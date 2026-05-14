@@ -230,22 +230,17 @@ class _ReasoningBlockState extends State<_ReasoningBlock> {
     final title = widget.live
         ? (_expanded ? 'Working' : 'Working...')
         : 'Working notes';
-    return Container(
-      width: double.infinity,
-      decoration: BoxDecoration(
-        color: colors.surfaceMuted,
-        borderRadius: AppShapes.input,
-        border: Border.all(color: colors.border),
-      ),
+    return Material(
+      color: Colors.transparent,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         mainAxisSize: MainAxisSize.min,
         children: [
           InkWell(
             onTap: _toggle,
-            borderRadius: AppShapes.input,
+            borderRadius: AppShapes.action,
             child: Padding(
-              padding: const EdgeInsets.fromLTRB(10, 8, 10, 8),
+              padding: const EdgeInsets.fromLTRB(0, 6, 0, 6),
               child: Row(
                 children: [
                   if (widget.live)
@@ -266,7 +261,7 @@ class _ReasoningBlockState extends State<_ReasoningBlock> {
                       title,
                       overflow: TextOverflow.ellipsis,
                       style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                        color: colors.textPrimary,
+                        color: colors.textSecondary,
                         fontWeight: AppWeights.title,
                       ),
                     ),
@@ -285,7 +280,7 @@ class _ReasoningBlockState extends State<_ReasoningBlock> {
           ),
           if (_expanded)
             Padding(
-              padding: const EdgeInsets.fromLTRB(10, 0, 10, 10),
+              padding: const EdgeInsets.fromLTRB(22, 2, 0, 10),
               child: _ReasoningTextBody(
                 text: widget.reasoning.trimRight(),
                 textColor: colors.textPrimary,
@@ -516,7 +511,7 @@ class _PlanUpdateCardState extends State<_PlanUpdateCard> {
                       ),
                       const SizedBox(width: 8),
                       MeshStatusBadge(
-                        label: '$completedCount/${steps.length} done',
+                        label: '$completedCount/${steps.length}',
                         tone: MeshStatusTone.neutral,
                         icon: Icons.checklist_rounded,
                         compact: true,
@@ -1019,35 +1014,26 @@ class _MessageBubble extends StatelessWidget {
       _ => colors.surfaceMuted,
     };
     final textColor = isUser ? colors.userBubbleOn : colors.textPrimary;
-    final messagePadding = isAssistant
-        ? const EdgeInsets.fromLTRB(4, 4, 4, 8)
-        : const EdgeInsets.fromLTRB(16, 12, 16, 14);
+    final messagePadding = const EdgeInsets.fromLTRB(16, 12, 16, 14);
 
-    return Align(
-      alignment: isUser ? Alignment.centerRight : Alignment.centerLeft,
-      child: Padding(
-        padding: EdgeInsets.only(bottom: isAssistant ? 14 : 10),
-        child: ConstrainedBox(
-          constraints: BoxConstraints(maxWidth: isAssistant ? 680 : 560),
-          child: DecoratedBox(
-            decoration: BoxDecoration(
-              color: isAssistant ? Colors.transparent : bubbleColor,
-              borderRadius: BorderRadius.circular(isAssistant ? 10 : 20),
-              border: Border.all(
-                color: isAssistant && !live
-                    ? Colors.transparent
-                    : live
-                    ? colors.accent.withValues(alpha: isAssistant ? 0.34 : 1)
-                    : colors.userBubble,
-                width: live ? 1.4 : 1,
-              ),
-            ),
+    if (isAssistant) {
+      final phaseLabel = live
+          ? 'Writing'
+          : message.phase == 'commentary'
+          ? 'Progress'
+          : null;
+      return Align(
+        alignment: Alignment.centerLeft,
+        child: Padding(
+          padding: const EdgeInsets.only(bottom: 16),
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 700),
             child: Padding(
-              padding: messagePadding,
+              padding: const EdgeInsets.fromLTRB(4, 2, 4, 8),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  if (message.phase != null && isAssistant && hasAnswer)
+                  if (phaseLabel != null)
                     Padding(
                       padding: const EdgeInsets.only(bottom: 6),
                       child: Row(
@@ -1057,19 +1043,115 @@ class _MessageBubble extends StatelessWidget {
                             const SizedBox(width: 6),
                           ],
                           Text(
-                            message.phase == 'commentary'
-                                ? 'COMMENTARY'
-                                : 'ANSWER',
+                            phaseLabel,
                             style: Theme.of(context).textTheme.labelSmall
                                 ?.copyWith(
                                   color: colors.textTertiary,
                                   fontWeight: AppWeights.title,
-                                  letterSpacing: 1.1,
+                                  letterSpacing: 0.2,
                                 ),
                           ),
                         ],
                       ),
                     ),
+                  for (final block in message.content)
+                    if (block is ThinkingBlock)
+                      Padding(
+                        padding: EdgeInsets.only(bottom: hasAnswer ? 10 : 0),
+                        child: _ReasoningBlock(
+                          reasoning: block.thinking,
+                          live: live,
+                          collapsedByDefault: hasAnswer,
+                          onOpenFile: onOpenFile,
+                        ),
+                      )
+                    else if (block is TextBlock)
+                      _MarkdownMessageBody(
+                        text: block.text,
+                        textColor: textColor,
+                        onOpenFile: onOpenFile,
+                      ),
+                  if (message.attachments.isNotEmpty) ...[
+                    _MessageAttachmentsSection(
+                      host: host,
+                      api: api,
+                      attachments: message.attachments,
+                    ),
+                    if (!hasTextBlocks && hasText)
+                      const SizedBox(height: 10),
+                  ],
+                  if (!hasTextBlocks && hasText)
+                    _MarkdownMessageBody(
+                      text: message.text,
+                      textColor: textColor,
+                      onOpenFile: onOpenFile,
+                    ),
+                  if (canPin || hasText)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 8),
+                      child: Align(
+                        alignment: Alignment.centerRight,
+                        child: Wrap(
+                          spacing: 8,
+                          runSpacing: 4,
+                          crossAxisAlignment: WrapCrossAlignment.center,
+                          children: [
+                            Text(
+                              _formatMessageTime(message.createdAt),
+                              style: Theme.of(context).textTheme.labelSmall
+                                  ?.copyWith(
+                                    color: colors.textTertiary,
+                                    fontSize: 10.5,
+                                    fontFeatures: const [
+                                      FontFeature.tabularFigures(),
+                                    ],
+                                  ),
+                            ),
+                            if (canPin)
+                              _MessagePinButton(
+                                pinned: pinned,
+                                tone: colors.textSecondary,
+                                accent: colors.warning,
+                                onTap: onTogglePin!,
+                              ),
+                            if (hasText)
+                              _MessageCopyButton(
+                                text: message.text,
+                                tone: colors.textSecondary,
+                                accent: colors.accent,
+                              ),
+                          ],
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      );
+    }
+
+    return Align(
+      alignment: isUser ? Alignment.centerRight : Alignment.centerLeft,
+      child: Padding(
+        padding: const EdgeInsets.only(bottom: 10),
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 560),
+          child: DecoratedBox(
+            decoration: BoxDecoration(
+              color: bubbleColor,
+              borderRadius: BorderRadius.circular(20),
+              border: Border.all(
+                color: live ? colors.accent : colors.userBubble,
+                width: live ? 1.4 : 1,
+              ),
+            ),
+            child: Padding(
+              padding: messagePadding,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
                   for (final block in message.content)
                     if (block is ThinkingBlock)
                       Padding(
@@ -2045,6 +2127,82 @@ class _ActivityCardState extends State<_ActivityCard> {
     return actions;
   }
 
+  Widget? _activityStatusBadge(SessionActivity activity) {
+    if (activity.status == 'completed') {
+      return null;
+    }
+    final statusTone = switch (activity.status) {
+      'failed' => MeshStatusTone.danger,
+      'declined' => MeshStatusTone.neutral,
+      _ => MeshStatusTone.running,
+    };
+    final statusLabel = switch (activity.status) {
+      'failed' => 'failed',
+      'declined' => 'declined',
+      _ => 'running',
+    };
+    final statusIcon = switch (activity.status) {
+      'failed' => Icons.error_outline_rounded,
+      'declined' => Icons.block_rounded,
+      _ => Icons.bolt_rounded,
+    };
+    return MeshStatusBadge(
+      label: statusLabel,
+      tone: statusTone,
+      icon: statusIcon,
+      compact: true,
+    );
+  }
+
+  List<Widget> _activityDetailPills(SessionActivity activity) {
+    final pills = <Widget>[];
+    if (activity.isCommand) {
+      if (activity.exitCode != null && activity.exitCode != 0) {
+        pills.add(
+          MeshPill(
+            label: 'exit ${activity.exitCode}',
+            tone: MeshPillTone.danger,
+            mono: true,
+          ),
+        );
+      }
+      if (activity.durationMs != null &&
+          (activity.status == 'failed' || activity.durationMs! >= 10000)) {
+        pills.add(
+          MeshPill(label: _formatDuration(activity.durationMs!), mono: true),
+        );
+      }
+      if (activity.terminalStatus == 'input') {
+        pills.add(
+          const MeshPill(
+            label: 'stdin',
+            tone: MeshPillTone.info,
+            mono: true,
+          ),
+        );
+      }
+      if (activity.terminalStatus == 'waiting') {
+        pills.add(
+          const MeshPill(
+            label: 'interactive',
+            tone: MeshPillTone.warning,
+            mono: true,
+          ),
+        );
+      }
+    }
+    if (activity.isTool && activity.toolError == true) {
+      pills.add(
+        const MeshPill(
+          label: 'tool error',
+          tone: MeshPillTone.danger,
+          mono: true,
+        ),
+      );
+    }
+    return pills;
+  }
+
   @override
   Widget build(BuildContext context) {
     final activity = widget.activity;
@@ -2055,8 +2213,7 @@ class _ActivityCardState extends State<_ActivityCard> {
     }
 
     final title = switch (activity.type) {
-      'command' =>
-        (activity.command ?? '').trim().isEmpty ? 'Command' : activity.command!,
+      'command' => _commandActivityTitle(activity),
       'tool' => _toolActivityTitle(activity, sessionCwd),
       'file_change' =>
         activity.changes.length == 1
@@ -2085,14 +2242,14 @@ class _ActivityCardState extends State<_ActivityCard> {
     };
 
     final activityLabel = switch (activity.type) {
-      'command' => 'COMMAND',
+      'command' => 'Command',
       'tool' => _toolActivityLabel(activity),
-      'file_change' => 'FILE CHANGE',
-      'turn_diff' => 'TURN DIFF',
-      'web_search' => 'WEB SEARCH',
-      'image_generation' => 'IMAGE',
-      'context_compaction' => 'COMPACTION',
-      _ => 'ACTIVITY',
+      'file_change' => 'File edit',
+      'turn_diff' => 'Live diff',
+      'web_search' => 'Web search',
+      'image_generation' => 'Image',
+      'context_compaction' => 'Context',
+      _ => 'Activity',
     };
 
     final activityIcon = switch (activity.type) {
@@ -2106,25 +2263,9 @@ class _ActivityCardState extends State<_ActivityCard> {
       _ => Icons.bolt_rounded,
     };
 
-    final statusTone = switch (activity.status) {
-      'completed' => MeshStatusTone.success,
-      'failed' => MeshStatusTone.danger,
-      'declined' => MeshStatusTone.neutral,
-      _ => MeshStatusTone.running,
-    };
-    final statusLabel = switch (activity.status) {
-      'completed' => 'done',
-      'failed' => 'failed',
-      'declined' => 'declined',
-      _ => 'running',
-    };
-    final statusIcon = switch (activity.status) {
-      'completed' => Icons.check_rounded,
-      'failed' => Icons.error_outline_rounded,
-      'declined' => Icons.block_rounded,
-      _ => Icons.bolt_rounded,
-    };
+    final statusBadge = _activityStatusBadge(activity);
     final contextActions = _buildContextActions();
+    final detailPills = _activityDetailPills(activity);
 
     return Align(
       alignment: Alignment.centerLeft,
@@ -2181,11 +2322,12 @@ class _ActivityCardState extends State<_ActivityCard> {
                             children: [
                               Text(
                                 activityLabel,
-                                style: monoStyle(
-                                  color: colors.textSecondary,
-                                  fontSize: 10,
-                                  fontWeight: AppWeights.title,
-                                ).copyWith(letterSpacing: 1),
+                                style: Theme.of(context).textTheme.labelSmall
+                                    ?.copyWith(
+                                      color: colors.textTertiary,
+                                      fontWeight: AppWeights.title,
+                                      letterSpacing: 0.2,
+                                    ),
                               ),
                               const SizedBox(height: 2),
                               Text(
@@ -2220,13 +2362,10 @@ class _ActivityCardState extends State<_ActivityCard> {
                             ],
                           ),
                         ),
-                        const SizedBox(width: 8),
-                        MeshStatusBadge(
-                          label: statusLabel,
-                          tone: statusTone,
-                          icon: statusIcon,
-                          compact: true,
-                        ),
+                        if (statusBadge != null) ...[
+                          const SizedBox(width: 8),
+                          statusBadge,
+                        ],
                         const SizedBox(width: 4),
                         Icon(
                           _cardCollapsed
@@ -2251,115 +2390,14 @@ class _ActivityCardState extends State<_ActivityCard> {
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            Wrap(
-                              spacing: 6,
-                              runSpacing: 6,
-                              children: [
-                                if (activity.turnId != null)
-                                  MeshPill(
-                                    label: 'turn ${_shortId(activity.turnId!)}',
-                                    mono: true,
-                                  ),
-                                if (activity.isCommand &&
-                                    activity.exitCode != null)
-                                  MeshPill(
-                                    label: 'exit ${activity.exitCode}',
-                                    tone: activity.exitCode == 0
-                                        ? MeshPillTone.success
-                                        : MeshPillTone.danger,
-                                    mono: true,
-                                  ),
-                                if (activity.isCommand &&
-                                    activity.durationMs != null)
-                                  MeshPill(
-                                    label: _formatDuration(
-                                      activity.durationMs!,
-                                    ),
-                                    mono: true,
-                                  ),
-                                if (activity.isCommand &&
-                                    (activity.source ?? '').isNotEmpty)
-                                  MeshPill(
-                                    label: _commandSourceLabel(
-                                      activity.source!,
-                                    ),
-                                    mono: true,
-                                  ),
-                                if (activity.isCommand &&
-                                    (activity.processId ?? '').isNotEmpty)
-                                  MeshPill(
-                                    label: 'pty ${activity.processId}',
-                                    mono: true,
-                                  ),
-                                if (activity.isCommand &&
-                                    activity.terminalStatus == 'input')
-                                  const MeshPill(
-                                    label: 'stdin',
-                                    tone: MeshPillTone.info,
-                                    mono: true,
-                                  ),
-                                if (activity.isCommand &&
-                                    activity.terminalStatus == 'waiting')
-                                  const MeshPill(
-                                    label: 'interactive',
-                                    tone: MeshPillTone.warning,
-                                    mono: true,
-                                  ),
-                                if (activity.isCommand)
-                                  ...activity.commandActions.map(
-                                    (action) =>
-                                        MeshPill(label: action.label, mono: true),
-                                  ),
-                                if (activity.isTool &&
-                                    (_toolSemanticPillLabel(activity) ?? '')
-                                        .isNotEmpty)
-                                  MeshPill(
-                                    label: _toolSemanticPillLabel(activity)!,
-                                    tone: MeshPillTone.info,
-                                    mono: true,
-                                  ),
-                                if (activity.isTool &&
-                                    (activity.toolName ?? '').trim().isNotEmpty)
-                                  MeshPill(
-                                    label: activity.toolName!.trim(),
-                                    mono: true,
-                                  ),
-                                if (activity.isTool &&
-                                    (activity.toolMode ?? '').trim().isNotEmpty)
-                                  MeshPill(
-                                    label: activity.toolMode!.trim(),
-                                    tone: MeshPillTone.info,
-                                    mono: true,
-                                  ),
-                                if (activity.isTool &&
-                                    activity.toolError == true)
-                                  const MeshPill(
-                                    label: 'tool error',
-                                    tone: MeshPillTone.danger,
-                                    mono: true,
-                                  ),
-                                if (activity.isWebSearch)
-                                  MeshPill(
-                                    label: _webSearchKindLabel(activity),
-                                    tone: MeshPillTone.info,
-                                    mono: true,
-                                  ),
-                                if (activity.isImageGeneration &&
-                                    (activity.savedPath ?? '').isNotEmpty)
-                                  const MeshPill(
-                                    label: 'saved image',
-                                    tone: MeshPillTone.info,
-                                    mono: true,
-                                  ),
-                                if (activity.isContextCompaction)
-                                  const MeshPill(
-                                    label: 'context',
-                                    tone: MeshPillTone.info,
-                                    mono: true,
-                                  ),
-                              ],
-                            ),
-                            const SizedBox(height: 12),
+                            if (detailPills.isNotEmpty) ...[
+                              Wrap(
+                                spacing: 6,
+                                runSpacing: 6,
+                                children: detailPills,
+                              ),
+                              const SizedBox(height: 12),
+                            ],
                             if (activity.isCommand)
                               ..._buildCommandBody(context, activity)
                             else if (activity.isTool)
@@ -2416,24 +2454,7 @@ class _ActivityCardState extends State<_ActivityCard> {
     final sessionCwd = widget.sessionCwd;
     final title = _fileChangeActivityTitle(activity, running: _activityRunning);
     final subtitle = _activityFileSummary(changes, sessionCwd);
-    final statusTone = switch (activity.status) {
-      'completed' => MeshStatusTone.success,
-      'failed' => MeshStatusTone.danger,
-      'declined' => MeshStatusTone.neutral,
-      _ => MeshStatusTone.running,
-    };
-    final statusLabel = switch (activity.status) {
-      'completed' => 'done',
-      'failed' => 'failed',
-      'declined' => 'declined',
-      _ => 'running',
-    };
-    final statusIcon = switch (activity.status) {
-      'completed' => Icons.check_rounded,
-      'failed' => Icons.error_outline_rounded,
-      'declined' => Icons.block_rounded,
-      _ => Icons.bolt_rounded,
-    };
+    final statusBadge = _activityStatusBadge(activity);
     final contextActions = _buildContextActions();
 
     return Align(
@@ -2513,13 +2534,10 @@ class _ActivityCardState extends State<_ActivityCard> {
                             ],
                           ),
                         ),
-                        const SizedBox(width: 8),
-                        MeshStatusBadge(
-                          label: statusLabel,
-                          tone: statusTone,
-                          icon: statusIcon,
-                          compact: true,
-                        ),
+                        if (statusBadge != null) ...[
+                          const SizedBox(width: 8),
+                          statusBadge,
+                        ],
                         const SizedBox(width: 4),
                         Icon(
                           _cardCollapsed
@@ -2919,7 +2937,7 @@ class _ActivityCardState extends State<_ActivityCard> {
       return 'Search web for "$query"';
     }
     if (activity.toolCategory == 'command' && command.isNotEmpty) {
-      return command;
+      return _commandStatusTitle(activity.status, _displayCommandText(command));
     }
 
     final title = (activity.toolTitle ?? '').trim();
@@ -2956,26 +2974,26 @@ class _ActivityCardState extends State<_ActivityCard> {
 
   String _toolActivityLabel(SessionActivity activity) {
     if (activity.toolAction == 'mode_change') {
-      return 'MODE';
+      return 'Mode';
     }
     return switch (activity.toolCategory) {
       'filesystem' => switch (activity.toolAction) {
-        'read' => 'FILE READ',
-        'write' => 'FILE EDIT',
-        'list' => 'FILE LIST',
-        'search' => 'FILE SEARCH',
-        _ => 'FILESYSTEM',
+        'read' => 'File read',
+        'write' => 'File edit',
+        'list' => 'File list',
+        'search' => 'File search',
+        _ => 'Filesystem',
       },
       'network' => switch (activity.toolAction) {
-        'fetch' => 'WEB FETCH',
-        'search' => 'WEB SEARCH',
-        _ => 'NETWORK',
+        'fetch' => 'Web fetch',
+        'search' => 'Web search',
+        _ => 'Network',
       },
-      'command' => 'COMMAND TOOL',
-      'session' => 'SESSION',
-      'memory' => 'MEMORY',
-      'task' => 'TASK',
-      _ => 'TOOL',
+      'command' => 'Command',
+      'session' => 'Session',
+      'memory' => 'Memory',
+      'task' => 'Task',
+      _ => 'Tool',
     };
   }
 
@@ -2999,27 +3017,6 @@ class _ActivityCardState extends State<_ActivityCard> {
       'memory' => Icons.psychology_alt_rounded,
       'task' => Icons.checklist_rounded,
       _ => Icons.extension_rounded,
-    };
-  }
-
-  String? _toolSemanticPillLabel(SessionActivity activity) {
-    if (activity.toolAction == 'mode_change') {
-      return 'mode change';
-    }
-    return switch (activity.toolCategory) {
-      'filesystem' => switch (activity.toolAction) {
-        'read' => 'file read',
-        'write' => 'file edit',
-        'list' => 'file list',
-        'search' => 'file search',
-        _ => 'filesystem',
-      },
-      'network' => activity.toolAction == 'search' ? 'web search' : 'web fetch',
-      'command' => 'command tool',
-      'session' => 'session',
-      'memory' => 'memory',
-      'task' => 'task',
-      _ => null,
     };
   }
 
@@ -3984,6 +3981,117 @@ String _activityFileSummary(
   return labels.join('  •  ');
 }
 
+String _commandActivityTitle(SessionActivity activity) {
+  final command = _displayCommandText(activity.command ?? '');
+  return _commandStatusTitle(activity.status, command);
+}
+
+String _commandStatusTitle(String status, String command) {
+  final target = command.trim();
+  if (target.isEmpty) {
+    return switch (status) {
+      'failed' => 'Command failed',
+      'declined' => 'Command declined',
+      'in_progress' => 'Running command',
+      _ => 'Ran command',
+    };
+  }
+  return switch (status) {
+    'failed' => 'Failed $target',
+    'declined' => 'Declined $target',
+    'in_progress' => 'Running $target',
+    _ => 'Ran $target',
+  };
+}
+
+String _displayCommandText(String raw) {
+  final trimmed = raw.trim();
+  if (trimmed.isEmpty) {
+    return '';
+  }
+  final words = _splitShellWords(trimmed);
+  if (words.length >= 3 &&
+      _isShellProgram(words.first) &&
+      _isShellCommandFlag(words[1])) {
+    final inner = words.sublist(2).join(' ').trim();
+    if (inner.isNotEmpty) {
+      return inner;
+    }
+  }
+  return trimmed;
+}
+
+bool _isShellProgram(String value) {
+  final name = value.replaceAll('\\', '/').split('/').last;
+  return name == 'bash' || name == 'sh' || name == 'zsh' || name == 'dash';
+}
+
+bool _isShellCommandFlag(String value) => value == '-lc' || value == '-c';
+
+List<String> _splitShellWords(String input) {
+  final words = <String>[];
+  final buffer = StringBuffer();
+  var inSingleQuote = false;
+  var inDoubleQuote = false;
+  var escaping = false;
+
+  void flush() {
+    if (buffer.length == 0) {
+      return;
+    }
+    words.add(buffer.toString());
+    buffer.clear();
+  }
+
+  for (var index = 0; index < input.length; index += 1) {
+    final char = input[index];
+    if (escaping) {
+      buffer.write(char);
+      escaping = false;
+      continue;
+    }
+    if (char == '\\' && !inSingleQuote) {
+      escaping = true;
+      continue;
+    }
+    if (inSingleQuote) {
+      if (char == "'") {
+        inSingleQuote = false;
+      } else {
+        buffer.write(char);
+      }
+      continue;
+    }
+    if (inDoubleQuote) {
+      if (char == '"') {
+        inDoubleQuote = false;
+      } else {
+        buffer.write(char);
+      }
+      continue;
+    }
+    if (char == "'") {
+      inSingleQuote = true;
+      continue;
+    }
+    if (char == '"') {
+      inDoubleQuote = true;
+      continue;
+    }
+    if (char.trim().isEmpty) {
+      flush();
+      continue;
+    }
+    buffer.write(char);
+  }
+
+  if (escaping) {
+    buffer.write('\\');
+  }
+  flush();
+  return words;
+}
+
 String _fileChangeActivityTitle(
   SessionActivity activity, {
   required bool running,
@@ -4020,23 +4128,6 @@ String _formatDuration(int durationMs) {
     return '${seconds.toStringAsFixed(seconds >= 10 ? 0 : 1)}s';
   }
   return '${durationMs}ms';
-}
-
-String _commandSourceLabel(String source) {
-  return switch (source) {
-    'agent' => 'agent',
-    'userShell' => 'shell',
-    'unifiedExecStartup' => 'command start',
-    'unifiedExecInteraction' => 'command input',
-    _ => source,
-  };
-}
-
-String _shortId(String value) {
-  if (value.length <= 8) {
-    return value;
-  }
-  return value.substring(value.length - 8);
 }
 
 bool _sameCalendarDay(DateTime a, DateTime b) {
