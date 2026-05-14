@@ -332,12 +332,12 @@ void main() {
     );
     await _pumpFrames(tester);
 
-    await tester.tap(find.text('Launch options'));
+    await tester.tap(find.text('Session setup'));
     await _pumpFrames(tester);
 
     expect(
       find.text(
-        'Fake Test Provider does not advertise profile or model controls.',
+        'Fake Test Provider does not offer profiles or model choices here.',
       ),
       findsOneWidget,
     );
@@ -367,7 +367,7 @@ void main() {
     );
     await _pumpFrames(tester);
 
-    await tester.tap(find.text('Launch options'));
+    await tester.tap(find.text('Session setup'));
     await _pumpFrames(tester);
 
     expect(find.text('Profile'), findsOneWidget);
@@ -512,7 +512,7 @@ void main() {
       );
       await _pumpFrames(tester);
 
-      await tester.tap(find.text('Launch options'));
+      await tester.tap(find.text('Session setup'));
       await _pumpFrames(tester);
       await tester.ensureVisible(find.text('Never ask').first);
       await _pumpFrames(tester);
@@ -578,7 +578,7 @@ void main() {
     );
     await _pumpFrames(tester);
 
-    await tester.tap(find.text('Launch options'));
+    await tester.tap(find.text('Session setup'));
     await _pumpFrames(tester);
 
     expect(find.text('Ask when requested'), findsWidgets);
