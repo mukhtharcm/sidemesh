@@ -84,7 +84,7 @@ class _FileViewerScreenState extends State<FileViewerScreen> {
                     if (state?.file != null)
                       Flexible(
                         child: Text(
-                          '${formatBytes(state!.file!.size)} • ${widget.host.label}',
+                          '${formatBytes(state!.file!.size)} on ${widget.host.label}',
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                           style: monoStyle(

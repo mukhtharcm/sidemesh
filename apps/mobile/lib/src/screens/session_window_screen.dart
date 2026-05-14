@@ -48,7 +48,7 @@ class _SessionWindowScreenState extends State<SessionWindowScreen> {
     final hostId = widget.arguments.hostId;
     if ((hostId ?? '').isEmpty) {
       setState(() {
-        _error = 'This session window is missing its host reference.';
+        _error = 'This window is missing the machine for this session.';
         _loading = false;
       });
       return;
@@ -65,8 +65,7 @@ class _SessionWindowScreenState extends State<SessionWindowScreen> {
       if (!mounted) return;
       if (match == null) {
         setState(() {
-          _error =
-              'The host for this session is no longer available in this app install.';
+          _error = 'This machine is no longer available in this app.';
           _loading = false;
         });
         return;
@@ -74,7 +73,7 @@ class _SessionWindowScreenState extends State<SessionWindowScreen> {
       if (!match.enabled) {
         setState(() {
           _error =
-              'The host for this session is disabled. Re-enable it in the main window to continue.';
+              'This machine is turned off here. Re-enable it in the main window to continue.';
           _loading = false;
         });
         return;
@@ -86,7 +85,7 @@ class _SessionWindowScreenState extends State<SessionWindowScreen> {
     } catch (error) {
       if (!mounted) return;
       setState(() {
-        _error = 'Failed to load the host for this session: $error';
+        _error = 'Could not load the machine for this session: $error';
         _loading = false;
       });
     }
@@ -148,7 +147,7 @@ class _SessionWindowScreenState extends State<SessionWindowScreen> {
         body: MeshEmptyState(
           icon: Icons.desktop_mac_rounded,
           title: 'Session unavailable',
-          body: _error ?? 'This session window could not be restored.',
+          body: _error ?? 'This session could not be reopened here.',
         ),
       );
     }

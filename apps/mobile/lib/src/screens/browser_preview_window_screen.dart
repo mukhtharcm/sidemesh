@@ -43,7 +43,7 @@ class _BrowserPreviewWindowScreenState extends State<BrowserPreviewWindowScreen>
     final hostId = widget.arguments.hostId;
     if ((hostId ?? '').isEmpty) {
       setState(() {
-        _error = 'This browser preview window is missing its host reference.';
+        _error = 'This window is missing the machine for this preview.';
         _loading = false;
       });
       return;
@@ -60,8 +60,7 @@ class _BrowserPreviewWindowScreenState extends State<BrowserPreviewWindowScreen>
       if (!mounted) return;
       if (match == null) {
         setState(() {
-          _error =
-              'The host for this browser preview is no longer available in this app install.';
+          _error = 'This machine is no longer available in this app.';
           _loading = false;
         });
         return;
@@ -69,7 +68,7 @@ class _BrowserPreviewWindowScreenState extends State<BrowserPreviewWindowScreen>
       if (!match.enabled) {
         setState(() {
           _error =
-              'The host for this browser preview is disabled. Re-enable it in the main window to continue.';
+              'This machine is turned off here. Re-enable it in the main window to continue.';
           _loading = false;
         });
         return;
@@ -81,7 +80,7 @@ class _BrowserPreviewWindowScreenState extends State<BrowserPreviewWindowScreen>
     } catch (error) {
       if (!mounted) return;
       setState(() {
-        _error = 'Failed to load the host for this browser preview: $error';
+        _error = 'Could not load the machine for this preview: $error';
         _loading = false;
       });
     }
@@ -100,8 +99,8 @@ class _BrowserPreviewWindowScreenState extends State<BrowserPreviewWindowScreen>
         appBar: AppBar(title: Text(_preview.label)),
         body: MeshEmptyState(
           icon: Icons.open_in_browser_rounded,
-          title: 'Browser preview unavailable',
-          body: _error ?? 'This browser preview window could not be restored.',
+          title: 'Preview unavailable',
+          body: _error ?? 'This preview could not be reopened here.',
         ),
       );
     }
