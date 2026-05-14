@@ -162,6 +162,61 @@ void main() {
     await tester.pump();
   });
 
+  testWidgets('composer thinking chip opens the thinking picker only', (
+    tester,
+  ) async {
+    final host = _host('session-thinking-picker');
+    final session = _session('thinking-picker-session', provider: 'fake');
+    final api = _CapabilityFakeApi(
+      _nodeForCapabilities(_fullCapabilities),
+      models: const [_fakeModel],
+    );
+    addTearDown(api.dispose);
+
+    await _pumpApp(
+      tester,
+      SessionScreen(
+        host: host,
+        session: session,
+        api: api,
+        desktopMode: true,
+      ),
+      size: const Size(1180, 900),
+    );
+    await _pumpFrames(tester);
+
+    final thinkingTooltip = find.byWidgetPredicate(
+      (widget) =>
+          widget is Tooltip &&
+          widget.message?.startsWith('Choose thinking level') == true,
+    );
+    final thinkingButton = find.descendant(
+      of: thinkingTooltip,
+      matching: find.byType(InkWell),
+    );
+    expect(thinkingButton, findsOneWidget);
+
+    await tester.tap(thinkingButton);
+    await _pumpFrames(tester);
+
+    expect(find.text('Choose thinking level'), findsOneWidget);
+    expect(find.text('Model and thinking'), findsNothing);
+    expect(find.text('Approvals'), findsNothing);
+
+    await tester.tap(find.text('Low'));
+    await _pumpFrames(tester);
+
+    final config = SessionTurnConfigStore.instance.configFor(
+      host,
+      session.id,
+    );
+    expect(config.model, isNull);
+    expect(config.reasoningEffort, 'low');
+
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pump();
+  });
+
   testWidgets(
     'session screen surfaces browser preview actions for preview-capable hosts',
     (tester) async {

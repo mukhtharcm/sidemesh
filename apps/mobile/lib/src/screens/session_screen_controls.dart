@@ -1489,6 +1489,93 @@ class _ModelPickerSheetState extends State<_ModelPickerSheet> {
   }
 }
 
+class _ReasoningPickerSheet extends StatelessWidget {
+  const _ReasoningPickerSheet({
+    required this.options,
+    required this.currentReasoning,
+    required this.defaultReasoning,
+    required this.modelLabel,
+  });
+
+  final List<ModelReasoningEffortOption> options;
+  final String currentReasoning;
+  final String defaultReasoning;
+  final String modelLabel;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    return MeshBottomSheetScaffold(
+      icon: Icons.psychology_alt_rounded,
+      title: 'Choose thinking level',
+      description:
+          'Set how much thinking the next reply should use with $modelLabel.',
+      maxWidth: 520,
+      maxHeightFactor: 0.72,
+      child: ListView.separated(
+        itemCount: options.length,
+        separatorBuilder: (_, _) => const SizedBox(height: 8),
+        itemBuilder: (context, index) {
+          final option = options[index];
+          final selected = option.reasoningEffort == currentReasoning;
+          final isDefault = option.reasoningEffort == defaultReasoning;
+          return MeshSurface(
+            onTap: () =>
+                Navigator.of(context).pop(option.reasoningEffort),
+            selected: selected,
+            tone: MeshSurfaceTone.muted,
+            radius: AppRadii.control,
+            padding: const EdgeInsets.all(14),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Icon(
+                  Icons.psychology_alt_rounded,
+                  size: 19,
+                  color: selected ? colors.accent : colors.textSecondary,
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Expanded(
+                            child: Text(
+                              _reasoningEffortLabel(option.reasoningEffort),
+                              style: Theme.of(context).textTheme.titleSmall
+                                  ?.copyWith(fontWeight: FontWeight.w700),
+                            ),
+                          ),
+                          if (selected) const _InlineBadge(label: 'current'),
+                          if (!selected && isDefault)
+                            const _InlineBadge(label: 'default'),
+                        ],
+                      ),
+                      if (option.description.trim().isNotEmpty) ...[
+                        const SizedBox(height: 6),
+                        Text(
+                          option.description.trim(),
+                          style: Theme.of(context).textTheme.bodySmall
+                              ?.copyWith(
+                                color: colors.textSecondary,
+                                height: 1.35,
+                              ),
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          );
+        },
+      ),
+    );
+  }
+}
+
 class _InlineBadge extends StatelessWidget {
   const _InlineBadge({required this.label});
 

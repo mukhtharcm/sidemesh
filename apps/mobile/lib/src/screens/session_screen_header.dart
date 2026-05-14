@@ -118,10 +118,15 @@ class _SessionActionGroup {
 }
 
 class _SessionActionSheet extends StatelessWidget {
-  const _SessionActionSheet({required this.session, required this.groups});
+  const _SessionActionSheet({
+    required this.session,
+    required this.groups,
+    this.desktop = false,
+  });
 
   final SessionSummary session;
   final List<_SessionActionGroup> groups;
+  final bool desktop;
 
   @override
   Widget build(BuildContext context) {
@@ -130,6 +135,112 @@ class _SessionActionSheet extends StatelessWidget {
     final visibleGroups = groups
         .where((group) => group.actions.isNotEmpty)
         .toList(growable: false);
+    final shape = desktop ? AppShapes.dialog : AppShapes.sheet;
+    final panel = DecoratedBox(
+      decoration: BoxDecoration(
+        color: colors.surfaceElevated,
+        borderRadius: shape,
+        border: Border.all(color: colors.border),
+        boxShadow: desktop
+            ? AppShadows.dialog(colors.textPrimary)
+            : AppShadows.sheet(colors.textPrimary),
+      ),
+      child: ClipRRect(
+        borderRadius: shape,
+        child: SingleChildScrollView(
+          padding: EdgeInsets.fromLTRB(14, desktop ? 14 : 10, 14, 14),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              if (!desktop) ...[
+                Center(
+                  child: Container(
+                    width: 38,
+                    height: 4,
+                    decoration: BoxDecoration(
+                      color: colors.borderStrong.withValues(alpha: 0.55),
+                      borderRadius: AppShapes.pill,
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 14),
+              ],
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Container(
+                    width: desktop ? 34 : 38,
+                    height: desktop ? 34 : 38,
+                    decoration: BoxDecoration(
+                      color: colors.accentMuted,
+                      borderRadius: AppShapes.iconWell,
+                      border: Border.all(
+                        color: colors.accent.withValues(alpha: 0.24),
+                      ),
+                    ),
+                    alignment: Alignment.center,
+                    child: Icon(
+                      Icons.auto_awesome_mosaic_rounded,
+                      size: desktop ? 18 : 19,
+                      color: colors.accent,
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'Session actions',
+                          style: Theme.of(context).textTheme.titleMedium
+                              ?.copyWith(
+                                color: colors.textPrimary,
+                                fontWeight: AppWeights.title,
+                                letterSpacing: -0.2,
+                              ),
+                        ),
+                        const SizedBox(height: 2),
+                        Text(
+                          session.title,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: Theme.of(context).textTheme.bodySmall
+                              ?.copyWith(
+                                color: colors.textSecondary,
+                                fontWeight: FontWeight.w600,
+                              ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  MeshIconButton(
+                    icon: Icons.close_rounded,
+                    tooltip: 'Close',
+                    color: colors.textSecondary,
+                    onTap: () => Navigator.of(context).pop(),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 14),
+              for (var index = 0; index < visibleGroups.length; index++)
+                Padding(
+                  padding: EdgeInsets.only(
+                    bottom: index == visibleGroups.length - 1 ? 0 : 12,
+                  ),
+                  child: _SessionActionGroupCard(
+                    group: visibleGroups[index],
+                    compact: desktop,
+                  ),
+                ),
+            ],
+          ),
+        ),
+      ),
+    );
+    if (desktop) {
+      return panel;
+    }
     return SafeArea(
       child: Padding(
         padding: const EdgeInsets.only(left: 10, top: 0, right: 10, bottom: 10),
@@ -137,113 +248,7 @@ class _SessionActionSheet extends StatelessWidget {
           alignment: Alignment.bottomCenter,
           child: ConstrainedBox(
             constraints: BoxConstraints(maxHeight: maxHeight),
-            child: DecoratedBox(
-              decoration: BoxDecoration(
-                color: colors.surfaceElevated,
-                borderRadius: AppShapes.sheet,
-                border: Border.all(color: colors.border),
-                boxShadow: [
-                  BoxShadow(
-                    color: colors.textPrimary.withValues(alpha: 0.12),
-                    blurRadius: 32,
-                    offset: const Offset(0, 18),
-                  ),
-                ],
-              ),
-              child: ClipRRect(
-                borderRadius: AppShapes.sheet,
-                child: SingleChildScrollView(
-                  padding: const EdgeInsets.only(
-                    left: 14,
-                    top: 10,
-                    right: 14,
-                    bottom: 14,
-                  ),
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      Center(
-                        child: Container(
-                          width: 38,
-                          height: 4,
-                          decoration: BoxDecoration(
-                            color: colors.borderStrong.withValues(alpha: 0.55),
-                            borderRadius: AppShapes.pill,
-                          ),
-                        ),
-                      ),
-                      const SizedBox(height: 14),
-                      Row(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Container(
-                            width: 38,
-                            height: 38,
-                            decoration: BoxDecoration(
-                              color: colors.accentMuted,
-                              borderRadius: AppShapes.input,
-                              border: Border.all(
-                                color: colors.accent.withValues(alpha: 0.24),
-                              ),
-                            ),
-                            child: Icon(
-                              Icons.auto_awesome_mosaic_rounded,
-                              size: 19,
-                              color: colors.accent,
-                            ),
-                          ),
-                          const SizedBox(width: 12),
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  'More actions',
-                                  style: Theme.of(context).textTheme.titleMedium
-                                      ?.copyWith(
-                                        color: colors.textPrimary,
-                                        fontWeight: AppWeights.title,
-                                        letterSpacing: -0.2,
-                                      ),
-                                ),
-                                const SizedBox(height: 2),
-                                Text(
-                                  session.title,
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: Theme.of(context).textTheme.bodySmall
-                                      ?.copyWith(
-                                        color: colors.textSecondary,
-                                        fontWeight: FontWeight.w600,
-                                      ),
-                                ),
-                              ],
-                            ),
-                          ),
-                          MeshIconButton(
-                            icon: Icons.close_rounded,
-                            tooltip: 'Close',
-                            color: colors.textSecondary,
-                            onTap: () => Navigator.of(context).pop(),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 16),
-                      for (var index = 0; index < visibleGroups.length; index++)
-                        Padding(
-                          padding: EdgeInsets.only(
-                            bottom: index == visibleGroups.length - 1 ? 0 : 12,
-                          ),
-                          child: _SessionActionGroupCard(
-                            group: visibleGroups[index],
-                          ),
-                        ),
-                    ],
-                  ),
-                ),
-              ),
-            ),
+            child: panel,
           ),
         ),
       ),
@@ -252,9 +257,10 @@ class _SessionActionSheet extends StatelessWidget {
 }
 
 class _SessionActionGroupCard extends StatelessWidget {
-  const _SessionActionGroupCard({required this.group});
+  const _SessionActionGroupCard({required this.group, this.compact = false});
 
   final _SessionActionGroup group;
+  final bool compact;
 
   @override
   Widget build(BuildContext context) {
@@ -276,7 +282,7 @@ class _SessionActionGroupCard extends StatelessWidget {
         DecoratedBox(
           decoration: BoxDecoration(
             color: colors.surface,
-            borderRadius: AppShapes.card,
+            borderRadius: BorderRadius.circular(AppRadii.control),
             border: Border.all(color: colors.border),
           ),
           child: Column(
@@ -285,10 +291,13 @@ class _SessionActionGroupCard extends StatelessWidget {
                 if (index > 0)
                   Divider(
                     height: 1,
-                    indent: 58,
+                    indent: compact ? 52 : 58,
                     color: colors.border.withValues(alpha: 0.72),
                   ),
-                _SessionActionRow(action: group.actions[index]),
+                _SessionActionRow(
+                  action: group.actions[index],
+                  compact: compact,
+                ),
               ],
             ],
           ),
@@ -299,9 +308,10 @@ class _SessionActionGroupCard extends StatelessWidget {
 }
 
 class _SessionActionRow extends StatelessWidget {
-  const _SessionActionRow({required this.action});
+  const _SessionActionRow({required this.action, this.compact = false});
 
   final _SessionActionSpec action;
+  final bool compact;
 
   Color _toneColor(AppColors colors) {
     return switch (action.tone) {
@@ -322,14 +332,14 @@ class _SessionActionRow extends StatelessWidget {
       radius: AppRadii.control,
       onTap: () => Navigator.of(context).pop(action.value),
       leading: Container(
-        width: 34,
-        height: 34,
+        width: compact ? 30 : 34,
+        height: compact ? 30 : 34,
         decoration: BoxDecoration(
           color: tone.withValues(alpha: action.active ? 0.14 : 0.08),
-          borderRadius: BorderRadius.circular(AppRadii.control),
+          borderRadius: AppShapes.iconWell,
           border: Border.all(color: tone.withValues(alpha: 0.18)),
         ),
-        child: Icon(action.icon, size: 18, color: tone),
+        child: Icon(action.icon, size: compact ? 17 : 18, color: tone),
       ),
       title: Text(
         action.label,
