@@ -1,10 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../models.dart'
-    show
-        ProviderModeSummary,
-        kDefaultProviderModes,
-        providerModeLabel;
+    show ProviderModeSummary, kDefaultProviderModes, providerModeLabel;
 import '../session_policy_store.dart';
 import '../theme/app_tokens.dart';
 import 'launch_controls.dart';
@@ -180,7 +177,7 @@ class LaunchOptionsForm extends StatelessWidget {
   Widget _buildBrainGroup(BuildContext context) {
     return LaunchControlGroup(
       icon: Icons.memory_rounded,
-      title: 'Brain',
+      title: 'Agent',
       children: [
         if (brainExtras != null) ...[
           for (var i = 0; i < brainExtras!.length; i++) ...[
@@ -193,11 +190,12 @@ class LaunchOptionsForm extends StatelessWidget {
             const SizedBox(height: AppSpacing.sm),
           LaunchChoiceWrap<String?>(
             icon: Icons.alt_route_rounded,
-            label: 'Mode',
+            label: 'Work style',
             value: value.sessionMode,
             options: <String?>[null, ...sessionModes.map((mode) => mode.id)],
-            optionLabel: (mode) =>
-                mode == null ? 'Default' : providerModeLabel(mode, sessionModes),
+            optionLabel: (mode) => mode == null
+                ? 'Use default'
+                : providerModeLabel(mode, sessionModes),
             isDefault: (mode) => mode == null,
             onChanged: (mode) {
               onSessionModeChanged?.call(mode);
@@ -212,7 +210,7 @@ class LaunchOptionsForm extends StatelessWidget {
           LaunchSwitchRow(
             icon: Icons.bolt_rounded,
             title: 'Fast mode',
-            subtitle: 'Ask for the fast service tier when supported.',
+            subtitle: 'Prefer the faster service tier when it is available.',
             value: value.fastMode,
             onChanged: (next) {
               onFastModeChanged?.call(next);

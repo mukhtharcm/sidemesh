@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 
 import '../theme/app_colors.dart';
-import '../theme/app_theme.dart';
 import '../theme/app_tokens.dart';
 import 'mesh_widgets.dart';
 
@@ -108,9 +107,9 @@ class LaunchSelectorRow extends StatelessWidget {
                 Text(
                   value,
                   style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                        color: colors.textPrimary,
-                        fontWeight: AppWeights.title,
-                      ),
+                    color: colors.textPrimary,
+                    fontWeight: AppWeights.title,
+                  ),
                 ),
                 if (detail.trim().isNotEmpty) ...[
                   const SizedBox(height: 1),
@@ -118,9 +117,8 @@ class LaunchSelectorRow extends StatelessWidget {
                     detail,
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
-                    style: monoStyle(
-                      color: colors.textTertiary,
-                      fontSize: 11,
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      color: colors.textSecondary,
                       fontWeight: AppWeights.emphasis,
                     ),
                   ),
@@ -155,6 +153,7 @@ class LaunchControlGroup extends StatelessWidget {
   Widget build(BuildContext context) {
     final colors = context.colors;
     return MeshSurface(
+      tone: MeshSurfaceTone.muted,
       width: double.infinity,
       radius: AppRadii.control,
       padding: AppPadding.cardSm,
@@ -169,9 +168,9 @@ class LaunchControlGroup extends StatelessWidget {
                 child: Text(
                   title,
                   style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                        fontWeight: AppWeights.title,
-                        color: colors.textPrimary,
-                      ),
+                    fontWeight: AppWeights.emphasis,
+                    color: colors.textPrimary,
+                  ),
                 ),
               ),
               ?trailing,
@@ -222,9 +221,9 @@ class LaunchChoiceWrap<T> extends StatelessWidget {
             Text(
               label,
               style: Theme.of(context).textTheme.labelMedium?.copyWith(
-                    color: colors.textSecondary,
-                    fontWeight: AppWeights.emphasis,
-                  ),
+                color: colors.textSecondary,
+                fontWeight: AppWeights.emphasis,
+              ),
             ),
           ],
         ),
@@ -254,18 +253,18 @@ class LaunchChoiceWrap<T> extends StatelessWidget {
                     Text(
                       optionLabel(option),
                       style: Theme.of(context).textTheme.labelMedium?.copyWith(
-                            color: selected ? accent : colors.textSecondary,
-                            fontWeight: AppWeights.emphasis,
-                          ),
+                        color: selected ? accent : colors.textSecondary,
+                        fontWeight: AppWeights.emphasis,
+                      ),
                     ),
                     if (isDefault?.call(option) ?? false) ...[
                       const SizedBox(width: 5),
                       Text(
-                        'default',
-                        style:
-                            Theme.of(context).textTheme.labelSmall?.copyWith(
-                                  color: colors.textTertiary,
-                                ),
+                        'Default',
+                        style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                          color: colors.textSecondary,
+                          fontWeight: AppWeights.emphasis,
+                        ),
                       ),
                     ],
                   ],
@@ -321,17 +320,17 @@ class LaunchSwitchRow extends StatelessWidget {
                 Text(
                   title,
                   style: Theme.of(context).textTheme.labelLarge?.copyWith(
-                        fontWeight: AppWeights.title,
-                        color: colors.textPrimary,
-                      ),
+                    fontWeight: AppWeights.title,
+                    color: colors.textPrimary,
+                  ),
                 ),
                 const SizedBox(height: 1),
                 Text(
                   subtitle,
                   style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                        color: colors.textSecondary,
-                        height: 1.25,
-                      ),
+                    color: colors.textSecondary,
+                    height: 1.25,
+                  ),
                 ),
               ],
             ),
@@ -362,9 +361,9 @@ class LaunchInfoLine extends StatelessWidget {
           child: Text(
             text,
             style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                  color: colors.textSecondary,
-                  height: 1.3,
-                ),
+              color: colors.textSecondary,
+              height: 1.3,
+            ),
           ),
         ),
       ],
@@ -416,10 +415,10 @@ class _CapsLabel extends StatelessWidget {
     return Text(
       text,
       style: Theme.of(context).textTheme.labelSmall?.copyWith(
-            color: colors.textSecondary,
-            fontWeight: AppWeights.title,
-            letterSpacing: 0.4,
-          ),
+        color: colors.textSecondary,
+        fontWeight: AppWeights.emphasis,
+        letterSpacing: 0.1,
+      ),
     );
   }
 }

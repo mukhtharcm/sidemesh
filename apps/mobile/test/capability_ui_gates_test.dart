@@ -371,7 +371,7 @@ void main() {
     await _pumpFrames(tester);
 
     expect(find.text('Profile'), findsOneWidget);
-    expect(find.text('Mode'), findsOneWidget);
+    expect(find.text('Work style'), findsOneWidget);
     expect(find.text('Model'), findsOneWidget);
     expect(find.text('Fast mode'), findsOneWidget);
     expect(find.text('Permissions'), findsOneWidget);
