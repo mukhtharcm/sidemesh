@@ -562,12 +562,12 @@ void main() {
     );
     await _pumpFrames(tester);
     final dialogFields = find.descendant(
-      of: find.byType(AlertDialog),
+      of: find.byType(Dialog),
       matching: find.byType(TextField),
     );
     await tester.enterText(dialogFields.at(0), 'accent');
     await tester.enterText(dialogFields.at(1), 'orange');
-    await tester.tap(find.text('Save'));
+    await tester.tap(find.text('Save item'));
     await _pumpFrames(tester);
 
     expect(api.sentMessages.last, {
@@ -587,7 +587,7 @@ void main() {
       find.byKey(const ValueKey('browserPreviewStorageClear-cookies')),
     );
     await _pumpFrames(tester);
-    await tester.tap(find.text('Clear'));
+    await tester.tap(find.text('Clear cookies'));
     await _pumpFrames(tester);
 
     expect(api.sentMessages.last, {'type': 'storageClearCookies'});

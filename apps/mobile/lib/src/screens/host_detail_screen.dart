@@ -14,6 +14,7 @@ import '../session_read_store.dart';
 import '../theme/app_colors.dart';
 import '../theme/app_theme.dart';
 import '../theme/app_tokens.dart';
+import '../widgets/app_dialogs.dart';
 import '../widgets/app_snackbar.dart';
 import '../widgets/mesh_widgets.dart';
 import '../widgets/session_row_card.dart';
@@ -2298,7 +2299,7 @@ class _HostManagementCardState extends State<_HostManagementCard> {
 
   String get _updateDialogTitle {
     if (_useBleedingEdgeForNextUpdate) {
-      return 'Update to latest main?';
+      return 'Update to the latest development build?';
     }
     final current = widget.node.packageVersion;
     final latest = widget.node.latestVersion;
@@ -2306,7 +2307,7 @@ class _HostManagementCardState extends State<_HostManagementCard> {
         current.isNotEmpty &&
         latest != null &&
         latest.isNotEmpty) {
-      return 'Update from v$current → v$latest?';
+      return 'Update Sidemesh to v$latest?';
     }
     return 'Update Sidemesh?';
   }
@@ -2322,18 +2323,33 @@ class _HostManagementCardState extends State<_HostManagementCard> {
       bool skipNextTime = false;
       final confirmed = await showDialog<bool>(
         context: context,
-        builder: (context) => AlertDialog(
-          title: Text(_updateDialogTitle),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
+        builder: (dialogContext) => MeshDialogScaffold(
+          icon: Icons.system_update_alt_rounded,
+          title: _updateDialogTitle,
+          description: _useBleedingEdgeForNextUpdate
+              ? 'This installs the newest development build of Sidemesh on this machine.'
+              : 'This installs the latest available Sidemesh update on this machine.',
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(false),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.of(dialogContext).pop(true),
+              child: const Text('Update now'),
+            ),
+          ],
+          child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(
-                _useBleedingEdgeForNextUpdate
-                    ? 'This will update Sidemesh to the latest commit on main. All active terminal sessions, port forwards, and browser previews will be disconnected.'
-                    : 'All active terminal sessions, port forwards, and browser previews will be disconnected.',
+                'Terminal sessions, port forwards, and browser previews will disconnect while the update starts.',
+                style: Theme.of(dialogContext).textTheme.bodySmall?.copyWith(
+                  color: dialogContext.colors.textSecondary,
+                  height: 1.4,
+                ),
               ),
-              const SizedBox(height: 12),
+              const SizedBox(height: 14),
               StatefulBuilder(
                 builder: (context, setLocalState) {
                   return MeshListRow(
@@ -2343,7 +2359,7 @@ class _HostManagementCardState extends State<_HostManagementCard> {
                     onTap: () {
                       setLocalState(() => skipNextTime = !skipNextTime);
                     },
-                    title: const Text("Don't ask again"),
+                    title: const Text('Skip this confirmation next time'),
                     trailing: Checkbox(
                       value: skipNextTime,
                       onChanged: (v) {
@@ -2355,16 +2371,6 @@ class _HostManagementCardState extends State<_HostManagementCard> {
               ),
             ],
           ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(context).pop(false),
-              child: const Text('Cancel'),
-            ),
-            TextButton(
-              onPressed: () => Navigator.of(context).pop(true),
-              child: const Text('Update'),
-            ),
-          ],
         ),
       );
 

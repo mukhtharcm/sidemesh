@@ -12,6 +12,7 @@ import '../models.dart';
 import '../theme/app_colors.dart';
 import '../theme/app_theme.dart';
 import '../theme/app_tokens.dart';
+import '../widgets/app_dialogs.dart';
 import '../widgets/app_snackbar.dart';
 import '../widgets/mesh_widgets.dart';
 import '../host_reconnect_scheduler.dart';
@@ -820,24 +821,13 @@ class _BrowserPreviewPaneState extends State<BrowserPreviewPane>
   }
 
   Future<void> _stopRemoteBrowser() async {
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Close preview?'),
-        content: const Text(
-          'This closes the browser window on the connected machine. You can start a new preview any time.',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(false),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.of(context).pop(true),
-            child: const Text('Close preview'),
-          ),
-        ],
-      ),
+    final confirmed = await showMeshConfirmDialog(
+      context,
+      icon: Icons.close_fullscreen_rounded,
+      title: 'Close this preview?',
+      description:
+          'This closes the browser window on the connected machine. You can start another preview any time.',
+      confirmLabel: 'Close preview',
     );
     if (confirmed != true || !mounted) return;
     try {
@@ -1096,8 +1086,8 @@ class _BrowserPreviewPaneState extends State<BrowserPreviewPane>
       context: context,
       builder: (context) => _StorageEntryEditorDialog(
         title: existing == null
-            ? 'Add ${_storageAreaLabel(area)} entry'
-            : 'Edit ${_storageAreaLabel(area)} entry',
+            ? 'Add item to ${_storageAreaLabel(area)}'
+            : 'Edit ${_storageAreaLabel(area)} item',
         initialKey: existing?.key ?? '',
         initialValue: existing?.value ?? '',
         keyEnabled: existing == null,
@@ -1116,22 +1106,14 @@ class _BrowserPreviewPaneState extends State<BrowserPreviewPane>
     String area,
     _StorageEntry entry,
   ) async {
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: Text('Delete ${_storageAreaLabel(area)} entry?'),
-        content: Text('Remove `${entry.key}` from ${_storageAreaLabel(area)}?'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(false),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.of(context).pop(true),
-            child: const Text('Delete'),
-          ),
-        ],
-      ),
+    final confirmed = await showMeshConfirmDialog(
+      context,
+      icon: Icons.delete_outline_rounded,
+      title: 'Delete this ${_storageAreaLabel(area)} item?',
+      description:
+          'This removes `${entry.key}` from ${_storageAreaLabel(area)} for the current page.',
+      confirmLabel: 'Delete item',
+      danger: true,
     );
     if (confirmed != true) return;
     _performStorageAction({
@@ -1142,46 +1124,28 @@ class _BrowserPreviewPaneState extends State<BrowserPreviewPane>
   }
 
   Future<void> _confirmClearStorageArea(String area) async {
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: Text('Clear ${_storageAreaLabel(area)}?'),
-        content: Text(
-          'This removes every entry from ${_storageAreaLabel(area)} for the current page.',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(false),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.of(context).pop(true),
-            child: const Text('Clear'),
-          ),
-        ],
-      ),
+    final confirmed = await showMeshConfirmDialog(
+      context,
+      icon: Icons.clear_all_rounded,
+      title: 'Clear ${_storageAreaLabel(area)}?',
+      description:
+          'This removes every saved item from ${_storageAreaLabel(area)} for the current page.',
+      confirmLabel: 'Clear items',
+      danger: true,
     );
     if (confirmed != true) return;
     _performStorageAction({'type': 'storageClearEntries', 'area': area});
   }
 
   Future<void> _confirmDeleteCookie(_StorageCookie cookie) async {
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Delete cookie?'),
-        content: Text('Remove the `${cookie.name}` cookie from this page?'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(false),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.of(context).pop(true),
-            child: const Text('Delete'),
-          ),
-        ],
-      ),
+    final confirmed = await showMeshConfirmDialog(
+      context,
+      icon: Icons.cookie_outlined,
+      title: 'Delete this cookie?',
+      description:
+          'This removes the `${cookie.name}` cookie from the current page.',
+      confirmLabel: 'Delete cookie',
+      danger: true,
     );
     if (confirmed != true) return;
     _performStorageAction({
@@ -1193,24 +1157,14 @@ class _BrowserPreviewPaneState extends State<BrowserPreviewPane>
   }
 
   Future<void> _confirmClearCookies() async {
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Clear cookies?'),
-        content: const Text(
-          'This removes every cookie currently visible for the page.',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(false),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.of(context).pop(true),
-            child: const Text('Clear'),
-          ),
-        ],
-      ),
+    final confirmed = await showMeshConfirmDialog(
+      context,
+      icon: Icons.cookie_outlined,
+      title: 'Clear cookies?',
+      description:
+          'This removes every cookie currently available to the current page.',
+      confirmLabel: 'Clear cookies',
+      danger: true,
     );
     if (confirmed != true) return;
     _performStorageAction({'type': 'storageClearCookies'});
@@ -3446,44 +3400,39 @@ class _StorageEntryEditorDialogState extends State<_StorageEntryEditorDialog> {
 
   @override
   Widget build(BuildContext context) {
-    return AlertDialog(
-      title: Text(widget.title),
-      content: SizedBox(
-        width: 420,
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            TextField(
-              controller: _keyController,
-              autofocus: true,
-              readOnly: !widget.keyEnabled,
-              decoration: const InputDecoration(
-                labelText: 'Key',
-                border: OutlineInputBorder(),
-              ),
-              onSubmitted: (_) => _submit(),
-            ),
-            const SizedBox(height: 12),
-            TextField(
-              controller: _valueController,
-              maxLines: 4,
-              minLines: 2,
-              decoration: const InputDecoration(
-                labelText: 'Value',
-                border: OutlineInputBorder(),
-              ),
-              onSubmitted: (_) => _submit(),
-            ),
-          ],
-        ),
-      ),
+    return MeshDialogScaffold(
+      icon: Icons.edit_note_rounded,
+      title: widget.title,
+      description:
+          'Keys identify each saved item for the current page. The value is stored exactly as entered.',
+      maxWidth: 480,
       actions: [
         TextButton(
           onPressed: () => Navigator.of(context).pop(),
           child: const Text('Cancel'),
         ),
-        FilledButton(onPressed: _submit, child: const Text('Save')),
+        FilledButton(onPressed: _submit, child: const Text('Save item')),
       ],
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          TextField(
+            controller: _keyController,
+            autofocus: true,
+            readOnly: !widget.keyEnabled,
+            decoration: const InputDecoration(labelText: 'Key'),
+            onSubmitted: (_) => _submit(),
+          ),
+          const SizedBox(height: 12),
+          TextField(
+            controller: _valueController,
+            maxLines: 4,
+            minLines: 2,
+            decoration: const InputDecoration(labelText: 'Value'),
+            onSubmitted: (_) => _submit(),
+          ),
+        ],
+      ),
     );
   }
 }
