@@ -4,7 +4,6 @@ import '../models.dart';
 import '../relative_time_ticker.dart';
 import '../search_query.dart';
 import '../session_read_store.dart';
-import '../session_runtime.dart';
 import '../theme/app_colors.dart';
 import '../theme/app_theme.dart';
 import '../theme/app_tokens.dart';
@@ -19,6 +18,19 @@ String sessionTimeLabel(DateTime updatedAt) {
   if (elapsed.inHours < 24) return '${elapsed.inHours}h ago';
   if (elapsed.inDays < 7) return '${elapsed.inDays}d ago';
   return '${(elapsed.inDays / 7).floor()}w ago';
+}
+
+String _workspaceLabel(String cwd) {
+  final trimmed = cwd.trim();
+  if (trimmed.isEmpty) return 'Workspace';
+  final parts = trimmed.split(RegExp(r'[\\/]'));
+  for (var i = parts.length - 1; i >= 0; i -= 1) {
+    final part = parts[i].trim();
+    if (part.isNotEmpty) {
+      return part;
+    }
+  }
+  return trimmed;
 }
 
 /// The canonical session list card used on both the Recent tab and the Host
@@ -68,6 +80,11 @@ class SessionRowCard extends StatelessWidget {
     bool running,
     bool unread,
   ) {
+    final theme = Theme.of(context);
+    final workspaceLabel = _workspaceLabel(session.cwd);
+    final supportingText = session.matchSnippet?.isNotEmpty == true
+        ? session.matchSnippet!
+        : session.preview;
     if (dense) {
       // Compact variant for the desktop sidebar — plain InkWell with tinted
       // selection fill, no card chrome.
@@ -119,8 +136,7 @@ class SessionRowCard extends StatelessWidget {
                               session.title,
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
-                              style: Theme.of(context).textTheme.bodyMedium
-                                  ?.copyWith(
+                              style: theme.textTheme.bodyMedium?.copyWith(
                                     fontWeight: AppWeights.body,
                                     height: 1.25,
                                     color: selected
@@ -129,56 +145,76 @@ class SessionRowCard extends StatelessWidget {
                                   ),
                             ),
                           ),
-                          if (session.provider != null) ...[
-                            const SizedBox(width: 6),
-                            AgentProviderBadge(
-                              providerKind: session.provider,
-                              compact: true,
-                            ),
-                          ],
-                          if (session.isSubAgent) ...[
-                            const SizedBox(width: 6),
-                            const _SubAgentBadge(),
-                          ],
                         ],
                       ),
                       const SizedBox(height: 3),
-                      Text(
-                        '${host.label} · ${session.cwd}',
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: monoStyle(
-                          color: colors.textTertiary,
-                          fontSize: 10.5,
-                        ),
-                      ),
-                      if (session.preview.isNotEmpty) ...[
-                        const SizedBox(height: 4),
-                        Text(
-                          session.preview,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: Theme.of(context).textTheme.bodySmall
-                              ?.copyWith(
+                      Row(
+                        children: [
+                          Expanded(
+                            child: Text(
+                              showHost
+                                  ? '${host.label} · $workspaceLabel'
+                                  : workspaceLabel,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: theme.textTheme.bodySmall?.copyWith(
                                 color: colors.textSecondary,
-                                height: 1.3,
                                 fontSize: 11.5,
+                                height: 1.25,
                               ),
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          ListenableBuilder(
+                            listenable: RelativeTimeTicker.minutes,
+                            builder: (_, _) => Text(
+                              sessionTimeLabel(session.updatedAt),
+                              style: theme.textTheme.bodySmall?.copyWith(
+                                color: colors.textTertiary,
+                                fontSize: 10.5,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                      if (session.provider != null || session.isSubAgent) ...[
+                        const SizedBox(height: 4),
+                        Wrap(
+                          spacing: 6,
+                          runSpacing: 4,
+                          children: [
+                            if (session.provider != null)
+                              AgentProviderBadge(
+                                providerKind: session.provider,
+                                compact: true,
+                              ),
+                            if (session.isSubAgent) const _SubAgentBadge(),
+                          ],
                         ),
                       ],
-                      if (session.matchSnippet != null &&
-                          session.matchSnippet!.isNotEmpty) ...[
+                      if (supportingText.isNotEmpty) ...[
                         const SizedBox(height: 4),
-                        _HighlightedSnippet(
-                          text: session.matchSnippet!,
-                          query: query,
-                          style: Theme.of(context).textTheme.bodySmall!
-                              .copyWith(
-                                color: colors.textSecondary,
-                                height: 1.3,
-                                fontSize: 11.5,
-                              ),
-                        ),
+                        if (session.matchSnippet?.isNotEmpty == true)
+                          _HighlightedSnippet(
+                            text: supportingText,
+                            query: query,
+                            style: theme.textTheme.bodySmall!.copyWith(
+                              color: colors.textSecondary,
+                              height: 1.3,
+                              fontSize: 11.5,
+                            ),
+                          )
+                        else
+                          Text(
+                            supportingText,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: theme.textTheme.bodySmall?.copyWith(
+                              color: colors.textSecondary,
+                              height: 1.3,
+                              fontSize: 11.5,
+                            ),
+                          ),
                       ],
                     ],
                   ),
@@ -214,8 +250,6 @@ class SessionRowCard extends StatelessWidget {
     }
 
     // ── Mobile / full-width variant ──────────────────────────────────────────
-    final branch = session.gitInfo?.branch;
-    final hasBranch = branch != null && branch.isNotEmpty;
     final statusBadge = _sessionStatusBadge(session);
     return MeshSurface(
       onTap: onTap,
@@ -263,37 +297,31 @@ class SessionRowCard extends StatelessWidget {
           Row(
             children: [
               if (showHost) ...[
-                Icon(Icons.dns_rounded, size: 13, color: colors.textTertiary),
+                Icon(Icons.dns_rounded, size: 14, color: colors.textTertiary),
                 const SizedBox(width: 4),
                 Flexible(
-                  flex: 0,
                   child: Text(
                     host.label,
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
-                    style: monoStyle(color: colors.textSecondary, fontSize: 11.5),
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: colors.textSecondary,
+                      fontWeight: AppWeights.emphasis,
+                    ),
                   ),
                 ),
-                const SizedBox(width: 8),
+                const SizedBox(width: 10),
               ],
-              if (session.provider != null) ...[
-                if (!showHost) const SizedBox(width: 0),
-                AgentProviderBadge(
-                  providerKind: session.provider,
-                  compact: !showHost,
-                ),
-                const SizedBox(width: 8),
-              ],
-              if (session.isSubAgent) ...[
-                const _SubAgentBadge(),
-                const SizedBox(width: 8),
-              ],
+              Icon(Icons.folder_outlined, size: 14, color: colors.textTertiary),
+              const SizedBox(width: 4),
               Expanded(
                 child: Text(
-                  session.cwd,
+                  workspaceLabel,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
-                  style: monoStyle(color: colors.textTertiary, fontSize: 11.5),
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: colors.textSecondary,
+                  ),
                 ),
               ),
               const SizedBox(width: 8),
@@ -301,66 +329,47 @@ class SessionRowCard extends StatelessWidget {
                 listenable: RelativeTimeTicker.minutes,
                 builder: (_, _) => Text(
                   sessionTimeLabel(session.updatedAt),
-                  style: monoStyle(
+                  style: theme.textTheme.bodySmall?.copyWith(
                     color: colors.textTertiary,
-                    fontSize: 10.5,
+                    fontSize: 11,
                   ),
                 ),
               ),
             ],
           ),
-          if (hasBranch) ...[
+          if (session.provider != null || session.isSubAgent) ...[
             const SizedBox(height: 4),
-            Row(
+            Wrap(
+              spacing: 8,
+              runSpacing: 4,
               children: [
-                Icon(
-                  Icons.account_tree_rounded,
-                  size: 12,
-                  color: colors.textTertiary,
-                ),
-                const SizedBox(width: 4),
-                Flexible(
-                  child: Text(
-                    branch,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: monoStyle(
-                      color: colors.textSecondary,
-                      fontSize: 11,
-                      fontWeight: AppWeights.emphasis,
-                    ),
-                  ),
-                ),
+                if (session.provider != null)
+                  AgentProviderBadge(providerKind: session.provider),
+                if (session.isSubAgent) const _SubAgentBadge(),
               ],
             ),
           ],
-          if (session.runtime != null) ...[
+          if (supportingText.isNotEmpty) ...[
             const SizedBox(height: AppSpacing.sm),
-            SessionRuntimeCardWrap(runtime: session.runtime),
-          ],
-          if (session.preview.isNotEmpty) ...[
-            const SizedBox(height: AppSpacing.sm),
-            Text(
-              session.preview,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                color: colors.textSecondary,
-                height: 1.35,
+            if (session.matchSnippet?.isNotEmpty == true)
+              _HighlightedSnippet(
+                text: supportingText,
+                query: query,
+                style: theme.textTheme.bodySmall!.copyWith(
+                  color: colors.textSecondary,
+                  height: 1.35,
+                ),
+              )
+            else
+              Text(
+                supportingText,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: colors.textSecondary,
+                  height: 1.35,
+                ),
               ),
-            ),
-          ],
-          if (session.matchSnippet != null &&
-              session.matchSnippet!.isNotEmpty) ...[
-            const SizedBox(height: AppSpacing.sm),
-            _HighlightedSnippet(
-              text: session.matchSnippet!,
-              query: query,
-              style: Theme.of(context).textTheme.bodySmall!.copyWith(
-                color: colors.textSecondary,
-                height: 1.35,
-              ),
-            ),
           ],
         ],
       ),

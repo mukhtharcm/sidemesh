@@ -50,25 +50,25 @@ class _SidemeshHomeScreenState extends State<SidemeshHomeScreen>
   static const _tabs = [
     _TabDef(
       title: 'Recent',
-      subtitle: 'Latest activity across the fleet',
+      subtitle: 'Pick up where your agents left off',
       icon: Icons.schedule_rounded,
       selectedIcon: Icons.schedule_rounded,
     ),
     _TabDef(
-      title: 'Actions',
-      subtitle: 'Pending approvals and queued sends',
-      icon: Icons.checklist_rounded,
-      selectedIcon: Icons.checklist_rounded,
+      title: 'Inbox',
+      subtitle: 'Approvals and pending replies in one place',
+      icon: Icons.all_inbox_rounded,
+      selectedIcon: Icons.all_inbox_rounded,
     ),
     _TabDef(
       title: 'Usage',
-      subtitle: 'Account limits across hosts',
+      subtitle: 'Limits, versions, and host health',
       icon: Icons.speed_rounded,
       selectedIcon: Icons.speed_rounded,
     ),
     _TabDef(
       title: 'Hosts',
-      subtitle: 'Your mesh of agent nodes',
+      subtitle: 'Machines you can reach from this device',
       icon: Icons.hub_rounded,
       selectedIcon: Icons.hub_rounded,
     ),
@@ -525,11 +525,34 @@ class _SidemeshHomeScreenState extends State<SidemeshHomeScreen>
     );
   }
 
+  _HomePrimaryAction _primaryActionForTab(_TabDef tab) {
+    if (_hosts.isEmpty || tab.title == 'Hosts') {
+      return _HomePrimaryAction(
+        label: 'Add host',
+        icon: Icons.add_link_rounded,
+        onTap: () => _showHostEditor(),
+      );
+    }
+    if (_enabledHosts.isEmpty) {
+      return _HomePrimaryAction(
+        label: 'Open hosts',
+        icon: Icons.hub_rounded,
+        onTap: () => setState(() => _tabIndex = 3),
+      );
+    }
+    return _HomePrimaryAction(
+      label: 'New session',
+      icon: Icons.add_rounded,
+      onTap: _startSessionFromHome,
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final colors = context.colors;
     final tab = _tabs[_tabIndex];
     final enabledHosts = _enabledHosts;
+    final primaryAction = _primaryActionForTab(tab);
     final installedAppVersion = _appVersionStore.info.comparableVersion;
     final mobileClientNotice = summarizeMobileClientCompatibility(
       installedVersion: installedAppVersion,
@@ -545,6 +568,7 @@ class _SidemeshHomeScreenState extends State<SidemeshHomeScreen>
           children: [
             _HomeStickyHeader(
               tab: tab,
+              primaryAction: primaryAction,
               searchController: _searchController,
               searchVisible: _searchVisibleForTab(tab, enabledHosts.length),
               viewMode: _tabIndex == 0 ? _recentViewMode : null,
@@ -557,7 +581,6 @@ class _SidemeshHomeScreenState extends State<SidemeshHomeScreen>
                   ? _toggleRecentUnreadOnly
                   : null,
               onRefresh: _refreshHosts,
-              onStartSession: _startSessionFromHome,
               onOpenSettings: _openSettings,
             ),
             const NotificationPermissionBanner(),
@@ -674,6 +697,24 @@ class _SidemeshHomeScreenState extends State<SidemeshHomeScreen>
 
 enum SessionViewMode { flat, byCwd, byHost }
 
+enum _HomeHeaderMenuAction { refresh, settings }
+
+String _sessionViewModeLabel(SessionViewMode mode) {
+  return switch (mode) {
+    SessionViewMode.flat => 'List',
+    SessionViewMode.byCwd => 'Folders',
+    SessionViewMode.byHost => 'Hosts',
+  };
+}
+
+IconData _sessionViewModeIcon(SessionViewMode mode) {
+  return switch (mode) {
+    SessionViewMode.flat => Icons.view_list_rounded,
+    SessionViewMode.byCwd => Icons.folder_rounded,
+    SessionViewMode.byHost => Icons.hub_rounded,
+  };
+}
+
 class RecentSessionFilters {
   const RecentSessionFilters({
     this.runningOnly = false,
@@ -707,9 +748,22 @@ class _TabDef {
   final IconData selectedIcon;
 }
 
+class _HomePrimaryAction {
+  const _HomePrimaryAction({
+    required this.label,
+    required this.icon,
+    required this.onTap,
+  });
+
+  final String label;
+  final IconData icon;
+  final VoidCallback onTap;
+}
+
 class _HomeStickyHeader extends StatelessWidget {
   const _HomeStickyHeader({
     required this.tab,
+    required this.primaryAction,
     required this.searchController,
     required this.searchVisible,
     required this.viewMode,
@@ -718,11 +772,11 @@ class _HomeStickyHeader extends StatelessWidget {
     required this.onRunningOnlyChanged,
     required this.onUnreadOnlyChanged,
     required this.onRefresh,
-    required this.onStartSession,
     required this.onOpenSettings,
   });
 
   final _TabDef tab;
+  final _HomePrimaryAction primaryAction;
   final TextEditingController searchController;
   final bool searchVisible;
   final SessionViewMode? viewMode;
@@ -731,7 +785,6 @@ class _HomeStickyHeader extends StatelessWidget {
   final ValueChanged<bool>? onRunningOnlyChanged;
   final ValueChanged<bool>? onUnreadOnlyChanged;
   final VoidCallback onRefresh;
-  final VoidCallback onStartSession;
   final VoidCallback onOpenSettings;
 
   @override
@@ -748,76 +801,95 @@ class _HomeStickyHeader extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           Row(
-            crossAxisAlignment: CrossAxisAlignment.center,
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Container(
-                width: 30,
-                height: 30,
-                decoration: BoxDecoration(
-                  color: colors.accentMuted,
-                  borderRadius: AppShapes.input,
-                  border: Border.all(
-                    color: colors.accent.withValues(alpha: 0.32),
-                  ),
-                ),
-                alignment: Alignment.center,
-                child: Icon(
-                  Icons.graphic_eq_rounded,
-                  color: colors.accent,
-                  size: 16,
-                ),
-              ),
-              const SizedBox(width: AppSpacing.md),
               Expanded(
-                child: Row(
-                  crossAxisAlignment: CrossAxisAlignment.baseline,
-                  textBaseline: TextBaseline.alphabetic,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      'sidemesh',
-                      style: monoStyle(
-                        color: colors.textPrimary,
-                        fontSize: 17,
-                        fontWeight: AppWeights.title,
-                      ).copyWith(letterSpacing: AppLetterSpacing.headline),
+                      'Sidemesh',
+                      style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                        color: colors.textSecondary,
+                        fontWeight: AppWeights.emphasis,
+                      ),
                     ),
-                    const SizedBox(width: AppSpacing.sm),
-                    Flexible(
-                      child: Text(
-                        '/ ${tab.title.toLowerCase()}',
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: monoStyle(
-                          color: colors.accent,
-                          fontSize: 13,
-                          fontWeight: AppWeights.emphasis,
-                        ),
+                    const SizedBox(height: 6),
+                    Text(
+                      tab.title,
+                      style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                        color: colors.textPrimary,
+                        fontWeight: AppWeights.title,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      tab.subtitle,
+                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                        color: colors.textSecondary,
+                        height: 1.4,
                       ),
                     ),
                   ],
                 ),
               ),
               const SizedBox(width: AppSpacing.sm),
-              MeshIconButton(
-                icon: Icons.terminal_rounded,
-                tooltip: 'New session',
-                onTap: onStartSession,
-              ),
-              const SizedBox(width: AppSpacing.xs),
-              MeshIconButton(
-                icon: Icons.tune_rounded,
-                tooltip: 'Settings',
-                onTap: onOpenSettings,
-              ),
-              const SizedBox(width: AppSpacing.xs),
-              MeshIconButton(
-                icon: Icons.refresh_rounded,
-                tooltip: 'Refresh',
-                onTap: onRefresh,
+              PopupMenuButton<_HomeHeaderMenuAction>(
+                tooltip: 'More',
+                onSelected: (action) {
+                  switch (action) {
+                    case _HomeHeaderMenuAction.refresh:
+                      onRefresh();
+                    case _HomeHeaderMenuAction.settings:
+                      onOpenSettings();
+                  }
+                },
+                itemBuilder: (context) => const [
+                  PopupMenuItem(
+                    value: _HomeHeaderMenuAction.refresh,
+                    child: ListTile(
+                      dense: true,
+                      leading: Icon(Icons.refresh_rounded),
+                      title: Text('Refresh'),
+                    ),
+                  ),
+                  PopupMenuItem(
+                    value: _HomeHeaderMenuAction.settings,
+                    child: ListTile(
+                      dense: true,
+                      leading: Icon(Icons.tune_rounded),
+                      title: Text('Settings'),
+                    ),
+                  ),
+                ],
+                child: Container(
+                  width: 44,
+                  height: 44,
+                  decoration: BoxDecoration(
+                    color: colors.surface,
+                    borderRadius: AppShapes.input,
+                    border: Border.all(color: colors.border),
+                  ),
+                  alignment: Alignment.center,
+                  child: Icon(
+                    Icons.more_horiz_rounded,
+                    color: colors.textSecondary,
+                    size: 20,
+                  ),
+                ),
               ),
             ],
           ),
-          const SizedBox(height: AppSpacing.sm),
+          const SizedBox(height: AppSpacing.md),
+          Align(
+            alignment: Alignment.centerLeft,
+            child: FilledButton.icon(
+              onPressed: primaryAction.onTap,
+              icon: Icon(primaryAction.icon, size: 18),
+              label: Text(primaryAction.label),
+            ),
+          ),
+          const SizedBox(height: AppSpacing.md),
           AnimatedSwitcher(
             duration: const Duration(milliseconds: 220),
             child: searchVisible
@@ -863,7 +935,6 @@ class _HomeSearchField extends StatelessWidget {
     return AnimatedBuilder(
       animation: controller,
       builder: (context, _) {
-        final hasQuery = controller.text.isNotEmpty;
         final filters = recentFilters;
         return Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -878,81 +949,16 @@ class _HomeSearchField extends StatelessWidget {
                 fillColor: colors.surface,
                 hintText: hintText,
                 hintStyle: TextStyle(color: colors.textTertiary, fontSize: 14),
-                prefixIcon: viewMode != null && onViewModeChanged != null
-                    ? ConstrainedBox(
-                        constraints: const BoxConstraints.tightFor(
-                          width: 32,
-                          height: 32,
-                        ),
-                        child: PopupMenuButton<SessionViewMode>(
-                          padding: EdgeInsets.zero,
-                          icon: Icon(
-                            switch (viewMode!) {
-                              SessionViewMode.flat => Icons.view_list_rounded,
-                              SessionViewMode.byCwd => Icons.folder_rounded,
-                              SessionViewMode.byHost => Icons.hub_rounded,
-                            },
-                            size: 18,
-                            color: colors.textSecondary,
-                          ),
-                          tooltip: 'View mode',
-                          onSelected: onViewModeChanged,
-                          itemBuilder: (context) => [
-                            PopupMenuItem(
-                              value: SessionViewMode.flat,
-                              child: Row(
-                                children: [
-                                  const Icon(Icons.view_list_rounded, size: 18),
-                                  const SizedBox(width: 10),
-                                  const Text('Flat list'),
-                                  if (viewMode == SessionViewMode.flat) ...[
-                                    const SizedBox(width: 8),
-                                    const Icon(Icons.check_rounded, size: 16),
-                                  ],
-                                ],
-                              ),
-                            ),
-                            PopupMenuItem(
-                              value: SessionViewMode.byCwd,
-                              child: Row(
-                                children: [
-                                  const Icon(Icons.folder_rounded, size: 18),
-                                  const SizedBox(width: 10),
-                                  const Text('By working dir'),
-                                  if (viewMode == SessionViewMode.byCwd) ...[
-                                    const SizedBox(width: 8),
-                                    const Icon(Icons.check_rounded, size: 16),
-                                  ],
-                                ],
-                              ),
-                            ),
-                            PopupMenuItem(
-                              value: SessionViewMode.byHost,
-                              child: Row(
-                                children: [
-                                  const Icon(Icons.hub_rounded, size: 18),
-                                  const SizedBox(width: 10),
-                                  const Text('By host'),
-                                  if (viewMode == SessionViewMode.byHost) ...[
-                                    const SizedBox(width: 8),
-                                    const Icon(Icons.check_rounded, size: 16),
-                                  ],
-                                ],
-                              ),
-                            ),
-                          ],
-                        ),
-                      )
-                    : Icon(
-                        Icons.search_rounded,
-                        size: 18,
-                        color: colors.textSecondary,
-                      ),
+                prefixIcon: Icon(
+                  Icons.search_rounded,
+                  size: 18,
+                  color: colors.textSecondary,
+                ),
                 prefixIconConstraints: const BoxConstraints(
                   minWidth: 36,
                   minHeight: 36,
                 ),
-                suffixIcon: hasQuery
+                suffixIcon: controller.text.isNotEmpty
                     ? IconButton(
                         tooltip: 'Clear',
                         iconSize: 16,
@@ -980,25 +986,85 @@ class _HomeSearchField extends StatelessWidget {
                   borderSide: BorderSide(color: colors.accent, width: 1.2),
                 ),
               ),
-            ),
-            if (filters != null) ...[
+              ),
+            if (viewMode != null ||
+                (filters != null && (onRunningOnlyChanged != null || onUnreadOnlyChanged != null))) ...[
               const SizedBox(height: AppSpacing.sm),
               Wrap(
                 spacing: AppSpacing.sm,
                 runSpacing: AppSpacing.xs,
                 children: [
-                  FilterChip(
-                    label: const Text('Running'),
-                    selected: filters.runningOnly,
-                    onSelected: onRunningOnlyChanged,
-                    visualDensity: VisualDensity.compact,
-                  ),
-                  FilterChip(
-                    label: const Text('Unread'),
-                    selected: filters.unreadOnly,
-                    onSelected: onUnreadOnlyChanged,
-                    visualDensity: VisualDensity.compact,
-                  ),
+                  if (viewMode != null && onViewModeChanged != null)
+                    PopupMenuButton<SessionViewMode>(
+                      tooltip: 'View mode',
+                      onSelected: onViewModeChanged,
+                      itemBuilder: (context) => [
+                        for (final mode in SessionViewMode.values)
+                          PopupMenuItem(
+                            value: mode,
+                            child: Row(
+                              children: [
+                                Icon(_sessionViewModeIcon(mode), size: 18),
+                                const SizedBox(width: 10),
+                                Text(_sessionViewModeLabel(mode)),
+                                if (viewMode == mode) ...[
+                                  const SizedBox(width: 8),
+                                  const Icon(Icons.check_rounded, size: 16),
+                                ],
+                              ],
+                            ),
+                          ),
+                      ],
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 12,
+                          vertical: 10,
+                        ),
+                        decoration: BoxDecoration(
+                          color: colors.surface,
+                          borderRadius: AppShapes.pill,
+                          border: Border.all(color: colors.border),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(
+                              _sessionViewModeIcon(viewMode!),
+                              size: 16,
+                              color: colors.textSecondary,
+                            ),
+                            const SizedBox(width: 8),
+                            Text(
+                              _sessionViewModeLabel(viewMode!),
+                              style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                                color: colors.textPrimary,
+                                fontWeight: AppWeights.emphasis,
+                              ),
+                            ),
+                            const SizedBox(width: 4),
+                            Icon(
+                              Icons.expand_more_rounded,
+                              size: 16,
+                              color: colors.textTertiary,
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  if (filters != null) ...[
+                    FilterChip(
+                      label: const Text('Running'),
+                      selected: filters.runningOnly,
+                      onSelected: onRunningOnlyChanged,
+                      visualDensity: VisualDensity.compact,
+                    ),
+                    FilterChip(
+                      label: const Text('Unread'),
+                      selected: filters.unreadOnly,
+                      onSelected: onUnreadOnlyChanged,
+                      visualDensity: VisualDensity.compact,
+                    ),
+                  ],
                 ],
               ),
             ],
@@ -1072,13 +1138,12 @@ class _MeshNavBar extends StatelessWidget {
                           const SizedBox(height: 4),
                           Text(
                             tab.title,
-                            style: monoStyle(
+                            style: Theme.of(context).textTheme.labelSmall?.copyWith(
                               color: selected
                                   ? colors.accent
                                   : colors.textSecondary,
-                              fontSize: 11,
                               fontWeight: AppWeights.emphasis,
-                            ).copyWith(letterSpacing: 0.3),
+                            ),
                           ),
                         ],
                       ),
@@ -1538,10 +1603,10 @@ class _RecentPaneState extends State<RecentPane> {
               mainAxisSize: MainAxisSize.min,
               children: [
                 const MeshEmptyState(
-                  icon: Icons.schedule_rounded,
-                  title: 'No sessions yet',
+                  icon: Icons.hub_rounded,
+                  title: 'Connect a machine',
                   body:
-                      'Add a host to start controlling your coding agents from your phone.',
+                      'Add a host to check sessions, approvals, files, and terminals from this device.',
                 ),
                 const SizedBox(height: AppSpacing.lg),
                 FilledButton.icon(
@@ -1581,7 +1646,7 @@ class _RecentPaneState extends State<RecentPane> {
         final sortedEntries = _sortEntries(_store.entries);
         final groups = _groupEntries(sortedEntries);
         final isGrouped = groups.isNotEmpty;
-        // Pinned shelf: shown in flat mode when no search is active.
+        // Pinned shelf: only surface it when it actively helps.
         final showPinnedShelf = !isGrouped &&
             widget.viewMode == SessionViewMode.flat &&
             widget.query.trim().isEmpty &&
@@ -1657,8 +1722,7 @@ class _RecentPaneState extends State<RecentPane> {
                 padding: EdgeInsets.symmetric(vertical: 8),
                 child: Center(child: CircularProgressIndicator(strokeWidth: 2)),
               ),
-            // Pinned shelf — fixed height, never pushes recents below fold.
-            if (showPinnedShelf && (pinnedEntries.isNotEmpty || !widget.dense))
+            if (showPinnedShelf && pinnedEntries.isNotEmpty)
               _FavoritesShelf(
                 entries: pinnedEntries,
                 onOpen: widget.onOpenSession,
@@ -1868,15 +1932,8 @@ class _RecentPaneState extends State<RecentPane> {
 
 // ── Pinned / Favourites Shelf ────────────────────────────────────────────────
 
-/// Compact horizontal strip of pinned sessions rendered above the recents
-/// list. Takes a fixed vertical footprint regardless of how many sessions
-/// are pinned, so the recents list is never pushed below the fold.
-///
-/// * On mobile ([dense] = false) it is always shown when in flat/unfiltered
-///   mode — even with zero pins — so new users discover the feature.
-/// * On desktop ([dense] = true) it only appears when at least one session
-///   is pinned, keeping the narrow sidebar tidy.
-/// * Long-pressing a chip calls [onUnpin] for quick removal.
+/// Compact horizontal strip of pinned sessions rendered above the recents list.
+/// Only shown when there are pins to surface.
 class _FavoritesShelf extends StatelessWidget {
   const _FavoritesShelf({
     required this.entries,
@@ -1893,98 +1950,66 @@ class _FavoritesShelf extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colors = context.colors;
-    final chipSize = dense ? 56.0 : 64.0;
-    final listHeight = chipSize + (dense ? 22.0 : 26.0);
+    final theme = Theme.of(context);
+    final horizontalPadding = dense ? 10.0 : 16.0;
+    final chipWidth = dense ? 156.0 : 184.0;
+    final listHeight = dense ? 68.0 : 74.0;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       mainAxisSize: MainAxisSize.min,
       children: [
-        // Header row.
         Padding(
           padding: EdgeInsets.fromLTRB(
-            dense ? 10 : 16,
+            horizontalPadding,
             dense ? 6 : 10,
-            dense ? 10 : 16,
+            horizontalPadding,
             4,
           ),
           child: Row(
             children: [
-              Icon(
-                Icons.push_pin_rounded,
-                size: 11,
-                color: colors.textTertiary,
-              ),
-              const SizedBox(width: 5),
               Text(
                 'Pinned',
-                style: monoStyle(
-                  color: colors.textTertiary,
-                  fontSize: dense ? 9.5 : 10.5,
+                style: theme.textTheme.labelLarge?.copyWith(
+                  color: colors.textSecondary,
                   fontWeight: AppWeights.emphasis,
                 ),
               ),
-              if (entries.isNotEmpty) ...[const SizedBox(width: 5),
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
-                  decoration: BoxDecoration(
-                    color: colors.surfaceElevated,
-                    borderRadius: BorderRadius.circular(5),
-                    border: Border.all(color: colors.border),
-                  ),
-                  child: Text(
-                    '${entries.length}',
-                    style: monoStyle(
-                      color: colors.textTertiary,
-                      fontSize: 9,
-                      fontWeight: AppWeights.emphasis,
-                    ),
-                  ),
+              const Spacer(),
+              Text(
+                '${entries.length} ${entries.length == 1 ? "session" : "sessions"}',
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: colors.textTertiary,
                 ),
-              ],
+              ),
             ],
           ),
         ),
-        // Horizontal chip row.
         SizedBox(
           height: listHeight,
-          child: entries.isEmpty
-              ? ListView(
-                  scrollDirection: Axis.horizontal,
-                  padding: EdgeInsets.fromLTRB(
-                    dense ? 10 : 16,
-                    0,
-                    dense ? 10 : 16,
-                    dense ? 6 : 8,
-                  ),
-                  children: [
-                    _FavoritesEmptyChip(chipSize: chipSize),
-                  ],
-                )
-              : ListView.separated(
-                  scrollDirection: Axis.horizontal,
-                  padding: EdgeInsets.fromLTRB(
-                    dense ? 10 : 16,
-                    0,
-                    dense ? 10 : 16,
-                    dense ? 6 : 8,
-                  ),
-                  itemCount: entries.length,
-                  separatorBuilder: (_, _) =>
-                      SizedBox(width: dense ? 6 : 8),
-                  itemBuilder: (context, index) {
-                    final entry = entries[index];
-                    return _FavoriteChip(
-                      entry: entry,
-                      chipSize: chipSize,
-                      onTap: () => onOpen(entry.host, entry.session),
-                      onUnpin: () =>
-                          onUnpin(entry.host, entry.session.id),
-                    );
-                  },
-                ),
+          child: ListView.separated(
+            scrollDirection: Axis.horizontal,
+            padding: EdgeInsets.fromLTRB(
+              horizontalPadding,
+              0,
+              horizontalPadding,
+              dense ? 6 : 8,
+            ),
+            itemCount: entries.length,
+            separatorBuilder: (_, _) => SizedBox(width: dense ? 8 : 10),
+            itemBuilder: (context, index) {
+              final entry = entries[index];
+              return _FavoriteChip(
+                entry: entry,
+                width: chipWidth,
+                dense: dense,
+                onTap: () => onOpen(entry.host, entry.session),
+                onUnpin: () => onUnpin(entry.host, entry.session.id),
+              );
+            },
+          ),
         ),
-        Divider(height: 1, color: colors.border),
+        SizedBox(height: dense ? 2 : 6),
       ],
     );
   }
@@ -1993,143 +2018,102 @@ class _FavoritesShelf extends StatelessWidget {
 class _FavoriteChip extends StatelessWidget {
   const _FavoriteChip({
     required this.entry,
-    required this.chipSize,
+    required this.width,
+    required this.dense,
     required this.onTap,
     required this.onUnpin,
   });
 
   final RemoteSessionEntry entry;
-  final double chipSize;
+  final double width;
+  final bool dense;
   final VoidCallback onTap;
   final VoidCallback onUnpin;
 
-  static String _initials(String title) {
-    final trimmed = title.trim();
-    if (trimmed.isEmpty) return '?';
-    final parts = trimmed.split(RegExp(r'[\s\-_/]+'));
-    if (parts.length >= 2 &&
-        parts[0].isNotEmpty &&
-        parts[1].isNotEmpty) {
-      return '${parts[0][0]}${parts[1][0]}'.toUpperCase();
-    }
-    return trimmed
-        .substring(0, min(2, trimmed.length))
-        .toUpperCase();
-  }
-
   @override
   Widget build(BuildContext context) {
     final colors = context.colors;
+    final theme = Theme.of(context);
     final running = entry.session.isActive;
-    final initials = _initials(entry.session.title);
-    return GestureDetector(
-      onTap: onTap,
-      onLongPress: onUnpin,
-      child: Tooltip(
-        message:
-            '${entry.session.title}\n${entry.host.label}\n'
-            'Long-press to unpin',
-        child: SizedBox(
-          width: chipSize,
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Stack(
-                clipBehavior: Clip.none,
-                alignment: Alignment.center,
-                children: [
-                  Container(
-                    width: chipSize,
-                    height: chipSize,
-                    decoration: BoxDecoration(
-                      color: running
-                          ? colors.successMuted
-                          : colors.surfaceMuted,
-                      borderRadius: BorderRadius.circular(14),
-                      border: Border.all(
-                        color: running
-                            ? colors.success.withValues(alpha: 0.5)
-                            : colors.border,
-                      ),
-                    ),
-                    alignment: Alignment.center,
-                    child: Text(
-                      initials,
-                      style: monoStyle(
-                        color: running
-                            ? colors.success
-                            : colors.textSecondary,
-                        fontSize: chipSize * 0.22,
-                        fontWeight: AppWeights.title,
-                      ),
-                    ),
-                  ),
-                  if (running)
-                    Positioned(
-                      top: -1,
-                      right: -1,
-                      child: LivePulse(color: colors.success),
-                    ),
-                ],
-              ),
-              const SizedBox(height: 3),
-              Text(
-                entry.session.title,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                textAlign: TextAlign.center,
-                style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                  color: colors.textTertiary,
-                  fontSize: 9.5,
-                  height: 1.2,
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class _FavoritesEmptyChip extends StatelessWidget {
-  const _FavoritesEmptyChip({required this.chipSize});
-
-  final double chipSize;
-
-  @override
-  Widget build(BuildContext context) {
-    final colors = context.colors;
     return Tooltip(
-      message: 'Tap ★ on any session to pin it here',
-      child: Container(
-        width: chipSize,
-        height: chipSize,
-        decoration: BoxDecoration(
-          color: colors.surfaceMuted,
-          borderRadius: BorderRadius.circular(14),
-          border: Border.all(color: colors.border),
-        ),
-        alignment: Alignment.center,
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(
-              Icons.push_pin_outlined,
-              size: 16,
-              color: colors.textTertiary,
+      message:
+          '${entry.session.title}\n${entry.host.label}\n'
+          'Long-press to remove from pinned',
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          onTap: onTap,
+          onLongPress: onUnpin,
+          borderRadius: BorderRadius.circular(16),
+          child: Ink(
+            width: width,
+            padding: EdgeInsets.symmetric(
+              horizontal: dense ? 12 : 14,
+              vertical: dense ? 8 : 9,
             ),
-            const SizedBox(height: 2),
-            Text(
-              'Pin one',
-              style: monoStyle(
-                color: colors.textTertiary,
-                fontSize: 8.5,
-                fontWeight: AppWeights.emphasis,
+            decoration: BoxDecoration(
+              color: running ? colors.successMuted : colors.surfaceMuted,
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(
+                color: running
+                    ? colors.success.withValues(alpha: 0.32)
+                    : colors.border,
               ),
-              textAlign: TextAlign.center,
             ),
-          ],
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Row(
+                  children: [
+                    if (running)
+                      LivePulse(color: colors.success)
+                    else
+                      Icon(
+                        Icons.push_pin_outlined,
+                        size: 14,
+                        color: colors.textTertiary,
+                      ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        entry.session.title,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: theme.textTheme.bodyMedium?.copyWith(
+                          color: colors.textPrimary,
+                          fontWeight: AppWeights.emphasis,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 3),
+                Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        entry.host.label,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          color: colors.textSecondary,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Text(
+                      sessionTimeLabel(entry.session.updatedAt),
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: colors.textTertiary,
+                        fontSize: 11,
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
         ),
       ),
     );
@@ -4895,6 +4879,7 @@ class _RecentProgressStrip extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colors = context.colors;
+    final theme = Theme.of(context);
     final loaded = (total - remaining).clamp(0, total);
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 6, 16, 6),
@@ -4911,8 +4896,12 @@ class _RecentProgressStrip extends StatelessWidget {
           const SizedBox(width: 10),
           Expanded(
             child: Text(
-              '${showingCached ? 'Refreshing cached sessions' : 'Loading hosts'} · $loaded of $total ready',
-              style: monoStyle(color: colors.textSecondary, fontSize: 11.5),
+              showingCached
+                  ? 'Refreshing sessions, $loaded of $total hosts ready'
+                  : 'Loading sessions, $loaded of $total hosts ready',
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: colors.textSecondary,
+              ),
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
             ),
@@ -4932,9 +4921,10 @@ class _RecentErrorBanner extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colors = context.colors;
+    final theme = Theme.of(context);
     final summary = hostLabels.length == 1
-        ? '${hostLabels.first} is unreachable.'
-        : '${hostLabels.length} hosts are unreachable: ${hostLabels.join(', ')}.';
+        ? 'Cannot reach ${hostLabels.first}.'
+        : 'Cannot reach ${hostLabels.length} hosts: ${hostLabels.join(', ')}.';
     return Container(
       margin: const EdgeInsets.fromLTRB(16, 8, 16, 4),
       padding: const EdgeInsets.fromLTRB(14, 10, 10, 10),
@@ -4950,9 +4940,8 @@ class _RecentErrorBanner extends StatelessWidget {
           Expanded(
             child: Text(
               summary,
-              style: TextStyle(
+              style: theme.textTheme.bodySmall?.copyWith(
                 color: colors.warning,
-                fontSize: 12.5,
                 fontWeight: AppWeights.body,
               ),
             ),

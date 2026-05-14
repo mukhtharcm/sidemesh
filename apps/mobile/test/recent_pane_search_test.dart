@@ -188,7 +188,7 @@ void main() {
     await tester.pump(const Duration(milliseconds: 350));
     await tester.pump();
 
-    expect(find.textContaining('Broken VPS is unreachable.'), findsOneWidget);
+    expect(find.textContaining('Cannot reach Broken VPS.'), findsOneWidget);
     expect(find.text('Best Match'), findsOneWidget);
   });
 
