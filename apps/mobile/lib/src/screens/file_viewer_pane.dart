@@ -10,6 +10,8 @@ import '../image_blob_cache_store.dart';
 import '../models.dart';
 import '../theme/app_colors.dart';
 import '../theme/app_theme.dart';
+import '../theme/app_tokens.dart';
+import '../widgets/app_dialogs.dart';
 import '../widgets/app_snackbar.dart';
 import '../widgets/markdown_content.dart';
 import '../widgets/mesh_widgets.dart';
@@ -133,8 +135,8 @@ class FileViewerPaneState extends State<FileViewerPane> {
         _file = file;
         _loading = false;
         _error = null;
-        _imagePreview = !_editing &&
-            _looksLikeImageFile(file.path, file.mimeHint);
+        _imagePreview =
+            !_editing && _looksLikeImageFile(file.path, file.mimeHint);
         if (!_editing) {
           _editController.text = file.contents;
         }
@@ -153,28 +155,34 @@ class FileViewerPaneState extends State<FileViewerPane> {
   Future<void> _save() async {
     final file = _file;
     if (file == null) return;
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (context) {
-        final colors = context.colors;
-        return AlertDialog(
-          title: const Text('Save changes?'),
-          content: Text(
-            widget.path,
-            style: monoStyle(color: colors.textSecondary, fontSize: 12),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(context).pop(false),
-              child: const Text('Cancel'),
-            ),
-            FilledButton(
-              onPressed: () => Navigator.of(context).pop(true),
-              child: const Text('Save'),
-            ),
-          ],
-        );
-      },
+    final confirmed = await showMeshConfirmDialog(
+      context,
+      icon: Icons.save_outlined,
+      title: 'Save these changes?',
+      description:
+          'This will overwrite the file on the connected machine with what you see here now.',
+      confirmLabel: 'Save changes',
+      child: Builder(
+        builder: (dialogContext) {
+          final colors = dialogContext.colors;
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'File',
+                style: Theme.of(
+                  dialogContext,
+                ).textTheme.labelLarge?.copyWith(fontWeight: AppWeights.title),
+              ),
+              const SizedBox(height: 4),
+              SelectableText(
+                widget.path,
+                style: monoStyle(color: colors.textSecondary, fontSize: 12),
+              ),
+            ],
+          );
+        },
+      ),
     );
     if (confirmed != true) return;
     setState(() => _saving = true);
@@ -199,7 +207,10 @@ class FileViewerPaneState extends State<FileViewerPane> {
       if (!mounted) return;
       setState(() => _saving = false);
       _bump();
-      showAppSnackBar(context, 'Could not save changes: ${friendlyError(error)}');
+      showAppSnackBar(
+        context,
+        'Could not save changes: ${friendlyError(error)}',
+      );
     }
   }
 
@@ -318,10 +329,9 @@ class FileViewerPaneState extends State<FileViewerPane> {
         child: MeshEmptyState(
           icon: isImageFile ? Icons.image_rounded : Icons.description_rounded,
           title: isImageFile ? 'Image file' : 'Preview unavailable',
-          body:
-              isImageFile
-                  ? '${formatBytes(file.size)} • Use Show image to open it.'
-                  : '${formatBytes(file.size)} • ${file.mimeHint.isEmpty ? 'unknown type' : file.mimeHint}',
+          body: isImageFile
+              ? '${formatBytes(file.size)} • Use Show image to open it.'
+              : '${formatBytes(file.size)} • ${file.mimeHint.isEmpty ? 'unknown type' : file.mimeHint}',
         ),
       );
     }
@@ -468,7 +478,9 @@ class FileViewerActions extends StatelessWidget {
         if (canPreviewImage)
           IconButton(
             tooltip: imagePreview ? 'View file' : 'Show image',
-            onPressed: hasFile && !editing ? () => s?.toggleImagePreview() : null,
+            onPressed: hasFile && !editing
+                ? () => s?.toggleImagePreview()
+                : null,
             icon: Icon(
               imagePreview ? Icons.description_rounded : Icons.image_rounded,
               size: 18,

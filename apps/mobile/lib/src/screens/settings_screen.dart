@@ -15,6 +15,7 @@ import '../session_send_outbox_store.dart';
 import '../theme/app_colors.dart';
 import '../theme/app_tokens.dart';
 import '../theme/theme_controller.dart';
+import '../widgets/app_dialogs.dart';
 import '../widgets/app_snackbar.dart';
 import '../widgets/appearance_sheet.dart';
 import '../widgets/launch_options_form.dart';
@@ -187,26 +188,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
     required String successMessage,
   }) async {
     if (_busyAction != null) return;
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (dialogContext) {
-        final colors = dialogContext.colors;
-        return AlertDialog(
-          backgroundColor: colors.surface,
-          title: Text(title),
-          content: Text(body),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(dialogContext).pop(false),
-              child: const Text('Cancel'),
-            ),
-            FilledButton(
-              onPressed: () => Navigator.of(dialogContext).pop(true),
-              child: const Text('Clear'),
-            ),
-          ],
-        );
-      },
+    final confirmed = await showMeshConfirmDialog(
+      context,
+      icon: Icons.delete_sweep_rounded,
+      title: title,
+      description: body,
+      confirmLabel: 'Clear data',
+      danger: true,
     );
     if (confirmed != true || !mounted) return;
     setState(() => _busyAction = key);
@@ -222,28 +210,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 
   Future<void> _replayOnboarding() async {
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (dialogContext) {
-        final colors = dialogContext.colors;
-        return AlertDialog(
-          backgroundColor: colors.surface,
-          title: const Text('Replay onboarding?'),
-          content: const Text(
-            'This will show the first-run guide again. You can skip it at any time.',
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(dialogContext).pop(false),
-              child: const Text('Cancel'),
-            ),
-            FilledButton(
-              onPressed: () => Navigator.of(dialogContext).pop(true),
-              child: const Text('Replay'),
-            ),
-          ],
-        );
-      },
+    final confirmed = await showMeshConfirmDialog(
+      context,
+      icon: Icons.play_circle_outline_rounded,
+      title: 'Show the guide again?',
+      description:
+          'This opens the first-run guide again. You can close it whenever you want.',
+      confirmLabel: 'Show guide',
     );
     if (confirmed != true || !mounted) return;
     await OnboardingStore.instance.reset();
