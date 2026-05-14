@@ -4314,13 +4314,13 @@ class _SessionScreenState extends State<SessionScreen>
 
   Future<void> _stopSession() async {
     if (!_supportsSessionInterrupt) {
-      showAppSnackBar(context, 'This provider does not support interruption.');
+      showAppSnackBar(context, 'This provider cannot stop the agent yet.');
       return;
     }
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (dialogContext) => AlertDialog(
-        title: const Text('Interrupt agent?'),
+        title: const Text('Stop agent?'),
         content: const Text(
           'The current task will stop. Any tools mid-run may not finish cleanly.',
         ),
@@ -4335,7 +4335,7 @@ class _SessionScreenState extends State<SessionScreen>
               foregroundColor: Colors.white,
             ),
             onPressed: () => Navigator.of(dialogContext).pop(true),
-            child: const Text('Interrupt'),
+            child: const Text('Stop'),
           ),
         ],
       ),
@@ -4357,7 +4357,7 @@ class _SessionScreenState extends State<SessionScreen>
       _syncSessionLiveActivity();
       showAppSnackBar(
         context,
-        'Agent interrupted.',
+        'Agent stopped.',
         duration: const Duration(seconds: 2),
       );
     } catch (error) {
@@ -4366,7 +4366,7 @@ class _SessionScreenState extends State<SessionScreen>
       }
       showAppSnackBar(
         context,
-        'Failed to interrupt agent: ${friendlyError(error)}',
+        'Failed to stop the agent: ${friendlyError(error)}',
       );
     }
   }
@@ -5694,7 +5694,7 @@ class _SessionScreenState extends State<SessionScreen>
     required bool resourcesOpen,
   }) {
     return [
-      // When the agent is running, surface the interrupt action at the top so
+      // When the agent is running, surface the stop action at the top so
       // it's immediately reachable without scrolling the sheet.
       if (_running && _supportsSessionInterrupt)
         const _SessionActionGroup(
@@ -5702,7 +5702,7 @@ class _SessionScreenState extends State<SessionScreen>
           actions: [
             _SessionActionSpec(
               value: 'stop',
-              label: 'Interrupt agent',
+              label: 'Stop agent',
               detail: 'Stop the current task immediately.',
               icon: Icons.stop_circle_rounded,
               tone: _SessionActionTone.danger,
@@ -6305,10 +6305,10 @@ class _SessionScreenState extends State<SessionScreen>
                   ignoring: !_running,
                   child: MeshIconButton(
                     icon: Icons.stop_circle_rounded,
-                    tooltip: 'Interrupt agent',
+                    tooltip: 'Stop agent',
                     color: colors.danger,
                     onTap: _stopSession,
-                    semanticLabel: 'Interrupt agent',
+                    semanticLabel: 'Stop agent',
                   ),
                 ),
               ),
