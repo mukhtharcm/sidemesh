@@ -4854,132 +4854,115 @@ class _SessionScreenState extends State<SessionScreen>
 
     await showModalBottomSheet<void>(
       context: context,
-      backgroundColor: colors.surface,
-      showDragHandle: true,
+      backgroundColor: Colors.transparent,
+      showDragHandle: false,
       useSafeArea: true,
       isScrollControlled: true,
-      builder: (context) => SafeArea(
-        child: ConstrainedBox(
-          constraints: BoxConstraints(
-            maxHeight: MediaQuery.of(context).size.height * 0.86,
-          ),
-          child: SingleChildScrollView(
-            padding: const EdgeInsets.fromLTRB(18, 4, 18, 24),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
+      builder: (context) => MeshBottomSheetScaffold(
+        icon: Icons.info_outline_rounded,
+        title: 'Session details',
+        description:
+            'See where this session is running and the live settings reported by the provider.',
+        maxWidth: 760,
+        maxHeightFactor: 0.86,
+        child: SingleChildScrollView(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              MeshCard(
+                tone: MeshCardTone.muted,
+                padding: const EdgeInsets.all(14),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Expanded(
-                      child: Text(
-                        'Session details',
-                        style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                          fontWeight: FontWeight.w800,
-                        ),
+                    Text(
+                      session.title,
+                      style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                        fontWeight: AppWeights.title,
                       ),
                     ),
-                    IconButton(
-                      tooltip: 'Close',
-                      onPressed: () => Navigator.of(context).pop(),
-                      icon: const Icon(Icons.close_rounded),
+                    const SizedBox(height: 4),
+                    Text(
+                      'Running on ${widget.host.label}',
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color: colors.textSecondary,
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
+                      children: [
+                        MeshPill(
+                          label: _running ? 'running' : 'idle',
+                          icon: _running
+                              ? Icons.play_circle_outline_rounded
+                              : Icons.pause_circle_outline_rounded,
+                          tone: _running
+                              ? MeshPillTone.success
+                              : MeshPillTone.neutral,
+                        ),
+                        MeshPill(
+                          label: session.source,
+                          icon: Icons.route_rounded,
+                          tone: MeshPillTone.neutral,
+                        ),
+                        if (gitLabel != null)
+                          MeshPill(
+                            label: gitLabel,
+                            icon: Icons.account_tree_rounded,
+                            tone: MeshPillTone.info,
+                          ),
+                      ],
                     ),
                   ],
                 ),
-                const SizedBox(height: 8),
-                MeshCard(
-                  tone: MeshCardTone.muted,
-                  padding: const EdgeInsets.all(14),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        session.title,
-                        style: Theme.of(context).textTheme.titleMedium
-                            ?.copyWith(fontWeight: AppWeights.title),
-                      ),
-                      const SizedBox(height: 4),
-                      Text(
-                        'Running on ${widget.host.label}',
-                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                          color: colors.textSecondary,
-                        ),
-                      ),
-                      const SizedBox(height: 10),
-                      Wrap(
-                        spacing: 8,
-                        runSpacing: 8,
-                        children: [
-                          MeshPill(
-                            label: _running ? 'running' : 'idle',
-                            icon: _running
-                                ? Icons.play_circle_outline_rounded
-                                : Icons.pause_circle_outline_rounded,
-                            tone: _running
-                                ? MeshPillTone.success
-                                : MeshPillTone.neutral,
-                          ),
-                          MeshPill(
-                            label: session.source,
-                            icon: Icons.route_rounded,
-                            tone: MeshPillTone.neutral,
-                          ),
-                          if (gitLabel != null)
-                            MeshPill(
-                              label: gitLabel,
-                              icon: Icons.account_tree_rounded,
-                              tone: MeshPillTone.info,
-                            ),
-                        ],
-                      ),
-                    ],
-                  ),
+              ),
+              const SizedBox(height: 14),
+              sectionLabel(
+                'Overview',
+                'Where this session is running and how it started.',
+              ),
+              const SizedBox(height: 8),
+              MeshCard(
+                tone: MeshCardTone.muted,
+                padding: const EdgeInsets.fromLTRB(14, 12, 14, 2),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    _DetailRow(label: 'Host', value: widget.host.label),
+                    _DetailRow(label: 'Folder', value: session.cwd),
+                    _DetailRow(
+                      label: 'Status',
+                      value: _running ? 'Running' : 'Idle',
+                    ),
+                    _DetailRow(label: 'Started from', value: session.source),
+                    if (gitLabel != null)
+                      _DetailRow(label: 'Git', value: gitLabel),
+                  ],
                 ),
+              ),
+              if (gitLabel != null) ...[
+                const SizedBox(height: 8),
+                OutlinedButton.icon(
+                  onPressed: () {
+                    Navigator.of(context).pop();
+                    unawaited(_showGitSheet(session));
+                  },
+                  icon: const Icon(Icons.account_tree_rounded, size: 18),
+                  label: const Text('View Git details'),
+                ),
+              ],
+              if (session.runtime != null) ...[
                 const SizedBox(height: 14),
                 sectionLabel(
-                  'Overview',
-                  'Where this session is running and how it started.',
+                  'Runtime now',
+                  'Live settings reported by the provider for the current session.',
                 ),
                 const SizedBox(height: 8),
-                MeshCard(
-                  tone: MeshCardTone.muted,
-                  padding: const EdgeInsets.fromLTRB(14, 12, 14, 2),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      _DetailRow(label: 'Host', value: widget.host.label),
-                      _DetailRow(label: 'Folder', value: session.cwd),
-                      _DetailRow(
-                        label: 'Status',
-                        value: _running ? 'Running' : 'Idle',
-                      ),
-                      _DetailRow(label: 'Started from', value: session.source),
-                      if (gitLabel != null)
-                        _DetailRow(label: 'Git', value: gitLabel),
-                    ],
-                  ),
-                ),
-                if (gitLabel != null) ...[
-                  const SizedBox(height: 8),
-                  OutlinedButton.icon(
-                    onPressed: () {
-                      Navigator.of(context).pop();
-                      unawaited(_showGitSheet(session));
-                    },
-                    icon: const Icon(Icons.account_tree_rounded, size: 18),
-                    label: const Text('View Git details'),
-                  ),
-                ],
-                if (session.runtime != null) ...[
-                  const SizedBox(height: 14),
-                  sectionLabel(
-                    'Runtime now',
-                    'Live settings reported by the provider for the current session.',
-                  ),
-                  const SizedBox(height: 8),
-                  _SessionRuntimeDetails(runtime: session.runtime!),
-                ],
+                _SessionRuntimeDetails(runtime: session.runtime!),
               ],
-            ),
+            ],
           ),
         ),
       ),
@@ -4996,6 +4979,7 @@ class _SessionScreenState extends State<SessionScreen>
       api: widget.api,
       host: widget.host,
       session: session,
+      useBottomSheetChrome: !isDesktop,
       runtimeModel: runtime?.model,
       runtimeModelProvider: runtime?.modelProvider,
       runtimeMode: runtime?.mode,
@@ -5030,8 +5014,8 @@ class _SessionScreenState extends State<SessionScreen>
     }
     await showModalBottomSheet<void>(
       context: context,
-      backgroundColor: context.colors.surface,
-      showDragHandle: true,
+      backgroundColor: Colors.transparent,
+      showDragHandle: false,
       useSafeArea: true,
       isScrollControlled: true,
       builder: (sheetContext) => sheet,
