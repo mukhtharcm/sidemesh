@@ -40,6 +40,10 @@ class _Composer extends StatelessWidget {
     required this.onDismiss,
     this.onAddSkillTrigger,
     this.onAddFileTrigger,
+    this.modelLabel,
+    this.modelDetail,
+    this.modelCustomized = false,
+    this.onModelTap,
     this.submitOnEnter = false,
   });
 
@@ -86,6 +90,11 @@ class _Composer extends StatelessWidget {
 
   /// Inserts a `@` trigger into the text field and focuses it (mobile + button).
   final VoidCallback? onAddFileTrigger;
+
+  final String? modelLabel;
+  final String? modelDetail;
+  final bool modelCustomized;
+  final VoidCallback? onModelTap;
 
   final bool submitOnEnter;
 
@@ -204,6 +213,15 @@ class _Composer extends StatelessWidget {
         ],
         Expanded(child: pill),
         const SizedBox(width: 8),
+        if (isDesktop && modelLabel != null && onModelTap != null) ...[
+          _ComposerModelButton(
+            label: modelLabel!,
+            detail: modelDetail,
+            customized: modelCustomized,
+            onPressed: onModelTap!,
+          ),
+          const SizedBox(width: 8),
+        ],
         _SendButton(
           sending: sending,
           controller: controller,
@@ -630,6 +648,97 @@ class _ComposerPasteButton extends StatelessWidget {
               Icons.content_paste_rounded,
               color: enabled ? colors.accent : colors.textTertiary,
               size: 22,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _ComposerModelButton extends StatelessWidget {
+  const _ComposerModelButton({
+    required this.label,
+    required this.detail,
+    required this.customized,
+    required this.onPressed,
+  });
+
+  final String label;
+  final String? detail;
+  final bool customized;
+  final VoidCallback onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    return Tooltip(
+      message: 'Model and session controls',
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          borderRadius: BorderRadius.circular(AppRadii.control),
+          onTap: onPressed,
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 140),
+            curve: Curves.easeOutCubic,
+            constraints: const BoxConstraints(maxWidth: 172, minHeight: 44),
+            padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 7),
+            decoration: BoxDecoration(
+              color: customized ? colors.accentMuted : colors.surfaceMuted,
+              borderRadius: BorderRadius.circular(AppRadii.control),
+              border: Border.all(
+                color: customized
+                    ? colors.accent.withValues(alpha: 0.38)
+                    : colors.border,
+              ),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(
+                  Icons.memory_rounded,
+                  size: 15,
+                  color: customized ? colors.accent : colors.textSecondary,
+                ),
+                const SizedBox(width: 7),
+                Flexible(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        label,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: monoStyle(
+                          color: colors.textPrimary,
+                          fontSize: 11.5,
+                          fontWeight: AppWeights.title,
+                        ),
+                      ),
+                      if (detail != null)
+                        Text(
+                          detail!,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: Theme.of(context).textTheme.labelSmall
+                              ?.copyWith(
+                                color: colors.textSecondary,
+                                fontWeight: AppWeights.emphasis,
+                                height: 1.1,
+                              ),
+                        ),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 5),
+                Icon(
+                  Icons.expand_more_rounded,
+                  size: 16,
+                  color: colors.textTertiary,
+                ),
+              ],
             ),
           ),
         ),

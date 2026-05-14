@@ -22,6 +22,7 @@ import '../live_activity_service.dart';
 import '../models.dart';
 import '../fs_models.dart';
 import '../pending_send_recovery.dart';
+import '../provider_labels.dart';
 import '../search_query.dart';
 import 'browser_preview_screen.dart';
 import 'create_session_sheet.dart';
@@ -130,6 +131,124 @@ class _DockedBrowserPreview {
     return _DockedBrowserPreview(
       preview: preview ?? this.preview,
       expanded: expanded ?? this.expanded,
+    );
+  }
+}
+
+class _DesktopSessionTitle extends StatelessWidget {
+  const _DesktopSessionTitle({
+    required this.host,
+    required this.session,
+    required this.running,
+    required this.gitStatus,
+    required this.showGit,
+    required this.canRename,
+    required this.onRename,
+  });
+
+  final HostProfile host;
+  final SessionSummary session;
+  final bool running;
+  final SessionGitStatus? gitStatus;
+  final bool showGit;
+  final bool canRename;
+  final VoidCallback onRename;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    final gitLabel = showGit ? _gitHeaderLabel(session, gitStatus) : null;
+    final title = Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Flexible(
+          child: Text(
+            session.title,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: Theme.of(context).textTheme.titleMedium?.copyWith(
+              color: colors.textPrimary,
+              fontWeight: AppWeights.title,
+              letterSpacing: AppLetterSpacing.headline,
+            ),
+          ),
+        ),
+        if (canRename) ...[
+          const SizedBox(width: 5),
+          Icon(Icons.edit_rounded, size: 13, color: colors.textTertiary),
+        ],
+      ],
+    );
+
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            if (running) ...[const LivePulse(), const SizedBox(width: 9)],
+            Expanded(
+              child: canRename
+                  ? GestureDetector(
+                      onTap: onRename,
+                      behavior: HitTestBehavior.opaque,
+                      child: title,
+                    )
+                  : title,
+            ),
+            const SizedBox(width: 8),
+            Text(
+              running ? 'running' : 'idle',
+              style: monoStyle(
+                color: running ? colors.success : colors.textSecondary,
+                fontSize: 10.5,
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 4),
+        Row(
+          children: [
+            Flexible(
+              child: Text(
+                host.label,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                  color: colors.textSecondary,
+                  fontWeight: AppWeights.emphasis,
+                ),
+              ),
+            ),
+            if (session.provider != null) ...[
+              const SizedBox(width: 8),
+              AgentProviderBadge(providerKind: session.provider, compact: true),
+            ],
+            if (gitLabel != null) ...[
+              const SizedBox(width: 8),
+              Flexible(
+                child: Text(
+                  gitLabel,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: monoStyle(color: colors.textSecondary, fontSize: 11),
+                ),
+              ),
+            ],
+            if (session.cwd.trim().isNotEmpty) ...[
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  session.cwd,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: monoStyle(color: colors.textTertiary, fontSize: 11),
+                ),
+              ),
+            ],
+          ],
+        ),
+      ],
     );
   }
 }
@@ -803,6 +922,13 @@ class _SessionScreenState extends State<SessionScreen>
     _pinsStore.addListener(_handlePinsChanged);
     _sendOutbox.addListener(_handleSendOutboxChanged);
     _policyStore.ensureLoaded();
+    unawaited(
+      _turnConfigStore.ensureLoaded().then((_) {
+        if (mounted && !_disposed) {
+          setState(() {});
+        }
+      }),
+    );
     _readStore.ensureLoaded();
     _composerController.addListener(_handleComposerChanged);
     _composerFocusNode.addListener(_handleComposerFocusChanged);
@@ -4966,6 +5092,65 @@ class _SessionScreenState extends State<SessionScreen>
     );
   }
 
+  String? _cleanComposerLabel(String? value) {
+    final trimmed = value?.trim();
+    if (trimmed == null || trimmed.isEmpty) {
+      return null;
+    }
+    return trimmed;
+  }
+
+  String _compactComposerModelLabel(String value) {
+    final model = value.split('/').last.trim();
+    if (model.length <= 24) {
+      return model;
+    }
+    return '${model.substring(0, 21)}...';
+  }
+
+  SessionTurnConfig _composerTurnConfig(SessionSummary session) {
+    return _turnConfigStore.configFor(widget.host, session.id);
+  }
+
+  String _composerModelLabel(SessionSummary session) {
+    final turnConfig = _composerTurnConfig(session);
+    final override = _cleanComposerLabel(turnConfig.model);
+    if (override != null) {
+      return _compactComposerModelLabel(override);
+    }
+    final runtime = _cleanComposerLabel(session.runtime?.model);
+    if (runtime != null) {
+      return _compactComposerModelLabel(runtime);
+    }
+    final provider = agentProviderDisplayLabel(
+      session.provider,
+      nodeInfo: _nodeInfo,
+    );
+    return provider ?? 'Model';
+  }
+
+  String _composerModelDetail(SessionSummary session) {
+    final turnConfig = _composerTurnConfig(session);
+    if (_cleanComposerLabel(turnConfig.model) != null ||
+        _cleanComposerLabel(turnConfig.reasoningEffort) != null ||
+        _cleanComposerLabel(turnConfig.mode) != null ||
+        turnConfig.fastMode != null) {
+      return 'Next reply';
+    }
+    if (_cleanComposerLabel(session.runtime?.model) != null) {
+      return 'Current model';
+    }
+    if (agentProviderDisplayLabel(session.provider, nodeInfo: _nodeInfo) !=
+        null) {
+      return 'Agent default';
+    }
+    return 'Choose model';
+  }
+
+  bool _composerModelCustomized(SessionSummary session) {
+    return !_composerTurnConfig(session).isEmpty;
+  }
+
   Future<void> _showSessionPolicySheet(SessionSummary session) async {
     await _policyStore.ensureLoaded();
     await _turnConfigStore.ensureLoaded();
@@ -6127,7 +6312,7 @@ class _SessionScreenState extends State<SessionScreen>
     final showWaitingState = !_loading && timelineEntries.isEmpty && _running;
     final bodyContent = Column(
       children: [
-        if (!isCompact)
+        if (!isCompact && !widget.desktopMode)
           ListenableBuilder(
             listenable: SessionLocalStore.instance,
             builder: (context, _) {
@@ -6375,44 +6560,59 @@ class _SessionScreenState extends State<SessionScreen>
               queueUpdated: _latestQueueUpdate,
               autoRetryUpdated: _latestAutoRetryUpdate,
             ),
-          ),
+        ),
         _ComposerStatusStrip(thinking: _thinkingNotifier),
-        _Composer(
-          controller: _composerController,
-          focusNode: _composerFocusNode,
-          isFocused: _composerFocused,
-          attachments: _draftAttachments,
-          skills: _draftSkillMentions,
-          files: _draftFileMentions,
-          activeSkillQuery: _activeSkillQuery?.query,
-          skillSuggestions: _skillSuggestions,
-          loadingSkills: _loadingSkills,
-          skillError: _skillsError,
-          activeFileQuery: _activeFileQuery?.query,
-          fileSuggestions: _fileSuggestions,
-          loadingFileSearch: _loadingFileSearch,
-          fileError: _fileSearchError,
-          sending: _sending,
-          supportsImageInput: _supportsImageInput,
-          supportsSkillInput: _supportsSkillInput,
-          supportsFileMentions: _supportsFileMentions,
-          onPickImages: _pickComposerImages,
-          onPasteImage: () => _pasteComposerImage(),
-          onNativePaste: () => _pasteComposerImage(showEmptyFeedback: false),
-          onRemoveAttachment: _removeDraftAttachment,
-          onSelectSkill: _insertSkillMention,
-          onRemoveSkill: _removeDraftSkillMention,
-          onSelectFile: _insertFileMention,
-          onRemoveFile: _removeDraftFileMention,
-          onSend: _sendInput,
-          onDismiss: _dismissKeyboard,
-          onAddSkillTrigger: _supportsSkillInput
-              ? _addSkillTriggerToComposer
-              : null,
-          onAddFileTrigger: _supportsFileMentions
-              ? _addFileTriggerToComposer
-              : null,
-          submitOnEnter: widget.desktopMode,
+        ListenableBuilder(
+          listenable: _turnConfigStore,
+          builder: (context, _) => _Composer(
+            controller: _composerController,
+            focusNode: _composerFocusNode,
+            isFocused: _composerFocused,
+            attachments: _draftAttachments,
+            skills: _draftSkillMentions,
+            files: _draftFileMentions,
+            activeSkillQuery: _activeSkillQuery?.query,
+            skillSuggestions: _skillSuggestions,
+            loadingSkills: _loadingSkills,
+            skillError: _skillsError,
+            activeFileQuery: _activeFileQuery?.query,
+            fileSuggestions: _fileSuggestions,
+            loadingFileSearch: _loadingFileSearch,
+            fileError: _fileSearchError,
+            sending: _sending,
+            supportsImageInput: _supportsImageInput,
+            supportsSkillInput: _supportsSkillInput,
+            supportsFileMentions: _supportsFileMentions,
+            onPickImages: _pickComposerImages,
+            onPasteImage: () => _pasteComposerImage(),
+            onNativePaste: () => _pasteComposerImage(showEmptyFeedback: false),
+            onRemoveAttachment: _removeDraftAttachment,
+            onSelectSkill: _insertSkillMention,
+            onRemoveSkill: _removeDraftSkillMention,
+            onSelectFile: _insertFileMention,
+            onRemoveFile: _removeDraftFileMention,
+            onSend: _sendInput,
+            onDismiss: _dismissKeyboard,
+            onAddSkillTrigger: _supportsSkillInput
+                ? _addSkillTriggerToComposer
+                : null,
+            onAddFileTrigger: _supportsFileMentions
+                ? _addFileTriggerToComposer
+                : null,
+            modelLabel: widget.desktopMode
+                ? _composerModelLabel(session)
+                : null,
+            modelDetail: widget.desktopMode
+                ? _composerModelDetail(session)
+                : null,
+            modelCustomized: widget.desktopMode
+                ? _composerModelCustomized(session)
+                : false,
+            onModelTap: widget.desktopMode
+                ? () => _showSessionPolicySheet(session)
+                : null,
+            submitOnEnter: widget.desktopMode,
+          ),
         ),
       ],
     );
@@ -6427,7 +6627,10 @@ class _SessionScreenState extends State<SessionScreen>
       backgroundColor: colors.canvas,
       appBar: AppBar(
         backgroundColor: colors.canvas,
-        toolbarHeight: isCompact ? 52 : null,
+        elevation: 0,
+        scrolledUnderElevation: 0,
+        titleSpacing: widget.desktopMode ? 16 : null,
+        toolbarHeight: isCompact ? 52 : (widget.desktopMode ? 60 : null),
         bottom: isCompact
             ? PreferredSize(
                 preferredSize: const Size.fromHeight(30),
@@ -6445,40 +6648,53 @@ class _SessionScreenState extends State<SessionScreen>
                 ),
               )
             : null,
-        title: Row(
-          children: [
-            if (_running) ...[const LivePulse(), const SizedBox(width: 10)],
-            Expanded(
-              child: _supportsSessionRename && !isCompact
-                  ? GestureDetector(
-                      onTap: () => unawaited(_renameSession()),
-                      behavior: HitTestBehavior.opaque,
-                      child: Row(
-                        children: [
-                          Expanded(
-                            child: Text(
-                              session.title,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
+        title: widget.desktopMode
+            ? _DesktopSessionTitle(
+                host: widget.host,
+                session: session,
+                running: _running,
+                gitStatus: _gitStatus,
+                showGit: _supportsGitStatus,
+                canRename: _supportsSessionRename,
+                onRename: () => unawaited(_renameSession()),
+              )
+            : Row(
+                children: [
+                  if (_running) ...[
+                    const LivePulse(),
+                    const SizedBox(width: 10),
+                  ],
+                  Expanded(
+                    child: _supportsSessionRename && !isCompact
+                        ? GestureDetector(
+                            onTap: () => unawaited(_renameSession()),
+                            behavior: HitTestBehavior.opaque,
+                            child: Row(
+                              children: [
+                                Expanded(
+                                  child: Text(
+                                    session.title,
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                ),
+                                const SizedBox(width: 4),
+                                Icon(
+                                  Icons.edit_rounded,
+                                  size: 13,
+                                  color: colors.textTertiary,
+                                ),
+                              ],
                             ),
+                          )
+                        : Text(
+                            session.title,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
                           ),
-                          const SizedBox(width: 4),
-                          Icon(
-                            Icons.edit_rounded,
-                            size: 13,
-                            color: colors.textTertiary,
-                          ),
-                        ],
-                      ),
-                    )
-                  : Text(
-                      session.title,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-            ),
-          ],
-        ),
+                  ),
+                ],
+              ),
         actions: [
           // Reserve a permanent slot for interrupt — this prevents all other
           // action buttons from jumping left/right when the agent starts/stops.
@@ -6513,12 +6729,25 @@ class _SessionScreenState extends State<SessionScreen>
           if (!isCompact)
             Padding(
               padding: const EdgeInsets.only(right: 6),
-              child: MeshIconButton(
-                icon: Icons.add_circle_outline_rounded,
-                tooltip: 'New session',
-                color: colors.textSecondary,
-                onTap: _startSessionFromCurrent,
-              ),
+              child: widget.desktopMode
+                  ? FilledButton.tonalIcon(
+                      onPressed: _startSessionFromCurrent,
+                      icon: const Icon(Icons.add_rounded, size: 18),
+                      label: const Text('New session'),
+                      style: FilledButton.styleFrom(
+                        visualDensity: VisualDensity.compact,
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 14,
+                          vertical: 10,
+                        ),
+                      ),
+                    )
+                  : MeshIconButton(
+                      icon: Icons.add_circle_outline_rounded,
+                      tooltip: 'New session',
+                      color: colors.textSecondary,
+                      onTap: _startSessionFromCurrent,
+                    ),
             ),
           if (!isCompact && _supportsTerminal)
             Padding(
@@ -6561,7 +6790,7 @@ class _SessionScreenState extends State<SessionScreen>
                 onTap: () => _showGitSheet(session),
               ),
             ),
-          if (!isCompact)
+          if (!isCompact && !widget.desktopMode)
             Padding(
               padding: const EdgeInsets.only(right: 6),
               child: MeshIconButton(
