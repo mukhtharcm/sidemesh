@@ -168,7 +168,7 @@ class FileBrowserScreen extends StatelessWidget {
             ),
             const SizedBox(height: 2),
             Text(
-              'Files on ${host.label}',
+              'On ${host.label}',
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
               style: Theme.of(context).textTheme.bodySmall?.copyWith(

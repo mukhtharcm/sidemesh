@@ -199,7 +199,7 @@ class FileViewerPaneState extends State<FileViewerPane> {
       if (!mounted) return;
       setState(() => _saving = false);
       _bump();
-      showAppSnackBar(context, 'Could not save file: ${friendlyError(error)}');
+      showAppSnackBar(context, 'Could not save changes: ${friendlyError(error)}');
     }
   }
 
@@ -251,7 +251,7 @@ class FileViewerPaneState extends State<FileViewerPane> {
     if (file == null) return;
     await Clipboard.setData(ClipboardData(text: file.contents));
     if (!mounted) return;
-    showAppSnackBar(context, 'Copied text');
+    showAppSnackBar(context, 'Copied');
   }
 
   bool get editing => _editing;
@@ -276,7 +276,7 @@ class FileViewerPaneState extends State<FileViewerPane> {
         padding: const EdgeInsets.all(24),
         child: MeshEmptyState(
           icon: Icons.error_outline_rounded,
-          title: "Couldn't open this file",
+          title: 'Could not open file',
           body: friendlyError(_error!),
         ),
       );
@@ -317,9 +317,11 @@ class FileViewerPaneState extends State<FileViewerPane> {
         padding: const EdgeInsets.all(24),
         child: MeshEmptyState(
           icon: isImageFile ? Icons.image_rounded : Icons.description_rounded,
-          title: isImageFile ? 'Image file' : 'Binary file',
+          title: isImageFile ? 'Image file' : 'Preview unavailable',
           body:
-              '${formatBytes(file.size)} • ${file.mimeHint.isEmpty ? 'unknown type' : file.mimeHint}',
+              isImageFile
+                  ? '${formatBytes(file.size)} • Use Show image to open it.'
+                  : '${formatBytes(file.size)} • ${file.mimeHint.isEmpty ? 'unknown type' : file.mimeHint}',
         ),
       );
     }
@@ -370,7 +372,7 @@ class FileViewerPaneState extends State<FileViewerPane> {
                     const SizedBox(width: 8),
                     Expanded(
                       child: Text(
-                        'Showing the first 2 MiB of a ${formatBytes(file.size)} file.',
+                        'Showing the first 2 MiB of this ${formatBytes(file.size)} file.',
                         style: Theme.of(context).textTheme.bodySmall,
                       ),
                     ),
@@ -448,13 +450,13 @@ class FileViewerActions extends StatelessWidget {
           ),
         ),
         IconButton(
-          tooltip: 'Copy text',
+          tooltip: 'Copy',
           onPressed: canUseTextContents ? () => s?.copyContents() : null,
           icon: const Icon(Icons.content_copy_rounded, size: 18),
         ),
         if (canPreviewMarkdown)
           IconButton(
-            tooltip: markdownPreview ? 'Show source' : 'Read markdown',
+            tooltip: markdownPreview ? 'View file' : 'Preview markdown',
             onPressed: hasFile && !editing
                 ? () => s?.toggleMarkdownPreview()
                 : null,
@@ -465,7 +467,7 @@ class FileViewerActions extends StatelessWidget {
           ),
         if (canPreviewImage)
           IconButton(
-            tooltip: imagePreview ? 'Show file' : 'Show image',
+            tooltip: imagePreview ? 'View file' : 'Show image',
             onPressed: hasFile && !editing ? () => s?.toggleImagePreview() : null,
             icon: Icon(
               imagePreview ? Icons.description_rounded : Icons.image_rounded,

@@ -123,9 +123,8 @@ class _WorkspaceBrowserDialogState extends State<_WorkspaceBrowserDialog> {
                         ? Center(
                             child: MeshEmptyState(
                               icon: Icons.description_rounded,
-                              title: 'Open a file',
-                              body:
-                                  'Choose a file on the left to view or edit it here.',
+                              title: 'Choose a file',
+                              body: 'Pick a file on the left to open it here.',
                             ),
                           )
                         : FileViewerPane(
@@ -186,7 +185,7 @@ class _DialogHeader extends StatelessWidget {
               children: [
                 Text(
                   selectedPath == null
-                      ? 'Workspace files'
+                      ? 'Files'
                       : baseName(selectedPath),
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
@@ -208,7 +207,7 @@ class _DialogHeader extends StatelessWidget {
                     Flexible(
                       child: Text(
                         selectedPath == null
-                            ? 'Files on ${host.label} · ${baseName(root).isEmpty ? root : baseName(root)}'
+                            ? '${host.label} · ${baseName(root).isEmpty ? root : baseName(root)}'
                             : '${host.label} · $selectedPath',
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
@@ -229,7 +228,7 @@ class _DialogHeader extends StatelessWidget {
                   FileViewerActions(state: viewerKey.currentState),
             ),
           IconButton(
-            tooltip: 'Close files',
+            tooltip: 'Close',
             onPressed: onClose,
             icon: const Icon(Icons.close_rounded, size: 20),
           ),
