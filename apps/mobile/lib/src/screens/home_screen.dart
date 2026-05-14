@@ -817,10 +817,11 @@ class _HomeStickyHeader extends StatelessWidget {
                     const SizedBox(height: 6),
                     Text(
                       tab.title,
-                      style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                        color: colors.textPrimary,
-                        fontWeight: AppWeights.title,
-                      ),
+                      style: Theme.of(context).textTheme.headlineSmall
+                          ?.copyWith(
+                            color: colors.textPrimary,
+                            fontWeight: AppWeights.title,
+                          ),
                     ),
                     const SizedBox(height: 4),
                     Text(
@@ -986,9 +987,11 @@ class _HomeSearchField extends StatelessWidget {
                   borderSide: BorderSide(color: colors.accent, width: 1.2),
                 ),
               ),
-              ),
+            ),
             if (viewMode != null ||
-                (filters != null && (onRunningOnlyChanged != null || onUnreadOnlyChanged != null))) ...[
+                (filters != null &&
+                    (onRunningOnlyChanged != null ||
+                        onUnreadOnlyChanged != null))) ...[
               const SizedBox(height: AppSpacing.sm),
               Wrap(
                 spacing: AppSpacing.sm,
@@ -1036,10 +1039,11 @@ class _HomeSearchField extends StatelessWidget {
                             const SizedBox(width: 8),
                             Text(
                               _sessionViewModeLabel(viewMode!),
-                              style: Theme.of(context).textTheme.labelLarge?.copyWith(
-                                color: colors.textPrimary,
-                                fontWeight: AppWeights.emphasis,
-                              ),
+                              style: Theme.of(context).textTheme.labelLarge
+                                  ?.copyWith(
+                                    color: colors.textPrimary,
+                                    fontWeight: AppWeights.emphasis,
+                                  ),
                             ),
                             const SizedBox(width: 4),
                             Icon(
@@ -1138,12 +1142,13 @@ class _MeshNavBar extends StatelessWidget {
                           const SizedBox(height: 4),
                           Text(
                             tab.title,
-                            style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                              color: selected
-                                  ? colors.accent
-                                  : colors.textSecondary,
-                              fontWeight: AppWeights.emphasis,
-                            ),
+                            style: Theme.of(context).textTheme.labelSmall
+                                ?.copyWith(
+                                  color: selected
+                                      ? colors.accent
+                                      : colors.textSecondary,
+                                  fontWeight: AppWeights.emphasis,
+                                ),
                           ),
                         ],
                       ),
@@ -1460,7 +1465,8 @@ class _RecentPaneState extends State<RecentPane> {
         widget.query.trim() != query) {
       return;
     }
-    final dedupedResults = _dedupeSearchEntries(results)..sort(_compareSearchEntryRank);
+    final dedupedResults = _dedupeSearchEntries(results)
+      ..sort(_compareSearchEntryRank);
 
     setState(() {
       _searchEntries = dedupedResults;
@@ -1469,7 +1475,9 @@ class _RecentPaneState extends State<RecentPane> {
     });
   }
 
-  List<RemoteSessionEntry> _dedupeSearchEntries(List<RemoteSessionEntry> entries) {
+  List<RemoteSessionEntry> _dedupeSearchEntries(
+    List<RemoteSessionEntry> entries,
+  ) {
     final bestByKey = <String, RemoteSessionEntry>{};
     for (final entry in entries) {
       final key = _searchDedupKey(entry);
@@ -1647,17 +1655,16 @@ class _RecentPaneState extends State<RecentPane> {
         final groups = _groupEntries(sortedEntries);
         final isGrouped = groups.isNotEmpty;
         // Pinned shelf: only surface it when it actively helps.
-        final showPinnedShelf = !isGrouped &&
+        final showPinnedShelf =
+            !isGrouped &&
             widget.viewMode == SessionViewMode.flat &&
             widget.query.trim().isEmpty &&
             !widget.filters.isAnyActive &&
             _searchEntries == null;
         final pinnedEntries = showPinnedShelf
             ? sortedEntries
-                .where(
-                  (e) => _localStore.isFavorite(e.host, e.session.id),
-                )
-                .toList(growable: false)
+                  .where((e) => _localStore.isFavorite(e.host, e.session.id))
+                  .toList(growable: false)
             : const <RemoteSessionEntry>[];
         final hasCachedEntries =
             _store.entries.isNotEmpty &&
@@ -2824,12 +2831,12 @@ class _PendingSendCard extends StatelessWidget {
                     label: 'Fix host',
                     onTap: onFixHost,
                   ),
-              if (onUseCurrentHost != null)
-                _PendingSendActionChip(
-                  icon: Icons.link_rounded,
-                  label: 'Use current',
-                  onTap: onUseCurrentHost,
-                ),
+                if (onUseCurrentHost != null)
+                  _PendingSendActionChip(
+                    icon: Icons.link_rounded,
+                    label: 'Use current',
+                    onTap: onUseCurrentHost,
+                  ),
                 if (onOpenSession != null)
                   _PendingSendActionChip(
                     icon: Icons.chat_bubble_outline_rounded,
@@ -3077,7 +3084,8 @@ String _pendingSendDetail(
 
 String _pendingSendRecoveryMessage(PendingSendAnalysis analysis) {
   return switch (analysis.issue) {
-    PendingSendIssueKind.hostDisabled => 'Turn this host back on before retrying.',
+    PendingSendIssueKind.hostDisabled =>
+      'Turn this host back on before retrying.',
     PendingSendIssueKind.hostMissing =>
       'The original host is gone. Discard this message or bind it again.',
     PendingSendIssueKind.hostChanged =>
@@ -3603,8 +3611,7 @@ class HostsPane extends StatelessWidget {
               const MeshEmptyState(
                 icon: Icons.route_rounded,
                 title: 'No machines yet',
-                body:
-                    'Add a laptop, desktop, or server to reach it from here.',
+                body: 'Add a laptop, desktop, or server to reach it from here.',
               ),
               const SizedBox(height: 12),
               FilledButton.icon(
@@ -3800,8 +3807,7 @@ class _HostRowCard extends StatelessWidget {
               icon: Icons.system_update_alt_rounded,
               tone: MeshPillTone.warning,
             ),
-          if (compatibility.level ==
-              MobileClientCompatibilityLevel.required)
+          if (compatibility.level == MobileClientCompatibilityLevel.required)
             MeshPill(
               label:
                   'Mobile ${mobileClientVersionLabel(compatibility.targetVersion)} needed',
@@ -3836,9 +3842,7 @@ class _HostRowCard extends StatelessWidget {
                         height: 44,
                         decoration: BoxDecoration(
                           color: colors.accentMuted,
-                          borderRadius: BorderRadius.circular(
-                            AppRadii.control,
-                          ),
+                          borderRadius: BorderRadius.circular(AppRadii.control),
                           border: Border.all(
                             color: colors.accent.withValues(alpha: 0.3),
                           ),
@@ -3873,9 +3877,7 @@ class _HostRowCard extends StatelessWidget {
                                 host.label,
                                 maxLines: 1,
                                 overflow: TextOverflow.ellipsis,
-                                style: Theme.of(context)
-                                    .textTheme
-                                    .titleMedium
+                                style: Theme.of(context).textTheme.titleMedium
                                     ?.copyWith(
                                       fontWeight: AppWeights.emphasis,
                                       color: host.enabled
@@ -4133,29 +4135,29 @@ MeshStatusBadge _hostStatusBadge(HostStatus status, bool enabled) {
   }
   return switch (status.reachability) {
     HostReachability.online => const MeshStatusBadge(
-        label: 'online',
-        tone: MeshStatusTone.success,
-        icon: Icons.check_circle_outline_rounded,
-        compact: true,
-      ),
+      label: 'online',
+      tone: MeshStatusTone.success,
+      icon: Icons.check_circle_outline_rounded,
+      compact: true,
+    ),
     HostReachability.probing => const MeshStatusBadge(
-        label: 'checking',
-        tone: MeshStatusTone.queued,
-        icon: Icons.sync_rounded,
-        compact: true,
-      ),
+      label: 'checking',
+      tone: MeshStatusTone.queued,
+      icon: Icons.sync_rounded,
+      compact: true,
+    ),
     HostReachability.offline => const MeshStatusBadge(
-        label: 'offline',
-        tone: MeshStatusTone.danger,
-        icon: Icons.wifi_off_rounded,
-        compact: true,
-      ),
+      label: 'offline',
+      tone: MeshStatusTone.danger,
+      icon: Icons.wifi_off_rounded,
+      compact: true,
+    ),
     HostReachability.unknown => const MeshStatusBadge(
-        label: 'unknown',
-        tone: MeshStatusTone.stale,
-        icon: Icons.help_outline_rounded,
-        compact: true,
-      ),
+      label: 'unknown',
+      tone: MeshStatusTone.stale,
+      icon: Icons.help_outline_rounded,
+      compact: true,
+    ),
   };
 }
 
@@ -4261,7 +4263,7 @@ class _HostEditorSheetState extends State<HostEditorSheet> {
     final token = _tokenController.text.trim();
     if (baseUrl.isEmpty || token.isEmpty) {
       setState(() {
-        _testResult = 'Enter a URL and token first.';
+        _testResult = 'Enter an address and token first.';
         _testSuccess = false;
       });
       return;
@@ -4286,7 +4288,7 @@ class _HostEditorSheetState extends State<HostEditorSheet> {
       setState(() {
         _testing = false;
         _testSuccess = true;
-        _testResult = 'Connected — ${node.hostname} \u00b7 ${node.platform}';
+        _testResult = 'Connected to ${node.hostname} \u00b7 ${node.platform}';
       });
       HapticFeedback.mediumImpact();
     } catch (e) {
@@ -4294,7 +4296,7 @@ class _HostEditorSheetState extends State<HostEditorSheet> {
       setState(() {
         _testing = false;
         _testSuccess = false;
-        _testResult = 'Could not reach host: ${friendlyError(e)}';
+        _testResult = 'Could not reach this machine. ${friendlyError(e)}';
       });
     }
   }
@@ -4305,7 +4307,7 @@ class _HostEditorSheetState extends State<HostEditorSheet> {
     final token = _tokenController.text.trim();
     if (label.isEmpty || baseUrl.isEmpty || token.isEmpty) {
       setState(() {
-        _error = 'Label, base URL, and shared token are required.';
+        _error = 'Name, address, and token are required.';
       });
       return;
     }
@@ -4401,18 +4403,28 @@ class _HostEditorSheetState extends State<HostEditorSheet> {
                     ),
                     const SizedBox(height: 14),
                     if (canScanPairingQr) ...[
+                      const _HostEditorSectionLabel(
+                        title: 'Pairing',
+                        subtitle: 'Start with a code if the machine is nearby.',
+                      ),
+                      const SizedBox(height: 8),
                       _HostEditorActionCard(
                         icon: Icons.qr_code_scanner_rounded,
                         title: isEditing
-                            ? 'Replace from pairing QR'
-                            : 'Scan a pairing QR',
+                            ? 'Replace from pairing code'
+                            : 'Pair with a code',
                         subtitle:
-                            'Run sidemesh pair on the machine, then scan its code here.',
-                        actionLabel: 'Scan',
+                            'Run sidemesh pair on the machine, then scan the code here to fill this form.',
+                        actionLabel: 'Scan code',
                         onTap: _scanPairingQr,
                       ),
-                      const SizedBox(height: 12),
+                      const SizedBox(height: 16),
                     ],
+                    const _HostEditorSectionLabel(
+                      title: 'About this machine',
+                      subtitle: 'Choose the name you want to see in Sidemesh.',
+                    ),
+                    const SizedBox(height: 8),
                     _HostEditorFieldFrame(
                       icon: Icons.label_rounded,
                       label: 'Name',
@@ -4425,22 +4437,23 @@ class _HostEditorSheetState extends State<HostEditorSheet> {
                           focusedBorder: InputBorder.none,
                           filled: false,
                           isDense: true,
-                          hintText: 'MacBook or VPS-1',
+                          hintText: 'MacBook, office iMac, or VPS-1',
                           contentPadding: EdgeInsets.zero,
                         ),
                       ),
                     ),
-                    const SizedBox(height: 10),
+                    const SizedBox(height: 16),
+                    const _HostEditorSectionLabel(
+                      title: 'Connection',
+                      subtitle: 'How this app reaches the machine.',
+                    ),
+                    const SizedBox(height: 8),
                     _HostEditorFieldFrame(
                       icon: Icons.link_rounded,
                       label: 'Address',
                       child: TextField(
                         controller: _baseUrlController,
                         textInputAction: TextInputAction.next,
-                        style: monoStyle(
-                          color: colors.textPrimary,
-                          fontSize: 13.5,
-                        ),
                         decoration: const InputDecoration(
                           border: InputBorder.none,
                           enabledBorder: InputBorder.none,
@@ -4455,27 +4468,58 @@ class _HostEditorSheetState extends State<HostEditorSheet> {
                     const SizedBox(height: 10),
                     _HostEditorFieldFrame(
                       icon: Icons.key_rounded,
-                      label: 'Shared token',
+                      label: 'Token',
                       child: TextField(
                         controller: _tokenController,
                         textInputAction: TextInputAction.done,
                         onSubmitted: (_) => _submit(),
-                        style: monoStyle(
-                          color: colors.textPrimary,
-                          fontSize: 13.5,
-                        ),
                         decoration: const InputDecoration(
                           border: InputBorder.none,
                           enabledBorder: InputBorder.none,
                           focusedBorder: InputBorder.none,
                           filled: false,
                           isDense: true,
-                          hintText: 'Paste the daemon token',
+                          hintText: 'Paste the pairing token',
                           contentPadding: EdgeInsets.zero,
                         ),
                       ),
                     ),
                     const SizedBox(height: 12),
+                    Align(
+                      alignment: Alignment.centerLeft,
+                      child: FilledButton.tonalIcon(
+                        onPressed: _testing ? null : _testConnection,
+                        icon: _testing
+                            ? const SizedBox(
+                                width: 14,
+                                height: 14,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 1.5,
+                                ),
+                              )
+                            : const Icon(
+                                Icons.wifi_tethering_rounded,
+                                size: 18,
+                              ),
+                        label: Text(
+                          _testing ? 'Checking...' : 'Check connection',
+                        ),
+                      ),
+                    ),
+                    if (_testResult != null) ...[
+                      const SizedBox(height: 8),
+                      _HostEditorStatusCard(
+                        success: _testSuccess,
+                        message: _testResult!,
+                      ),
+                    ],
+                    const SizedBox(height: 16),
+                    const _HostEditorSectionLabel(
+                      title: 'Availability',
+                      subtitle:
+                          'Decide whether this machine is active in the app right now.',
+                    ),
+                    const SizedBox(height: 8),
                     _HostEnabledCard(
                       enabled: _enabled,
                       onChanged: (value) => setState(() => _enabled = value),
@@ -4484,52 +4528,9 @@ class _HostEditorSheetState extends State<HostEditorSheet> {
                       const SizedBox(height: 12),
                       _HostEditorError(message: _error!),
                     ],
-                    const SizedBox(height: 12),
-                    FilledButton.tonalIcon(
-                      onPressed: _testing ? null : _testConnection,
-                      icon: _testing
-                          ? const SizedBox(
-                              width: 14,
-                              height: 14,
-                              child: CircularProgressIndicator(
-                                strokeWidth: 1.5,
-                              ),
-                            )
-                          : const Icon(Icons.wifi_tethering_rounded, size: 18),
-                      label: const Text('Test connection'),
-                    ),
-                    if (_testResult != null) ...[
-                      const SizedBox(height: 8),
-                      Row(
-                        children: [
-                          Icon(
-                            _testSuccess
-                                ? Icons.check_circle_rounded
-                                : Icons.error_outline_rounded,
-                            size: 16,
-                            color: _testSuccess
-                                ? context.colors.success
-                                : context.colors.danger,
-                          ),
-                          const SizedBox(width: 6),
-                          Expanded(
-                            child: Text(
-                              _testResult!,
-                              style: monoStyle(
-                                color: _testSuccess
-                                    ? context.colors.success
-                                    : context.colors.danger,
-                                fontSize: 11.5,
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ],
                     const SizedBox(height: 16),
                     _HostEditorFooter(
                       isEditing: isEditing,
-                      enabled: _enabled,
                       onCancel: () => Navigator.of(context).pop(),
                       onSubmit: _submit,
                     ),
@@ -4573,9 +4574,7 @@ class _HostEditorActionCard extends StatelessWidget {
         decoration: BoxDecoration(
           color: colors.infoMuted,
           borderRadius: BorderRadius.circular(11),
-          border: Border.all(
-            color: colors.info.withValues(alpha: 0.24),
-          ),
+          border: Border.all(color: colors.info.withValues(alpha: 0.24)),
         ),
         alignment: Alignment.center,
         child: Icon(icon, color: colors.info, size: 17),
@@ -4589,11 +4588,11 @@ class _HostEditorActionCard extends StatelessWidget {
       ),
       subtitle: Text(
         subtitle,
-        maxLines: 1,
+        maxLines: 2,
         overflow: TextOverflow.ellipsis,
-        style: Theme.of(context).textTheme.bodySmall?.copyWith(
-          color: colors.textSecondary,
-        ),
+        style: Theme.of(
+          context,
+        ).textTheme.bodySmall?.copyWith(color: colors.textSecondary),
       ),
       trailing: Text(
         actionLabel,
@@ -4602,6 +4601,38 @@ class _HostEditorActionCard extends StatelessWidget {
           fontWeight: AppWeights.title,
         ),
       ),
+    );
+  }
+}
+
+class _HostEditorSectionLabel extends StatelessWidget {
+  const _HostEditorSectionLabel({required this.title, required this.subtitle});
+
+  final String title;
+  final String subtitle;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          title,
+          style: Theme.of(context).textTheme.labelLarge?.copyWith(
+            color: colors.textPrimary,
+            fontWeight: AppWeights.title,
+          ),
+        ),
+        const SizedBox(height: 3),
+        Text(
+          subtitle,
+          style: Theme.of(context).textTheme.bodySmall?.copyWith(
+            color: colors.textSecondary,
+            height: 1.35,
+          ),
+        ),
+      ],
     );
   }
 }
@@ -4661,6 +4692,49 @@ class _HostEditorFieldFrame extends StatelessWidget {
   }
 }
 
+class _HostEditorStatusCard extends StatelessWidget {
+  const _HostEditorStatusCard({required this.success, required this.message});
+
+  final bool success;
+  final String message;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    final tone = success ? colors.success : colors.warning;
+    final muted = success ? colors.successMuted : colors.warningMuted;
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
+      decoration: BoxDecoration(
+        color: muted,
+        borderRadius: AppShapes.input,
+        border: Border.all(color: tone.withValues(alpha: 0.28)),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(
+            success ? Icons.check_circle_rounded : Icons.info_outline_rounded,
+            color: tone,
+            size: 18,
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              message,
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                color: colors.textPrimary,
+                height: 1.35,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 class _HostEnabledCard extends StatelessWidget {
   const _HostEnabledCard({required this.enabled, required this.onChanged});
 
@@ -4682,7 +4756,7 @@ class _HostEnabledCard extends StatelessWidget {
         size: 18,
       ),
       title: Text(
-        enabled ? 'Host traffic enabled' : 'Host traffic paused',
+        enabled ? 'Use this machine in Sidemesh' : 'Machine is paused',
         style: Theme.of(context).textTheme.labelLarge?.copyWith(
           color: colors.textPrimary,
           fontWeight: AppWeights.title,
@@ -4690,13 +4764,13 @@ class _HostEnabledCard extends StatelessWidget {
       ),
       subtitle: Text(
         enabled
-            ? 'Include this host in sessions, inbox, and sync.'
-            : 'Keep it saved, but skip automatic app traffic.',
+            ? 'Show it in sessions, inbox, and syncing.'
+            : 'Keep it saved, but leave it out of active work.',
         maxLines: 1,
         overflow: TextOverflow.ellipsis,
-        style: Theme.of(context).textTheme.bodySmall?.copyWith(
-          color: colors.textSecondary,
-        ),
+        style: Theme.of(
+          context,
+        ).textTheme.bodySmall?.copyWith(color: colors.textSecondary),
       ),
       trailing: _HostEditorToggle(value: enabled),
     );
@@ -4782,13 +4856,11 @@ class _HostEditorError extends StatelessWidget {
 class _HostEditorFooter extends StatelessWidget {
   const _HostEditorFooter({
     required this.isEditing,
-    required this.enabled,
     required this.onCancel,
     required this.onSubmit,
   });
 
   final bool isEditing;
-  final bool enabled;
   final VoidCallback onCancel;
   final VoidCallback onSubmit;
 
@@ -4814,14 +4886,8 @@ class _HostEditorFooter extends StatelessWidget {
         }
         return Row(
           children: [
-            MeshPill(
-              label: enabled ? 'enabled' : 'paused',
-              icon: enabled ? Icons.sensors_rounded : Icons.pause_rounded,
-              tone: enabled ? MeshPillTone.success : MeshPillTone.neutral,
-            ),
-            const Spacer(),
             TextButton(onPressed: onCancel, child: const Text('Cancel')),
-            const SizedBox(width: 8),
+            const Spacer(),
             saveButton,
           ],
         );

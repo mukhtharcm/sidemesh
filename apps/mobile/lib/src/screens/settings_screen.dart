@@ -400,7 +400,15 @@ class _LaunchDefaultsSheetState extends State<_LaunchDefaultsSheet> {
                     height: 1.35,
                   ),
                 ),
+                const SizedBox(height: 16),
+                _LaunchDefaultsSummaryCard(draft: _draft),
                 const SizedBox(height: 18),
+                const _LaunchDefaultsSectionLabel(
+                  title: 'Starting point',
+                  subtitle:
+                      'These controls decide how every new session begins before you make one-off changes.',
+                ),
+                const SizedBox(height: 10),
                 LaunchOptionsForm(
                   capabilities: const LaunchOptionsCapabilities(
                     supportsApprovalPolicy: true,
@@ -438,7 +446,7 @@ class _LaunchDefaultsSheetState extends State<_LaunchDefaultsSheet> {
                       ),
                     ),
                     child: Text(
-                      'These defaults are permissive. New sessions will start closer to autopilot behavior.',
+                      'These defaults allow more freedom than usual. New sessions may ask less often or start with broader access.',
                       style: Theme.of(context).textTheme.bodySmall?.copyWith(
                         color: colors.textPrimary,
                         height: 1.35,
@@ -447,9 +455,10 @@ class _LaunchDefaultsSheetState extends State<_LaunchDefaultsSheet> {
                   ),
                 ],
                 const SizedBox(height: 18),
-                Row(
-                  children: [
-                    TextButton(
+                LayoutBuilder(
+                  builder: (context, constraints) {
+                    final compact = constraints.maxWidth < 480;
+                    final resetButton = TextButton(
                       onPressed: _saving
                           ? null
                           : () {
@@ -457,26 +466,147 @@ class _LaunchDefaultsSheetState extends State<_LaunchDefaultsSheet> {
                                 _draft = CreateSessionDefaults.factoryDefaults;
                               });
                             },
-                      child: const Text('Reset'),
-                    ),
-                    const Spacer(),
-                    OutlinedButton(
-                      onPressed: _saving
-                          ? null
-                          : () => Navigator.of(context).maybePop(),
-                      child: const Text('Cancel'),
-                    ),
-                    const SizedBox(width: 8),
-                    FilledButton(
+                      child: const Text('Use recommended'),
+                    );
+                    final applyButton = FilledButton(
                       onPressed: _saving ? null : () => unawaited(_save()),
-                      child: Text(_saving ? 'Saving...' : 'Save'),
-                    ),
-                  ],
+                      child: Text(_saving ? 'Applying...' : 'Apply defaults'),
+                    );
+                    if (compact) {
+                      return Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          applyButton,
+                          const SizedBox(height: 8),
+                          OutlinedButton(
+                            onPressed: _saving
+                                ? null
+                                : () => Navigator.of(context).maybePop(),
+                            child: const Text('Cancel'),
+                          ),
+                          const SizedBox(height: 4),
+                          Center(child: resetButton),
+                        ],
+                      );
+                    }
+                    return Row(
+                      children: [
+                        resetButton,
+                        const Spacer(),
+                        OutlinedButton(
+                          onPressed: _saving
+                              ? null
+                              : () => Navigator.of(context).maybePop(),
+                          child: const Text('Cancel'),
+                        ),
+                        const SizedBox(width: 8),
+                        applyButton,
+                      ],
+                    );
+                  },
                 ),
               ],
             ),
           ),
         ),
+      ),
+    );
+  }
+}
+
+class _LaunchDefaultsSectionLabel extends StatelessWidget {
+  const _LaunchDefaultsSectionLabel({
+    required this.title,
+    required this.subtitle,
+  });
+
+  final String title;
+  final String subtitle;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          title,
+          style: Theme.of(context).textTheme.labelLarge?.copyWith(
+            color: colors.textPrimary,
+            fontWeight: AppWeights.title,
+          ),
+        ),
+        const SizedBox(height: 3),
+        Text(
+          subtitle,
+          style: Theme.of(context).textTheme.bodySmall?.copyWith(
+            color: colors.textSecondary,
+            height: 1.35,
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _LaunchDefaultsSummaryCard extends StatelessWidget {
+  const _LaunchDefaultsSummaryCard({required this.draft});
+
+  final CreateSessionDefaults draft;
+
+  @override
+  Widget build(BuildContext context) {
+    return MeshSurface(
+      tone: MeshSurfaceTone.muted,
+      radius: AppRadii.control,
+      padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'Used every time you open New session.',
+            style: Theme.of(
+              context,
+            ).textTheme.labelLarge?.copyWith(fontWeight: AppWeights.title),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            'You can still adjust these choices for a specific machine or session later.',
+            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+              color: context.colors.textSecondary,
+              height: 1.35,
+            ),
+          ),
+          const SizedBox(height: 10),
+          Wrap(
+            spacing: AppSpacing.sm,
+            runSpacing: AppSpacing.sm,
+            children: [
+              MeshPill(
+                label: draft.approval.label,
+                icon: Icons.verified_user_rounded,
+              ),
+              MeshPill(
+                label: draft.sandbox.label,
+                icon: Icons.folder_special_rounded,
+              ),
+              MeshPill(
+                label: draft.fastMode ? 'fast mode on' : 'fast mode off',
+                icon: Icons.bolt_rounded,
+                tone: draft.fastMode
+                    ? MeshPillTone.accent
+                    : MeshPillTone.neutral,
+              ),
+              MeshPill(
+                label: draft.webSearch ? 'web search on' : 'web search off',
+                icon: Icons.public_rounded,
+                tone: draft.webSearch
+                    ? MeshPillTone.info
+                    : MeshPillTone.neutral,
+              ),
+            ],
+          ),
+        ],
       ),
     );
   }
@@ -583,8 +713,7 @@ class _SettingsContent extends StatelessWidget {
                   footer: _ToggleTile(
                     icon: Icons.screen_lock_portrait_rounded,
                     title: 'Keep screen awake while agent runs',
-                    subtitle:
-                        'Useful for long turns. May use more battery.',
+                    subtitle: 'Useful for long turns. May use more battery.',
                     value: enabled,
                     onChanged: (value) => unawaited(
                       screenAwakeStore.setKeepScreenAwakeWhileAgentRuns(value),
@@ -629,11 +758,11 @@ class _SettingsContent extends StatelessWidget {
                         : Icons.notifications_off_rounded,
                   ),
                   MeshPill(
-                    label: BackgroundSyncService.instance.supportsBackgroundFetch
+                    label:
+                        BackgroundSyncService.instance.supportsBackgroundFetch
                         ? 'background sync'
                         : 'foreground only',
-                    tone:
-                        BackgroundSyncService.instance.supportsBackgroundFetch
+                    tone: BackgroundSyncService.instance.supportsBackgroundFetch
                         ? MeshPillTone.info
                         : MeshPillTone.neutral,
                     icon: Icons.sync_rounded,
@@ -907,9 +1036,7 @@ class _SettingsSectionState extends State<_SettingsSection>
             decoration: BoxDecoration(
               color: colors.accentMuted,
               borderRadius: BorderRadius.circular(AppRadii.control),
-              border: Border.all(
-                color: colors.accent.withValues(alpha: 0.28),
-              ),
+              border: Border.all(color: colors.accent.withValues(alpha: 0.28)),
             ),
             alignment: Alignment.center,
             child: Icon(widget.icon, size: 17, color: colors.accent),
@@ -923,9 +1050,9 @@ class _SettingsSectionState extends State<_SettingsSection>
           ),
           subtitle: Text(
             widget.subtitle,
-            style: Theme.of(context).textTheme.bodySmall?.copyWith(
-              color: colors.textSecondary,
-            ),
+            style: Theme.of(
+              context,
+            ).textTheme.bodySmall?.copyWith(color: colors.textSecondary),
           ),
           trailing: AnimatedRotation(
             duration: const Duration(milliseconds: 180),
