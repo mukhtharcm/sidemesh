@@ -112,9 +112,7 @@ class _UsagePaneState extends State<UsagePane> {
         .where((account) => account.isUnsupported && !account.hasLimits)
         .toList();
     final other = accounts
-        .where(
-          (account) => !account.hasLimits && !account.isUnsupported,
-        )
+        .where((account) => !account.hasLimits && !account.isUnsupported)
         .toList();
 
     return Container(
@@ -149,14 +147,16 @@ class _UsagePaneState extends State<UsagePane> {
               const MeshEmptyState.compact(
                 icon: Icons.speed_rounded,
                 title: 'Nothing to show yet',
-                body: 'Pull to refresh, or check that your machines are online.',
+                body:
+                    'Pull to refresh, or check that your machines are online.',
               ),
             ] else ...[
               if (limits.isNotEmpty) ...[
                 const SizedBox(height: 16),
                 _SectionLabel(
                   title: 'Limits',
-                  subtitle: 'The usage windows your machines can confirm right now.',
+                  subtitle:
+                      'The usage windows your machines can confirm right now.',
                 ),
                 const SizedBox(height: 10),
                 ...limits.map(
@@ -170,7 +170,8 @@ class _UsagePaneState extends State<UsagePane> {
                 const SizedBox(height: 10),
                 _SectionLabel(
                   title: 'Recent usage',
-                  subtitle: 'Helpful usage data that may not include full limits yet.',
+                  subtitle:
+                      'Helpful usage data that may not include full limits yet.',
                 ),
                 const SizedBox(height: 10),
                 ...other.map(
@@ -184,7 +185,7 @@ class _UsagePaneState extends State<UsagePane> {
                 const SizedBox(height: 10),
                 _SectionLabel(
                   title: 'Not available',
-                  subtitle: 'These providers do not report usage to Sidemesh yet.',
+                  subtitle: 'These agents do not report usage to Sidemesh yet.',
                 ),
                 const SizedBox(height: 10),
                 ...unsupported.map(
@@ -303,7 +304,9 @@ class _UsageAccountCard extends StatelessWidget {
     final tone = account.isError ? MeshCardTone.muted : MeshCardTone.surface;
     return MeshCard(
       tone: tone,
-      borderColor: account.isError ? colors.danger.withValues(alpha: 0.45) : null,
+      borderColor: account.isError
+          ? colors.danger.withValues(alpha: 0.45)
+          : null,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -427,7 +430,9 @@ class _UsageWindowRow extends StatelessWidget {
             value: progress,
             minHeight: 7,
             backgroundColor: colors.surfaceMuted,
-            valueColor: AlwaysStoppedAnimation<Color>(_colorForTone(colors, tone)),
+            valueColor: AlwaysStoppedAnimation<Color>(
+              _colorForTone(colors, tone),
+            ),
           ),
         ),
         const SizedBox(height: 6),
@@ -457,9 +462,15 @@ class _CreditsRow extends StatelessWidget {
       padding: const EdgeInsets.all(12),
       child: Row(
         children: [
-          Icon(Icons.account_balance_wallet_rounded, size: 17, color: colors.accent),
+          Icon(
+            Icons.account_balance_wallet_rounded,
+            size: 17,
+            color: colors.accent,
+          ),
           const SizedBox(width: 8),
-          Expanded(child: Text(label, style: TextStyle(color: colors.textPrimary))),
+          Expanded(
+            child: Text(label, style: TextStyle(color: colors.textPrimary)),
+          ),
         ],
       ),
     );
@@ -479,7 +490,11 @@ class _UnsupportedUsageCard extends StatelessWidget {
       padding: const EdgeInsets.all(14),
       child: Row(
         children: [
-          Icon(Icons.visibility_off_rounded, color: colors.textTertiary, size: 19),
+          Icon(
+            Icons.visibility_off_rounded,
+            color: colors.textTertiary,
+            size: 19,
+          ),
           const SizedBox(width: 10),
           Expanded(
             child: Text(
