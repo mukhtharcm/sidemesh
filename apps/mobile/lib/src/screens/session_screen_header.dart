@@ -214,12 +214,13 @@ class _SessionActionSheet extends StatelessWidget {
                       ],
                     ),
                   ),
-                  MeshIconButton(
-                    icon: Icons.close_rounded,
-                    tooltip: 'Close',
-                    color: colors.textSecondary,
-                    onTap: () => Navigator.of(context).pop(),
-                  ),
+                  if (!desktop)
+                    MeshIconButton(
+                      icon: Icons.close_rounded,
+                      tooltip: 'Close',
+                      color: colors.textSecondary,
+                      onTap: () => Navigator.of(context).pop(),
+                    ),
                 ],
               ),
               const SizedBox(height: 14),
