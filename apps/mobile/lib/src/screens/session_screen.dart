@@ -1355,21 +1355,22 @@ class _SessionScreenState extends State<SessionScreen>
       useSafeArea: true,
       backgroundColor: Colors.transparent,
       builder: (sheetContext) {
-        final size = MediaQuery.of(sheetContext).size;
-        return Padding(
-          padding: EdgeInsets.only(
-            bottom: MediaQuery.of(sheetContext).viewInsets.bottom,
-          ),
-          child: SizedBox(
-            height: size.height * 0.85,
-            child: SearchPanel(
-              controller: _searchController,
-              focusNode: _searchFocusNode,
-              records: records,
-              onClose: () => Navigator.of(sheetContext).maybePop(),
-              showDragHandle: true,
-              showCloseButton: false,
-            ),
+        final bottomInset = MediaQuery.of(sheetContext).viewInsets.bottom;
+        return MeshBottomSheetScaffold(
+          icon: Icons.search_rounded,
+          title: 'Search this session',
+          description:
+              'Look through messages, activities, and tool results without leaving the session.',
+          maxWidth: 760,
+          maxHeightFactor: 0.88,
+          padding: EdgeInsets.fromLTRB(14, 10, 14, 14 + bottomInset),
+          child: SearchPanel(
+            controller: _searchController,
+            focusNode: _searchFocusNode,
+            records: records,
+            onClose: () => Navigator.of(sheetContext).maybePop(),
+            showDragHandle: false,
+            showCloseButton: false,
           ),
         );
       },
@@ -1444,27 +1445,15 @@ class _SessionScreenState extends State<SessionScreen>
       isScrollControlled: true,
       useSafeArea: true,
       backgroundColor: Colors.transparent,
-      builder: (sheetContext) {
-        final size = MediaQuery.of(sheetContext).size;
-        return Padding(
-          padding: EdgeInsets.only(
-            bottom: MediaQuery.of(sheetContext).viewInsets.bottom,
-          ),
-          child: SizedBox(
-            height: size.height * 0.75,
-            child: _PinnedListSheet(
-              pinsBuilder: _currentPins,
-              refresh: _pinsStore,
-              onOpen: (pin) {
-                Navigator.of(sheetContext).maybePop();
-                _showPinnedMessage(pin);
-              },
-              onUnpin: _unpinMessage,
-              onClose: () => Navigator.of(sheetContext).maybePop(),
-            ),
-          ),
-        );
-      },
+      builder: (sheetContext) => _PinnedListSheet(
+        pinsBuilder: _currentPins,
+        refresh: _pinsStore,
+        onOpen: (pin) {
+          Navigator.of(sheetContext).maybePop();
+          _showPinnedMessage(pin);
+        },
+        onUnpin: _unpinMessage,
+      ),
     );
   }
 
@@ -1496,26 +1485,28 @@ class _SessionScreenState extends State<SessionScreen>
       isScrollControlled: true,
       useSafeArea: true,
       backgroundColor: Colors.transparent,
-      builder: (sheetContext) {
-        final size = MediaQuery.of(sheetContext).size;
-        return SizedBox(
-          height: size.height * 0.82,
-          child: SessionResourcesPanel(
-            host: widget.host,
-            session: session,
-            api: widget.api,
-            showDragHandle: true,
-            onClose: () => Navigator.of(sheetContext).maybePop(),
-            onOpenFile: (path) {
-              Navigator.of(sheetContext).maybePop();
-              WidgetsBinding.instance.addPostFrameCallback((_) {
-                if (!mounted || _disposed) return;
-                _openWorkspaceFile(path);
-              });
-            },
-          ),
-        );
-      },
+      builder: (sheetContext) => MeshBottomSheetScaffold(
+        icon: Icons.perm_media_rounded,
+        title: 'Session resources',
+        description:
+            'Review files, images, and links saved from this session in one place.',
+        maxWidth: 900,
+        maxHeightFactor: 0.84,
+        child: SessionResourcesPanel(
+          host: widget.host,
+          session: session,
+          api: widget.api,
+          showDragHandle: false,
+          onClose: () => Navigator.of(sheetContext).maybePop(),
+          onOpenFile: (path) {
+            Navigator.of(sheetContext).maybePop();
+            WidgetsBinding.instance.addPostFrameCallback((_) {
+              if (!mounted || _disposed) return;
+              _openWorkspaceFile(path);
+            });
+          },
+        ),
+      ),
     );
   }
 
