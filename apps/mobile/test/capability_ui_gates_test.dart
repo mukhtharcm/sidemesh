@@ -640,36 +640,36 @@ void main() {
     );
     await _pumpFrames(tester);
 
-    expect(find.text('Providers & capabilities'), findsOneWidget);
+    expect(find.text('Agent support'), findsAtLeastNWidgets(1));
     expect(
-      find.text('Fake Test Provider active - 2 providers supported'),
+      find.text('Using Fake Test Provider, 2 agents available'),
       findsOneWidget,
     );
 
-    await tester.tap(find.text('Providers & capabilities'));
+    await tester.tap(find.text('Agent support'));
     await _pumpFrames(tester);
 
-    expect(find.text('Provider contract'), findsOneWidget);
+    expect(find.text('Agent support'), findsAtLeastNWidgets(1));
     expect(
-      find.text('Fake Test Provider - fake-provider 1.0.0'),
+      find.text('Fake Test Provider · fake-provider 1.0.0'),
       findsOneWidget,
     );
-    expect(find.text('active: fake'), findsOneWidget);
+    expect(find.text('Using Fake Test Provider'), findsOneWidget);
     expect(find.text('Fake Test Provider'), findsOneWidget);
-    expect(find.text('active'), findsOneWidget);
+    expect(find.text('In use'), findsOneWidget);
     expect(find.text('Codex'), findsOneWidget);
-    expect(find.text('Provider-owned capabilities'), findsOneWidget);
-    expect(find.text('Runtime controls'), findsOneWidget);
+    expect(find.text('Agent features'), findsOneWidget);
+    expect(find.text('Session controls'), findsOneWidget);
     expect(find.text('web search'), findsOneWidget);
-    expect(find.text('Host-owned capabilities'), findsOneWidget);
+    expect(find.text('Machine features'), findsOneWidget);
     expect(find.text('git status'), findsOneWidget);
 
     await tester.tap(find.text('Codex'));
     await _pumpFrames(tester);
 
-    expect(find.text('Codex - codex-cli 0.125.0'), findsOneWidget);
-    expect(find.text('viewing: codex'), findsOneWidget);
-    expect(find.text('command: codex'), findsOneWidget);
+    expect(find.text('Codex · codex-cli 0.125.0'), findsOneWidget);
+    expect(find.text('Showing Codex'), findsOneWidget);
+    expect(find.text('Starts with codex'), findsOneWidget);
     expect(find.text('Fake Test Provider'), findsOneWidget);
     expect(find.text('2/5'), findsOneWidget);
     expect(find.text('1/4'), findsOneWidget);
