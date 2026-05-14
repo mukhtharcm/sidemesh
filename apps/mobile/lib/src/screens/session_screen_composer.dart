@@ -160,6 +160,88 @@ class _Composer extends StatelessWidget {
     final bool showPlusButton =
         !isDesktop &&
         (supportsImageInput || supportsSkillInput || supportsFileMentions);
+    final bool showModelButton = modelLabel != null && onModelTap != null;
+    final bool showMobileModelButton = !isDesktop && showModelButton;
+
+    final inputRow = Row(
+      crossAxisAlignment: CrossAxisAlignment.end,
+      children: [
+        // Paste remains available through native shortcuts/menu; the visible
+        // action here is only for adding new context.
+        if (isDesktop && supportsImageInput) ...[
+          _ComposerAttachButton(enabled: !sending, onPressed: onPickImages),
+          const SizedBox(width: 6),
+        ] else if (showPlusButton) ...[
+          _ComposerPlusButton(
+            enabled: !sending,
+            supportsImageInput: supportsImageInput,
+            supportsSkillInput: supportsSkillInput,
+            supportsFileMentions: supportsFileMentions,
+            onPickImages: onPickImages,
+            onAddSkillTrigger: onAddSkillTrigger,
+            onAddFileTrigger: onAddFileTrigger,
+          ),
+          const SizedBox(width: 6),
+        ],
+        Expanded(
+          child: Padding(
+            padding: EdgeInsets.symmetric(
+              horizontal: isDesktop ? 2 : 4,
+              vertical: isFocused ? 12 : 8,
+            ),
+            child: field,
+          ),
+        ),
+        if (isDesktop && showModelButton) ...[
+          const SizedBox(width: 8),
+          _ComposerModelButton(
+            label: modelLabel!,
+            detail: modelDetail,
+            customized: modelCustomized,
+            onPressed: onModelTap!,
+          ),
+        ],
+        const SizedBox(width: 6),
+        _SendButton(
+          sending: sending,
+          controller: controller,
+          hasAttachments: attachments.isNotEmpty,
+          hasSkills: skills.isNotEmpty || files.isNotEmpty,
+          onSend: onSend,
+          compact: isDesktop,
+        ),
+      ],
+    );
+
+    final barContent = showMobileModelButton
+        ? Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Row(
+                children: [
+                  Flexible(
+                    child: _ComposerModelButton(
+                      label: modelLabel!,
+                      detail: modelDetail,
+                      customized: modelCustomized,
+                      onPressed: onModelTap!,
+                      compact: true,
+                    ),
+                  ),
+                  const Spacer(),
+                ],
+              ),
+              const SizedBox(height: 7),
+              Container(
+                height: 1,
+                color: colors.border.withValues(alpha: 0.7),
+              ),
+              const SizedBox(height: 2),
+              inputRow,
+            ],
+          )
+        : inputRow;
 
     final barRow = AnimatedContainer(
       duration: const Duration(milliseconds: 150),
@@ -173,56 +255,8 @@ class _Composer extends StatelessWidget {
               : colors.border,
         ),
       ),
-      padding: EdgeInsets.fromLTRB(8, isDesktop ? 7 : 6, 8, isDesktop ? 7 : 6),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.end,
-        children: [
-          // Paste remains available through native shortcuts/menu; the visible
-          // action here is only for adding new context.
-          if (isDesktop && supportsImageInput) ...[
-            _ComposerAttachButton(enabled: !sending, onPressed: onPickImages),
-            const SizedBox(width: 6),
-          ] else if (showPlusButton) ...[
-            _ComposerPlusButton(
-              enabled: !sending,
-              supportsImageInput: supportsImageInput,
-              supportsSkillInput: supportsSkillInput,
-              supportsFileMentions: supportsFileMentions,
-              onPickImages: onPickImages,
-              onAddSkillTrigger: onAddSkillTrigger,
-              onAddFileTrigger: onAddFileTrigger,
-            ),
-            const SizedBox(width: 6),
-          ],
-          Expanded(
-            child: Padding(
-              padding: EdgeInsets.symmetric(
-                horizontal: isDesktop ? 2 : 4,
-                vertical: isFocused ? 12 : 8,
-              ),
-              child: field,
-            ),
-          ),
-          if (isDesktop && modelLabel != null && onModelTap != null) ...[
-            const SizedBox(width: 8),
-            _ComposerModelButton(
-              label: modelLabel!,
-              detail: modelDetail,
-              customized: modelCustomized,
-              onPressed: onModelTap!,
-            ),
-          ],
-          const SizedBox(width: 8),
-          _SendButton(
-            sending: sending,
-            controller: controller,
-            hasAttachments: attachments.isNotEmpty,
-            hasSkills: skills.isNotEmpty || files.isNotEmpty,
-            onSend: onSend,
-            compact: isDesktop,
-          ),
-        ],
-      ),
+      padding: EdgeInsets.fromLTRB(8, isDesktop ? 7 : 8, 8, isDesktop ? 7 : 8),
+      child: barContent,
     );
 
     final hasContext =
@@ -571,12 +605,17 @@ class _ComposerPlusButton extends StatelessWidget {
         child: InkWell(
           borderRadius: BorderRadius.circular(8),
           onTap: enabled ? () => _handleTap(context) : null,
-          child: SizedBox(
+          child: Container(
             width: 40,
             height: 40,
+            decoration: BoxDecoration(
+              color: colors.surfaceMuted.withValues(alpha: 0.56),
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(color: colors.border),
+            ),
             child: Icon(
               Icons.add_rounded,
-              color: enabled ? colors.accent : colors.textTertiary,
+              color: enabled ? colors.textSecondary : colors.textTertiary,
               size: 21,
             ),
           ),
@@ -624,16 +663,20 @@ class _ComposerModelButton extends StatelessWidget {
     required this.detail,
     required this.customized,
     required this.onPressed,
+    this.compact = false,
   });
 
   final String label;
   final String? detail;
   final bool customized;
   final VoidCallback onPressed;
+  final bool compact;
 
   @override
   Widget build(BuildContext context) {
     final colors = context.colors;
+    final maxWidth = compact ? 220.0 : 162.0;
+    final minHeight = compact ? 32.0 : 36.0;
     return Tooltip(
       message: detail == null ? 'Choose model' : 'Choose model: $detail',
       child: Material(
@@ -644,8 +687,14 @@ class _ComposerModelButton extends StatelessWidget {
           child: AnimatedContainer(
             duration: const Duration(milliseconds: 140),
             curve: Curves.easeOutCubic,
-            constraints: const BoxConstraints(maxWidth: 162, minHeight: 36),
-            padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 7),
+            constraints: BoxConstraints(
+              maxWidth: maxWidth,
+              minHeight: minHeight,
+            ),
+            padding: EdgeInsets.symmetric(
+              horizontal: compact ? 8 : 9,
+              vertical: compact ? 6 : 7,
+            ),
             decoration: BoxDecoration(
               color: customized
                   ? colors.accentMuted
@@ -662,7 +711,7 @@ class _ComposerModelButton extends StatelessWidget {
               children: [
                 Icon(
                   Icons.memory_rounded,
-                  size: 15,
+                  size: compact ? 14 : 15,
                   color: customized ? colors.accent : colors.textSecondary,
                 ),
                 const SizedBox(width: 6),
@@ -673,7 +722,7 @@ class _ComposerModelButton extends StatelessWidget {
                     overflow: TextOverflow.ellipsis,
                     style: monoStyle(
                       color: colors.textPrimary,
-                      fontSize: 11.5,
+                      fontSize: compact ? 11 : 11.5,
                       fontWeight: AppWeights.title,
                     ),
                   ),
@@ -726,27 +775,22 @@ class _SendButton extends StatelessWidget {
         final bgColor = sending
             ? colors.surfaceMuted
             : (canSend ? colors.accent : colors.surfaceMuted);
-        final size = compact ? 36.0 : 44.0;
+        final size = compact ? 36.0 : 40.0;
+        final radius = compact ? 9.0 : 10.0;
         return Material(
           color: Colors.transparent,
           child: InkWell(
-            borderRadius: BorderRadius.circular(compact ? 9 : 999),
+            borderRadius: BorderRadius.circular(radius),
             onTap: canSend ? onSend : null,
             child: Container(
               width: size,
               height: size,
               decoration: BoxDecoration(
                 color: bgColor,
-                borderRadius: BorderRadius.circular(compact ? 9 : 999),
-                boxShadow: !compact && showActive && canSend
-                    ? [
-                        BoxShadow(
-                          color: colors.accent.withValues(alpha: 0.3),
-                          blurRadius: 8,
-                          offset: const Offset(0, 3),
-                        ),
-                      ]
-                    : const [],
+                borderRadius: BorderRadius.circular(radius),
+                border: showActive
+                    ? null
+                    : Border.all(color: colors.border),
               ),
               alignment: Alignment.center,
               child: sending

@@ -23,14 +23,14 @@ Future<void> showAppearanceSheet(BuildContext context) {
           constraints: const BoxConstraints(maxWidth: 820, maxHeight: 760),
           child: DecoratedBox(
             decoration: BoxDecoration(
-              color: colors.surface,
-              borderRadius: BorderRadius.circular(24),
+              color: colors.surfaceElevated,
+              borderRadius: BorderRadius.circular(18),
               border: Border.all(color: colors.border),
               boxShadow: [
                 BoxShadow(
                   color: colors.textPrimary.withValues(alpha: 0.12),
-                  blurRadius: 24,
-                  offset: const Offset(0, 12),
+                  blurRadius: 28,
+                  offset: const Offset(0, 16),
                 ),
               ],
             ),
@@ -80,8 +80,8 @@ class _AppearanceSheet extends StatelessWidget {
             decoration: BoxDecoration(
               color: colors.surface,
               borderRadius: embedded
-                  ? BorderRadius.circular(24)
-                  : const BorderRadius.vertical(top: Radius.circular(24)),
+                  ? BorderRadius.circular(18)
+                  : const BorderRadius.vertical(top: Radius.circular(20)),
               border: embedded
                   ? null
                   : Border(top: BorderSide(color: colors.border)),

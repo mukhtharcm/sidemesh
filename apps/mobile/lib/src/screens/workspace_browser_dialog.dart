@@ -72,116 +72,133 @@ class _WorkspaceBrowserDialogState extends State<_WorkspaceBrowserDialog> {
     final maxHeight = (mediaSize.height * 0.88).clamp(520.0, 900.0);
 
     return Dialog(
-      backgroundColor: colors.surface,
+      backgroundColor: Colors.transparent,
       insetPadding: const EdgeInsets.symmetric(horizontal: 40, vertical: 40),
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
       child: ConstrainedBox(
         constraints: BoxConstraints(
           maxWidth: maxWidth.toDouble(),
           maxHeight: maxHeight.toDouble(),
         ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            _DialogHeader(
-              host: widget.host,
-              root: widget.root,
-              onClose: () => Navigator.of(context).pop(),
-            ),
-            Divider(height: 1, color: colors.border),
-            Expanded(
-              child: Row(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  SizedBox(
-                    width: 300,
-                    child: Container(
-                      color: colors.surfaceElevated,
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.stretch,
-                        children: [
-                          _DialogPaneHeader(
-                            icon: Icons.folder_copy_rounded,
-                            title: 'Folders',
-                            subtitle: baseName(widget.root).isEmpty
-                                ? widget.root
-                                : baseName(widget.root),
-                          ),
-                          Divider(height: 1, color: colors.border),
-                          Expanded(
-                            child: FileBrowserTree(
-                              host: widget.host,
-                              api: widget.api,
-                              root: widget.root,
-                              agentProvider: widget.agentProvider,
-                              sessionId: widget.sessionId,
-                              selectedPath: _selected,
-                              onOpenFile: (path, liveStream) {
-                                setState(() {
-                                  _selected = path;
-                                  _liveStream = liveStream;
-                                });
-                              },
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                  VerticalDivider(width: 1, color: colors.border),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
-                      children: [
-                        _DialogPaneHeader(
-                          icon: _selected == null
-                              ? Icons.description_rounded
-                              : Icons.insert_drive_file_rounded,
-                          title: _selected == null
-                              ? 'Preview'
-                              : baseName(_selected!),
-                          subtitle: _selected == null
-                              ? 'Choose a file to open it here.'
-                              : _selected!,
-                          trailing: _selected == null
-                              ? null
-                              : ListenableBuilder(
-                                  listenable: _viewerObservable,
-                                  builder: (context, _) => FileViewerActions(
-                                    state: _viewerKey.currentState,
-                                  ),
-                                ),
-                        ),
-                        Divider(height: 1, color: colors.border),
-                        Expanded(
-                          child: _selected == null
-                              ? const Center(
-                                  child: MeshEmptyState(
-                                    icon: Icons.description_rounded,
-                                    title: 'Choose a file',
-                                    body:
-                                        'Pick a file on the left to open it here.',
-                                  ),
-                                )
-                              : FileViewerPane(
-                                  key: _viewerKey,
+        child: DecoratedBox(
+          decoration: BoxDecoration(
+            color: colors.surfaceElevated,
+            borderRadius: BorderRadius.circular(18),
+            border: Border.all(color: colors.border),
+            boxShadow: [
+              BoxShadow(
+                color: colors.textPrimary.withValues(alpha: 0.12),
+                blurRadius: 28,
+                offset: const Offset(0, 16),
+              ),
+            ],
+          ),
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(18),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                _DialogHeader(
+                  host: widget.host,
+                  root: widget.root,
+                  onClose: () => Navigator.of(context).pop(),
+                ),
+                Divider(height: 1, color: colors.border),
+                Expanded(
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      SizedBox(
+                        width: 300,
+                        child: Container(
+                          color: colors.surface,
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.stretch,
+                            children: [
+                              _DialogPaneHeader(
+                                icon: Icons.folder_copy_rounded,
+                                title: 'Folders',
+                                subtitle: baseName(widget.root).isEmpty
+                                    ? widget.root
+                                    : baseName(widget.root),
+                              ),
+                              Divider(height: 1, color: colors.border),
+                              Expanded(
+                                child: FileBrowserTree(
                                   host: widget.host,
                                   api: widget.api,
-                                  path: _selected!,
+                                  root: widget.root,
                                   agentProvider: widget.agentProvider,
                                   sessionId: widget.sessionId,
-                                  observable: _viewerObservable,
-                                  dense: true,
-                                  liveStream: _liveStream,
+                                  selectedPath: _selected,
+                                  onOpenFile: (path, liveStream) {
+                                    setState(() {
+                                      _selected = path;
+                                      _liveStream = liveStream;
+                                    });
+                                  },
                                 ),
+                              ),
+                            ],
+                          ),
                         ),
-                      ],
-                    ),
+                      ),
+                      VerticalDivider(width: 1, color: colors.border),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            _DialogPaneHeader(
+                              icon: _selected == null
+                                  ? Icons.description_rounded
+                                  : Icons.insert_drive_file_rounded,
+                              title: _selected == null
+                                  ? 'Preview'
+                                  : baseName(_selected!),
+                              subtitle: _selected == null
+                                  ? 'Choose a file to open it here.'
+                                  : _selected!,
+                              trailing: _selected == null
+                                  ? null
+                                  : ListenableBuilder(
+                                      listenable: _viewerObservable,
+                                      builder: (context, _) =>
+                                          FileViewerActions(
+                                            state: _viewerKey.currentState,
+                                          ),
+                                    ),
+                            ),
+                            Divider(height: 1, color: colors.border),
+                            Expanded(
+                              child: _selected == null
+                                  ? const Center(
+                                      child: MeshEmptyState(
+                                        icon: Icons.description_rounded,
+                                        title: 'Choose a file',
+                                        body:
+                                            'Pick a file on the left to open it here.',
+                                      ),
+                                    )
+                                  : FileViewerPane(
+                                      key: _viewerKey,
+                                      host: widget.host,
+                                      api: widget.api,
+                                      path: _selected!,
+                                      agentProvider: widget.agentProvider,
+                                      sessionId: widget.sessionId,
+                                      observable: _viewerObservable,
+                                      dense: true,
+                                      liveStream: _liveStream,
+                                    ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
                   ),
-                ],
-              ),
+                ),
+              ],
             ),
-          ],
+          ),
         ),
       ),
     );

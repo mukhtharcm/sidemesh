@@ -41,22 +41,25 @@ Future<void> openSettingsScreen(
           constraints: const BoxConstraints(maxWidth: 920, maxHeight: 860),
           child: DecoratedBox(
             decoration: BoxDecoration(
-              color: colors.surface,
-              borderRadius: BorderRadius.circular(26),
+              color: colors.surfaceElevated,
+              borderRadius: BorderRadius.circular(18),
               border: Border.all(color: colors.border),
               boxShadow: [
                 BoxShadow(
-                  color: Colors.black.withValues(alpha: 0.2),
-                  blurRadius: 40,
-                  offset: const Offset(0, 20),
+                  color: colors.textPrimary.withValues(alpha: 0.12),
+                  blurRadius: 28,
+                  offset: const Offset(0, 16),
                 ),
               ],
             ),
-            child: SettingsScreen(
-              embedded: true,
-              onClose: () => Navigator.of(dialogContext).pop(),
-              onResetSidebarWidth: onResetSidebarWidth,
-              onResetInspectorWidth: onResetInspectorWidth,
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(18),
+              child: SettingsScreen(
+                embedded: true,
+                onClose: () => Navigator.of(dialogContext).pop(),
+                onResetSidebarWidth: onResetSidebarWidth,
+                onResetInspectorWidth: onResetInspectorWidth,
+              ),
             ),
           ),
         ),
