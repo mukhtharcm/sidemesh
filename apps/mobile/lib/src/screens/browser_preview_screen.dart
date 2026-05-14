@@ -3704,165 +3704,135 @@ class _NetworkDetailSheet extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colors = context.colors;
-    final maxHeight = MediaQuery.sizeOf(context).height * 0.85;
-    return Container(
-      decoration: BoxDecoration(
-        color: colors.surface,
-        borderRadius: const BorderRadius.vertical(top: Radius.circular(18)),
-      ),
-      child: SafeArea(
-        top: false,
-        child: ConstrainedBox(
-          constraints: BoxConstraints(maxHeight: maxHeight),
-          child: ValueListenableBuilder<_NetworkDetail?>(
-            valueListenable: detailListenable,
-            builder: (context, detail, _) {
-              return Column(
+    return MeshBottomSheetScaffold(
+      icon: Icons.travel_explore_rounded,
+      title: _networkDisplayName(entry.url),
+      description:
+          'Review request details, headers, and captured payloads for this page request.',
+      maxWidth: 960,
+      maxHeightFactor: 0.86,
+      child: ValueListenableBuilder<_NetworkDetail?>(
+        valueListenable: detailListenable,
+        builder: (context, detail, _) {
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(18, 14, 18, 10),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Row(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Expanded(
-                              child: Text(
-                                _networkDisplayName(entry.url),
-                                style: Theme.of(context).textTheme.titleMedium
-                                    ?.copyWith(
-                                      color: colors.textPrimary,
-                                      fontWeight: AppWeights.title,
-                                    ),
-                              ),
-                            ),
-                            const SizedBox(width: 8),
-                            _NetworkDetailActionsButton(
-                              entry: entry,
-                              detail: detail,
-                            ),
-                          ],
-                        ),
-                        const SizedBox(height: 6),
-                        SelectableText(
-                          entry.url,
-                          style: monoStyle(
-                            color: colors.textSecondary,
-                            fontSize: 11,
-                          ),
-                        ),
-                        const SizedBox(height: 10),
-                        Wrap(
-                          spacing: 8,
-                          runSpacing: 8,
-                          children: [
-                            _NetworkMetaChip(label: entry.method),
-                            _NetworkMetaChip(
-                              label: _networkStatusLabel(detail ?? entry),
-                            ),
-                            _NetworkMetaChip(
-                              label: _networkResourceTypeLabel(
-                                detail?.resourceType ?? entry.resourceType,
-                              ),
-                            ),
-                            if ((detail?.mimeType ?? entry.mimeType) != null)
-                              _NetworkMetaChip(
-                                label: detail?.mimeType ?? entry.mimeType!,
-                              ),
-                            if ((detail?.encodedDataLength ??
-                                    entry.encodedDataLength) !=
-                                null)
-                              _NetworkMetaChip(
-                                label: _formatNetworkBytes(
-                                  detail?.encodedDataLength ??
-                                      entry.encodedDataLength!,
-                                ),
-                              ),
-                            if ((detail?.durationMs ?? entry.durationMs) !=
-                                null)
-                              _NetworkMetaChip(
-                                label:
-                                    '${detail?.durationMs ?? entry.durationMs} ms',
-                              ),
-                            if ((detail?.servedFromCache ??
-                                entry.servedFromCache))
-                              const _NetworkMetaChip(label: 'cache'),
-                          ],
-                        ),
-                      ],
+                  Expanded(
+                    child: SelectableText(
+                      entry.url,
+                      style: monoStyle(
+                        color: colors.textSecondary,
+                        fontSize: 11,
+                      ),
                     ),
                   ),
-                  Divider(height: 1, color: colors.border),
-                  Expanded(
-                    child: detail == null
-                        ? const Center(child: CircularProgressIndicator())
-                        : ListView(
-                            padding: const EdgeInsets.fromLTRB(18, 14, 18, 18),
-                            children: [
-                              if (detail.errorText != null &&
-                                  detail.errorText!.isNotEmpty)
-                                _NetworkSection(
-                                  title: 'Request error',
-                                  child: SelectableText(
-                                    detail.errorText!,
-                                    style: TextStyle(color: colors.danger),
-                                  ),
-                                ),
-                              if (detail.requestHeaders.isNotEmpty)
-                                _NetworkSection(
-                                  title: 'Request headers',
-                                  child: _HeaderList(
-                                    headers: detail.requestHeaders,
-                                  ),
-                                ),
-                              if (_networkShouldShowRequestBody(detail))
-                                _NetworkSection(
-                                  title: 'Request body',
-                                  child: _NetworkPayloadView(
-                                    body: detail.requestBody,
-                                    bodyError: detail.requestBodyError,
-                                    mimeType: _networkRequestMimeType(detail),
-                                    bodyBase64Encoded: false,
-                                    emptyMessage:
-                                        'No request body captured for this request.',
-                                  ),
-                                ),
-                              if (detail.responseHeaders.isNotEmpty)
-                                _NetworkSection(
-                                  title: 'Response headers',
-                                  child: _HeaderList(
-                                    headers: detail.responseHeaders,
-                                  ),
-                                ),
-                              if (_networkShouldShowWebSocketMessages(detail))
-                                _NetworkSection(
-                                  title: 'Messages',
-                                  child: _NetworkWebSocketMessagesView(
-                                    messages: detail.webSocketMessages,
-                                  ),
-                                ),
-                              if (_networkShouldShowResponseBody(detail))
-                                _NetworkSection(
-                                  title: 'Response body',
-                                  child: _NetworkPayloadView(
-                                    body: detail.body,
-                                    bodyError: detail.bodyError,
-                                    mimeType: detail.mimeType ?? '',
-                                    bodyBase64Encoded: detail.bodyBase64Encoded,
-                                    emptyMessage:
-                                        'No response body captured for this request.',
-                                  ),
-                                ),
-                            ],
-                          ),
-                  ),
+                  const SizedBox(width: 8),
+                  _NetworkDetailActionsButton(entry: entry, detail: detail),
                 ],
-              );
-            },
-          ),
-        ),
+              ),
+              const SizedBox(height: 10),
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: [
+                  _NetworkMetaChip(label: entry.method),
+                  _NetworkMetaChip(label: _networkStatusLabel(detail ?? entry)),
+                  _NetworkMetaChip(
+                    label: _networkResourceTypeLabel(
+                      detail?.resourceType ?? entry.resourceType,
+                    ),
+                  ),
+                  if ((detail?.mimeType ?? entry.mimeType) != null)
+                    _NetworkMetaChip(
+                      label: detail?.mimeType ?? entry.mimeType!,
+                    ),
+                  if ((detail?.encodedDataLength ?? entry.encodedDataLength) !=
+                      null)
+                    _NetworkMetaChip(
+                      label: _formatNetworkBytes(
+                        detail?.encodedDataLength ?? entry.encodedDataLength!,
+                      ),
+                    ),
+                  if ((detail?.durationMs ?? entry.durationMs) != null)
+                    _NetworkMetaChip(
+                      label: '${detail?.durationMs ?? entry.durationMs} ms',
+                    ),
+                  if ((detail?.servedFromCache ?? entry.servedFromCache))
+                    const _NetworkMetaChip(label: 'cache'),
+                ],
+              ),
+              const SizedBox(height: 12),
+              Divider(height: 1, color: colors.border),
+              const SizedBox(height: 12),
+              Expanded(
+                child: detail == null
+                    ? const Center(child: CircularProgressIndicator())
+                    : ListView(
+                        padding: EdgeInsets.zero,
+                        children: [
+                          if (detail.errorText != null &&
+                              detail.errorText!.isNotEmpty)
+                            _NetworkSection(
+                              title: 'Request error',
+                              child: SelectableText(
+                                detail.errorText!,
+                                style: TextStyle(color: colors.danger),
+                              ),
+                            ),
+                          if (detail.requestHeaders.isNotEmpty)
+                            _NetworkSection(
+                              title: 'Request headers',
+                              child: _HeaderList(
+                                headers: detail.requestHeaders,
+                              ),
+                            ),
+                          if (_networkShouldShowRequestBody(detail))
+                            _NetworkSection(
+                              title: 'Request body',
+                              child: _NetworkPayloadView(
+                                body: detail.requestBody,
+                                bodyError: detail.requestBodyError,
+                                mimeType: _networkRequestMimeType(detail),
+                                bodyBase64Encoded: false,
+                                emptyMessage:
+                                    'No request body captured for this request.',
+                              ),
+                            ),
+                          if (detail.responseHeaders.isNotEmpty)
+                            _NetworkSection(
+                              title: 'Response headers',
+                              child: _HeaderList(
+                                headers: detail.responseHeaders,
+                              ),
+                            ),
+                          if (_networkShouldShowWebSocketMessages(detail))
+                            _NetworkSection(
+                              title: 'Messages',
+                              child: _NetworkWebSocketMessagesView(
+                                messages: detail.webSocketMessages,
+                              ),
+                            ),
+                          if (_networkShouldShowResponseBody(detail))
+                            _NetworkSection(
+                              title: 'Response body',
+                              child: _NetworkPayloadView(
+                                body: detail.body,
+                                bodyError: detail.bodyError,
+                                mimeType: detail.mimeType ?? '',
+                                bodyBase64Encoded: detail.bodyBase64Encoded,
+                                emptyMessage:
+                                    'No response body captured for this request.',
+                              ),
+                            ),
+                        ],
+                      ),
+              ),
+            ],
+          );
+        },
       ),
     );
   }

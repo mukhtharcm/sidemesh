@@ -153,7 +153,12 @@ class _SessionActionSheet extends StatelessWidget {
               child: ClipRRect(
                 borderRadius: AppShapes.sheet,
                 child: SingleChildScrollView(
-                  padding: const EdgeInsets.only(left: 14, top: 10, right: 14, bottom: 14),
+                  padding: const EdgeInsets.only(
+                    left: 14,
+                    top: 10,
+                    right: 14,
+                    bottom: 14,
+                  ),
                   child: Column(
                     mainAxisSize: MainAxisSize.min,
                     crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -666,7 +671,12 @@ class _SessionAppBarSubtitle extends StatelessWidget {
       child: InkWell(
         onTap: onDetails,
         child: Padding(
-          padding: const EdgeInsets.only(left: 16, top: 0, right: 10, bottom: 6),
+          padding: const EdgeInsets.only(
+            left: 16,
+            top: 0,
+            right: 10,
+            bottom: 6,
+          ),
           child: Row(
             children: [
               _HeaderStatusDot(
@@ -722,11 +732,7 @@ class _SessionAppBarSubtitle extends StatelessWidget {
                 ),
               ],
               const SizedBox(width: 6),
-              Icon(
-                Icons.info_outline_rounded,
-                size: 14,
-                color: colors.accent,
-              ),
+              Icon(Icons.info_outline_rounded, size: 14, color: colors.accent),
             ],
           ),
         ),
@@ -824,7 +830,9 @@ String? _contextUsageShortLabel(SessionRuntimeSummary? runtime) {
 
 MeshPillTone _contextUsageTone(SessionRuntimeSummary? runtime) {
   final context = runtime?.telemetry?.contextWindow;
-  if (context == null || context.tokenLimit <= 0 || context.currentTokens == null) {
+  if (context == null ||
+      context.tokenLimit <= 0 ||
+      context.currentTokens == null) {
     return MeshPillTone.neutral;
   }
   final used = context.currentTokens! / context.tokenLimit;
@@ -876,28 +884,25 @@ class _GitDetailsSheet extends StatelessWidget {
     final shortSha = status?.shortSha ?? gitInfo?.shortSha;
     final originUrl = status?.originUrl ?? gitInfo?.originUrl;
 
-    return SafeArea(
+    return MeshBottomSheetScaffold(
+      icon: Icons.account_tree_rounded,
+      title: 'Git details',
+      description:
+          'Review branch status, changed files, and the diffs available for this session.',
+      maxWidth: 920,
+      maxHeightFactor: 0.88,
       child: SingleChildScrollView(
-        padding: const EdgeInsets.only(left: 20, top: 8, right: 20, bottom: 28),
+        padding: const EdgeInsets.only(bottom: 6),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Row(
-              children: [
-                Expanded(
-                  child: Text(
-                    'Git details',
-                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                      fontWeight: AppWeights.title,
-                    ),
-                  ),
-                ),
-                IconButton(
-                  onPressed: loading ? null : onRefresh,
-                  icon: const Icon(Icons.refresh_rounded),
-                  tooltip: 'Refresh git status',
-                ),
-              ],
+            Align(
+              alignment: Alignment.centerRight,
+              child: OutlinedButton.icon(
+                onPressed: loading ? null : onRefresh,
+                icon: const Icon(Icons.refresh_rounded, size: 18),
+                label: const Text('Refresh'),
+              ),
             ),
             const SizedBox(height: 12),
             if (loading && status == null)
@@ -1101,87 +1106,71 @@ class _GitDiffSheet extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colors = context.colors;
-    return SizedBox(
-      height: MediaQuery.of(context).size.height * 0.86,
-      child: FutureBuilder<SessionGitDiff>(
-        future: future,
-        builder: (context, snapshot) {
-          final title = snapshot.data == null
-              ? 'Git diff'
-              : _gitDiffTitle(snapshot.data!);
-          return Padding(
-            padding: const EdgeInsets.only(left: 16, top: 8, right: 16, bottom: 20),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  title,
-                  style: Theme.of(
-                    context,
-                  ).textTheme.titleMedium?.copyWith(fontWeight: AppWeights.title),
-                ),
-                const SizedBox(height: 12),
-                Expanded(
-                  child: Builder(
-                    builder: (context) {
-                      if (snapshot.connectionState != ConnectionState.done) {
-                        return const Center(child: CircularProgressIndicator());
-                      }
-                      if (snapshot.hasError) {
-                        return MeshEmptyState(
-                          icon: Icons.error_outline_rounded,
-                          title: 'Could not load diff',
-                          body: friendlyError(
-                            snapshot.error ?? 'Unknown error',
-                          ),
-                        );
-                      }
-                      final diff = snapshot.data!;
-                      if (diff.diff.trim().isEmpty) {
-                        return MeshEmptyState(
-                          icon: Icons.check_rounded,
-                          title: 'No diff',
-                          body: 'Git did not report changes for this view.',
-                        );
-                      }
-                      return SingleChildScrollView(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.stretch,
-                          children: [
-                            if (diff.truncated)
-                              Padding(
-                                padding: const EdgeInsets.only(bottom: 10),
-                                child: MeshPill(
-                                  label:
-                                      'Truncated after ${diff.maxChars} chars',
-                                  icon: Icons.content_cut_rounded,
-                                  tone: MeshPillTone.warning,
-                                  mono: true,
-                                ),
-                              ),
-                            if (diff.baseSha != null)
-                              Padding(
-                                padding: const EdgeInsets.only(bottom: 10),
-                                child: Text(
-                                  'Base ${diff.baseSha}',
-                                  style: monoStyle(
-                                    color: colors.textSecondary,
-                                    fontSize: 11.5,
-                                  ),
-                                ),
-                              ),
-                            DiffView(diff: diff.diff),
-                          ],
+    return FutureBuilder<SessionGitDiff>(
+      future: future,
+      builder: (context, snapshot) {
+        final title = snapshot.data == null
+            ? 'Git diff'
+            : _gitDiffTitle(snapshot.data!);
+        return MeshBottomSheetScaffold(
+          icon: Icons.difference_rounded,
+          title: title,
+          description: 'Review the Git patch for this session.',
+          maxWidth: 980,
+          maxHeightFactor: 0.9,
+          child: Builder(
+            builder: (context) {
+              if (snapshot.connectionState != ConnectionState.done) {
+                return const Center(child: CircularProgressIndicator());
+              }
+              if (snapshot.hasError) {
+                return MeshEmptyState(
+                  icon: Icons.error_outline_rounded,
+                  title: 'Could not load diff',
+                  body: friendlyError(snapshot.error ?? 'Unknown error'),
+                );
+              }
+              final diff = snapshot.data!;
+              if (diff.diff.trim().isEmpty) {
+                return MeshEmptyState(
+                  icon: Icons.check_rounded,
+                  title: 'No diff',
+                  body: 'Git did not report changes for this view.',
+                );
+              }
+              return SingleChildScrollView(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    if (diff.truncated)
+                      Padding(
+                        padding: const EdgeInsets.only(bottom: 10),
+                        child: MeshPill(
+                          label: 'Truncated after ${diff.maxChars} chars',
+                          icon: Icons.content_cut_rounded,
+                          tone: MeshPillTone.warning,
+                          mono: true,
                         ),
-                      );
-                    },
-                  ),
+                      ),
+                    if (diff.baseSha != null)
+                      Padding(
+                        padding: const EdgeInsets.only(bottom: 10),
+                        child: Text(
+                          'Base ${diff.baseSha}',
+                          style: monoStyle(
+                            color: colors.textSecondary,
+                            fontSize: 11.5,
+                          ),
+                        ),
+                      ),
+                    DiffView(diff: diff.diff),
+                  ],
                 ),
-              ],
-            ),
-          );
-        },
-      ),
+              );
+            },
+          ),
+        );
+      },
     );
   }
 }
@@ -1230,7 +1219,12 @@ class _PinnedListSheet extends StatelessWidget {
             ),
             const SizedBox(height: 8),
             Padding(
-              padding: const EdgeInsets.only(left: 16, top: 4, right: 8, bottom: 4),
+              padding: const EdgeInsets.only(
+                left: 16,
+                top: 4,
+                right: 8,
+                bottom: 4,
+              ),
               child: Row(
                 children: [
                   Icon(
@@ -1290,98 +1284,88 @@ class _PinnedMessageSheet extends StatelessWidget {
     final textStyle = Theme.of(
       context,
     ).textTheme.bodyMedium?.copyWith(color: colors.textPrimary, height: 1.45);
-    return SizedBox(
-      height: MediaQuery.of(context).size.height * 0.82,
-      child: Padding(
-        padding: const EdgeInsets.only(left: 18, top: 8, right: 18, bottom: 20),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                Icon(Icons.push_pin_rounded, size: 20, color: colors.warning),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: Text(
-                    'Pinned ${pin.roleLabel.toLowerCase()} message',
-                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                      color: colors.textPrimary,
-                      fontWeight: AppWeights.title,
-                    ),
-                  ),
+    return MeshBottomSheetScaffold(
+      icon: Icons.push_pin_rounded,
+      title: 'Pinned ${pin.roleLabel.toLowerCase()} message',
+      description:
+          'Keep an important message visible while you work through this session.',
+      maxWidth: 920,
+      maxHeightFactor: 0.84,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Spacer(),
+              if (pin.hasText)
+                _MessageCopyButton(
+                  text: pin.text,
+                  tone: colors.textSecondary,
+                  accent: colors.accent,
                 ),
-                if (pin.hasText)
-                  _MessageCopyButton(
-                    text: pin.text,
-                    tone: colors.textSecondary,
-                    accent: colors.accent,
-                  ),
-                const SizedBox(width: 6),
-                TextButton.icon(
-                  onPressed: onUnpin,
-                  icon: const Icon(Icons.push_pin_rounded, size: 17),
-                  label: const Text('Unpin'),
-                ),
-              ],
-            ),
-            const SizedBox(height: 10),
-            Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              children: [
+              if (pin.hasText) const SizedBox(width: 6),
+              TextButton.icon(
+                onPressed: onUnpin,
+                icon: const Icon(Icons.push_pin_rounded, size: 17),
+                label: const Text('Unpin'),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              MeshPill(
+                label: pin.roleLabel,
+                icon: pin.role == 'assistant'
+                    ? Icons.smart_toy_rounded
+                    : Icons.person_outline_rounded,
+              ),
+              MeshPill(
+                label: 'Pinned ${_formatPinnedTimestamp(pin.pinnedAt)}',
+                icon: Icons.schedule_rounded,
+              ),
+              if (pin.attachmentCount > 0)
                 MeshPill(
-                  label: pin.roleLabel,
-                  icon: pin.role == 'assistant'
-                      ? Icons.smart_toy_rounded
-                      : Icons.person_outline_rounded,
+                  label:
+                      '${pin.attachmentCount} attachment${pin.attachmentCount == 1 ? '' : 's'}',
+                  icon: Icons.attachment_rounded,
                 ),
-                MeshPill(
-                  label: 'Pinned ${_formatPinnedTimestamp(pin.pinnedAt)}',
-                  icon: Icons.schedule_rounded,
+              if (pin.textTruncated)
+                const MeshPill(
+                  label: 'Stored preview truncated',
+                  icon: Icons.content_cut_rounded,
+                  tone: MeshPillTone.warning,
                 ),
-                if (pin.attachmentCount > 0)
-                  MeshPill(
-                    label:
-                        '${pin.attachmentCount} attachment${pin.attachmentCount == 1 ? '' : 's'}',
-                    icon: Icons.attachment_rounded,
-                  ),
-                if (pin.textTruncated)
-                  const MeshPill(
-                    label: 'Stored preview truncated',
-                    icon: Icons.content_cut_rounded,
-                    tone: MeshPillTone.warning,
-                  ),
-              ],
-            ),
-            const SizedBox(height: 14),
-            Expanded(
-              child: MeshCard(
-                tone: MeshCardTone.muted,
-                padding: const EdgeInsets.all(14),
-                child: SingleChildScrollView(
-                  child: pin.hasText
-                      ? (pin.role == 'assistant'
-                            ? _MarkdownMessageBody(
-                                text: pin.text,
-                                textColor: colors.textPrimary,
-                                onOpenFile: onOpenFile,
-                              )
-                            : _LinkifiedSelectableText(
-                                text: pin.text,
-                                style: textStyle,
-                                linkColor: colors.accent,
-                              ))
-                      : Text(
-                          pin.preview,
-                          style: textStyle?.copyWith(
-                            color: colors.textSecondary,
-                          ),
-                        ),
-                ),
+            ],
+          ),
+          const SizedBox(height: 14),
+          Expanded(
+            child: MeshCard(
+              tone: MeshCardTone.muted,
+              padding: const EdgeInsets.all(14),
+              child: SingleChildScrollView(
+                child: pin.hasText
+                    ? (pin.role == 'assistant'
+                          ? _MarkdownMessageBody(
+                              text: pin.text,
+                              textColor: colors.textPrimary,
+                              onOpenFile: onOpenFile,
+                            )
+                          : _LinkifiedSelectableText(
+                              text: pin.text,
+                              style: textStyle,
+                              linkColor: colors.accent,
+                            ))
+                    : Text(
+                        pin.preview,
+                        style: textStyle?.copyWith(color: colors.textSecondary),
+                      ),
               ),
             ),
-          ],
-        ),
+          ),
+        ],
       ),
     );
   }
@@ -1904,10 +1888,14 @@ class _PendingActionCardState extends State<_PendingActionCard> {
     return [
       if (action.canApprove)
         FilledButton.icon(
-          onPressed: _responding ? null : () {
-              if (!_responding) setState(() => _responding = true);
-              widget.onRespond(PendingActionResponseDraft.approval('accept'));
-            },
+          onPressed: _responding
+              ? null
+              : () {
+                  if (!_responding) setState(() => _responding = true);
+                  widget.onRespond(
+                    PendingActionResponseDraft.approval('accept'),
+                  );
+                },
           icon: const Icon(Icons.check_rounded, size: 18),
           label: const Text('Approve'),
         ),
@@ -1921,10 +1909,14 @@ class _PendingActionCardState extends State<_PendingActionCard> {
         ),
       if (action.canDecline)
         MeshDangerAction(
-          onPressed: _responding ? null : () {
-              if (!_responding) setState(() => _responding = true);
-              widget.onRespond(PendingActionResponseDraft.approval('decline'));
-            },
+          onPressed: _responding
+              ? null
+              : () {
+                  if (!_responding) setState(() => _responding = true);
+                  widget.onRespond(
+                    PendingActionResponseDraft.approval('decline'),
+                  );
+                },
           icon: Icons.close_rounded,
           label: 'Decline',
         ),

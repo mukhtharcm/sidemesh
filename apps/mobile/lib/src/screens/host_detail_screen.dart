@@ -15,6 +15,7 @@ import '../theme/app_colors.dart';
 import '../theme/app_theme.dart';
 import '../theme/app_tokens.dart';
 import '../widgets/app_dialogs.dart';
+import '../widgets/app_sheets.dart';
 import '../widgets/app_snackbar.dart';
 import '../widgets/mesh_widgets.dart';
 import '../widgets/session_row_card.dart';
@@ -2228,40 +2229,48 @@ class _HostManagementCardState extends State<_HostManagementCard> {
     if (!_supportsChannelSelection || _savingUpdateChannel) return;
     final selected = await showModalBottomSheet<String>(
       context: context,
+      backgroundColor: Colors.transparent,
+      showDragHandle: false,
+      useSafeArea: true,
+      isScrollControlled: true,
       builder: (context) {
         final colors = context.colors;
-        return SafeArea(
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                MeshListRow(
-                  framed: false,
-                  dense: true,
-                  radius: AppRadii.control,
-                  leading: Icon(Icons.verified_rounded, color: colors.accent),
-                  title: const Text('Stable'),
-                  subtitle: const Text('Tagged releases'),
-                  trailing: _selectedUpdateChannel == 'stable'
-                      ? Icon(Icons.check_rounded, color: colors.accent)
-                      : null,
-                  onTap: () => Navigator.of(context).pop('stable'),
-                ),
-                MeshListRow(
-                  framed: false,
-                  dense: true,
-                  radius: AppRadii.control,
-                  leading: Icon(Icons.science_rounded, color: colors.accent),
-                  title: const Text('Bleeding edge'),
-                  subtitle: const Text('Latest commits from main'),
-                  trailing: _selectedUpdateChannel == 'bleeding-edge'
-                      ? Icon(Icons.check_rounded, color: colors.accent)
-                      : null,
-                  onTap: () => Navigator.of(context).pop('bleeding-edge'),
-                ),
-              ],
-            ),
+        return MeshBottomSheetScaffold(
+          icon: Icons.system_update_rounded,
+          title: 'Choose update channel',
+          description:
+              'Stable follows tagged releases. Bleeding edge tracks the latest commits from main.',
+          maxWidth: 560,
+          maxHeightFactor: 0.44,
+          child: ListView(
+            padding: EdgeInsets.zero,
+            shrinkWrap: true,
+            children: [
+              MeshListRow(
+                framed: false,
+                dense: true,
+                radius: AppRadii.control,
+                leading: Icon(Icons.verified_rounded, color: colors.accent),
+                title: const Text('Stable'),
+                subtitle: const Text('Tagged releases'),
+                trailing: _selectedUpdateChannel == 'stable'
+                    ? Icon(Icons.check_rounded, color: colors.accent)
+                    : null,
+                onTap: () => Navigator.of(context).pop('stable'),
+              ),
+              MeshListRow(
+                framed: false,
+                dense: true,
+                radius: AppRadii.control,
+                leading: Icon(Icons.science_rounded, color: colors.accent),
+                title: const Text('Bleeding edge'),
+                subtitle: const Text('Latest commits from main'),
+                trailing: _selectedUpdateChannel == 'bleeding-edge'
+                    ? Icon(Icons.check_rounded, color: colors.accent)
+                    : null,
+                onTap: () => Navigator.of(context).pop('bleeding-edge'),
+              ),
+            ],
           ),
         );
       },
