@@ -423,4 +423,54 @@ describe("loadSessionRuntime", () => {
       "Error: prompt too long; exceeded max context length by 12490 tokens",
     );
   });
+
+  it("reconstructs command activities from Codex response function calls", async () => {
+    const lines = [
+      JSON.stringify({
+        timestamp: "2026-04-29T00:00:00.000Z",
+        type: "session_meta",
+        payload: { id: "thread-1", cwd: "/repo" },
+      }),
+      JSON.stringify({
+        timestamp: "2026-04-29T00:00:01.000Z",
+        type: "response_item",
+        payload: {
+          type: "function_call",
+          name: "exec_command",
+          arguments: JSON.stringify({
+            cmd: "npm test",
+            workdir: "/repo",
+            yield_time_ms: 1000,
+          }),
+          call_id: "call-command-1",
+        },
+      }),
+      JSON.stringify({
+        timestamp: "2026-04-29T00:00:02.000Z",
+        type: "response_item",
+        payload: {
+          type: "function_call_output",
+          call_id: "call-command-1",
+          output:
+            "Chunk ID: abc\nWall time: 1.2345 seconds\nProcess exited with code 0\nOutput:\ntests passed\n",
+        },
+      }),
+    ];
+
+    await writeFile(rolloutPath, `${lines.join("\n")}\n`, "utf8");
+
+    const log = await loadRolloutLog("thread-1", rolloutPath, null);
+
+    assert.equal(log.totalActivities, 1);
+    assert.equal(log.activities.length, 1);
+    const activity = log.activities[0];
+    assert(activity && activity.type === "command");
+    assert.equal(activity.id, "call-command-1");
+    assert.equal(activity.command, "npm test");
+    assert.equal(activity.cwd, "/repo");
+    assert.equal(activity.status, "completed");
+    assert.equal(activity.exitCode, 0);
+    assert.equal(activity.durationMs, 1235);
+    assert.match(activity.output ?? "", /tests passed/);
+  });
 });
