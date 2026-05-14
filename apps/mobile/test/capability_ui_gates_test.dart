@@ -332,7 +332,7 @@ void main() {
     );
     await _pumpFrames(tester);
 
-    await tester.tap(find.text('Tune launch'));
+    await tester.tap(find.text('Launch options'));
     await _pumpFrames(tester);
 
     expect(
@@ -367,7 +367,7 @@ void main() {
     );
     await _pumpFrames(tester);
 
-    await tester.tap(find.text('Tune launch'));
+    await tester.tap(find.text('Launch options'));
     await _pumpFrames(tester);
 
     expect(find.text('Profile'), findsOneWidget);
@@ -512,7 +512,7 @@ void main() {
       );
       await _pumpFrames(tester);
 
-      await tester.tap(find.text('Tune launch'));
+      await tester.tap(find.text('Launch options'));
       await _pumpFrames(tester);
       await tester.ensureVisible(find.text('Never ask').first);
       await _pumpFrames(tester);
@@ -578,7 +578,7 @@ void main() {
     );
     await _pumpFrames(tester);
 
-    await tester.tap(find.text('Tune launch'));
+    await tester.tap(find.text('Launch options'));
     await _pumpFrames(tester);
 
     expect(find.text('Ask when requested'), findsWidgets);

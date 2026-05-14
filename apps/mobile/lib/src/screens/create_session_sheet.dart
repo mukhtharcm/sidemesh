@@ -21,6 +21,18 @@ import '../widgets/mesh_widgets.dart';
 
 enum CreateSessionPresentation { sheet, dialog }
 
+String _hostEndpointLabel(String baseUrl) {
+  final uri = Uri.tryParse(baseUrl.trim());
+  if (uri == null || uri.host.isEmpty) {
+    return baseUrl.trim();
+  }
+  final hasDefaultPort =
+      !uri.hasPort ||
+      (uri.scheme == 'http' && uri.port == 80) ||
+      (uri.scheme == 'https' && uri.port == 443);
+  return hasDefaultPort ? uri.host : '${uri.host}:${uri.port}';
+}
+
 class CreateSessionLaunchResult {
   const CreateSessionLaunchResult({required this.host, required this.session});
 
@@ -162,12 +174,12 @@ class _HostPickerSurface extends StatelessWidget {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(
-                          'Choose host',
+                          'Choose a machine',
                           style: Theme.of(context).textTheme.titleLarge
                               ?.copyWith(fontWeight: AppWeights.title),
                         ),
                         Text(
-                          'Pick where the new agent session should run.',
+                          'Pick where this session should run.',
                           style: Theme.of(context).textTheme.bodySmall
                               ?.copyWith(color: colors.textSecondary),
                         ),
@@ -219,7 +231,7 @@ class _HostPickerSurface extends StatelessWidget {
                                 ),
                                 const SizedBox(height: 2),
                                 Text(
-                                  host.baseUrl,
+                                  _hostEndpointLabel(host.baseUrl),
                                   maxLines: 1,
                                   overflow: TextOverflow.ellipsis,
                                   style: monoStyle(
@@ -1403,7 +1415,7 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(
-                'New $_providerName session',
+                'Start a new session',
                 style: theme.textTheme.titleLarge?.copyWith(
                   fontWeight: AppWeights.title,
                   letterSpacing: -0.4,
@@ -1411,7 +1423,7 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
               ),
               const SizedBox(height: 3),
               Text(
-                widget.host.label,
+                '${widget.host.label} · $_providerName',
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
                 style: theme.textTheme.bodySmall?.copyWith(
@@ -1526,7 +1538,7 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  'Tune launch',
+                  'Launch options',
                   style: Theme.of(context).textTheme.labelLarge?.copyWith(
                     color: colors.textPrimary,
                     fontWeight: AppWeights.title,
@@ -1581,9 +1593,9 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
         children: [
           _PanelHeading(
             icon: Icons.tune_rounded,
-            title: 'Tune launch',
+            title: 'Launch options',
             subtitle:
-                'Only controls supported by $_providerName are shown here.',
+                'Only controls that $_providerName supports are shown here.',
             trailing: IconButton(
               tooltip: 'Hide advanced',
               onPressed: _submitting ? null : _toggleAdvanced,

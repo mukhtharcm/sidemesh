@@ -20,6 +20,18 @@ import '../widgets/session_row_card.dart';
 import 'create_session_sheet.dart';
 import 'terminal_screen.dart';
 
+String _hostEndpointLabel(String baseUrl) {
+  final uri = Uri.tryParse(baseUrl.trim());
+  if (uri == null || uri.host.isEmpty) {
+    return baseUrl.trim();
+  }
+  final hasDefaultPort =
+      !uri.hasPort ||
+      (uri.scheme == 'http' && uri.port == 80) ||
+      (uri.scheme == 'https' && uri.port == 443);
+  return hasDefaultPort ? uri.host : '${uri.host}:${uri.port}';
+}
+
 class HostDetailScreen extends StatefulWidget {
   const HostDetailScreen({
     super.key,
@@ -340,7 +352,7 @@ class _HostDetailScreenState extends State<HostDetailScreen>
           return MeshEmptyState(
             icon: Icons.wifi_off_rounded,
             title: 'Could not reach host',
-            body: snapshot.error.toString(),
+            body: friendlyError(snapshot.error!),
           );
         }
         final data = snapshot.data!;
@@ -380,9 +392,9 @@ class _HostDetailScreenState extends State<HostDetailScreen>
                     const SizedBox(height: AppSpacing.lg),
                     _SectionHeader(
                       icon: Icons.folder_open_rounded,
-                      title: 'Quick launch',
+                      title: 'Start from folder',
                       subtitle:
-                          '${data.workspaces.length} ${data.workspaces.length == 1 ? "folder" : "folders"}',
+                          '${data.workspaces.length} recent ${data.workspaces.length == 1 ? "folder" : "folders"}',
                     ),
                     const SizedBox(height: AppSpacing.sm),
                     _WorkspaceLaunchRow(
@@ -394,8 +406,8 @@ class _HostDetailScreenState extends State<HostDetailScreen>
                   const SizedBox(height: AppSpacing.xl),
                   _SectionHeader(
                     icon: Icons.medical_services_rounded,
-                    title: 'Host management',
-                    subtitle: 'Diagnostics and provider control.',
+                    title: 'Host tools',
+                    subtitle: 'Diagnostics and provider controls',
                   ),
                   const SizedBox(height: AppSpacing.sm),
                   _HostManagementCard(
@@ -417,7 +429,7 @@ class _HostDetailScreenState extends State<HostDetailScreen>
                     const MeshEmptyState(
                       icon: Icons.chat_bubble_outline_rounded,
                       title: 'No sessions yet',
-                      body: 'Tap "New session" to start one on this host.',
+                      body: 'Start a session on this machine to see it here.',
                     )
                   else
                     ...sortedSessions.map(
@@ -495,7 +507,7 @@ class _EmbeddedHostHeader extends StatelessWidget {
                 ),
                 const SizedBox(height: 2),
                 Text(
-                  host.baseUrl,
+                  _hostEndpointLabel(host.baseUrl),
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: monoStyle(color: colors.textTertiary, fontSize: 11),
@@ -1891,29 +1903,28 @@ class _SectionHeader extends StatelessWidget {
     return Padding(
       padding: const EdgeInsets.fromLTRB(2, 0, 2, 0),
       child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Icon(icon, size: 18, color: colors.accent),
+          Icon(icon, size: 18, color: colors.textTertiary),
           const SizedBox(width: 8),
           Expanded(
-            child: Row(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Expanded(
-                  child: Text(
-                    title,
-                    overflow: TextOverflow.ellipsis,
-                    style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                      fontWeight: AppWeights.title,
-                    ),
+                Text(
+                  title,
+                  overflow: TextOverflow.ellipsis,
+                  style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                    fontWeight: AppWeights.title,
                   ),
                 ),
-                const SizedBox(width: 8),
-                Flexible(
-                  child: Text(
-                    subtitle,
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                    textAlign: TextAlign.right,
-                    style: monoStyle(color: colors.textTertiary, fontSize: 11),
+                const SizedBox(height: 2),
+                Text(
+                  subtitle,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: colors.textSecondary,
                   ),
                 ),
               ],
