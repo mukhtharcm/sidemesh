@@ -1822,6 +1822,7 @@ class _ActivityCard extends StatefulWidget {
     this.onBrowsePath,
     this.onOpenBrowserPreview,
     this.onOpenTerminal,
+    this.opensFilesInInspector = false,
   });
 
   final HostProfile host;
@@ -1833,6 +1834,7 @@ class _ActivityCard extends StatefulWidget {
   final void Function(String path)? onBrowsePath;
   final void Function(BrowserPreviewTargetCandidate target)? onOpenBrowserPreview;
   final void Function(String? cwd)? onOpenTerminal;
+  final bool opensFilesInInspector;
 
   @override
   State<_ActivityCard> createState() => _ActivityCardState();
@@ -1950,7 +1952,9 @@ class _ActivityCardState extends State<_ActivityCard> {
     if (browsePath != null && widget.onBrowsePath != null) {
       actions.add(
         _ActivityActionSpec(
-          label: 'Browse files',
+          label: widget.activity.isFileChange && widget.opensFilesInInspector
+              ? 'Open in inspector'
+              : 'Browse files',
           icon: Icons.folder_open_rounded,
           onTap: () => widget.onBrowsePath!(browsePath),
         ),
@@ -1983,6 +1987,10 @@ class _ActivityCardState extends State<_ActivityCard> {
     final activity = widget.activity;
     final sessionCwd = widget.sessionCwd;
     final colors = context.colors;
+    if (activity.isFileChange) {
+      return _buildFileChangeInlineActivity(context, activity);
+    }
+
     final title = switch (activity.type) {
       'command' =>
         (activity.command ?? '').trim().isEmpty ? 'Command' : activity.command!,
@@ -2058,43 +2066,52 @@ class _ActivityCardState extends State<_ActivityCard> {
     return Align(
       alignment: Alignment.centerLeft,
       child: Padding(
-        padding: const EdgeInsets.only(bottom: 12),
+        padding: const EdgeInsets.only(bottom: 10),
         child: ConstrainedBox(
           constraints: const BoxConstraints(maxWidth: 640),
-          child: MeshCard(
-            tone: MeshCardTone.surface,
-            padding: const EdgeInsets.fromLTRB(14, 12, 14, 14),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                InkWell(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Material(
+                color: Colors.transparent,
+                child: InkWell(
                   onTap: () {
                     setState(() {
                       _cardCollapsed = !_cardCollapsed;
                       _userOverrode = true;
                     });
                   },
-                  borderRadius: BorderRadius.circular(10),
+                  borderRadius: AppShapes.input,
                   child: Padding(
-                    padding: const EdgeInsets.symmetric(vertical: 2),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 4,
+                      vertical: 7,
+                    ),
                     child: Row(
-                      crossAxisAlignment: CrossAxisAlignment.start,
+                      crossAxisAlignment: CrossAxisAlignment.center,
                       children: [
                         Container(
-                          width: 34,
-                          height: 34,
+                          width: 30,
+                          height: 30,
                           decoration: BoxDecoration(
-                            color: colors.accentMuted,
-                            borderRadius: BorderRadius.circular(10),
+                            color: activity.isCommand || activity.isTool
+                                ? colors.surfaceMuted.withValues(alpha: 0.72)
+                                : colors.accentMuted.withValues(alpha: 0.68),
+                            borderRadius: AppShapes.iconWell,
+                            border: Border.all(
+                              color: colors.border.withValues(alpha: 0.5),
+                            ),
                           ),
                           alignment: Alignment.center,
                           child: Icon(
                             activityIcon,
-                            size: 18,
-                            color: colors.accent,
+                            size: 16,
+                            color: activity.isCommand || activity.isTool
+                                ? colors.textSecondary
+                                : colors.accent,
                           ),
                         ),
-                        const SizedBox(width: 12),
+                        const SizedBox(width: 10),
                         Expanded(
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
@@ -2102,12 +2119,12 @@ class _ActivityCardState extends State<_ActivityCard> {
                               Text(
                                 activityLabel,
                                 style: monoStyle(
-                                  color: colors.accent,
-                                  fontSize: 10.5,
+                                  color: colors.textSecondary,
+                                  fontSize: 10,
                                   fontWeight: AppWeights.title,
-                                ).copyWith(letterSpacing: 1.2),
+                                ).copyWith(letterSpacing: 1),
                               ),
-                              const SizedBox(height: 3),
+                              const SizedBox(height: 2),
                               Text(
                                 title,
                                 maxLines: _cardCollapsed ? 1 : 3,
@@ -2131,6 +2148,8 @@ class _ActivityCardState extends State<_ActivityCard> {
                                 const SizedBox(height: 4),
                                 Text(
                                   subtitle,
+                                  maxLines: 2,
+                                  overflow: TextOverflow.ellipsis,
                                   style: Theme.of(context).textTheme.bodySmall
                                       ?.copyWith(color: colors.textSecondary),
                                 ),
@@ -2148,150 +2167,351 @@ class _ActivityCardState extends State<_ActivityCard> {
                         const SizedBox(width: 4),
                         Icon(
                           _cardCollapsed
-                              ? Icons.unfold_more_rounded
-                              : Icons.unfold_less_rounded,
-                          size: 16,
+                              ? Icons.keyboard_arrow_down_rounded
+                              : Icons.keyboard_arrow_up_rounded,
+                          size: 18,
                           color: colors.textTertiary,
                         ),
                       ],
                     ),
                   ),
                 ),
-                if (!_cardCollapsed) ...[
-                  const SizedBox(height: 12),
-                  Wrap(
-                    spacing: 6,
-                    runSpacing: 6,
-                    children: [
-                      if (activity.turnId != null)
-                        MeshPill(
-                          label: 'turn ${_shortId(activity.turnId!)}',
-                          mono: true,
+              ),
+              AnimatedSize(
+                duration: const Duration(milliseconds: 160),
+                curve: Curves.easeOutCubic,
+                alignment: Alignment.topLeft,
+                child: _cardCollapsed
+                    ? const SizedBox.shrink()
+                    : Padding(
+                        padding: const EdgeInsets.only(left: 44, top: 6),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Wrap(
+                              spacing: 6,
+                              runSpacing: 6,
+                              children: [
+                                if (activity.turnId != null)
+                                  MeshPill(
+                                    label: 'turn ${_shortId(activity.turnId!)}',
+                                    mono: true,
+                                  ),
+                                if (activity.isCommand &&
+                                    activity.exitCode != null)
+                                  MeshPill(
+                                    label: 'exit ${activity.exitCode}',
+                                    tone: activity.exitCode == 0
+                                        ? MeshPillTone.success
+                                        : MeshPillTone.danger,
+                                    mono: true,
+                                  ),
+                                if (activity.isCommand &&
+                                    activity.durationMs != null)
+                                  MeshPill(
+                                    label: _formatDuration(
+                                      activity.durationMs!,
+                                    ),
+                                    mono: true,
+                                  ),
+                                if (activity.isCommand &&
+                                    (activity.source ?? '').isNotEmpty)
+                                  MeshPill(
+                                    label: _commandSourceLabel(
+                                      activity.source!,
+                                    ),
+                                    mono: true,
+                                  ),
+                                if (activity.isCommand &&
+                                    (activity.processId ?? '').isNotEmpty)
+                                  MeshPill(
+                                    label: 'pty ${activity.processId}',
+                                    mono: true,
+                                  ),
+                                if (activity.isCommand &&
+                                    activity.terminalStatus == 'input')
+                                  const MeshPill(
+                                    label: 'stdin',
+                                    tone: MeshPillTone.info,
+                                    mono: true,
+                                  ),
+                                if (activity.isCommand &&
+                                    activity.terminalStatus == 'waiting')
+                                  const MeshPill(
+                                    label: 'interactive',
+                                    tone: MeshPillTone.warning,
+                                    mono: true,
+                                  ),
+                                if (activity.isCommand)
+                                  ...activity.commandActions.map(
+                                    (action) =>
+                                        MeshPill(label: action.label, mono: true),
+                                  ),
+                                if (activity.isTool &&
+                                    (_toolSemanticPillLabel(activity) ?? '')
+                                        .isNotEmpty)
+                                  MeshPill(
+                                    label: _toolSemanticPillLabel(activity)!,
+                                    tone: MeshPillTone.info,
+                                    mono: true,
+                                  ),
+                                if (activity.isTool &&
+                                    (activity.toolName ?? '').trim().isNotEmpty)
+                                  MeshPill(
+                                    label: activity.toolName!.trim(),
+                                    mono: true,
+                                  ),
+                                if (activity.isTool &&
+                                    (activity.toolMode ?? '').trim().isNotEmpty)
+                                  MeshPill(
+                                    label: activity.toolMode!.trim(),
+                                    tone: MeshPillTone.info,
+                                    mono: true,
+                                  ),
+                                if (activity.isTool &&
+                                    activity.toolError == true)
+                                  const MeshPill(
+                                    label: 'tool error',
+                                    tone: MeshPillTone.danger,
+                                    mono: true,
+                                  ),
+                                if (activity.isWebSearch)
+                                  MeshPill(
+                                    label: _webSearchKindLabel(activity),
+                                    tone: MeshPillTone.info,
+                                    mono: true,
+                                  ),
+                                if (activity.isImageGeneration &&
+                                    (activity.savedPath ?? '').isNotEmpty)
+                                  const MeshPill(
+                                    label: 'saved image',
+                                    tone: MeshPillTone.info,
+                                    mono: true,
+                                  ),
+                                if (activity.isContextCompaction)
+                                  const MeshPill(
+                                    label: 'context',
+                                    tone: MeshPillTone.info,
+                                    mono: true,
+                                  ),
+                              ],
+                            ),
+                            const SizedBox(height: 12),
+                            if (activity.isCommand)
+                              ..._buildCommandBody(context, activity)
+                            else if (activity.isTool)
+                              ..._buildToolBody(context, activity)
+                            else if (activity.isWebSearch) ...[
+                              _buildWebSearchBody(context, activity),
+                            ] else if (activity.isImageGeneration) ...[
+                              _buildImageGenerationBody(context, activity),
+                            ] else if (activity.isContextCompaction) ...[
+                              ..._buildContextCompactionBody(context, activity),
+                            ] else if (activity.isTurnDiff) ...[
+                              if ((activity.diff ?? '').isNotEmpty)
+                                _buildLazyDiff(
+                                  context,
+                                  label:
+                                      'Show turn diff (${_diffLineCount(activity.diff!)} lines)',
+                                  diff: activity.diff!,
+                                )
+                              else
+                                _waitingText(context, 'Waiting for turn diff.'),
+                            ] else if (activity.changes.isEmpty) ...[
+                              _waitingText(
+                                context,
+                                'Waiting for file changes.',
+                              ),
+                            ] else ...[
+                              _buildLazyFileChanges(
+                                context,
+                                changes: activity.changes,
+                                sessionCwd: sessionCwd,
+                              ),
+                            ],
+                            if (contextActions.isNotEmpty) ...[
+                              const SizedBox(height: 12),
+                              _ActivityActionRow(actions: contextActions),
+                            ],
+                          ],
                         ),
-                      if (activity.isCommand && activity.exitCode != null)
-                        MeshPill(
-                          label: 'exit ${activity.exitCode}',
-                          tone: activity.exitCode == 0
-                              ? MeshPillTone.success
-                              : MeshPillTone.danger,
-                          mono: true,
-                        ),
-                      if (activity.isCommand && activity.durationMs != null)
-                        MeshPill(
-                          label: _formatDuration(activity.durationMs!),
-                          mono: true,
-                        ),
-                      if (activity.isCommand &&
-                          (activity.source ?? '').isNotEmpty)
-                        MeshPill(
-                          label: _commandSourceLabel(activity.source!),
-                          mono: true,
-                        ),
-                      if (activity.isCommand &&
-                          (activity.processId ?? '').isNotEmpty)
-                        MeshPill(
-                          label: 'pty ${activity.processId}',
-                          mono: true,
-                        ),
-                      if (activity.isCommand &&
-                          activity.terminalStatus == 'input')
-                        const MeshPill(
-                          label: 'stdin',
-                          tone: MeshPillTone.info,
-                          mono: true,
-                        ),
-                      if (activity.isCommand &&
-                          activity.terminalStatus == 'waiting')
-                        const MeshPill(
-                          label: 'interactive',
-                          tone: MeshPillTone.warning,
-                          mono: true,
-                        ),
-                      if (activity.isCommand)
-                        ...activity.commandActions.map(
-                          (action) => MeshPill(label: action.label, mono: true),
-                        ),
-                      if (activity.isTool &&
-                          (_toolSemanticPillLabel(activity) ?? '').isNotEmpty)
-                        MeshPill(
-                          label: _toolSemanticPillLabel(activity)!,
-                          tone: MeshPillTone.info,
-                          mono: true,
-                        ),
-                      if (activity.isTool &&
-                          (activity.toolName ?? '').trim().isNotEmpty)
-                        MeshPill(label: activity.toolName!.trim(), mono: true),
-                      if (activity.isTool &&
-                          (activity.toolMode ?? '').trim().isNotEmpty)
-                        MeshPill(
-                          label: activity.toolMode!.trim(),
-                          tone: MeshPillTone.info,
-                          mono: true,
-                        ),
-                      if (activity.isTool && activity.toolError == true)
-                        const MeshPill(
-                          label: 'tool error',
-                          tone: MeshPillTone.danger,
-                          mono: true,
-                        ),
-                      if (activity.isWebSearch)
-                        MeshPill(
-                          label: _webSearchKindLabel(activity),
-                          tone: MeshPillTone.info,
-                          mono: true,
-                        ),
-                      if (activity.isImageGeneration &&
-                          (activity.savedPath ?? '').isNotEmpty)
-                        const MeshPill(
-                          label: 'saved image',
-                          tone: MeshPillTone.info,
-                          mono: true,
-                        ),
-                      if (activity.isContextCompaction)
-                        const MeshPill(
-                          label: 'context',
-                          tone: MeshPillTone.info,
-                          mono: true,
-                        ),
-                    ],
-                  ),
-                  const SizedBox(height: 12),
-                  if (activity.isCommand)
-                    ..._buildCommandBody(context, activity)
-                  else if (activity.isTool)
-                    ..._buildToolBody(context, activity)
-                  else if (activity.isWebSearch) ...[
-                    _buildWebSearchBody(context, activity),
-                  ] else if (activity.isImageGeneration) ...[
-                    _buildImageGenerationBody(context, activity),
-                  ] else if (activity.isContextCompaction) ...[
-                    ..._buildContextCompactionBody(context, activity),
-                  ] else if (activity.isTurnDiff) ...[
-                    if ((activity.diff ?? '').isNotEmpty)
-                      _buildLazyDiff(
-                        context,
-                        label:
-                            'Show turn diff (${_diffLineCount(activity.diff!)} lines)',
-                        diff: activity.diff!,
-                      )
-                    else
-                      _waitingText(context, 'Waiting for turn diff.'),
-                  ] else if (activity.changes.isEmpty) ...[
-                    _waitingText(context, 'Waiting for file changes.'),
-                  ] else ...[
-                    _buildLazyFileChanges(
-                      context,
-                      changes: activity.changes,
-                      sessionCwd: sessionCwd,
+                      ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildFileChangeInlineActivity(
+    BuildContext context,
+    SessionActivity activity,
+  ) {
+    final colors = context.colors;
+    final changes = activity.changes;
+    final sessionCwd = widget.sessionCwd;
+    final title = _fileChangeActivityTitle(activity, running: _activityRunning);
+    final subtitle = _activityFileSummary(changes, sessionCwd);
+    final statusTone = switch (activity.status) {
+      'completed' => MeshStatusTone.success,
+      'failed' => MeshStatusTone.danger,
+      'declined' => MeshStatusTone.neutral,
+      _ => MeshStatusTone.running,
+    };
+    final statusLabel = switch (activity.status) {
+      'completed' => 'done',
+      'failed' => 'failed',
+      'declined' => 'declined',
+      _ => 'running',
+    };
+    final statusIcon = switch (activity.status) {
+      'completed' => Icons.check_rounded,
+      'failed' => Icons.error_outline_rounded,
+      'declined' => Icons.block_rounded,
+      _ => Icons.bolt_rounded,
+    };
+    final contextActions = _buildContextActions();
+
+    return Align(
+      alignment: Alignment.centerLeft,
+      child: Padding(
+        padding: const EdgeInsets.only(bottom: 10),
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 640),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Material(
+                color: Colors.transparent,
+                child: InkWell(
+                  onTap: () {
+                    setState(() {
+                      _cardCollapsed = !_cardCollapsed;
+                      _userOverrode = true;
+                    });
+                  },
+                  borderRadius: AppShapes.input,
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 4,
+                      vertical: 7,
                     ),
-                  ],
-                  if (contextActions.isNotEmpty) ...[
-                    const SizedBox(height: 12),
-                    _ActivityActionRow(actions: contextActions),
-                  ],
-                ],
-              ],
-            ),
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.center,
+                      children: [
+                        Container(
+                          width: 30,
+                          height: 30,
+                          decoration: BoxDecoration(
+                            color: colors.surfaceMuted.withValues(alpha: 0.72),
+                            borderRadius: AppShapes.iconWell,
+                            border: Border.all(
+                              color: colors.border.withValues(alpha: 0.5),
+                            ),
+                          ),
+                          alignment: Alignment.center,
+                          child: Icon(
+                            Icons.edit_note_rounded,
+                            size: 16,
+                            color: colors.textSecondary,
+                          ),
+                        ),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                title,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: Theme.of(context).textTheme.titleSmall
+                                    ?.copyWith(
+                                      color: colors.textPrimary,
+                                      fontWeight: AppWeights.emphasis,
+                                      height: 1.25,
+                                    ),
+                              ),
+                              if (subtitle.isNotEmpty) ...[
+                                const SizedBox(height: 2),
+                                Text(
+                                  subtitle,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style:
+                                      monoStyle(
+                                        color: colors.textSecondary,
+                                        fontSize: 12,
+                                        fontWeight: AppWeights.body,
+                                      ).copyWith(height: 1.3),
+                                ),
+                              ],
+                            ],
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        MeshStatusBadge(
+                          label: statusLabel,
+                          tone: statusTone,
+                          icon: statusIcon,
+                          compact: true,
+                        ),
+                        const SizedBox(width: 4),
+                        Icon(
+                          _cardCollapsed
+                              ? Icons.keyboard_arrow_down_rounded
+                              : Icons.keyboard_arrow_up_rounded,
+                          size: 18,
+                          color: colors.textTertiary,
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+              AnimatedSize(
+                duration: const Duration(milliseconds: 160),
+                curve: Curves.easeOutCubic,
+                alignment: Alignment.topLeft,
+                child: _cardCollapsed
+                    ? const SizedBox.shrink()
+                    : Padding(
+                        padding: const EdgeInsets.only(left: 44, top: 4),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            if (contextActions.isNotEmpty) ...[
+                              _ActivityActionRow(actions: contextActions),
+                              const SizedBox(height: 10),
+                            ],
+                            if (changes.isEmpty)
+                              _waitingText(context, 'Waiting for file changes.')
+                            else if (_diffExpanded)
+                              _buildLazyFileChanges(
+                                context,
+                                changes: changes,
+                                sessionCwd: sessionCwd,
+                              )
+                            else ...[
+                              for (final change in changes)
+                                _InlineFileChangeRow(
+                                  change: change,
+                                  sessionCwd: sessionCwd,
+                                  onOpen: _openWorkspaceFile,
+                                ),
+                              const SizedBox(height: 8),
+                              _buildLazyFileChanges(
+                                context,
+                                changes: changes,
+                                sessionCwd: sessionCwd,
+                              ),
+                            ],
+                          ],
+                        ),
+                      ),
+              ),
+            ],
           ),
         ),
       ),
@@ -3248,6 +3468,78 @@ class _FileChangeBlock extends StatelessWidget {
   }
 }
 
+class _InlineFileChangeRow extends StatelessWidget {
+  const _InlineFileChangeRow({
+    required this.change,
+    required this.sessionCwd,
+    this.onOpen,
+  });
+
+  final SessionActivityChange change;
+  final String sessionCwd;
+  final void Function(String path)? onOpen;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    final tone = switch (change.kind) {
+      'added' || 'add' || 'create' => MeshPillTone.success,
+      'deleted' || 'delete' || 'remove' => MeshPillTone.danger,
+      'moved' || 'move' || 'rename' => MeshPillTone.info,
+      _ => MeshPillTone.neutral,
+    };
+    final isDeleted = switch (change.kind) {
+      'deleted' || 'delete' || 'remove' => true,
+      _ => false,
+    };
+    final canOpen = onOpen != null && !isDeleted;
+    final row = Padding(
+      padding: const EdgeInsets.symmetric(vertical: 4),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: [
+          Icon(
+            Icons.description_rounded,
+            size: 15,
+            color: colors.textTertiary,
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              _relativeSessionPath(change.path, sessionCwd),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style:
+                  monoStyle(
+                    color: canOpen ? colors.accent : colors.textPrimary,
+                    fontSize: 12.5,
+                    fontWeight: AppWeights.body,
+                  ).copyWith(
+                    decoration: canOpen ? TextDecoration.underline : null,
+                    decorationColor: canOpen ? colors.accent : null,
+                  ),
+            ),
+          ),
+          const SizedBox(width: 8),
+          MeshPill(label: change.kind, tone: tone, mono: true),
+        ],
+      ),
+    );
+
+    if (!canOpen) {
+      return row;
+    }
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: () => onOpen!(change.path),
+        borderRadius: AppShapes.badge,
+        child: row,
+      ),
+    );
+  }
+}
+
 class _DetailRow extends StatelessWidget {
   const _DetailRow({required this.label, required this.value});
 
@@ -3626,6 +3918,18 @@ String _activityFileSummary(
     labels.add('+$remainder more');
   }
   return labels.join('  •  ');
+}
+
+String _fileChangeActivityTitle(
+  SessionActivity activity, {
+  required bool running,
+}) {
+  final count = activity.changes.length;
+  if (count == 0) {
+    return running ? 'Editing files' : 'No file changes';
+  }
+  final noun = count == 1 ? 'file' : 'files';
+  return '${running ? 'Editing' : 'Edited'} $count $noun';
 }
 
 String _formatDuration(int durationMs) {

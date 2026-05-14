@@ -1161,6 +1161,9 @@ void main() {
       );
       await _pumpFrames(tester);
 
+      expect(find.text('Edited 1 file'), findsOneWidget);
+      expect(find.text('FILE CHANGE'), findsNothing);
+
       await tester.tap(find.text('npm run dev'));
       await _pumpFrames(tester);
       await tester.tap(find.text('apps/web/src/main.dart'));
