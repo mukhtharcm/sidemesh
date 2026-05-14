@@ -407,7 +407,7 @@ class _HostDetailScreenState extends State<HostDetailScreen>
                   _SectionHeader(
                     icon: Icons.medical_services_rounded,
                     title: 'Host tools',
-                    subtitle: 'Diagnostics and provider controls',
+                    subtitle: 'Updates, tools, and agent settings',
                   ),
                   const SizedBox(height: AppSpacing.sm),
                   _HostManagementCard(
@@ -782,7 +782,7 @@ class HostProviderContractScreen extends StatelessWidget {
     final title = node.label.isNotEmpty ? node.label : node.hostname;
     return Scaffold(
       backgroundColor: colors.canvas,
-      appBar: AppBar(title: Text('Provider contract')),
+      appBar: AppBar(title: Text('Agent support')),
       body: ListView(
         padding: const EdgeInsets.fromLTRB(16, 8, 16, 32),
         children: [_ProviderContractDetailPanel(node: node, title: title)],
@@ -859,15 +859,14 @@ class _ProviderContractDetailPanelState
         ],
         const SizedBox(height: AppSpacing.lg),
         _CapabilitySummaryMatrix(
-          title: 'Provider-owned capabilities',
-          emptyText:
-              'This provider did not report any provider-owned capabilities.',
+          title: 'Agent features',
+          emptyText: 'This agent did not report any extra features.',
           groups: providerGroups,
         ),
         const SizedBox(height: AppSpacing.lg),
         _CapabilitySummaryMatrix(
-          title: 'Host-owned capabilities',
-          emptyText: 'This daemon did not report host capabilities.',
+          title: 'Machine features',
+          emptyText: 'This machine did not report any extra features.',
           groups: hostGroups,
         ),
       ],
@@ -932,12 +931,12 @@ class _ProviderContractOverviewCard extends StatelessWidget {
                     ),
                     const SizedBox(height: 2),
                     Text(
-                      '$selectedDisplayName - $selectedVersion',
+                      '$selectedDisplayName · $selectedVersion',
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
-                      style: monoStyle(
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
                         color: colors.textTertiary,
-                        fontSize: 11,
+                        height: 1.3,
                       ),
                     ),
                   ],
@@ -951,34 +950,30 @@ class _ProviderContractOverviewCard extends StatelessWidget {
             runSpacing: 8,
             children: [
               MeshPill(
-                label: 'active: ${node.provider}',
+                label: 'Using ${node.providerDisplayName}',
                 icon: Icons.radio_button_checked_rounded,
                 tone: isViewingActiveProvider
                     ? MeshPillTone.success
                     : MeshPillTone.neutral,
-                mono: true,
               ),
               if (!isViewingActiveProvider)
                 MeshPill(
-                  label: 'viewing: $selectedProviderKind',
+                  label: 'Showing $selectedDisplayName',
                   icon: Icons.visibility_rounded,
                   tone: MeshPillTone.accent,
-                  mono: true,
                 ),
               if (selectedCommand != null)
                 MeshPill(
-                  label: 'command: $selectedCommand',
+                  label: 'Starts with $selectedCommand',
                   icon: Icons.terminal_rounded,
                   tone: MeshPillTone.neutral,
-                  mono: true,
                 ),
               MeshPill(
-                label: '${node.supportedProviders.length} supported',
+                label: '${node.supportedProviders.length} available',
                 icon: Icons.extension_rounded,
                 tone: node.supportedProviders.isEmpty
                     ? MeshPillTone.warning
                     : MeshPillTone.info,
-                mono: true,
               ),
             ],
           ),
@@ -1009,7 +1004,7 @@ class _ProviderDefinitionSection extends StatelessWidget {
       children: [
         _ContractSectionLabel(
           icon: Icons.extension_rounded,
-          title: 'Providers',
+          title: 'Available agents',
           detail: '${providers.length} available',
         ),
         const SizedBox(height: 8),
@@ -1095,19 +1090,22 @@ class _ProviderDefinitionRow extends StatelessWidget {
           ),
           if (active) ...[
             const SizedBox(width: 7),
-            _TinyStatusPill(label: 'active', tone: MeshPillTone.success),
+            _TinyStatusPill(label: 'In use', tone: MeshPillTone.success),
           ],
         ],
       ),
       subtitle: Text(
         [
-          provider.kind,
           if (provider.version.trim().isNotEmpty) provider.version.trim(),
-          if (command.trim().isNotEmpty) 'cmd $command',
-        ].join(' - '),
+          if (command.trim().isNotEmpty) 'Starts with $command',
+          if (provider.version.trim().isEmpty && command.trim().isEmpty)
+            provider.kind,
+        ].join(' · '),
         maxLines: 1,
         overflow: TextOverflow.ellipsis,
-        style: monoStyle(color: colors.textTertiary, fontSize: 10.5),
+        style: Theme.of(
+          context,
+        ).textTheme.bodySmall?.copyWith(color: colors.textTertiary),
       ),
       trailing: selected
           ? Icon(Icons.check_rounded, color: colors.accent, size: 18)
@@ -1142,11 +1140,11 @@ class _CapabilitySummaryMatrix extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         _ContractSectionLabel(
-          icon: title.startsWith('Host')
+          icon: title.startsWith('Machine')
               ? Icons.dns_rounded
               : Icons.verified_user_rounded,
           title: title,
-          detail: total == 0 ? null : '$enabled/$total enabled',
+          detail: total == 0 ? null : '$enabled/$total ready',
         ),
         const SizedBox(height: 8),
         if (groups.isEmpty)
@@ -1275,7 +1273,9 @@ class _ContractSectionLabel extends StatelessWidget {
         if (detail != null)
           Text(
             detail!,
-            style: monoStyle(color: colors.textTertiary, fontSize: 10.5),
+            style: Theme.of(
+              context,
+            ).textTheme.bodySmall?.copyWith(color: colors.textTertiary),
           ),
       ],
     );
@@ -1332,9 +1332,8 @@ class _TinyStatusPill extends StatelessWidget {
       ),
       child: Text(
         label,
-        style: monoStyle(
+        style: Theme.of(context).textTheme.labelSmall?.copyWith(
           color: fg,
-          fontSize: 10.5,
           fontWeight: AppWeights.title,
         ),
       ),
@@ -1400,7 +1399,7 @@ class _ProviderContractSummaryCard extends StatelessWidget {
     final colors = context.colors;
     final supportedProviders = node.supportedProviders.length;
     final providerCountLabel =
-        '$supportedProviders ${supportedProviders == 1 ? "provider" : "providers"}';
+        '$supportedProviders ${supportedProviders == 1 ? "agent" : "agents"}';
     return MeshCard(
       tone: MeshCardTone.muted,
       padding: EdgeInsets.zero,
@@ -1438,19 +1437,19 @@ class _ProviderContractSummaryCard extends StatelessWidget {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        'Providers & capabilities',
+                        'Agent support',
                         style: Theme.of(context).textTheme.titleSmall?.copyWith(
                           fontWeight: AppWeights.title,
                         ),
                       ),
                       const SizedBox(height: 3),
                       Text(
-                        '${node.providerDisplayName} active - $providerCountLabel supported',
+                        'Using ${node.providerDisplayName}, $providerCountLabel available',
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
-                        style: monoStyle(
+                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
                           color: colors.textSecondary,
-                          fontSize: 11,
+                          height: 1.3,
                         ),
                       ),
                     ],
@@ -1536,16 +1535,19 @@ class _ProviderContractCardState extends State<_ProviderContractCard> {
             child: Icon(Icons.hub_rounded, color: colors.info, size: 16),
           ),
           title: Text(
-            'Provider contract',
+            'Agent support',
             style: Theme.of(
               context,
             ).textTheme.titleSmall?.copyWith(fontWeight: AppWeights.title),
           ),
           subtitle: Text(
-            '$selectedDisplayName - $selectedVersion',
+            '$selectedDisplayName · $selectedVersion',
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
-            style: monoStyle(color: colors.textSecondary, fontSize: 11),
+            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+              color: colors.textSecondary,
+              height: 1.3,
+            ),
           ),
           children: [
             Align(
@@ -1555,34 +1557,30 @@ class _ProviderContractCardState extends State<_ProviderContractCard> {
                 runSpacing: 8,
                 children: [
                   MeshPill(
-                    label: 'active: ${node.provider}',
+                    label: 'Using ${node.providerDisplayName}',
                     icon: Icons.radio_button_checked_rounded,
                     tone: isViewingActiveProvider
                         ? MeshPillTone.success
                         : MeshPillTone.neutral,
-                    mono: true,
                   ),
                   if (!isViewingActiveProvider)
                     MeshPill(
-                      label: 'viewing: $_selectedProviderKind',
+                      label: 'Showing $selectedDisplayName',
                       icon: Icons.visibility_rounded,
                       tone: MeshPillTone.accent,
-                      mono: true,
                     ),
                   if (selectedCommand != null)
                     MeshPill(
-                      label: 'command: $selectedCommand',
+                      label: 'Starts with $selectedCommand',
                       icon: Icons.terminal_rounded,
                       tone: MeshPillTone.neutral,
-                      mono: true,
                     ),
                   MeshPill(
-                    label: '${supportedProviders.length} supported',
+                    label: '${supportedProviders.length} available',
                     icon: Icons.extension_rounded,
                     tone: supportedProviders.isEmpty
                         ? MeshPillTone.warning
                         : MeshPillTone.info,
-                    mono: true,
                   ),
                 ],
               ),
@@ -1602,15 +1600,14 @@ class _ProviderContractCardState extends State<_ProviderContractCard> {
             ],
             const SizedBox(height: 14),
             _CapabilityMatrix(
-              title: 'Provider-owned capabilities',
-              emptyText:
-                  'This provider did not report any provider-owned capabilities.',
+              title: 'Agent features',
+              emptyText: 'This agent did not report any extra features.',
               groups: providerGroups,
             ),
             const SizedBox(height: 12),
             _CapabilityMatrix(
-              title: 'Host-owned capabilities',
-              emptyText: 'This daemon did not report host capabilities.',
+              title: 'Machine features',
+              emptyText: 'This machine did not report any extra features.',
               groups: hostGroups,
             ),
           ],
@@ -1701,7 +1698,7 @@ class _ProviderDefinitionList extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text(
-          'Daemon-supported providers',
+          'Available agents',
           style: Theme.of(context).textTheme.labelLarge?.copyWith(
             color: colors.textSecondary,
             fontWeight: AppWeights.title,
@@ -1709,7 +1706,7 @@ class _ProviderDefinitionList extends StatelessWidget {
         ),
         const SizedBox(height: 4),
         Text(
-          'Tap a provider to inspect its contract.',
+          'Choose an agent to see what it supports.',
           style: Theme.of(
             context,
           ).textTheme.bodySmall?.copyWith(color: colors.textTertiary),
@@ -1724,7 +1721,7 @@ class _ProviderDefinitionList extends StatelessWidget {
                 final selected = provider.kind == selectedProvider;
                 return _ProviderSelectPill(
                   label: active
-                      ? '${provider.displayName} active'
+                      ? '${provider.displayName} in use'
                       : provider.displayName,
                   icon: active
                       ? Icons.check_circle_rounded
@@ -1768,7 +1765,7 @@ class _ProviderSelectPill extends StatelessWidget {
         child: AnimatedScale(
           duration: const Duration(milliseconds: 140),
           scale: selected ? 1.0 : 0.985,
-          child: MeshPill(label: label, icon: icon, tone: tone, mono: true),
+          child: MeshPill(label: label, icon: icon, tone: tone),
         ),
       ),
     );
@@ -1856,7 +1853,6 @@ class _CapabilityGroupRow extends StatelessWidget {
               MeshPill(
                 label: '${group.enabledCount}/${group.totalCount}',
                 tone: allEnabled ? MeshPillTone.success : MeshPillTone.warning,
-                mono: true,
               ),
             ],
           ),
@@ -1875,7 +1871,6 @@ class _CapabilityGroupRow extends StatelessWidget {
                         ? MeshPillTone.success
                         : MeshPillTone.neutral,
                     bold: false,
-                    mono: true,
                   );
                 })
                 .toList(growable: false),
@@ -1923,9 +1918,9 @@ class _SectionHeader extends StatelessWidget {
                   subtitle,
                   maxLines: 2,
                   overflow: TextOverflow.ellipsis,
-                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                    color: colors.textSecondary,
-                  ),
+                  style: Theme.of(
+                    context,
+                  ).textTheme.bodySmall?.copyWith(color: colors.textSecondary),
                 ),
               ],
             ),
@@ -2008,11 +2003,11 @@ String _capabilitySectionTitle(String key) {
   return switch (key) {
     'sessions' => 'Sessions',
     'input' => 'Input',
-    'interaction' => 'Interactive input',
+    'interaction' => 'Follow-ups',
     'approvals' => 'Approvals',
-    'configuration' => 'Configuration',
-    'runtimeControls' => 'Runtime controls',
-    'workspace' => 'Workspace',
+    'configuration' => 'Setup',
+    'runtimeControls' => 'Session controls',
+    'workspace' => 'Files & Git',
     _ => _humanizeCamelCase(key),
   };
 }
@@ -2036,21 +2031,21 @@ String _capabilityFeatureLabel(String key) {
     'localImage' => 'local image',
     'eventReplay' => 'event replay',
     'recentFallback' => 'recent fallback',
-    'skillManagement' => 'skill management',
-    'mode' => 'mode',
-    'reasoningEffort' => 'reasoning',
+    'skillManagement' => 'skills',
+    'mode' => 'work style',
+    'reasoningEffort' => 'thinking',
     'fastMode' => 'fast mode',
-    'approvalPolicy' => 'approval policy',
-    'sandboxMode' => 'sandbox',
-    'networkAccess' => 'network',
+    'approvalPolicy' => 'approvals',
+    'sandboxMode' => 'workspace access',
+    'networkAccess' => 'network access',
     'webSearch' => 'web search',
     'remoteGitDiff' => 'remote git diff',
     'gitStatus' => 'git status',
     'gitDiff' => 'git diff',
     'portForwarding' => 'port forwarding',
-    'approveForSession' => 'approve for session',
-    'userInput' => 'ask user',
-    'elicitation' => 'form requests',
+    'approveForSession' => 'remember approval',
+    'userInput' => 'ask for input',
+    'elicitation' => 'forms',
     _ => _humanizeCamelCase(key),
   };
 }
