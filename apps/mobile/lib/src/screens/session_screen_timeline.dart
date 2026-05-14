@@ -2136,7 +2136,7 @@ class _ActivityCardState extends State<_ActivityCard> {
   _CommandTitleParts? _activityCommandTitleParts(SessionActivity activity) {
     final command = activity.isCommand
         ? _displayCommandText(activity.command ?? '')
-        : activity.isTool && activity.toolCategory == 'command'
+        : activity.isTool && _toolIsCommandActivity(activity)
         ? _displayCommandText(_toolCommandText(activity))
         : '';
     if (command.isEmpty) {
@@ -2192,14 +2192,14 @@ class _ActivityCardState extends State<_ActivityCard> {
   Widget _activityDetailsPanel(BuildContext context, Widget child) {
     final colors = context.colors;
     return Padding(
-      padding: const EdgeInsets.only(left: 44, top: 6),
+      padding: const EdgeInsets.only(top: 6),
       child: Container(
         width: double.infinity,
-        padding: const EdgeInsets.all(12),
+        padding: const EdgeInsets.fromLTRB(10, 10, 10, 10),
         decoration: BoxDecoration(
-          color: colors.surface.withValues(alpha: 0.78),
+          color: colors.surface.withValues(alpha: 0.58),
           borderRadius: AppShapes.input,
-          border: Border.all(color: colors.border.withValues(alpha: 0.72)),
+          border: Border.all(color: colors.border.withValues(alpha: 0.52)),
         ),
         child: child,
       ),
@@ -2413,11 +2413,11 @@ class _ActivityCardState extends State<_ActivityCard> {
                                 _buildLazyDiff(
                                   context,
                                   label:
-                                      'Show turn diff (${_diffLineCount(activity.diff!)} lines)',
+                                      'View patch (${_diffLineCount(activity.diff!)} lines)',
                                   diff: activity.diff!,
                                 )
                               else
-                                _waitingText(context, 'Waiting for turn diff.'),
+                                _waitingText(context, 'Tracking file changes.'),
                             ] else if (activity.changes.isEmpty) ...[
                               _waitingText(
                                 context,
@@ -2943,7 +2943,7 @@ class _ActivityCardState extends State<_ActivityCard> {
         query.isNotEmpty) {
       return 'Search web for "$query"';
     }
-    if (activity.toolCategory == 'command' && command.isNotEmpty) {
+    if (_toolIsCommandActivity(activity) && command.isNotEmpty) {
       return _commandStatusTitle(activity.status, _displayCommandText(command));
     }
 
@@ -2983,6 +2983,9 @@ class _ActivityCardState extends State<_ActivityCard> {
     if (activity.toolAction == 'mode_change') {
       return 'Mode';
     }
+    if (_toolIsCommandActivity(activity)) {
+      return null;
+    }
     return switch (activity.toolCategory) {
       'filesystem' => switch (activity.toolAction) {
         'read' => 'File read',
@@ -3007,6 +3010,9 @@ class _ActivityCardState extends State<_ActivityCard> {
   IconData _toolActivityIcon(SessionActivity activity) {
     if (activity.toolAction == 'mode_change') {
       return Icons.tune_rounded;
+    }
+    if (_toolIsCommandActivity(activity)) {
+      return Icons.terminal_rounded;
     }
     return switch (activity.toolCategory) {
       'filesystem' => switch (activity.toolAction) {
@@ -3089,7 +3095,18 @@ class _ActivityCardState extends State<_ActivityCard> {
     return _relativeSessionPath(raw, sessionCwd);
   }
 
+  bool _toolIsCommandActivity(SessionActivity activity) {
+    return activity.toolCategory == 'command' ||
+        _toolCommandText(activity).isNotEmpty;
+  }
+
   String _toolCommandText(SessionActivity activity) {
+    for (final target in activity.toolSemanticTargets) {
+      final command = (target.command ?? '').trim();
+      if (target.type == 'command' && command.isNotEmpty) {
+        return command;
+      }
+    }
     final args = activity.toolArgs;
     if (args is Map<String, dynamic>) {
       final command =
@@ -3216,7 +3233,7 @@ class _ActivityCardState extends State<_ActivityCard> {
           _DiffToggle(
             expanded: true,
             label: label,
-            expandedLabel: 'Hide diff',
+            expandedLabel: 'Hide patch',
             onToggle: () => setState(() => _diffExpanded = false),
           ),
         ],
@@ -3225,7 +3242,7 @@ class _ActivityCardState extends State<_ActivityCard> {
     return _DiffToggle(
       expanded: false,
       label: label,
-      expandedLabel: 'Hide diff',
+      expandedLabel: 'Hide patch',
       onToggle: () => setState(() => _diffExpanded = true),
     );
   }
@@ -3240,8 +3257,8 @@ class _ActivityCardState extends State<_ActivityCard> {
       (sum, c) => sum + _diffLineCount(c.diff),
     );
     final label = changes.length == 1
-        ? 'Show diff ($totalLines lines)'
-        : 'Show ${changes.length} file diffs ($totalLines lines)';
+        ? 'View diff ($totalLines lines)'
+        : 'View ${changes.length} file diffs ($totalLines lines)';
     if (_diffExpanded) {
       return Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -3417,35 +3434,41 @@ class _DiffToggle extends StatelessWidget {
     final colors = context.colors;
     return Align(
       alignment: Alignment.centerLeft,
-      child: GestureDetector(
-        onTap: onToggle,
-        child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-          decoration: BoxDecoration(
-            color: colors.accentMuted,
-            borderRadius: BorderRadius.circular(8),
-            border: Border.all(color: colors.accent.withValues(alpha: 0.3)),
-          ),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(
-                expanded
-                    ? Icons.unfold_less_rounded
-                    : Icons.unfold_more_rounded,
-                size: 16,
-                color: colors.accent,
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          onTap: onToggle,
+          borderRadius: AppShapes.badge,
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 7),
+            decoration: BoxDecoration(
+              color: colors.surfaceElevated.withValues(alpha: 0.78),
+              borderRadius: AppShapes.badge,
+              border: Border.all(
+                color: colors.border.withValues(alpha: 0.72),
               ),
-              const SizedBox(width: 6),
-              Text(
-                expanded ? expandedLabel : label,
-                style: monoStyle(
-                  color: colors.accent,
-                  fontSize: 12,
-                  fontWeight: AppWeights.body,
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(
+                  expanded
+                      ? Icons.unfold_less_rounded
+                      : Icons.unfold_more_rounded,
+                  size: 15,
+                  color: colors.textSecondary,
                 ),
-              ),
-            ],
+                const SizedBox(width: 6),
+                Text(
+                  expanded ? expandedLabel : label,
+                  style: monoStyle(
+                    color: colors.textSecondary,
+                    fontSize: 12,
+                    fontWeight: AppWeights.emphasis,
+                  ),
+                ),
+              ],
+            ),
           ),
         ),
       ),

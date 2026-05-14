@@ -1180,29 +1180,26 @@ void main() {
     },
   );
 
-  testWidgets('session screen asks for a deeper persisted activity window', (
+  testWidgets('session screen renders legacy command tool activities', (
     tester,
   ) async {
-    final session = _session('persisted-activity-window');
-    final activities = <SessionActivity>[
-      for (var i = 0; i < 82; i += 1)
-        _fileChangeActivity(
-          id: 'noise-$i',
-          seq: i + 1,
-          path: '/repo/apps/mobile/lib/noise_$i.dart',
-        ),
-    ];
+    final session = _session('legacy-command-tool');
     final api = _RichEventFakeApi(
       sessionSummary: session,
-      activities: activities,
-      respectLogLimits: true,
+      activities: [
+        _legacyCommandToolActivity(
+          id: 'legacy-tool-command',
+          seq: 1,
+          command: 'npm test',
+        ),
+      ],
     );
     addTearDown(api.dispose);
 
     await _pumpApp(
       tester,
       SessionScreen(
-        host: _host('persisted-activity-window'),
+        host: _host('legacy-command-tool'),
         session: session,
         api: api,
         desktopMode: true,
@@ -1211,9 +1208,41 @@ void main() {
     );
     await _pumpFrames(tester);
 
-    expect(api.fetchLogActivityLimits, isNotEmpty);
-    expect(api.fetchLogActivityLimits.first, greaterThanOrEqualTo(240));
-    expect(api.lastReturnedActivityCount, activities.length);
+    expect(find.text('ran '), findsOneWidget);
+    expect(find.text('npm test'), findsOneWidget);
+    expect(find.text('run_command'), findsNothing);
+    expect(find.text('Tool execution'), findsNothing);
+  });
+
+  testWidgets('session screen avoids internal turn diff copy', (tester) async {
+    final session = _session('turn-diff-copy');
+    final api = _RichEventFakeApi(
+      sessionSummary: session,
+      activities: [
+        _turnDiffActivity(
+          id: 'turn-diff-1',
+          seq: 1,
+          diff: '@@ -1 +1 @@\n-old\n+new',
+        ),
+      ],
+    );
+    addTearDown(api.dispose);
+
+    await _pumpApp(
+      tester,
+      SessionScreen(
+        host: _host('turn-diff-copy'),
+        session: session,
+        api: api,
+        desktopMode: true,
+      ),
+      size: const Size(1180, 900),
+    );
+    await _pumpFrames(tester);
+
+    expect(find.text('live diff · 3 lines'), findsOneWidget);
+    expect(find.text('View patch (3 lines)'), findsOneWidget);
+    expect(find.textContaining('turn diff'), findsNothing);
   });
 
   testWidgets('session screen groups adjacent file changes by turn', (
@@ -1483,14 +1512,90 @@ SessionActivity _fileChangeActivity({
   );
 }
 
-List<T> _tail<T>(List<T> items, int? limit) {
-  if (limit == null || limit >= items.length) {
-    return items;
-  }
-  if (limit <= 0) {
-    return <T>[];
-  }
-  return items.sublist(items.length - limit);
+SessionActivity _legacyCommandToolActivity({
+  required String id,
+  required int seq,
+  required String command,
+}) {
+  final now = DateTime(2026, 1, 1, 12).add(Duration(minutes: seq));
+  return SessionActivity(
+    id: id,
+    type: 'tool',
+    createdAt: now,
+    seq: seq,
+    status: 'completed',
+    turnId: 'turn-$seq',
+    command: null,
+    cwd: null,
+    output: null,
+    exitCode: null,
+    durationMs: null,
+    source: null,
+    processId: null,
+    commandActions: const [],
+    terminalStatus: null,
+    terminalInput: null,
+    toolName: 'run_command',
+    toolTitle: null,
+    toolArgs: null,
+    toolResult: null,
+    toolError: null,
+    toolSemantic: SessionToolSemantic(
+      category: 'command',
+      action: 'invoke',
+      targets: [
+        SessionToolSemanticTarget(type: 'command', command: command),
+      ],
+    ),
+    changes: const [],
+    diff: null,
+    query: null,
+    queries: const [],
+    targetUrl: null,
+    pattern: null,
+    revisedPrompt: null,
+    savedPath: null,
+  );
+}
+
+SessionActivity _turnDiffActivity({
+  required String id,
+  required int seq,
+  required String diff,
+}) {
+  final now = DateTime(2026, 1, 1, 12).add(Duration(minutes: seq));
+  return SessionActivity(
+    id: id,
+    type: 'turn_diff',
+    createdAt: now,
+    seq: seq,
+    status: 'in_progress',
+    turnId: 'turn-$seq',
+    command: null,
+    cwd: null,
+    output: null,
+    exitCode: null,
+    durationMs: null,
+    source: null,
+    processId: null,
+    commandActions: const [],
+    terminalStatus: null,
+    terminalInput: null,
+    toolName: null,
+    toolTitle: null,
+    toolArgs: null,
+    toolResult: null,
+    toolError: null,
+    toolSemantic: null,
+    changes: const [],
+    diff: diff,
+    query: null,
+    queries: const [],
+    targetUrl: null,
+    pattern: null,
+    revisedPrompt: null,
+    savedPath: null,
+  );
 }
 
 NodeInfo _nodeInfo({
@@ -1568,7 +1673,6 @@ class _RichEventFakeApi extends ApiClient {
     this.nodeInfo,
     this.sessionSummary,
     this.sessionStatus,
-    this.respectLogLimits = false,
   });
 
   final _ControllableWebSocketChannel _channel =
@@ -1583,9 +1687,6 @@ class _RichEventFakeApi extends ApiClient {
   final NodeInfo? nodeInfo;
   final SessionSummary? sessionSummary;
   final SessionStatus? sessionStatus;
-  final bool respectLogLimits;
-  final List<int?> fetchLogActivityLimits = <int?>[];
-  int lastReturnedActivityCount = 0;
   int stopSessionCalls = 0;
 
   @override
@@ -1598,31 +1699,23 @@ class _RichEventFakeApi extends ApiClient {
     int? messageLimit,
     int? activityLimit,
   }) async {
-    fetchLogActivityLimits.add(activityLimit);
     final blocker = fetchLogBlocker;
     if (blocker != null) {
       await blocker;
     }
-    final returnedMessages = respectLogLimits
-        ? _tail(messages, messageLimit)
-        : messages;
-    final returnedActivities = respectLogLimits
-        ? _tail(activities, activityLimit)
-        : activities;
-    lastReturnedActivityCount = returnedActivities.length;
     return SessionLog(
       session: sessionSummary ?? _session(sessionId),
-      messages: returnedMessages,
-      activities: returnedActivities,
+      messages: messages,
+      activities: activities,
       pendingAction: null,
       history:
           sessionLogHistory ??
           SessionLogHistorySummary(
             isTruncated: false,
             totalMessages: messages.length,
-            returnedMessages: returnedMessages.length,
+            returnedMessages: messages.length,
             totalActivities: activities.length,
-            returnedActivities: returnedActivities.length,
+            returnedActivities: activities.length,
           ),
       latestPlanUpdate: latestPlanUpdate,
     );
