@@ -1190,77 +1190,28 @@ class _PinnedListSheet extends StatelessWidget {
     required this.refresh,
     required this.onOpen,
     required this.onUnpin,
-    required this.onClose,
   });
 
   final List<PinnedSessionMessage> Function() pinsBuilder;
   final Listenable refresh;
   final ValueChanged<PinnedSessionMessage> onOpen;
   final ValueChanged<PinnedSessionMessage> onUnpin;
-  final VoidCallback onClose;
 
   @override
   Widget build(BuildContext context) {
-    final colors = context.colors;
-    return ClipRRect(
-      borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
-      child: Container(
-        color: colors.surfaceElevated,
-        child: Column(
-          children: [
-            const SizedBox(height: 8),
-            Container(
-              width: 36,
-              height: 4,
-              decoration: BoxDecoration(
-                color: colors.border,
-                borderRadius: AppShapes.pill,
-              ),
-            ),
-            const SizedBox(height: 8),
-            Padding(
-              padding: const EdgeInsets.only(
-                left: 16,
-                top: 4,
-                right: 8,
-                bottom: 4,
-              ),
-              child: Row(
-                children: [
-                  Icon(
-                    Icons.push_pin_rounded,
-                    size: 16,
-                    color: colors.textSecondary,
-                  ),
-                  const SizedBox(width: 8),
-                  Text(
-                    'Pinned messages',
-                    style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                      color: colors.textPrimary,
-                      fontWeight: FontWeight.w800,
-                    ),
-                  ),
-                  const Spacer(),
-                  IconButton(
-                    tooltip: 'Close',
-                    onPressed: onClose,
-                    icon: const Icon(Icons.close_rounded, size: 20),
-                  ),
-                ],
-              ),
-            ),
-            Divider(height: 1, color: colors.border),
-            Expanded(
-              child: ListenableBuilder(
-                listenable: refresh,
-                builder: (context, _) => PinnedListPanel(
-                  pins: pinsBuilder(),
-                  onOpen: onOpen,
-                  onUnpin: onUnpin,
-                ),
-              ),
-            ),
-          ],
+    return MeshBottomSheetScaffold(
+      icon: Icons.push_pin_rounded,
+      title: 'Pinned messages',
+      description:
+          'Jump back to saved messages or remove them from the pinned list.',
+      maxWidth: 760,
+      maxHeightFactor: 0.78,
+      child: ListenableBuilder(
+        listenable: refresh,
+        builder: (context, _) => PinnedListPanel(
+          pins: pinsBuilder(),
+          onOpen: onOpen,
+          onUnpin: onUnpin,
         ),
       ),
     );
