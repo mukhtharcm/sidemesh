@@ -57,6 +57,7 @@ import '../theme/app_theme.dart';
 import '../theme/app_tokens.dart';
 import '../windowing.dart';
 import '../widgets/app_snackbar.dart';
+import '../widgets/app_sheets.dart';
 import '../widgets/composer_paste_text_action.dart';
 import '../widgets/markdown_content.dart';
 import '../widgets/diff_view.dart';

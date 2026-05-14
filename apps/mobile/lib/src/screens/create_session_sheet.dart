@@ -15,6 +15,7 @@ import '../theme/app_colors.dart';
 import '../theme/app_theme.dart';
 import '../widgets/app_snackbar.dart';
 import '../theme/app_tokens.dart';
+import '../widgets/app_sheets.dart';
 import '../widgets/launch_controls.dart';
 import '../widgets/launch_options_form.dart';
 import '../widgets/mesh_widgets.dart';
@@ -1165,8 +1166,8 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
 
     final result = await showModalBottomSheet<_ProfilePickerResult>(
       context: context,
-      backgroundColor: context.colors.surface,
-      showDragHandle: true,
+      backgroundColor: Colors.transparent,
+      showDragHandle: false,
       useSafeArea: true,
       isScrollControlled: true,
       builder: (context) => _ProfilePickerSheet(
@@ -1230,8 +1231,8 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
 
     final result = await showModalBottomSheet<_ModelPickerResult>(
       context: context,
-      backgroundColor: context.colors.surface,
-      showDragHandle: true,
+      backgroundColor: Colors.transparent,
+      showDragHandle: false,
       useSafeArea: true,
       isScrollControlled: true,
       builder: (context) => _ModelPickerSheet(
@@ -2550,93 +2551,79 @@ class _ProfilePickerSheetState extends State<_ProfilePickerSheet> {
         })
         .toList(growable: false);
 
-    return FractionallySizedBox(
-      heightFactor: 0.78,
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(20, 8, 20, 24),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              'Choose profile',
-              style: Theme.of(
-                context,
-              ).textTheme.titleLarge?.copyWith(fontWeight: AppWeights.emphasis),
+    return MeshBottomSheetScaffold(
+      icon: Icons.layers_rounded,
+      title: 'Choose a profile',
+      description:
+          'Pick a saved setup for this session. A profile can fill in the model and other launch options for you.',
+      maxWidth: 760,
+      maxHeightFactor: 0.78,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          TextField(
+            controller: _queryController,
+            decoration: const InputDecoration(
+              prefixIcon: Icon(Icons.search_rounded),
+              hintText: 'Search profiles',
             ),
-            const SizedBox(height: 6),
-            Text(
-              'Pick a saved setup for this session. It can set the model and other options for you.',
-              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                color: colors.textSecondary,
-                height: 1.4,
-              ),
-            ),
-            const SizedBox(height: 16),
-            TextField(
-              controller: _queryController,
-              decoration: const InputDecoration(
-                prefixIcon: Icon(Icons.search_rounded),
-                hintText: 'Search profiles',
-              ),
-            ),
-            if (widget.loadError != null) ...[
-              const SizedBox(height: 12),
-              _CompactInfoLine(
-                icon: Icons.info_outline_rounded,
-                text: 'Could not load profiles: ${widget.loadError}',
-              ),
-            ],
-            const SizedBox(height: 14),
-            Expanded(
-              child: filtered.isEmpty && query.isNotEmpty
-                  ? Center(
-                      child: Text(
-                        'No profiles match that search.',
-                        style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                          color: colors.textSecondary,
-                        ),
-                      ),
-                    )
-                  : ListView.separated(
-                      itemCount: filtered.length + (query.isEmpty ? 1 : 0),
-                      separatorBuilder: (_, _) => const SizedBox(height: 8),
-                      itemBuilder: (context, index) {
-                        if (query.isEmpty && index == 0) {
-                          return _ModelPickerTile(
-                            title: 'Use defaults',
-                            model: null,
-                            description: widget.defaultProfile == null
-                                ? 'Use this machine\'s default setup.'
-                                : 'Use the default setup saved for this folder: ${widget.defaultProfile}.',
-                            selected: widget.currentProfile == null,
-                            badges: const <String>['default'],
-                            onTap: () => Navigator.of(
-                              context,
-                            ).pop(const _ProfilePickerResult(null)),
-                          );
-                        }
-                        final profile =
-                            filtered[index - (query.isEmpty ? 1 : 0)];
-                        return _ModelPickerTile(
-                          title: profile.name,
-                          model: null,
-                          description: _profilePickerDescription(profile),
-                          selected: profile.name == widget.currentProfile,
-                          badges: <String>[
-                            if (profile.isDefault) 'default',
-                            if (_profileProviderLabel(profile) != null) 'agent',
-                            if (_trimmedOrNull(profile.model) != null)
-                              'model set',
-                          ],
-                          onTap: () => Navigator.of(
-                            context,
-                          ).pop(_ProfilePickerResult(profile.name)),
-                        );
-                      },
-                    ),
+          ),
+          if (widget.loadError != null) ...[
+            const SizedBox(height: 12),
+            _CompactInfoLine(
+              icon: Icons.info_outline_rounded,
+              text: 'Could not load profiles: ${widget.loadError}',
             ),
           ],
-        ),
+          const SizedBox(height: 14),
+          Expanded(
+            child: filtered.isEmpty && query.isNotEmpty
+                ? Center(
+                    child: Text(
+                      'No profiles match that search.',
+                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                        color: colors.textSecondary,
+                      ),
+                    ),
+                  )
+                : ListView.separated(
+                    itemCount: filtered.length + (query.isEmpty ? 1 : 0),
+                    separatorBuilder: (_, _) => const SizedBox(height: 8),
+                    itemBuilder: (context, index) {
+                      if (query.isEmpty && index == 0) {
+                        return _ModelPickerTile(
+                          title: 'Use defaults',
+                          model: null,
+                          description: widget.defaultProfile == null
+                              ? 'Use this machine\'s default setup.'
+                              : 'Use the default setup saved for this folder: ${widget.defaultProfile}.',
+                          selected: widget.currentProfile == null,
+                          badges: const <String>['default'],
+                          onTap: () => Navigator.of(
+                            context,
+                          ).pop(const _ProfilePickerResult(null)),
+                        );
+                      }
+                      final profile = filtered[index - (query.isEmpty ? 1 : 0)];
+                      return _ModelPickerTile(
+                        title: profile.name,
+                        model: null,
+                        description: _profilePickerDescription(profile),
+                        selected: profile.name == widget.currentProfile,
+                        badges: <String>[
+                          if (profile.isDefault) 'default',
+                          if (_profileProviderLabel(profile) != null) 'agent',
+                          if (_trimmedOrNull(profile.model) != null)
+                            'model set',
+                        ],
+                        onTap: () => Navigator.of(
+                          context,
+                        ).pop(_ProfilePickerResult(profile.name)),
+                      );
+                    },
+                  ),
+          ),
+        ],
       ),
     );
   }
@@ -2706,104 +2693,89 @@ class _ModelPickerSheetState extends State<_ModelPickerSheet> {
         })
         .toList(growable: false);
 
-    return FractionallySizedBox(
-      heightFactor: 0.82,
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(20, 8, 20, 24),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              'Choose model',
-              style: Theme.of(
-                context,
-              ).textTheme.titleLarge?.copyWith(fontWeight: AppWeights.emphasis),
+    return MeshBottomSheetScaffold(
+      icon: Icons.memory_rounded,
+      title: 'Choose a model',
+      description: widget.profileName == null
+          ? 'Use the machine default, or choose a model just for this session.'
+          : 'Use the model from profile ${widget.profileName}, or choose a different one just for this session.',
+      maxWidth: 760,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          TextField(
+            controller: _queryController,
+            decoration: const InputDecoration(
+              prefixIcon: Icon(Icons.search_rounded),
+              hintText: 'Search models',
             ),
-            const SizedBox(height: 6),
-            Text(
-              widget.profileName == null
-                  ? 'Use the machine default, or choose a model just for this session.'
-                  : 'Use the model from profile ${widget.profileName}, or choose a different one for this session.',
-              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                color: colors.textSecondary,
-                height: 1.4,
-              ),
-            ),
-            const SizedBox(height: 16),
-            TextField(
-              controller: _queryController,
-              decoration: const InputDecoration(
-                prefixIcon: Icon(Icons.search_rounded),
-                hintText: 'Search models',
-              ),
-            ),
-            const SizedBox(height: 14),
-            Expanded(
-              child: filtered.isEmpty && query.isNotEmpty
-                  ? Center(
-                      child: Text(
-                        'No models match that search.',
-                        style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                          color: colors.textSecondary,
-                        ),
+          ),
+          const SizedBox(height: 14),
+          Expanded(
+            child: filtered.isEmpty && query.isNotEmpty
+                ? Center(
+                    child: Text(
+                      'No models match that search.',
+                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                        color: colors.textSecondary,
                       ),
-                    )
-                  : ListView.separated(
-                      itemCount: filtered.length + (query.isEmpty ? 1 : 0),
-                      separatorBuilder: (_, _) => const SizedBox(height: 8),
-                      itemBuilder: (context, index) {
-                        if (query.isEmpty && index == 0) {
-                          final profileName = widget.profileName;
-                          return _ModelPickerTile(
-                            title: profileName == null
-                                ? 'Use machine default'
-                                : 'Use profile default',
-                            model: widget.inheritedModel,
-                            description: profileName == null
-                                ? 'Use the model already set on this machine.'
-                                : _profileModelInheritDescription(
-                                    profileName,
-                                    widget.profile,
-                                    widget.providerName,
-                                  ),
-                            selected: widget.currentModel == null,
-                            badges: <String>[
-                              'default',
-                              if (widget.profile?.isDefault ?? false) 'profile',
-                            ],
-                            onTap: () => Navigator.of(
-                              context,
-                            ).pop(const _ModelPickerResult()),
-                          );
-                        }
-                        final model = filtered[index - (query.isEmpty ? 1 : 0)];
+                    ),
+                  )
+                : ListView.separated(
+                    itemCount: filtered.length + (query.isEmpty ? 1 : 0),
+                    separatorBuilder: (_, _) => const SizedBox(height: 8),
+                    itemBuilder: (context, index) {
+                      if (query.isEmpty && index == 0) {
+                        final profileName = widget.profileName;
                         return _ModelPickerTile(
-                          title: model.displayName,
-                          model: model,
-                          description: model.description,
-                          selected: model.model == widget.currentModel,
-                          badges: <String>[
-                            if (model.isAutoModel) 'auto',
-                            if (model.isDefault) 'default',
-                            if (model.isProfileModel) 'profile',
-                            if (model.supportsFastMode) 'fast',
-                            ...model.supportedReasoningEfforts
-                                .take(3)
-                                .map(
-                                  (option) => _reasoningEffortLabel(
-                                    option.reasoningEffort,
-                                  ),
+                          title: profileName == null
+                              ? 'Use machine default'
+                              : 'Use profile default',
+                          model: widget.inheritedModel,
+                          description: profileName == null
+                              ? 'Use the model already set on this machine.'
+                              : _profileModelInheritDescription(
+                                  profileName,
+                                  widget.profile,
+                                  widget.providerName,
                                 ),
+                          selected: widget.currentModel == null,
+                          badges: <String>[
+                            'default',
+                            if (widget.profile?.isDefault ?? false) 'profile',
                           ],
                           onTap: () => Navigator.of(
                             context,
-                          ).pop(_ModelPickerResult(model: model)),
+                          ).pop(const _ModelPickerResult()),
                         );
-                      },
-                    ),
-            ),
-          ],
-        ),
+                      }
+                      final model = filtered[index - (query.isEmpty ? 1 : 0)];
+                      return _ModelPickerTile(
+                        title: model.displayName,
+                        model: model,
+                        description: model.description,
+                        selected: model.model == widget.currentModel,
+                        badges: <String>[
+                          if (model.isAutoModel) 'auto',
+                          if (model.isDefault) 'default',
+                          if (model.isProfileModel) 'profile',
+                          if (model.supportsFastMode) 'fast',
+                          ...model.supportedReasoningEfforts
+                              .take(3)
+                              .map(
+                                (option) => _reasoningEffortLabel(
+                                  option.reasoningEffort,
+                                ),
+                              ),
+                        ],
+                        onTap: () => Navigator.of(
+                          context,
+                        ).pop(_ModelPickerResult(model: model)),
+                      );
+                    },
+                  ),
+          ),
+        ],
       ),
     );
   }
@@ -3124,153 +3096,149 @@ class _DirectoryPickerSheetState extends State<_DirectoryPickerSheet> {
   @override
   Widget build(BuildContext context) {
     final colors = context.colors;
-    return SafeArea(
-      child: Container(
-        height: MediaQuery.of(context).size.height * 0.62,
-        decoration: BoxDecoration(
-          color: colors.surface,
-          borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            // Handle bar
-            Center(
-              child: Container(
-                margin: const EdgeInsets.only(top: 10, bottom: 6),
-                width: 36,
-                height: 4,
-                decoration: BoxDecoration(
-                  color: colors.border,
-                  borderRadius: BorderRadius.circular(2),
-                ),
-              ),
-            ),
-            // Header row
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 4, 8, 8),
-              child: Row(
-                children: [
-                  IconButton(
-                    icon: const Icon(Icons.arrow_upward_rounded, size: 20),
-                    tooltip: 'Parent directory',
-                    visualDensity: VisualDensity.compact,
-                    onPressed: _up,
+    return MeshBottomSheetScaffold(
+      icon: Icons.folder_open_rounded,
+      title: 'Choose a folder',
+      description:
+          'Start the session inside one of your workspace folders on this machine.',
+      maxWidth: 760,
+      maxHeightFactor: 0.7,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          MeshSurface(
+            tone: MeshSurfaceTone.muted,
+            radius: AppRadii.control,
+            padding: const EdgeInsets.fromLTRB(12, 12, 12, 12),
+            child: LayoutBuilder(
+              builder: (context, constraints) {
+                final stackActions = constraints.maxWidth < 560;
+                final pathText = Text(
+                  _path,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: monoStyle(
+                    color: colors.textPrimary,
+                    fontSize: 13,
+                    fontWeight: AppWeights.emphasis,
                   ),
-                  const SizedBox(width: 4),
-                  Expanded(
-                    child: Text(
-                      _path,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: monoStyle(
-                        color: colors.textPrimary,
-                        fontSize: 13,
-                        fontWeight: AppWeights.emphasis,
-                      ),
+                );
+                final actions = Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  alignment: WrapAlignment.end,
+                  children: [
+                    OutlinedButton.icon(
+                      onPressed: _up,
+                      icon: const Icon(Icons.arrow_upward_rounded, size: 18),
+                      label: const Text('Up'),
                     ),
-                  ),
-                  TextButton(
-                    onPressed: () => Navigator.of(context).pop(_path),
-                    child: const Text('Select'),
-                  ),
-                ],
-              ),
-            ),
-            Divider(color: colors.border, height: 1),
-            // Content
-            Expanded(
-              child: _loading
-                  ? Center(
-                      child: CircularProgressIndicator(
-                        strokeWidth: 2,
-                        color: colors.accent,
+                    FilledButton(
+                      onPressed: () => Navigator.of(context).pop(_path),
+                      child: const Text('Use folder'),
+                    ),
+                  ],
+                );
+                if (stackActions) {
+                  return Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Current folder',
+                        style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                          fontWeight: AppWeights.title,
+                        ),
                       ),
-                    )
-                  : _error != null
-                  ? Padding(
-                      padding: const EdgeInsets.all(24),
+                      const SizedBox(height: 6),
+                      pathText,
+                      const SizedBox(height: 10),
+                      actions,
+                    ],
+                  );
+                }
+                return Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Expanded(
                       child: Column(
-                        mainAxisAlignment: MainAxisAlignment.center,
+                        crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Icon(
-                            Icons.folder_off_rounded,
-                            size: 32,
-                            color: colors.textTertiary,
-                          ),
-                          const SizedBox(height: AppSpacing.sm),
                           Text(
-                            _error!,
-                            textAlign: TextAlign.center,
-                            style: TextStyle(
-                              color: colors.danger,
-                              fontSize: 13,
-                            ),
+                            'Current folder',
+                            style: Theme.of(context).textTheme.labelLarge
+                                ?.copyWith(fontWeight: AppWeights.title),
                           ),
-                          if (_path == '/') ...[
-                            const SizedBox(height: AppSpacing.md),
-                            FilledButton.tonal(
-                              onPressed: _up,
-                              child: const Text('Try parent'),
-                            ),
-                          ],
+                          const SizedBox(height: 6),
+                          pathText,
                         ],
                       ),
-                    )
-                  : _entries.isEmpty
-                  ? Center(
-                      child: Text(
-                        'No sub-directories',
-                        style: TextStyle(color: colors.textSecondary),
-                      ),
-                    )
-                  : ListView.builder(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 12,
-                        vertical: 8,
-                      ),
-                      itemCount: _entries.length,
-                      itemBuilder: (context, i) {
-                        final entry = _entries[i];
-                        return InkWell(
-                          borderRadius: AppShapes.input,
-                          onTap: () => _enter(entry.name),
-                          child: Padding(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 12,
-                              vertical: 10,
-                            ),
-                            child: Row(
-                              children: [
-                                Icon(
-                                  Icons.folder_rounded,
-                                  size: 18,
-                                  color: colors.accent,
-                                ),
-                                const SizedBox(width: 12),
-                                Expanded(
-                                  child: Text(
-                                    entry.name,
-                                    style: TextStyle(
-                                      color: colors.textPrimary,
-                                      fontSize: 14,
-                                    ),
-                                  ),
-                                ),
-                                Icon(
-                                  Icons.chevron_right_rounded,
-                                  size: 16,
-                                  color: colors.textTertiary,
-                                ),
-                              ],
-                            ),
-                          ),
-                        );
-                      },
                     ),
+                    const SizedBox(width: 12),
+                    actions,
+                  ],
+                );
+              },
             ),
-          ],
-        ),
+          ),
+          const SizedBox(height: 12),
+          Expanded(
+            child: _loading
+                ? Center(
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      color: colors.accent,
+                    ),
+                  )
+                : _error != null
+                ? Center(
+                    child: Padding(
+                      padding: const EdgeInsets.all(24),
+                      child: Text(
+                        _error!,
+                        textAlign: TextAlign.center,
+                        style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                          color: colors.danger,
+                          height: 1.4,
+                        ),
+                      ),
+                    ),
+                  )
+                : _entries.isEmpty
+                ? Center(
+                    child: Text(
+                      'No folders are available here yet.',
+                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                        color: colors.textSecondary,
+                      ),
+                    ),
+                  )
+                : ListView.separated(
+                    padding: EdgeInsets.zero,
+                    itemCount: _entries.length,
+                    separatorBuilder: (_, _) => const SizedBox(height: 8),
+                    itemBuilder: (context, i) {
+                      final entry = _entries[i];
+                      return MeshListRow(
+                        framed: false,
+                        dense: true,
+                        radius: AppRadii.control,
+                        leading: Icon(
+                          Icons.folder_rounded,
+                          size: 18,
+                          color: colors.accent,
+                        ),
+                        title: Text(entry.name),
+                        trailing: Icon(
+                          Icons.chevron_right_rounded,
+                          size: 16,
+                          color: colors.textTertiary,
+                        ),
+                        onTap: () => _enter(entry.name),
+                      );
+                    },
+                  ),
+          ),
+        ],
       ),
     );
   }

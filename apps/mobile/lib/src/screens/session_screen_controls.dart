@@ -487,8 +487,8 @@ class _SessionControlsSheetState extends State<SessionControlsSheet> {
 
     final selected = await showModalBottomSheet<ModelCatalogEntry>(
       context: context,
-      backgroundColor: context.colors.surface,
-      showDragHandle: true,
+      backgroundColor: Colors.transparent,
+      showDragHandle: false,
       useSafeArea: true,
       isScrollControlled: true,
       builder: (sheetContext) => _ModelPickerSheet(
@@ -798,32 +798,33 @@ class _SessionControlsSheetState extends State<SessionControlsSheet> {
                   Wrap(
                     spacing: 8,
                     runSpacing: 8,
-                    children: <String?>[
-                      null,
-                      ..._availableModeChoices.map((mode) => mode.id),
-                    ].map((mode) {
-                      final selected = mode == _effectiveMode;
-                      final fromRuntime =
-                          mode != null &&
-                          _turnConfig.mode == null &&
-                          widget.runtimeMode == mode;
-                      return _ReasoningChoiceChip(
-                        label: _sessionModeChoiceLabel(
-                          mode,
-                          _availableModeChoices,
-                        ),
-                        selected: selected,
-                        isDefault: mode == null || fromRuntime,
-                        defaultLabel: mode == null ? 'inherit' : 'current',
-                        onTap: () {
-                          setState(() {
-                            _turnConfig = _normalisedTurnConfig(
-                              _turnConfig.copyWith(mode: mode),
-                            );
-                          });
-                        },
-                      );
-                    }).toList(),
+                    children:
+                        <String?>[
+                          null,
+                          ..._availableModeChoices.map((mode) => mode.id),
+                        ].map((mode) {
+                          final selected = mode == _effectiveMode;
+                          final fromRuntime =
+                              mode != null &&
+                              _turnConfig.mode == null &&
+                              widget.runtimeMode == mode;
+                          return _ReasoningChoiceChip(
+                            label: _sessionModeChoiceLabel(
+                              mode,
+                              _availableModeChoices,
+                            ),
+                            selected: selected,
+                            isDefault: mode == null || fromRuntime,
+                            defaultLabel: mode == null ? 'inherit' : 'current',
+                            onTap: () {
+                              setState(() {
+                                _turnConfig = _normalisedTurnConfig(
+                                  _turnConfig.copyWith(mode: mode),
+                                );
+                              });
+                            },
+                          );
+                        }).toList(),
                   ),
                   const SizedBox(height: 8),
                   Text(
@@ -1139,9 +1140,9 @@ class _ModelSelectionCard extends StatelessWidget {
               Expanded(
                 child: Text(
                   title,
-                  style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                    fontWeight: FontWeight.w700,
-                  ),
+                  style: Theme.of(
+                    context,
+                  ).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w700),
                 ),
               ),
               if (loading)
@@ -1359,129 +1360,114 @@ class _ModelPickerSheetState extends State<_ModelPickerSheet> {
         })
         .toList(growable: false);
 
-    return FractionallySizedBox(
-      heightFactor: 0.82,
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(20, 8, 20, 24),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              'Choose a model',
-              style: Theme.of(
-                context,
-              ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w700),
+    return MeshBottomSheetScaffold(
+      icon: Icons.memory_rounded,
+      title: 'Choose a model',
+      description: widget.providerName == null
+          ? 'Pick the model for the next reply. Auto models keep things simple, while named models let you choose thinking effort.'
+          : 'Pick the model for the next reply on this session\'s ${widget.providerName} provider.',
+      maxWidth: 760,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          TextField(
+            controller: _queryController,
+            decoration: const InputDecoration(
+              prefixIcon: Icon(Icons.search_rounded),
+              hintText: 'Search models',
             ),
-            const SizedBox(height: 6),
-            Text(
-              widget.providerName == null
-                  ? 'Pick the model for the next reply. Auto models keep things simple; named models let you choose thinking effort.'
-                  : 'Pick the model for the next reply on this session\'s ${widget.providerName} provider.',
-              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                color: colors.textSecondary,
-                height: 1.4,
-              ),
-            ),
-            const SizedBox(height: 16),
-            TextField(
-              controller: _queryController,
-              decoration: const InputDecoration(
-                prefixIcon: Icon(Icons.search_rounded),
-                hintText: 'Search models',
-              ),
-            ),
-            const SizedBox(height: 14),
-            Expanded(
-              child: filtered.isEmpty
-                  ? Center(
-                      child: Text(
-                        'No models match that search.',
-                        style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                          color: colors.textSecondary,
-                        ),
+          ),
+          const SizedBox(height: 14),
+          Expanded(
+            child: filtered.isEmpty
+                ? Center(
+                    child: Text(
+                      'No models match that search.',
+                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                        color: colors.textSecondary,
                       ),
-                    )
-                  : ListView.separated(
-                      itemCount: filtered.length,
-                      separatorBuilder: (_, _) => const SizedBox(height: 8),
-                      itemBuilder: (context, index) {
-                        final model = filtered[index];
-                        final isCurrent =
-                            model.model == _trimmedOrNull(widget.currentModel);
-                        return MeshSurface(
-                          onTap: () => Navigator.of(context).pop(model),
-                          selected: isCurrent,
-                          tone: MeshSurfaceTone.muted,
-                          radius: AppRadii.control,
-                          padding: const EdgeInsets.all(14),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Row(
-                                children: [
-                                  Expanded(
-                                    child: Text(
-                                      model.displayName,
-                                      style: Theme.of(context)
-                                          .textTheme
-                                          .titleSmall
-                                          ?.copyWith(
-                                            fontWeight: FontWeight.w700,
-                                          ),
-                                    ),
+                    ),
+                  )
+                : ListView.separated(
+                    itemCount: filtered.length,
+                    separatorBuilder: (_, _) => const SizedBox(height: 8),
+                    itemBuilder: (context, index) {
+                      final model = filtered[index];
+                      final isCurrent =
+                          model.model == _trimmedOrNull(widget.currentModel);
+                      return MeshSurface(
+                        onTap: () => Navigator.of(context).pop(model),
+                        selected: isCurrent,
+                        tone: MeshSurfaceTone.muted,
+                        radius: AppRadii.control,
+                        padding: const EdgeInsets.all(14),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Row(
+                              children: [
+                                Expanded(
+                                  child: Text(
+                                    model.displayName,
+                                    style: Theme.of(context)
+                                        .textTheme
+                                        .titleSmall
+                                        ?.copyWith(fontWeight: FontWeight.w700),
                                   ),
-                                  if (isCurrent)
-                                    const _InlineBadge(label: 'current'),
-                                ],
-                              ),
-                              const SizedBox(height: 4),
-                              Text(
-                                model.model,
-                                style: monoStyle(
-                                  color: colors.textSecondary,
-                                  fontSize: 12,
-                                  fontWeight: FontWeight.w600,
                                 ),
+                                if (isCurrent)
+                                  const _InlineBadge(label: 'current'),
+                              ],
+                            ),
+                            const SizedBox(height: 4),
+                            Text(
+                              model.model,
+                              style: monoStyle(
+                                color: colors.textSecondary,
+                                fontSize: 12,
+                                fontWeight: FontWeight.w600,
                               ),
-                              const SizedBox(height: 8),
-                              Wrap(
-                                spacing: 8,
-                                runSpacing: 8,
-                                children: [
-                                  if (widget.providerName != null)
-                                    _InlineBadge(label: widget.providerName!),
-                                  if (model.isAutoModel)
-                                    const _InlineBadge(label: 'auto'),
-                                  if (model.isDefault)
-                                    const _InlineBadge(label: 'default'),
-                                  if (model.supportsFastMode)
-                                    const _InlineBadge(label: 'fast'),
-                                  ...model.supportedReasoningEfforts.take(3).map(
-                                        (option) => _InlineBadge(
-                                          label: _reasoningEffortLabel(
-                                            option.reasoningEffort,
-                                          ),
+                            ),
+                            const SizedBox(height: 8),
+                            Wrap(
+                              spacing: 8,
+                              runSpacing: 8,
+                              children: [
+                                if (widget.providerName != null)
+                                  _InlineBadge(label: widget.providerName!),
+                                if (model.isAutoModel)
+                                  const _InlineBadge(label: 'auto'),
+                                if (model.isDefault)
+                                  const _InlineBadge(label: 'default'),
+                                if (model.supportsFastMode)
+                                  const _InlineBadge(label: 'fast'),
+                                ...model.supportedReasoningEfforts
+                                    .take(3)
+                                    .map(
+                                      (option) => _InlineBadge(
+                                        label: _reasoningEffortLabel(
+                                          option.reasoningEffort,
                                         ),
                                       ),
-                                ],
-                              ),
-                              const SizedBox(height: 8),
-                              Text(
-                                model.description,
-                                style: Theme.of(context).textTheme.bodySmall
-                                    ?.copyWith(
-                                      color: colors.textSecondary,
-                                      height: 1.35,
                                     ),
-                              ),
-                            ],
-                          ),
-                        );
-                      },
-                    ),
-            ),
-          ],
-        ),
+                              ],
+                            ),
+                            const SizedBox(height: 8),
+                            Text(
+                              model.description,
+                              style: Theme.of(context).textTheme.bodySmall
+                                  ?.copyWith(
+                                    color: colors.textSecondary,
+                                    height: 1.35,
+                                  ),
+                            ),
+                          ],
+                        ),
+                      );
+                    },
+                  ),
+          ),
+        ],
       ),
     );
   }
@@ -1780,8 +1766,7 @@ String _sessionModeDescription(
     return description.trim();
   }
   return switch (value) {
-    null =>
-      'Keep the current $providerName mode for the next reply.',
+    null => 'Keep the current $providerName mode for the next reply.',
     'interactive' =>
       'Interactive keeps the agent conversational and approval-oriented.',
     'plan' =>
