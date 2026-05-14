@@ -171,7 +171,8 @@ class _Composer extends StatelessWidget {
     );
 
     // ── Zone 1: bar row ─────────────────────────────────────────────────────
-    final bool showPlusButton = !isDesktop &&
+    final bool showPlusButton =
+        !isDesktop &&
         (supportsImageInput || supportsSkillInput || supportsFileMentions);
 
     final barRow = Row(
@@ -228,7 +229,6 @@ class _Composer extends StatelessWidget {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-
             // ── Zone 3a: Skill suggestion tray ─────────────────────────────
             // Lives *above* the context shelf so it overlays the conversation
             // list visually without being clipped by the pill.
@@ -428,10 +428,9 @@ class _ComposerShelfChip extends StatelessWidget {
                         label,
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
-                        style:
-                            Theme.of(context).textTheme.labelSmall?.copyWith(
-                              fontWeight: AppWeights.emphasis,
-                            ),
+                        style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                          fontWeight: AppWeights.emphasis,
+                        ),
                       ),
                       Text(
                         sublabel!,
@@ -516,40 +515,35 @@ class _ComposerPlusButton extends StatelessWidget {
 
     showModalBottomSheet<void>(
       context: context,
-      backgroundColor: context.colors.surface,
-      showDragHandle: true,
+      backgroundColor: Colors.transparent,
+      showDragHandle: false,
       useSafeArea: true,
       builder: (ctx) {
         final colors = ctx.colors;
-        return SafeArea(
-          top: false,
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  'Add',
-                  style: Theme.of(ctx).textTheme.titleMedium?.copyWith(
-                    fontWeight: AppWeights.title,
-                  ),
+        return MeshBottomSheetScaffold(
+          icon: Icons.add_rounded,
+          title: 'Add something',
+          description:
+              'Attach an image, insert a skill, or mention a file in this message.',
+          maxWidth: 560,
+          maxHeightFactor: 0.48,
+          child: ListView(
+            padding: EdgeInsets.zero,
+            shrinkWrap: true,
+            children: [
+              for (final option in options)
+                MeshListRow(
+                  framed: false,
+                  dense: true,
+                  radius: AppRadii.control,
+                  leading: Icon(option.$1, color: colors.accent),
+                  title: Text(option.$2),
+                  onTap: () {
+                    Navigator.of(ctx).pop();
+                    option.$3();
+                  },
                 ),
-                const SizedBox(height: 8),
-                for (final option in options)
-                  MeshListRow(
-                    framed: false,
-                    dense: true,
-                    radius: AppRadii.control,
-                    leading: Icon(option.$1, color: colors.accent),
-                    title: Text(option.$2),
-                    onTap: () {
-                      Navigator.of(ctx).pop();
-                      option.$3();
-                    },
-                  ),
-              ],
-            ),
+            ],
           ),
         );
       },
@@ -842,11 +836,7 @@ class _ComposerSkillSuggestionTrayState
           border: Border.all(color: colors.border),
         ),
         alignment: Alignment.center,
-        child: Icon(
-          Icons.auto_awesome_rounded,
-          size: 15,
-          color: colors.accent,
-        ),
+        child: Icon(Icons.auto_awesome_rounded, size: 15, color: colors.accent),
       ),
       title: Text(
         skill.displayName,
@@ -860,9 +850,9 @@ class _ComposerSkillSuggestionTrayState
         skill.summaryDescription,
         maxLines: 2,
         overflow: TextOverflow.ellipsis,
-        style: Theme.of(context).textTheme.bodySmall?.copyWith(
-          color: colors.textSecondary,
-        ),
+        style: Theme.of(
+          context,
+        ).textTheme.bodySmall?.copyWith(color: colors.textSecondary),
       ),
       badges: [_SkillScopeBadge(skill: skill)],
       trailing: Text(
@@ -968,9 +958,9 @@ class _ComposerFileSuggestionTrayState
             Expanded(
               child: Text(
                 widget.error!,
-                style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                  color: colors.danger,
-                ),
+                style: Theme.of(
+                  context,
+                ).textTheme.bodySmall?.copyWith(color: colors.danger),
               ),
             ),
           ],
@@ -992,9 +982,9 @@ class _ComposerFileSuggestionTrayState
                 widget.query.trim().isEmpty
                     ? 'Type after "@" to search files.'
                     : 'No files match "@${widget.query}".',
-                style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                  color: colors.textSecondary,
-                ),
+                style: Theme.of(
+                  context,
+                ).textTheme.bodySmall?.copyWith(color: colors.textSecondary),
               ),
             ),
           ],

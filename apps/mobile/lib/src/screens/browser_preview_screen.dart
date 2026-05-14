@@ -13,6 +13,7 @@ import '../theme/app_colors.dart';
 import '../theme/app_theme.dart';
 import '../theme/app_tokens.dart';
 import '../widgets/app_dialogs.dart';
+import '../widgets/app_sheets.dart';
 import '../widgets/app_snackbar.dart';
 import '../widgets/mesh_widgets.dart';
 import '../host_reconnect_scheduler.dart';
@@ -5636,7 +5637,6 @@ class _ViewportResizeSheetState extends State<_ViewportResizeSheet> {
 
   @override
   Widget build(BuildContext context) {
-    final colors = context.colors;
     final keyboardInset = MediaQuery.viewInsetsOf(context).bottom;
     final presets = <_ViewportPreset>[
       const _ViewportPreset('Phone', 390, 844, 'Mobile portrait'),
@@ -5651,79 +5651,64 @@ class _ViewportResizeSheetState extends State<_ViewportResizeSheet> {
           'Match this Sidemesh pane',
         ),
     ];
-    return Container(
-      decoration: BoxDecoration(
-        color: colors.surface,
-        borderRadius: const BorderRadius.vertical(top: Radius.circular(16)),
-      ),
-      child: SafeArea(
-        top: false,
-        child: Padding(
-          padding: EdgeInsets.fromLTRB(18, 12, 18, 18 + keyboardInset),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                'Resize browser viewport',
-                style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                  color: colors.textPrimary,
-                  fontWeight: AppWeights.title,
-                ),
-              ),
-              const SizedBox(height: 6),
-              Text(
-                'This changes the remote Chromium viewport, not just the local image scale.',
-                style: TextStyle(color: colors.textSecondary, height: 1.35),
-              ),
-              const SizedBox(height: 16),
-              Wrap(
-                spacing: 8,
-                runSpacing: 8,
-                children: [
-                  for (final preset in presets)
-                    _ViewportPresetButton(
-                      preset: preset,
-                      selected:
-                          preset.width == widget.currentWidth &&
-                          preset.height == widget.currentHeight,
-                      onTap: () => Navigator.of(context).pop(preset),
-                    ),
-                ],
-              ),
-              const SizedBox(height: 18),
-              Row(
-                children: [
-                  Expanded(
-                    child: TextField(
-                      controller: _widthController,
-                      keyboardType: TextInputType.number,
-                      inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-                      decoration: const InputDecoration(labelText: 'Width'),
-                    ),
+    return MeshBottomSheetScaffold(
+      icon: Icons.aspect_ratio_rounded,
+      title: 'Resize browser viewport',
+      description:
+          'This changes the remote Chromium viewport, not just the local image scale.',
+      maxWidth: 760,
+      maxHeightFactor: 0.72,
+      child: SingleChildScrollView(
+        padding: EdgeInsets.only(bottom: keyboardInset),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                for (final preset in presets)
+                  _ViewportPresetButton(
+                    preset: preset,
+                    selected:
+                        preset.width == widget.currentWidth &&
+                        preset.height == widget.currentHeight,
+                    onTap: () => Navigator.of(context).pop(preset),
                   ),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: TextField(
-                      controller: _heightController,
-                      keyboardType: TextInputType.number,
-                      inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-                      decoration: const InputDecoration(labelText: 'Height'),
-                    ),
+              ],
+            ),
+            const SizedBox(height: 18),
+            Row(
+              children: [
+                Expanded(
+                  child: TextField(
+                    controller: _widthController,
+                    keyboardType: TextInputType.number,
+                    inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                    decoration: const InputDecoration(labelText: 'Width'),
                   ),
-                ],
-              ),
-              const SizedBox(height: 14),
-              SizedBox(
-                width: double.infinity,
-                child: FilledButton.icon(
-                  onPressed: _submitCustom,
-                  icon: const Icon(Icons.aspect_ratio_rounded),
-                  label: const Text('Apply custom viewport'),
                 ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: TextField(
+                    controller: _heightController,
+                    keyboardType: TextInputType.number,
+                    inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                    decoration: const InputDecoration(labelText: 'Height'),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 14),
+            SizedBox(
+              width: double.infinity,
+              child: FilledButton.icon(
+                onPressed: _submitCustom,
+                icon: const Icon(Icons.aspect_ratio_rounded),
+                label: const Text('Apply custom viewport'),
               ),
-            ],
-          ),
+            ),
+          ],
         ),
       ),
     );

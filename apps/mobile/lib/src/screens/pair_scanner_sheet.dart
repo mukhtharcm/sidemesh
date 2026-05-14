@@ -4,7 +4,7 @@ import 'package:mobile_scanner/mobile_scanner.dart';
 
 import '../pairing.dart';
 import '../theme/app_colors.dart';
-import '../widgets/mesh_widgets.dart';
+import '../widgets/app_sheets.dart';
 
 bool get canScanPairingQr {
   if (kIsWeb) return false;
@@ -70,100 +70,59 @@ class _PairScannerSheetState extends State<PairScannerSheet> {
   @override
   Widget build(BuildContext context) {
     final colors = context.colors;
-    final bottom = MediaQuery.of(context).viewInsets.bottom;
-    return Padding(
-      padding: EdgeInsets.fromLTRB(16, 16, 16, bottom + 16),
-      child: MeshCard(
-        tone: MeshCardTone.surface,
-        padding: const EdgeInsets.all(18),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                _ScannerGlyph(colors: colors),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        'Scan a pairing code',
-                        style: Theme.of(context).textTheme.titleLarge
-                            ?.copyWith(fontWeight: FontWeight.w800),
-                      ),
-                      Text(
-                        'On the machine you want to connect, run `sidemesh pair`, then scan the code here.',
-                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                          color: colors.textSecondary,
+    return MeshBottomSheetScaffold(
+      icon: Icons.qr_code_scanner_rounded,
+      title: 'Scan a pairing code',
+      description:
+          'On the machine you want to connect, run sidemesh pair, then scan the code here.',
+      maxWidth: 640,
+      maxHeightFactor: 0.88,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Expanded(
+            child: Center(
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 420),
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(18),
+                  child: AspectRatio(
+                    aspectRatio: 1,
+                    child: Stack(
+                      fit: StackFit.expand,
+                      children: [
+                        MobileScanner(
+                          controller: _controller,
+                          fit: BoxFit.cover,
+                          onDetect: _handleDetect,
+                          errorBuilder: (context, error) =>
+                              _ScannerError(error: error),
                         ),
-                      ),
-                    ],
+                        IgnorePointer(
+                          child: CustomPaint(
+                            painter: _ScanFramePainter(colors),
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
                 ),
-                IconButton(
-                  tooltip: 'Close scanner',
-                  onPressed: () => Navigator.of(context).pop(),
-                  icon: const Icon(Icons.close_rounded),
-                ),
-              ],
-            ),
-            const SizedBox(height: 16),
-            ClipRRect(
-              borderRadius: BorderRadius.circular(18),
-              child: AspectRatio(
-                aspectRatio: 1,
-                child: Stack(
-                  fit: StackFit.expand,
-                  children: [
-                    MobileScanner(
-                      controller: _controller,
-                      fit: BoxFit.cover,
-                      onDetect: _handleDetect,
-                      errorBuilder: (context, error) =>
-                          _ScannerError(error: error),
-                    ),
-                    IgnorePointer(
-                      child: CustomPaint(painter: _ScanFramePainter(colors)),
-                    ),
-                  ],
-                ),
               ),
             ),
-            if (_message != null) ...[
-              const SizedBox(height: 12),
-              Text(
-                _message!,
-                style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                  color: colors.warning,
-                  fontWeight: FontWeight.w700,
-                ),
+          ),
+          if (_message != null) ...[
+            const SizedBox(height: 12),
+            Text(
+              _message!,
+              textAlign: TextAlign.center,
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                color: colors.warning,
+                fontWeight: FontWeight.w700,
               ),
-            ],
+            ),
           ],
-        ),
+        ],
       ),
-    );
-  }
-}
-
-class _ScannerGlyph extends StatelessWidget {
-  const _ScannerGlyph({required this.colors});
-
-  final AppColors colors;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      width: 38,
-      height: 38,
-      decoration: BoxDecoration(
-        color: colors.accentMuted,
-        borderRadius: BorderRadius.circular(12),
-      ),
-      alignment: Alignment.center,
-      child: Icon(Icons.qr_code_scanner_rounded, color: colors.accent, size: 20),
     );
   }
 }
