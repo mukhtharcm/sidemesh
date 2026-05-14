@@ -1251,12 +1251,67 @@ void main() {
     );
     await _pumpFrames(tester);
 
-    expect(find.text('ran '), findsOneWidget);
+    expect(find.text('viewed '), findsOneWidget);
+    expect(find.text('session_screen.dart lines 1-80'), findsOneWidget);
+    expect(
+      find.text(
+        "sed -n '1,80p' apps/mobile/lib/src/screens/session_screen.dart",
+      ),
+      findsNothing,
+    );
+    expect(find.textContaining('/bin/bash'), findsNothing);
+
+    await tester.tap(find.text('session_screen.dart lines 1-80'));
+    await _pumpFrames(tester);
+
+    expect(find.text('Raw command'), findsOneWidget);
     expect(
       find.text(
         "sed -n '1,80p' apps/mobile/lib/src/screens/session_screen.dart",
       ),
       findsOneWidget,
+    );
+  });
+
+  testWidgets('session screen renders search commands as readable activity', (
+    tester,
+  ) async {
+    final session = _session('search-command-row');
+    final api = _RichEventFakeApi(
+      sessionSummary: session,
+      activities: [
+        _commandActivity(
+          id: 'rg-command',
+          seq: 1,
+          command:
+              "/bin/bash -lc 'rg -n \"parseCommandFunctionCall\" src/codex-history.ts'",
+          cwd: '/repo',
+          output: 'src/codex-history.ts:12:function parseCommandFunctionCall',
+        ),
+      ],
+    );
+    addTearDown(api.dispose);
+
+    await _pumpApp(
+      tester,
+      SessionScreen(
+        host: _host('search-command-row'),
+        session: session,
+        api: api,
+        desktopMode: true,
+      ),
+      size: const Size(1180, 900),
+    );
+    await _pumpFrames(tester);
+
+    expect(find.text('searched '), findsOneWidget);
+    expect(
+      find.text('for "parseCommandFunctionCall" in codex-history.ts'),
+      findsOneWidget,
+    );
+    expect(
+      find.text('rg -n "parseCommandFunctionCall" src/codex-history.ts'),
+      findsNothing,
     );
     expect(find.textContaining('/bin/bash'), findsNothing);
   });

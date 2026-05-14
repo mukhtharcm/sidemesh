@@ -2134,18 +2134,12 @@ class _ActivityCardState extends State<_ActivityCard> {
   }
 
   _CommandTitleParts? _activityCommandTitleParts(SessionActivity activity) {
-    final command = activity.isCommand
-        ? _displayCommandText(activity.command ?? '')
+    final rawCommand = activity.isCommand
+        ? activity.command ?? ''
         : activity.isTool && _toolIsCommandActivity(activity)
-        ? _displayCommandText(_toolCommandText(activity))
+        ? _toolCommandText(activity)
         : '';
-    if (command.isEmpty) {
-      return null;
-    }
-    return _CommandTitleParts(
-      verb: _commandStatusVerb(activity.status),
-      command: command,
-    );
+    return _commandTitleParts(rawCommand, activity.status);
   }
 
   Widget _buildActivityTitle(
@@ -2623,6 +2617,12 @@ class _ActivityCardState extends State<_ActivityCard> {
   ) {
     final colors = context.colors;
     final widgets = <Widget>[];
+    final command = _displayCommandText(activity.command ?? '');
+
+    if (_friendlyCommandTitleParts(command, activity.status) != null) {
+      widgets.add(_activityCodeBlock(context, 'Raw command', command, 'bash'));
+      widgets.add(const SizedBox(height: 12));
+    }
 
     if ((activity.terminalInput ?? '').isNotEmpty) {
       widgets.add(
@@ -2675,6 +2675,11 @@ class _ActivityCardState extends State<_ActivityCard> {
     final widgets = <Widget>[];
     widgets.addAll(_buildToolSemanticBlocks(context, activity));
     if (widgets.isNotEmpty) {
+      widgets.add(const SizedBox(height: 12));
+    }
+    final command = _displayCommandText(_toolCommandText(activity));
+    if (_friendlyCommandTitleParts(command, activity.status) != null) {
+      widgets.add(_activityCodeBlock(context, 'Raw command', command, 'bash'));
       widgets.add(const SizedBox(height: 12));
     }
     final output = (activity.output ?? '').trimRight();
@@ -2955,7 +2960,8 @@ class _ActivityCardState extends State<_ActivityCard> {
       return 'Search web for "$query"';
     }
     if (_toolIsCommandActivity(activity) && command.isNotEmpty) {
-      return _commandStatusTitle(activity.status, _displayCommandText(command));
+      return _commandTitleParts(command, activity.status)?.plainText ??
+          _commandStatusTitle(activity.status, _displayCommandText(command));
     }
 
     final title = (activity.toolTitle ?? '').trim();
@@ -4076,8 +4082,21 @@ String _activityFileSummary(
 }
 
 String _commandActivityTitle(SessionActivity activity) {
-  final command = _displayCommandText(activity.command ?? '');
-  return _commandStatusTitle(activity.status, command);
+  return _commandTitleParts(activity.command ?? '', activity.status)
+          ?.plainText ??
+      _commandStatusTitle(activity.status, '');
+}
+
+_CommandTitleParts? _commandTitleParts(String rawCommand, String status) {
+  final command = _displayCommandText(rawCommand);
+  if (command.isEmpty) {
+    return null;
+  }
+  return _friendlyCommandTitleParts(command, status) ??
+      _CommandTitleParts(
+        verb: _commandStatusVerb(status),
+        command: command,
+      );
 }
 
 String _commandStatusVerb(String status) {
@@ -4100,6 +4119,281 @@ String _commandStatusTitle(String status, String command) {
     };
   }
   return '$verb $target';
+}
+
+_CommandTitleParts? _friendlyCommandTitleParts(String command, String status) {
+  final trimmed = command.trim();
+  if (trimmed.isEmpty) {
+    return null;
+  }
+  final words = _splitShellWords(trimmed);
+  if (words.isEmpty) {
+    return null;
+  }
+  final program = _commandProgramName(words.first);
+  return switch (program) {
+    'sed' => _friendlySedCommandTitle(words, status),
+    'rg' => _friendlySearchCommandTitle(words, status, filesFlag: '--files'),
+    'grep' => _friendlySearchCommandTitle(words, status),
+    'ls' => _friendlyListCommandTitle(words, status),
+    'cat' => _friendlyCatCommandTitle(words, status),
+    _ => null,
+  };
+}
+
+_CommandTitleParts? _friendlySedCommandTitle(
+  List<String> words,
+  String status,
+) {
+  String? script;
+  var pathStart = 1;
+  for (var index = 1; index < words.length; index += 1) {
+    final word = words[index];
+    if (_isShellControlWord(word)) {
+      break;
+    }
+    if (word == '-n') {
+      continue;
+    }
+    if (word == '-e' && index + 1 < words.length) {
+      script = words[index + 1];
+      pathStart = index + 2;
+      break;
+    }
+    if (word.startsWith('-')) {
+      continue;
+    }
+    script = word;
+    pathStart = index + 1;
+    break;
+  }
+  final match = script == null
+      ? null
+      : RegExp(r'^(\d+)(?:,(\d+))?p$').firstMatch(script);
+  if (match == null) {
+    return null;
+  }
+  final start = match.group(1)!;
+  final end = match.group(2);
+  final lineLabel = end == null || end == start
+      ? 'line $start'
+      : 'lines $start-$end';
+  final target = _firstCommandPath(words, pathStart);
+  final command = target == null
+      ? lineLabel
+      : '${_friendlyPathLabel(target)} $lineLabel';
+  return _CommandTitleParts(
+    verb: _actionVerb(status, completed: 'viewed', progress: 'viewing'),
+    command: command,
+  );
+}
+
+_CommandTitleParts? _friendlySearchCommandTitle(
+  List<String> words,
+  String status, {
+  String? filesFlag,
+}) {
+  final targets = <String>[];
+  var sawFilesFlag = false;
+  String? query;
+
+  for (var index = 1; index < words.length; index += 1) {
+    final word = words[index];
+    if (_isShellControlWord(word)) {
+      break;
+    }
+    if (filesFlag != null && word == filesFlag) {
+      sawFilesFlag = true;
+      continue;
+    }
+    if (word == '-e' || word == '--regexp') {
+      if (index + 1 < words.length) {
+        query = words[index + 1];
+        index += 1;
+      }
+      continue;
+    }
+    if (word.startsWith('--regexp=')) {
+      query = word.substring('--regexp='.length);
+      continue;
+    }
+    if (_commandOptionTakesValue(word)) {
+      index += 1;
+      continue;
+    }
+    if (word.startsWith('-')) {
+      continue;
+    }
+    if (query == null) {
+      query = word;
+    } else {
+      targets.add(word);
+    }
+  }
+
+  if ((query == null || query.trim().isEmpty) && sawFilesFlag) {
+    final targetLabel = _friendlyTargetLabel(targets);
+    return _CommandTitleParts(
+      verb: _actionVerb(status, completed: 'listed', progress: 'listing'),
+      command: targetLabel.isEmpty ? 'files' : 'files in $targetLabel',
+    );
+  }
+  if (query == null || query.trim().isEmpty) {
+    return null;
+  }
+
+  final queryLabel = _friendlySnippet(query, 44);
+  final targetLabel = _friendlyTargetLabel(targets);
+  return _CommandTitleParts(
+    verb: _actionVerb(status, completed: 'searched', progress: 'searching'),
+    command: targetLabel.isEmpty
+        ? 'for "$queryLabel"'
+        : 'for "$queryLabel" in $targetLabel',
+  );
+}
+
+_CommandTitleParts? _friendlyListCommandTitle(
+  List<String> words,
+  String status,
+) {
+  final targets = _commandPathArgs(words, start: 1);
+  final targetLabel = _friendlyTargetLabel(targets);
+  return _CommandTitleParts(
+    verb: _actionVerb(status, completed: 'listed', progress: 'listing'),
+    command: targetLabel.isEmpty ? 'files' : 'files in $targetLabel',
+  );
+}
+
+_CommandTitleParts? _friendlyCatCommandTitle(
+  List<String> words,
+  String status,
+) {
+  final target = _firstCommandPath(words, 1);
+  if (target == null) {
+    return null;
+  }
+  return _CommandTitleParts(
+    verb: _actionVerb(status, completed: 'viewed', progress: 'viewing'),
+    command: _friendlyPathLabel(target),
+  );
+}
+
+String _actionVerb(
+  String status, {
+  required String completed,
+  required String progress,
+}) {
+  return switch (status) {
+    'failed' => 'failed $progress',
+    'declined' => 'declined $progress',
+    'in_progress' => progress,
+    _ => completed,
+  };
+}
+
+String _commandProgramName(String value) {
+  return value.replaceAll('\\', '/').split('/').last;
+}
+
+bool _isShellControlWord(String value) {
+  return value == '|' ||
+      value == '&&' ||
+      value == '||' ||
+      value == ';' ||
+      value == '>' ||
+      value == '>>' ||
+      value == '<' ||
+      value == '2>' ||
+      value == '2>&1';
+}
+
+bool _commandOptionTakesValue(String value) {
+  const options = {
+    '-A',
+    '-B',
+    '-C',
+    '-g',
+    '-m',
+    '-t',
+    '--after-context',
+    '--before-context',
+    '--context',
+    '--glob',
+    '--max-count',
+    '--type',
+  };
+  return options.contains(value);
+}
+
+String? _firstCommandPath(List<String> words, int start) {
+  final args = _commandPathArgs(words, start: start);
+  return args.isEmpty ? null : args.first;
+}
+
+List<String> _commandPathArgs(List<String> words, {required int start}) {
+  final args = <String>[];
+  for (var index = start; index < words.length; index += 1) {
+    final word = words[index];
+    if (_isShellControlWord(word)) {
+      break;
+    }
+    if (_commandOptionTakesValue(word)) {
+      index += 1;
+      continue;
+    }
+    if (word.startsWith('-')) {
+      continue;
+    }
+    args.add(word);
+  }
+  return args;
+}
+
+String _friendlyTargetLabel(List<String> targets) {
+  if (targets.isEmpty) {
+    return '';
+  }
+  final labels = targets
+      .take(2)
+      .map(_friendlyPathLabel)
+      .where((label) => label.isNotEmpty)
+      .toList();
+  final remainder = targets.length - labels.length;
+  if (remainder > 0) {
+    labels.add('+$remainder more');
+  }
+  return labels.join(', ');
+}
+
+String _friendlyPathLabel(String path) {
+  final trimmed = path.trim();
+  if (trimmed.isEmpty) {
+    return '';
+  }
+  if (trimmed == '.' || trimmed == '..') {
+    return trimmed;
+  }
+  final normalized = trimmed.replaceAll('\\', '/');
+  final withoutTrailingSlash = normalized.replaceFirst(RegExp(r'/+$'), '');
+  final parts = withoutTrailingSlash
+      .split('/')
+      .where((part) => part.isNotEmpty)
+      .toList(growable: false);
+  if (parts.isEmpty) {
+    return _friendlySnippet(trimmed, 36);
+  }
+  return _friendlySnippet(parts.last, 36);
+}
+
+String _friendlySnippet(String value, int maxLength) {
+  final singleLine = value.replaceAll(RegExp(r'\s+'), ' ').trim();
+  if (singleLine.length <= maxLength) {
+    return singleLine;
+  }
+  if (maxLength <= 3) {
+    return singleLine.substring(0, maxLength);
+  }
+  return '${singleLine.substring(0, maxLength - 3)}...';
 }
 
 String _displayCommandText(String raw) {
