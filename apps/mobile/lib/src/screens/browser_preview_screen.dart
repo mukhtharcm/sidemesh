@@ -109,7 +109,7 @@ class _BrowserPreviewPaneState extends State<BrowserPreviewPane>
   int _frameWidth = 390;
   int _frameHeight = 844;
   Size? _lastPreviewBoxSize;
-  String? _status = 'Connecting to remote browser...';
+  String? _status = 'Connecting to preview...';
   String? _error;
   bool _inputRailConfigured = false;
   bool _inputRailOpen = false;
@@ -229,8 +229,8 @@ class _BrowserPreviewPaneState extends State<BrowserPreviewPane>
     if (mounted) {
       setState(() {
         _status = _frameBytes == null
-            ? 'Connecting to remote browser...'
-            : 'Reconnecting stream...';
+            ? 'Connecting to preview...'
+            : 'Reconnecting preview...';
         _error = null;
         _networkAvailable = true;
         _networkUnavailableMessage = null;
@@ -250,11 +250,11 @@ class _BrowserPreviewPaneState extends State<BrowserPreviewPane>
         _firstFrameTimer?.cancel();
         if (_remoteClosed) {
           setState(() {
-            _status = 'Remote browser stopped.';
+            _status = 'Browser closed.';
           });
           return;
         }
-        _scheduleStreamReconnect('Viewer connection closed.');
+        _scheduleStreamReconnect('Preview connection closed.');
       },
       cancelOnError: true,
     );
@@ -272,8 +272,8 @@ class _BrowserPreviewPaneState extends State<BrowserPreviewPane>
     if (!mounted) return;
     setState(() {
       _status = manual
-          ? 'Stream paused. The remote browser is still running.'
-          : 'Stream paused while the app is in the background.';
+          ? 'Preview paused. The browser is still running.'
+          : 'Preview paused while the app is in the background.';
     });
   }
 
@@ -406,7 +406,7 @@ class _BrowserPreviewPaneState extends State<BrowserPreviewPane>
         widget.onStopped?.call(preview);
       }
       setState(() {
-        _status = 'Remote browser stopped.';
+        _status = 'Browser closed.';
         _error = null;
       });
       return;
@@ -833,9 +833,9 @@ class _BrowserPreviewPaneState extends State<BrowserPreviewPane>
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('Stop remote browser?'),
+        title: const Text('Close browser preview?'),
         content: const Text(
-          'This shuts down the remote Chromium instance. You can start a new preview from the Ports screen any time.',
+          'This closes the remote browser window. You can open a new preview from the previews screen any time.',
         ),
         actions: [
           TextButton(
@@ -864,7 +864,7 @@ class _BrowserPreviewPaneState extends State<BrowserPreviewPane>
       if (!mounted) return;
       showAppSnackBar(
         context,
-        'Could not stop browser preview: ${friendlyError(error)}',
+        'Could not close browser preview: ${friendlyError(error)}',
       );
     }
   }
@@ -1828,7 +1828,7 @@ class _BrowserChromeBar extends StatelessWidget {
                 icon: devToolsOpen
                     ? Icons.construction_rounded
                     : Icons.construction_outlined,
-                tooltip: devToolsOpen ? 'Hide DevTools' : 'DevTools',
+                tooltip: devToolsOpen ? 'Hide details' : 'Details',
                 color: devToolsOpen ? colors.accent : null,
                 onTap: onToggleDevTools,
               ),
@@ -1845,7 +1845,7 @@ class _BrowserChromeBar extends StatelessWidget {
                 const SizedBox(width: 2),
                 _ChromeButton(
                   icon: Icons.open_in_new_rounded,
-                  tooltip: 'Open in new window',
+                  tooltip: 'Open in its own window',
                   color: colors.accent,
                   onTap: onOpenInWindow!,
                 ),
@@ -1863,7 +1863,7 @@ class _BrowserChromeBar extends StatelessWidget {
             if (onStop != null)
               _ChromeButton(
                 icon: Icons.stop_circle_rounded,
-                tooltip: 'Stop remote browser',
+                tooltip: 'Close browser',
                 color: colors.danger,
                 onTap: onStop!,
               ),
@@ -2002,7 +2002,7 @@ class _BrowserBottomToolbar extends StatelessWidget {
                 icon: devToolsOpen
                     ? Icons.construction_rounded
                     : Icons.construction_outlined,
-                tooltip: 'DevTools',
+                tooltip: 'Details',
                 color: devToolsOpen ? colors.accent : null,
                 onTap: onToggleDevTools,
               ),
@@ -5537,7 +5537,7 @@ class _PausedPreviewOverlay extends StatelessWidget {
                 ),
                 const SizedBox(height: 10),
                 Text(
-                  manualPause ? 'Viewer paused' : 'Viewer is sleeping',
+                  manualPause ? 'Preview paused' : 'Preview sleeping',
                   style: Theme.of(context).textTheme.titleMedium?.copyWith(
                     color: colors.textPrimary,
                     fontWeight: FontWeight.w800,
@@ -5546,8 +5546,8 @@ class _PausedPreviewOverlay extends StatelessWidget {
                 const SizedBox(height: 6),
                 Text(
                   manualPause
-                      ? 'The remote browser is still running. Resume when you want fresh frames again.'
-                      : 'Sidemesh paused the stream while the app was backgrounded. Resume to reconnect.',
+                      ? 'The browser is still running. Resume when you want live updates again.'
+                      : 'Sidemesh paused the live feed while the app was in the background. Resume to reconnect.',
                   textAlign: TextAlign.center,
                   style: TextStyle(color: colors.textSecondary, height: 1.35),
                 ),
@@ -5555,7 +5555,7 @@ class _PausedPreviewOverlay extends StatelessWidget {
                 FilledButton.icon(
                   onPressed: onResume,
                   icon: const Icon(Icons.play_arrow_rounded),
-                  label: const Text('Resume stream'),
+                  label: const Text('Resume preview'),
                 ),
               ],
             ),
