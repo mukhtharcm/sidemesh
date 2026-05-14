@@ -568,7 +568,9 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
     final selected = _selectedProfile;
     if (selected != null) {
       final provider = _profileProviderLabel(selected);
-      final providerText = provider == null ? '' : ' Uses $provider.';
+      final providerText = provider == null
+          ? ''
+          : ' Uses models from $provider.';
       return '${_describeProviderProfile(selected)}$providerText Other settings will stay linked to this profile until you change them.';
     }
     final unresolvedProfile = _profileToSubmit;
@@ -2951,7 +2953,7 @@ String? _profileProviderLabel(ProviderProfileSummary profile) =>
 
 String _profilePickerDescription(ProviderProfileSummary profile) {
   final provider = _profileProviderLabel(profile);
-  final providerText = provider == null ? '' : ' Uses $provider.';
+  final providerText = provider == null ? '' : ' Uses models from $provider.';
   return '${_describeProviderProfile(profile)}$providerText';
 }
 

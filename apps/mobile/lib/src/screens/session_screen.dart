@@ -1459,10 +1459,7 @@ class _SessionScreenState extends State<SessionScreen>
 
   void _openResourcesPanel() {
     if (!_supportsSessionResources) {
-      showAppSnackBar(
-        context,
-        'This provider does not expose session resources.',
-      );
+      showAppSnackBar(context, 'This session does not have a resources view.');
       return;
     }
     final width = MediaQuery.of(context).size.width;
@@ -3109,7 +3106,7 @@ class _SessionScreenState extends State<SessionScreen>
     if (!_supportsImageInput) {
       showAppSnackBar(
         context,
-        'This provider does not support image attachments.',
+        'This session does not accept image attachments.',
       );
       return;
     }
@@ -3277,7 +3274,7 @@ class _SessionScreenState extends State<SessionScreen>
       if (showEmptyFeedback) {
         showAppSnackBar(
           context,
-          'This provider does not support image attachments.',
+          'This session does not accept image attachments.',
         );
       }
       return false;
@@ -4497,7 +4494,10 @@ class _SessionScreenState extends State<SessionScreen>
 
   Future<void> _stopSession() async {
     if (!_supportsSessionInterrupt) {
-      showAppSnackBar(context, 'This provider cannot stop the agent yet.');
+      showAppSnackBar(
+        context,
+        'Stopping the agent is not available for this session yet.',
+      );
       return;
     }
     final confirmed = await _showSessionConfirmDialog(
@@ -4541,7 +4541,10 @@ class _SessionScreenState extends State<SessionScreen>
 
   Future<void> _compactSession() async {
     if (!_supportsSessionCompact) {
-      showAppSnackBar(context, 'This provider does not support compaction.');
+      showAppSnackBar(
+        context,
+        'Context compaction is not available for this session.',
+      );
       return;
     }
     if (_running) {
@@ -4582,7 +4585,7 @@ class _SessionScreenState extends State<SessionScreen>
 
   Future<void> _renameSession() async {
     if (!_supportsSessionRename) {
-      showAppSnackBar(context, 'This provider does not support renaming.');
+      showAppSnackBar(context, 'Renaming is not available for this session.');
       return;
     }
     final current = (_session ?? widget.session).title;
@@ -4613,7 +4616,7 @@ class _SessionScreenState extends State<SessionScreen>
 
   Future<void> _archiveSession() async {
     if (!_supportsSessionArchive) {
-      showAppSnackBar(context, 'This provider does not support archiving.');
+      showAppSnackBar(context, 'Archiving is not available for this session.');
       return;
     }
     final confirmed = await _showSessionConfirmDialog(
@@ -4764,7 +4767,7 @@ class _SessionScreenState extends State<SessionScreen>
     bool forceRefresh = false,
   }) async {
     if (!_supportsGitStatus) {
-      showAppSnackBar(context, 'This provider does not expose git status.');
+      showAppSnackBar(context, 'Git status is not available for this session.');
       return;
     }
     if (forceRefresh || _gitStatus == null) {
@@ -4795,7 +4798,10 @@ class _SessionScreenState extends State<SessionScreen>
 
   Future<void> _showGitDiffSheet(String kind) async {
     if (!_supportsGitDiffKind(kind)) {
-      showAppSnackBar(context, 'This provider does not expose this git diff.');
+      showAppSnackBar(
+        context,
+        'This Git diff is not available for this session.',
+      );
       return;
     }
     if (!mounted) return;
@@ -4853,7 +4859,7 @@ class _SessionScreenState extends State<SessionScreen>
         icon: Icons.info_outline_rounded,
         title: 'Session details',
         description:
-            'See where this session is running and the live settings reported by the provider.',
+            'See where this session is running and the live settings the agent is using.',
         maxWidth: 760,
         maxHeightFactor: 0.86,
         child: SingleChildScrollView(
@@ -4948,7 +4954,7 @@ class _SessionScreenState extends State<SessionScreen>
                 const SizedBox(height: 14),
                 sectionLabel(
                   'Runtime now',
-                  'Live settings reported by the provider for the current session.',
+                  'Live settings the agent is using for this session.',
                 ),
                 const SizedBox(height: 8),
                 _SessionRuntimeDetails(runtime: session.runtime!),
@@ -6020,7 +6026,7 @@ class _SessionScreenState extends State<SessionScreen>
             const _SessionActionSpec(
               value: 'compact',
               label: 'Compact context',
-              detail: 'Ask the provider to compress this conversation.',
+              detail: 'Summarize older context to keep the session lighter.',
               icon: Icons.compress_rounded,
             ),
           if (widget.topPadding != null &&
@@ -6042,8 +6048,8 @@ class _SessionScreenState extends State<SessionScreen>
             if (_supportsProviderRestart)
               const _SessionActionSpec(
                 value: 'restart_provider',
-                label: 'Restart provider',
-                detail: 'Restart the agent process on this host.',
+                label: 'Restart agent',
+                detail: 'Restart the active agent on this host.',
                 icon: Icons.restart_alt_rounded,
                 tone: _SessionActionTone.warning,
               ),

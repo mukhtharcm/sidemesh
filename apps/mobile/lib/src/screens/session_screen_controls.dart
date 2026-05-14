@@ -201,14 +201,14 @@ class _SessionControlsSheetState extends State<SessionControlsSheet> {
     if (selected != null) {
       return selected.displayName;
     }
-    return _effectiveModelValue ?? 'Use provider default';
+    return _effectiveModelValue ?? 'Use session default';
   }
 
   String get _effectiveModelDescription {
     if (_loadingModels) {
       final provider = _runtimeModelProvider;
       if (provider != null) {
-        return 'Loading models from this session\'s $provider provider.';
+        return 'Loading models for this session…';
       }
       return 'Loading the available models from this host.';
     }
@@ -221,7 +221,7 @@ class _SessionControlsSheetState extends State<SessionControlsSheet> {
     }
     final provider = _runtimeModelProvider;
     if (provider != null) {
-      return 'Use the current $provider provider for new turns.';
+      return 'Use the current model source for new turns.';
     }
     return 'Use the host default model for new turns.';
   }
@@ -432,8 +432,8 @@ class _SessionControlsSheetState extends State<SessionControlsSheet> {
         _loadingModels = false;
         _modelsError = models.isEmpty
             ? _runtimeModelProvider == null
-                  ? 'This provider did not return any models for this host.'
-                  : 'No models returned for provider $_runtimeModelProvider.'
+                  ? 'No models are available from this host right now.'
+                  : 'No models were returned for this session.'
             : null;
       });
       _coerceTurnConfigForSelectedModel();
@@ -746,7 +746,7 @@ class _SessionControlsSheetState extends State<SessionControlsSheet> {
                       ),
                       const SizedBox(height: 2),
                       Text(
-                        '$_providerName does not expose session settings you can change after a run starts.',
+                        '$_providerName does not offer session settings you can change after a run starts.',
                         style: theme.textTheme.bodySmall?.copyWith(
                           color: colors.textSecondary,
                           height: 1.35,
@@ -1379,7 +1379,7 @@ class _ModelPickerSheetState extends State<_ModelPickerSheet> {
       title: 'Choose a model',
       description: widget.providerName == null
           ? 'Pick the model for the next reply. Auto models keep things simple, while named models let you choose thinking effort.'
-          : 'Pick the model for the next reply on this session\'s ${widget.providerName} provider.',
+          : 'Pick the model for the next reply in this session.',
       maxWidth: 760,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -1780,15 +1780,14 @@ String _sessionModeDescription(
     return description.trim();
   }
   return switch (value) {
-    null => 'Keep the current $providerName mode for the next reply.',
+    null => 'Keep the current mode for the next reply.',
     'interactive' =>
       'Interactive keeps the agent conversational and approval-oriented.',
     'plan' =>
       'Plan focuses on outlining or analyzing before it starts making changes.',
     'autopilot' =>
-      'Autopilot lets the provider keep going with fewer interruptions.',
-    _ =>
-      '$providerName will switch to ${providerModeLabel(value, modes)} mode on the next reply.',
+      'Autopilot lets the agent keep going with fewer interruptions.',
+    _ => 'The next reply will use ${providerModeLabel(value, modes)} mode.',
   };
 }
 

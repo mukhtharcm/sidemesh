@@ -229,7 +229,7 @@ void main() {
     expect(find.text('Nothing to change here'), findsOneWidget);
     expect(
       find.text(
-        'Fake Test Provider does not expose session settings you can change after a run starts.',
+        'Fake Test Provider does not offer session settings you can change after a run starts.',
       ),
       findsOneWidget,
     );

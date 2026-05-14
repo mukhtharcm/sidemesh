@@ -101,7 +101,7 @@ class _OnboardingEmptyState extends StatelessWidget {
               ),
               const SizedBox(height: 8),
               Text(
-                'Install the Sidemesh daemon on the machine you want to control, then add that host here.',
+                'Install Sidemesh on the machine you want to control, then add that host here.',
                 textAlign: TextAlign.center,
                 style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                   color: colors.textSecondary,
