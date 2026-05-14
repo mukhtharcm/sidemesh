@@ -1214,6 +1214,53 @@ void main() {
     expect(find.text('Tool execution'), findsNothing);
   });
 
+  testWidgets('session screen renders shell-wrapped command rows', (
+    tester,
+  ) async {
+    final session = _session('shell-command-row');
+    final api = _RichEventFakeApi(
+      sessionSummary: session,
+      activities: [
+        for (var i = 0; i < 24; i += 1)
+          _fileChangeActivity(
+            id: 'file-change-$i',
+            seq: i + 1,
+            path: '/repo/apps/mobile/lib/file_$i.dart',
+          ),
+        _commandActivity(
+          id: 'sed-command',
+          seq: 80,
+          command:
+              "/bin/bash -lc \"sed -n '1,80p' apps/mobile/lib/src/screens/session_screen.dart\"",
+          cwd: '/repo',
+          output: 'class SessionScreen extends StatefulWidget',
+        ),
+      ],
+    );
+    addTearDown(api.dispose);
+
+    await _pumpApp(
+      tester,
+      SessionScreen(
+        host: _host('shell-command-row'),
+        session: session,
+        api: api,
+        desktopMode: true,
+      ),
+      size: const Size(1180, 900),
+    );
+    await _pumpFrames(tester);
+
+    expect(find.text('ran '), findsOneWidget);
+    expect(
+      find.text(
+        "sed -n '1,80p' apps/mobile/lib/src/screens/session_screen.dart",
+      ),
+      findsOneWidget,
+    );
+    expect(find.textContaining('/bin/bash'), findsNothing);
+  });
+
   testWidgets('session screen avoids internal turn diff copy', (tester) async {
     final session = _session('turn-diff-copy');
     final api = _RichEventFakeApi(

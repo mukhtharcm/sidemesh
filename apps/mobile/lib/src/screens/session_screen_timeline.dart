@@ -2211,6 +2211,9 @@ class _ActivityCardState extends State<_ActivityCard> {
     final activity = widget.activity;
     final sessionCwd = widget.sessionCwd;
     final colors = context.colors;
+    final commandLikeActivity =
+        activity.isCommand ||
+        (activity.isTool && _toolIsCommandActivity(activity));
     if (activity.isFileChange) {
       return _buildFileChangeInlineActivity(context, activity);
     }
@@ -2280,11 +2283,15 @@ class _ActivityCardState extends State<_ActivityCard> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Material(
-                color: colors.surfaceMuted.withValues(alpha: 0.48),
+                color: commandLikeActivity
+                    ? colors.surface.withValues(alpha: 0.76)
+                    : colors.surfaceMuted.withValues(alpha: 0.48),
                 shape: RoundedRectangleBorder(
                   borderRadius: AppShapes.input,
                   side: BorderSide(
-                    color: colors.border.withValues(alpha: 0.62),
+                    color: commandLikeActivity
+                        ? colors.codeBorder.withValues(alpha: 0.76)
+                        : colors.border.withValues(alpha: 0.62),
                   ),
                 ),
                 clipBehavior: Clip.antiAlias,
@@ -2308,7 +2315,9 @@ class _ActivityCardState extends State<_ActivityCard> {
                           width: 30,
                           height: 30,
                           decoration: BoxDecoration(
-                            color: activity.isCommand || activity.isTool
+                            color: commandLikeActivity
+                                ? colors.surfaceElevated
+                                : activity.isCommand || activity.isTool
                                 ? colors.surfaceMuted.withValues(alpha: 0.72)
                                 : colors.accentMuted.withValues(alpha: 0.68),
                             borderRadius: AppShapes.iconWell,
@@ -2320,7 +2329,9 @@ class _ActivityCardState extends State<_ActivityCard> {
                           child: Icon(
                             activityIcon,
                             size: 16,
-                            color: activity.isCommand || activity.isTool
+                            color: commandLikeActivity
+                                ? colors.codeForeground
+                                : activity.isCommand || activity.isTool
                                 ? colors.textPrimary
                                 : colors.accent,
                           ),
@@ -3307,33 +3318,43 @@ class _CommandTitleChip extends StatelessWidget {
       fontWeight: AppWeights.emphasis,
       height: 1.35,
     );
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Text('${parts.verb} ', style: verbStyle),
-        Flexible(
-          child: Container(
-            padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
-            decoration: BoxDecoration(
-              color: colors.surfaceElevated,
-              borderRadius: BorderRadius.circular(AppRadii.badge),
-              border: Border.all(
-                color: colors.codeBorder.withValues(alpha: 0.92),
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final maxCommandWidth = constraints.hasBoundedWidth
+            ? math.max(96.0, constraints.maxWidth - 34)
+            : 420.0;
+        return Wrap(
+          crossAxisAlignment: WrapCrossAlignment.center,
+          spacing: 4,
+          runSpacing: 4,
+          children: [
+            Text('${parts.verb} ', style: verbStyle),
+            ConstrainedBox(
+              constraints: BoxConstraints(maxWidth: maxCommandWidth),
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+                decoration: BoxDecoration(
+                  color: colors.surfaceElevated,
+                  borderRadius: BorderRadius.circular(AppRadii.badge),
+                  border: Border.all(
+                    color: colors.codeBorder.withValues(alpha: 0.92),
+                  ),
+                ),
+                child: Text(
+                  parts.command,
+                  maxLines: collapsed ? 1 : 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: monoStyle(
+                    color: colors.codeForeground,
+                    fontSize: 12.5,
+                    fontWeight: AppWeights.emphasis,
+                  ).copyWith(height: 1.25),
+                ),
               ),
             ),
-            child: Text(
-              parts.command,
-              maxLines: collapsed ? 1 : 2,
-              overflow: TextOverflow.ellipsis,
-              style: monoStyle(
-                color: colors.codeForeground,
-                fontSize: 12.5,
-                fontWeight: AppWeights.emphasis,
-              ).copyWith(height: 1.25),
-            ),
-          ),
-        ),
-      ],
+          ],
+        );
+      },
     );
   }
 }
