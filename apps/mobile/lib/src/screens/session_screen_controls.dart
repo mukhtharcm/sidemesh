@@ -16,6 +16,7 @@ class SessionControlsSheet extends StatefulWidget {
     required this.runtimeNetworkAccess,
     required this.policyStore,
     required this.turnConfigStore,
+    this.useBottomSheetChrome = true,
   });
 
   final ApiClient api;
@@ -31,6 +32,7 @@ class SessionControlsSheet extends StatefulWidget {
   final bool? runtimeNetworkAccess;
   final SessionPolicyStore policyStore;
   final SessionTurnConfigStore turnConfigStore;
+  final bool useBottomSheetChrome;
 
   @override
   State<SessionControlsSheet> createState() => _SessionControlsSheetState();
@@ -709,6 +711,375 @@ class _SessionControlsSheetState extends State<SessionControlsSheet> {
         showReasoningControls ||
         _showFastSection ||
         showPolicyControls;
+    final intro =
+        'Choose the model, mode, approvals, file access, and internet behavior for the next reply in this session. If the agent is already working, the changes wait for the current reply to finish.';
+    final content = Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        if (!showAnyControls) ...[
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(14),
+            decoration: BoxDecoration(
+              color: colors.surfaceMuted,
+              borderRadius: BorderRadius.circular(14),
+              border: Border.all(color: colors.border),
+            ),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Icon(
+                  Icons.info_outline_rounded,
+                  color: colors.textSecondary,
+                  size: 20,
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Nothing to change here',
+                        style: theme.textTheme.titleSmall?.copyWith(
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        '$_providerName does not expose session settings you can change after a run starts.',
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          color: colors.textSecondary,
+                          height: 1.35,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ] else ...[
+          if (showModeControls) ...[
+            Text(
+              'Mode',
+              style: theme.textTheme.labelLarge?.copyWith(
+                color: colors.textSecondary,
+                letterSpacing: 0.4,
+              ),
+            ),
+            const SizedBox(height: 8),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children:
+                  <String?>[
+                    null,
+                    ..._availableModeChoices.map((mode) => mode.id),
+                  ].map((mode) {
+                    final selected = mode == _effectiveMode;
+                    final fromRuntime =
+                        mode != null &&
+                        _turnConfig.mode == null &&
+                        widget.runtimeMode == mode;
+                    return _ReasoningChoiceChip(
+                      label: _sessionModeChoiceLabel(
+                        mode,
+                        _availableModeChoices,
+                      ),
+                      selected: selected,
+                      isDefault: mode == null || fromRuntime,
+                      defaultLabel: mode == null ? 'inherit' : 'current',
+                      onTap: () {
+                        setState(() {
+                          _turnConfig = _normalisedTurnConfig(
+                            _turnConfig.copyWith(mode: mode),
+                          );
+                        });
+                      },
+                    );
+                  }).toList(),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              _sessionModeDescription(
+                _effectiveMode,
+                providerName: _providerName,
+                modes: _availableModeChoices,
+              ),
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: colors.textSecondary,
+                height: 1.35,
+              ),
+            ),
+          ],
+          if (showModelControls) ...[
+            const SizedBox(height: 20),
+            Text(
+              showReasoningControls ? 'Model and thinking' : 'Model',
+              style: theme.textTheme.labelLarge?.copyWith(
+                color: colors.textSecondary,
+                letterSpacing: 0.4,
+              ),
+            ),
+            const SizedBox(height: 8),
+            _ModelSelectionCard(
+              title: 'Model',
+              value: _effectiveModelLabel,
+              subtitle: _effectiveModelDescription,
+              loading: _loadingModels,
+              error: _modelsError,
+              currentValue: _turnConfig.model != null
+                  ? widget.runtimeModel
+                  : null,
+              badges: <String>[
+                ?_runtimeModelProvider,
+                if (selectedModel?.isAutoModel ?? false) 'auto',
+                if (selectedModel?.isDefault ?? false) 'default',
+                if (_turnConfig.model != null) 'next turn',
+              ],
+              onTap: _chooseModel,
+              onRetry: () {
+                unawaited(_loadModels());
+              },
+            ),
+          ],
+          if (showReasoningControls) ...[
+            const SizedBox(height: 18),
+            Text(
+              'Reasoning effort',
+              style: theme.textTheme.labelLarge?.copyWith(
+                color: colors.textSecondary,
+                letterSpacing: 0.4,
+              ),
+            ),
+            const SizedBox(height: 8),
+            if (_loadingModels && _models.isEmpty)
+              const LinearProgressIndicator(minHeight: 3)
+            else if (_selectedModelIsAuto)
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: colors.surfaceMuted,
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: colors.border),
+                ),
+                child: Text(
+                  'Auto models choose the thinking effort themselves. The agent will use ${_reasoningEffortLabel(effectiveReasoning ?? selectedModel?.defaultReasoningEffort ?? 'medium')}.',
+                  style: theme.textTheme.bodyMedium?.copyWith(
+                    color: colors.textSecondary,
+                    height: 1.35,
+                  ),
+                ),
+              )
+            else if (_supportedReasoningOptions.isEmpty)
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: colors.surfaceMuted,
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: colors.border),
+                ),
+                child: Text(
+                  'This model does not expose adjustable thinking effort.',
+                  style: theme.textTheme.bodyMedium?.copyWith(
+                    color: colors.textSecondary,
+                    height: 1.35,
+                  ),
+                ),
+              )
+            else ...[
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: _supportedReasoningOptions.map((option) {
+                  final isDefault =
+                      selectedModel != null &&
+                      option.reasoningEffort ==
+                          selectedModel.defaultReasoningEffort;
+                  final selected = option.reasoningEffort == effectiveReasoning;
+                  return _ReasoningChoiceChip(
+                    label: _reasoningEffortLabel(option.reasoningEffort),
+                    selected: selected,
+                    isDefault: isDefault,
+                    onTap: () {
+                      setState(() {
+                        _turnConfig = _normalisedTurnConfig(
+                          _turnConfig.copyWith(
+                            reasoningEffort: option.reasoningEffort,
+                          ),
+                        );
+                      });
+                    },
+                  );
+                }).toList(),
+              ),
+              if (reasoningDescription != null &&
+                  reasoningDescription.trim().isNotEmpty) ...[
+                const SizedBox(height: 8),
+                Text(
+                  reasoningDescription.trim(),
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: colors.textSecondary,
+                    height: 1.35,
+                  ),
+                ),
+              ],
+            ],
+          ],
+          if (_showFastSection) ...[
+            const SizedBox(height: 18),
+            Text(
+              'Speed',
+              style: theme.textTheme.labelLarge?.copyWith(
+                color: colors.textSecondary,
+                letterSpacing: 0.4,
+              ),
+            ),
+            const SizedBox(height: 8),
+            _FastModeTile(
+              value: _effectiveFastMode,
+              enabled: _selectedModelSupportsFast,
+              onChanged: (value) {
+                setState(() {
+                  _turnConfig = _normalisedTurnConfig(
+                    _turnConfig.copyWith(fastMode: value),
+                  );
+                });
+              },
+            ),
+          ],
+          if (showPolicyControls) ...[
+            const SizedBox(height: 18),
+            if (showAutopilot) ...[
+              _PolicyAutopilotCard(
+                active: _isAutopilot,
+                onTap: _applyAutopilot,
+                colors: colors,
+              ),
+              const SizedBox(height: 22),
+            ],
+            if (_supportsApprovalPolicy) ...[
+              Text(
+                'Approvals',
+                style: theme.textTheme.labelLarge?.copyWith(
+                  color: colors.textSecondary,
+                  letterSpacing: 0.4,
+                ),
+              ),
+              const SizedBox(height: 8),
+              for (final policy in _approvalOptions)
+                _PolicyRadioTile<ApprovalPolicy>(
+                  value: policy,
+                  groupValue: _effectiveApproval,
+                  title: policy.label,
+                  subtitle: policy.description,
+                  fromRuntime:
+                      _policy.approval == null &&
+                      widget.runtimeApproval == policy,
+                  onSelected: (value) {
+                    setState(() {
+                      _policy = _policy.copyWith(approval: value);
+                    });
+                  },
+                ),
+            ],
+            if (_supportsApprovalPolicy && _supportsSandboxMode)
+              const SizedBox(height: 18),
+            if (_supportsSandboxMode) ...[
+              Text(
+                'File access',
+                style: theme.textTheme.labelLarge?.copyWith(
+                  color: colors.textSecondary,
+                  letterSpacing: 0.4,
+                ),
+              ),
+              const SizedBox(height: 8),
+              for (final sandbox in SandboxMode.values)
+                _PolicyRadioTile<SandboxMode>(
+                  value: sandbox,
+                  groupValue: _effectiveSandbox,
+                  title: sandbox.label,
+                  subtitle: sandbox.description,
+                  fromRuntime:
+                      _policy.sandbox == null &&
+                      widget.runtimeSandbox == sandbox,
+                  danger: sandbox == SandboxMode.dangerFullAccess,
+                  onSelected: (value) {
+                    setState(() {
+                      _policy = _policy.copyWith(sandbox: value);
+                    });
+                  },
+                ),
+            ],
+            if ((_supportsApprovalPolicy || _supportsSandboxMode) &&
+                _supportsNetworkAccess)
+              const SizedBox(height: 18),
+            if (_supportsNetworkAccess) ...[
+              Text(
+                'Internet access',
+                style: theme.textTheme.labelLarge?.copyWith(
+                  color: colors.textSecondary,
+                  letterSpacing: 0.4,
+                ),
+              ),
+              const SizedBox(height: 8),
+              _PolicyNetworkTile(
+                value: _effectiveNetworkOn,
+                disabled: _networkToggleDisabled,
+                subtitle: _networkToggleDisabled
+                    ? 'Full access already includes internet access.'
+                    : (_effectiveSandbox == SandboxMode.workspaceWrite ||
+                          _effectiveSandbox == SandboxMode.readOnly)
+                    ? 'Let tools like gh, curl, or pip use the internet. Off by default for read-only and workspace-write modes.'
+                    : 'Let tools use the internet.',
+                onChanged: (value) {
+                  setState(() {
+                    _policy = _policy.copyWith(networkAccess: value);
+                  });
+                },
+              ),
+            ],
+          ],
+        ],
+        const SizedBox(height: 22),
+        Row(
+          children: [
+            TextButton.icon(
+              onPressed: _reset,
+              icon: const Icon(Icons.restart_alt_rounded, size: 18),
+              label: const Text('Reset'),
+            ),
+            const Spacer(),
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(),
+              child: const Text('Cancel'),
+            ),
+            const SizedBox(width: 8),
+            FilledButton.icon(
+              onPressed: _save,
+              icon: const Icon(Icons.check_rounded, size: 18),
+              label: const Text('Apply'),
+            ),
+          ],
+        ),
+      ],
+    );
+
+    if (widget.useBottomSheetChrome) {
+      return MeshBottomSheetScaffold(
+        icon: Icons.tune_rounded,
+        title: 'Session controls',
+        description: intro,
+        maxWidth: 760,
+        maxHeightFactor: 0.9,
+        child: SingleChildScrollView(
+          padding: EdgeInsets.only(bottom: bottomInset),
+          child: content,
+        ),
+      );
+    }
 
     return Padding(
       padding: EdgeInsets.only(bottom: bottomInset),
@@ -719,379 +1090,22 @@ class _SessionControlsSheetState extends State<SessionControlsSheet> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Row(
-                children: [
-                  Icon(Icons.tune_rounded, color: colors.accent, size: 22),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: Text(
-                      'Turn settings',
-                      style: theme.textTheme.titleMedium?.copyWith(
-                        fontWeight: AppWeights.title,
-                      ),
-                    ),
-                  ),
-                ],
+              Text(
+                'Session controls',
+                style: theme.textTheme.titleMedium?.copyWith(
+                  fontWeight: AppWeights.title,
+                ),
               ),
               const SizedBox(height: 6),
               Text(
-                'Choose the model, mode, approvals, file access, and internet behavior for the next reply in this session. If the agent is already working, the changes wait for the current reply to finish.',
+                intro,
                 style: theme.textTheme.bodyMedium?.copyWith(
                   color: colors.textSecondary,
                   height: 1.4,
                 ),
               ),
-              if (!showAnyControls) ...[
-                const SizedBox(height: 20),
-                Container(
-                  width: double.infinity,
-                  padding: const EdgeInsets.all(14),
-                  decoration: BoxDecoration(
-                    color: colors.surfaceMuted,
-                    borderRadius: BorderRadius.circular(14),
-                    border: Border.all(color: colors.border),
-                  ),
-                  child: Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Icon(
-                        Icons.info_outline_rounded,
-                        color: colors.textSecondary,
-                        size: 20,
-                      ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              'Nothing to change here',
-                              style: theme.textTheme.titleSmall?.copyWith(
-                                fontWeight: FontWeight.w700,
-                              ),
-                            ),
-                            const SizedBox(height: 2),
-                            Text(
-                              '$_providerName does not expose session settings you can change after a run starts.',
-                              style: theme.textTheme.bodySmall?.copyWith(
-                                color: colors.textSecondary,
-                                height: 1.35,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ] else ...[
-                if (showModeControls) ...[
-                  const SizedBox(height: 20),
-                  Text(
-                    'Mode',
-                    style: theme.textTheme.labelLarge?.copyWith(
-                      color: colors.textSecondary,
-                      letterSpacing: 0.4,
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  Wrap(
-                    spacing: 8,
-                    runSpacing: 8,
-                    children:
-                        <String?>[
-                          null,
-                          ..._availableModeChoices.map((mode) => mode.id),
-                        ].map((mode) {
-                          final selected = mode == _effectiveMode;
-                          final fromRuntime =
-                              mode != null &&
-                              _turnConfig.mode == null &&
-                              widget.runtimeMode == mode;
-                          return _ReasoningChoiceChip(
-                            label: _sessionModeChoiceLabel(
-                              mode,
-                              _availableModeChoices,
-                            ),
-                            selected: selected,
-                            isDefault: mode == null || fromRuntime,
-                            defaultLabel: mode == null ? 'inherit' : 'current',
-                            onTap: () {
-                              setState(() {
-                                _turnConfig = _normalisedTurnConfig(
-                                  _turnConfig.copyWith(mode: mode),
-                                );
-                              });
-                            },
-                          );
-                        }).toList(),
-                  ),
-                  const SizedBox(height: 8),
-                  Text(
-                    _sessionModeDescription(
-                      _effectiveMode,
-                      providerName: _providerName,
-                      modes: _availableModeChoices,
-                    ),
-                    style: theme.textTheme.bodySmall?.copyWith(
-                      color: colors.textSecondary,
-                      height: 1.35,
-                    ),
-                  ),
-                ],
-                if (showModelControls) ...[
-                  const SizedBox(height: 20),
-                  Text(
-                    showReasoningControls ? 'Model and thinking' : 'Model',
-                    style: theme.textTheme.labelLarge?.copyWith(
-                      color: colors.textSecondary,
-                      letterSpacing: 0.4,
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  _ModelSelectionCard(
-                    title: 'Model',
-                    value: _effectiveModelLabel,
-                    subtitle: _effectiveModelDescription,
-                    loading: _loadingModels,
-                    error: _modelsError,
-                    currentValue: _turnConfig.model != null
-                        ? widget.runtimeModel
-                        : null,
-                    badges: <String>[
-                      ?_runtimeModelProvider,
-                      if (selectedModel?.isAutoModel ?? false) 'auto',
-                      if (selectedModel?.isDefault ?? false) 'default',
-                      if (_turnConfig.model != null) 'next turn',
-                    ],
-                    onTap: _chooseModel,
-                    onRetry: () {
-                      unawaited(_loadModels());
-                    },
-                  ),
-                ],
-                if (showReasoningControls) ...[
-                  const SizedBox(height: 18),
-                  Text(
-                    'Reasoning effort',
-                    style: theme.textTheme.labelLarge?.copyWith(
-                      color: colors.textSecondary,
-                      letterSpacing: 0.4,
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  if (_loadingModels && _models.isEmpty)
-                    const LinearProgressIndicator(minHeight: 3)
-                  else if (_selectedModelIsAuto)
-                    Container(
-                      width: double.infinity,
-                      padding: const EdgeInsets.all(12),
-                      decoration: BoxDecoration(
-                        color: colors.surfaceMuted,
-                        borderRadius: BorderRadius.circular(12),
-                        border: Border.all(color: colors.border),
-                      ),
-                      child: Text(
-                        'Auto models choose the thinking effort themselves. The agent will use ${_reasoningEffortLabel(effectiveReasoning ?? selectedModel?.defaultReasoningEffort ?? 'medium')}.',
-                        style: theme.textTheme.bodyMedium?.copyWith(
-                          color: colors.textSecondary,
-                          height: 1.35,
-                        ),
-                      ),
-                    )
-                  else if (_supportedReasoningOptions.isEmpty)
-                    Container(
-                      width: double.infinity,
-                      padding: const EdgeInsets.all(12),
-                      decoration: BoxDecoration(
-                        color: colors.surfaceMuted,
-                        borderRadius: BorderRadius.circular(12),
-                        border: Border.all(color: colors.border),
-                      ),
-                      child: Text(
-                        'This model does not expose adjustable thinking effort.',
-                        style: theme.textTheme.bodyMedium?.copyWith(
-                          color: colors.textSecondary,
-                          height: 1.35,
-                        ),
-                      ),
-                    )
-                  else ...[
-                    Wrap(
-                      spacing: 8,
-                      runSpacing: 8,
-                      children: _supportedReasoningOptions.map((option) {
-                        final isDefault =
-                            selectedModel != null &&
-                            option.reasoningEffort ==
-                                selectedModel.defaultReasoningEffort;
-                        final selected =
-                            option.reasoningEffort == effectiveReasoning;
-                        return _ReasoningChoiceChip(
-                          label: _reasoningEffortLabel(option.reasoningEffort),
-                          selected: selected,
-                          isDefault: isDefault,
-                          onTap: () {
-                            setState(() {
-                              _turnConfig = _normalisedTurnConfig(
-                                _turnConfig.copyWith(
-                                  reasoningEffort: option.reasoningEffort,
-                                ),
-                              );
-                            });
-                          },
-                        );
-                      }).toList(),
-                    ),
-                    if (reasoningDescription != null &&
-                        reasoningDescription.trim().isNotEmpty) ...[
-                      const SizedBox(height: 8),
-                      Text(
-                        reasoningDescription.trim(),
-                        style: theme.textTheme.bodySmall?.copyWith(
-                          color: colors.textSecondary,
-                          height: 1.35,
-                        ),
-                      ),
-                    ],
-                  ],
-                ],
-                if (_showFastSection) ...[
-                  const SizedBox(height: 18),
-                  Text(
-                    'Speed',
-                    style: theme.textTheme.labelLarge?.copyWith(
-                      color: colors.textSecondary,
-                      letterSpacing: 0.4,
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  _FastModeTile(
-                    value: _effectiveFastMode,
-                    enabled: _selectedModelSupportsFast,
-                    onChanged: (value) {
-                      setState(() {
-                        _turnConfig = _normalisedTurnConfig(
-                          _turnConfig.copyWith(fastMode: value),
-                        );
-                      });
-                    },
-                  ),
-                ],
-                if (showPolicyControls) ...[
-                  const SizedBox(height: 18),
-                  if (showAutopilot) ...[
-                    _PolicyAutopilotCard(
-                      active: _isAutopilot,
-                      onTap: _applyAutopilot,
-                      colors: colors,
-                    ),
-                    const SizedBox(height: 22),
-                  ],
-                  if (_supportsApprovalPolicy) ...[
-                    Text(
-                      'Approvals',
-                      style: theme.textTheme.labelLarge?.copyWith(
-                        color: colors.textSecondary,
-                        letterSpacing: 0.4,
-                      ),
-                    ),
-                    const SizedBox(height: 8),
-                    for (final policy in _approvalOptions)
-                      _PolicyRadioTile<ApprovalPolicy>(
-                        value: policy,
-                        groupValue: _effectiveApproval,
-                        title: policy.label,
-                        subtitle: policy.description,
-                        fromRuntime:
-                            _policy.approval == null &&
-                            widget.runtimeApproval == policy,
-                        onSelected: (value) {
-                          setState(() {
-                            _policy = _policy.copyWith(approval: value);
-                          });
-                        },
-                      ),
-                  ],
-                  if (_supportsApprovalPolicy && _supportsSandboxMode)
-                    const SizedBox(height: 18),
-                  if (_supportsSandboxMode) ...[
-                    Text(
-                      'File access',
-                      style: theme.textTheme.labelLarge?.copyWith(
-                        color: colors.textSecondary,
-                        letterSpacing: 0.4,
-                      ),
-                    ),
-                    const SizedBox(height: 8),
-                    for (final sandbox in SandboxMode.values)
-                      _PolicyRadioTile<SandboxMode>(
-                        value: sandbox,
-                        groupValue: _effectiveSandbox,
-                        title: sandbox.label,
-                        subtitle: sandbox.description,
-                        fromRuntime:
-                            _policy.sandbox == null &&
-                            widget.runtimeSandbox == sandbox,
-                        danger: sandbox == SandboxMode.dangerFullAccess,
-                        onSelected: (value) {
-                          setState(() {
-                            _policy = _policy.copyWith(sandbox: value);
-                          });
-                        },
-                      ),
-                  ],
-                  if ((_supportsApprovalPolicy || _supportsSandboxMode) &&
-                      _supportsNetworkAccess)
-                    const SizedBox(height: 18),
-                  if (_supportsNetworkAccess) ...[
-                    Text(
-                      'Internet access',
-                      style: theme.textTheme.labelLarge?.copyWith(
-                        color: colors.textSecondary,
-                        letterSpacing: 0.4,
-                      ),
-                    ),
-                    const SizedBox(height: 8),
-                    _PolicyNetworkTile(
-                      value: _effectiveNetworkOn,
-                      disabled: _networkToggleDisabled,
-                      subtitle: _networkToggleDisabled
-                          ? 'Full access already includes internet access.'
-                          : (_effectiveSandbox == SandboxMode.workspaceWrite ||
-                                _effectiveSandbox == SandboxMode.readOnly)
-                          ? 'Let tools like gh, curl, or pip use the internet. Off by default for read-only and workspace-write modes.'
-                          : 'Let tools use the internet.',
-                      onChanged: (value) {
-                        setState(() {
-                          _policy = _policy.copyWith(networkAccess: value);
-                        });
-                      },
-                    ),
-                  ],
-                ],
-              ],
-              const SizedBox(height: 22),
-              Row(
-                children: [
-                  TextButton.icon(
-                    onPressed: _reset,
-                    icon: const Icon(Icons.restart_alt_rounded, size: 18),
-                    label: const Text('Reset'),
-                  ),
-                  const Spacer(),
-                  TextButton(
-                    onPressed: () => Navigator.of(context).pop(),
-                    child: const Text('Cancel'),
-                  ),
-                  const SizedBox(width: 8),
-                  FilledButton.icon(
-                    onPressed: _save,
-                    icon: const Icon(Icons.check_rounded, size: 18),
-                    label: const Text('Apply'),
-                  ),
-                ],
-              ),
+              const SizedBox(height: 18),
+              content,
             ],
           ),
         ),
