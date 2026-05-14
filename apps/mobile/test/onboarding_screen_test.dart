@@ -32,7 +32,7 @@ void main() {
     );
     await tester.pump(const Duration(milliseconds: 100));
 
-    expect(find.text('Your coding agents,\nin your pocket.'), findsOneWidget);
+    expect(find.text('Keep your coding agents\nwithin reach.'), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
 
@@ -56,7 +56,7 @@ void main() {
       ),
     );
 
-    for (var i = 0; i < 4; i++) {
+    for (var i = 0; i < 3; i++) {
       await tester.drag(find.byType(PageView), const Offset(-360, 0));
       await tester.pump(const Duration(milliseconds: 400));
     }

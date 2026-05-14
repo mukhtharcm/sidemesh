@@ -27,22 +27,22 @@ enum ThemeVariant {
 
   /// Human-readable label shown in the Appearance picker.
   String get label => switch (this) {
-        ThemeVariant.codexAmber => 'Codex Amber',
-        ThemeVariant.nord => 'Nord',
-        ThemeVariant.dracula => 'Dracula',
-        ThemeVariant.catppuccin => 'Catppuccin',
-        ThemeVariant.rosePine => 'Rosé Pine',
-        ThemeVariant.tokyoNight => 'Tokyo Night',
+        ThemeVariant.codexAmber => 'Amber',
+        ThemeVariant.nord => 'Slate',
+        ThemeVariant.dracula => 'Plum',
+        ThemeVariant.catppuccin => 'Mist',
+        ThemeVariant.rosePine => 'Clay',
+        ThemeVariant.tokyoNight => 'Harbor',
       };
 
-  /// One-line vibe blurb shown below the label in the picker.
+  /// Short description shown below the label in the picker.
   String get tagline => switch (this) {
-        ThemeVariant.codexAmber => 'Warm terminal, CRT-inspired',
-        ThemeVariant.nord => 'Cool arctic, desaturated',
-        ThemeVariant.dracula => 'Neon gothic, high contrast',
-        ThemeVariant.catppuccin => 'Soothing pastel, community favorite',
-        ThemeVariant.rosePine => 'Muted warm, tasteful',
-        ThemeVariant.tokyoNight => 'Cool blue, editor classic',
+        ThemeVariant.codexAmber => 'Warm neutrals with amber accents',
+        ThemeVariant.nord => 'Cool slate with restrained blue',
+        ThemeVariant.dracula => 'Deep plum with stronger contrast',
+        ThemeVariant.catppuccin => 'Soft neutrals with gentle accents',
+        ThemeVariant.rosePine => 'Muted rose with warm contrast',
+        ThemeVariant.tokyoNight => 'Night navy with crisp blue accents',
       };
 
   AppColors get dark => switch (this) {
@@ -63,7 +63,7 @@ enum ThemeVariant {
         ThemeVariant.tokyoNight => _tokyoDay,
       };
 
-  static ThemeVariant fromId(String? id, {ThemeVariant fallback = ThemeVariant.codexAmber}) {
+  static ThemeVariant fromId(String? id, {ThemeVariant fallback = ThemeVariant.nord}) {
     for (final variant in ThemeVariant.values) {
       if (variant.id == id) return variant;
     }
@@ -72,7 +72,7 @@ enum ThemeVariant {
 }
 
 // ---------------------------------------------------------------------------
-// Codex Amber — ships as the default; identical to what pre-palette builds had.
+// Amber — the legacy warm accent palette retained for users who prefer it.
 // ---------------------------------------------------------------------------
 
 const _codexAmberDark = AppColors(

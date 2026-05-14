@@ -259,7 +259,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
         ),
       );
     } else {
-      await showOnboardingScreen(context, themeController: ThemeScope.of(context));
+      await showOnboardingScreen(context);
     }
   }
 

@@ -41,7 +41,6 @@ ThemeData _buildTheme(
     colorScheme: colorScheme,
     useMaterial3: true,
     scaffoldBackgroundColor: palette.canvas,
-    splashFactory: InkSparkle.splashFactory,
   );
 
   final textTheme = base.textTheme.apply(

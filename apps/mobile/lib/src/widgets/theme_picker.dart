@@ -32,68 +32,78 @@ class ThemePicker extends StatelessWidget {
           final palette = Theme.of(context).brightness == Brightness.dark
               ? variant.dark
               : variant.light;
+          final borderRadius = BorderRadius.circular(18);
 
-          return GestureDetector(
-            onTap: () => controller.setVariant(variant),
-            child: AnimatedContainer(
-              duration: const Duration(milliseconds: 200),
-              width: cardWidth,
-              padding: const EdgeInsets.all(14),
-              decoration: BoxDecoration(
-                color: palette.surface,
-                borderRadius: BorderRadius.circular(18),
-                border: Border.all(
-                  color: isSelected ? palette.accent : palette.border,
-                  width: isSelected ? 2 : 1,
-                ),
-                boxShadow: isSelected
-                    ? [
-                        BoxShadow(
-                          color: palette.accent.withValues(alpha: 0.15),
-                          blurRadius: 16,
-                          spreadRadius: 2,
-                        ),
-                      ]
-                    : null,
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
+          return Semantics(
+            button: true,
+            selected: isSelected,
+            label: variant.label,
+            child: Material(
+              color: Colors.transparent,
+              child: InkWell(
+                borderRadius: borderRadius,
+                onTap: () => controller.setVariant(variant),
+                child: AnimatedContainer(
+                  duration: const Duration(milliseconds: 200),
+                  width: cardWidth,
+                  padding: const EdgeInsets.all(14),
+                  decoration: BoxDecoration(
+                    color: palette.surface,
+                    borderRadius: borderRadius,
+                    border: Border.all(
+                      color: isSelected ? palette.accent : palette.border,
+                      width: isSelected ? 2 : 1,
+                    ),
+                    boxShadow: isSelected
+                        ? [
+                            BoxShadow(
+                              color: palette.accent.withValues(alpha: 0.12),
+                              blurRadius: 14,
+                              spreadRadius: 1,
+                            ),
+                          ]
+                        : null,
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      _ColorDot(color: palette.accent),
-                      const SizedBox(width: 6),
-                      _ColorDot(color: palette.success),
-                      const SizedBox(width: 6),
-                      _ColorDot(color: palette.danger),
-                      const SizedBox(width: 6),
-                      _ColorDot(color: palette.info),
+                      Row(
+                        children: [
+                          _ColorDot(color: palette.accent, border: palette.border),
+                          const SizedBox(width: 6),
+                          _ColorDot(color: palette.success, border: palette.border),
+                          const SizedBox(width: 6),
+                          _ColorDot(color: palette.danger, border: palette.border),
+                          const SizedBox(width: 6),
+                          _ColorDot(color: palette.info, border: palette.border),
+                        ],
+                      ),
+                      const Spacer(),
+                      Text(
+                        variant.label,
+                        style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                          fontWeight: FontWeight.w700,
+                          color: palette.textPrimary,
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        variant.tagline,
+                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color: palette.textSecondary,
+                          height: 1.3,
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      if (isSelected)
+                        MeshPill(
+                          label: 'Selected',
+                          tone: MeshPillTone.accent,
+                          icon: Icons.check_rounded,
+                        ),
                     ],
                   ),
-                  const Spacer(),
-                  Text(
-                    variant.label,
-                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                      fontWeight: FontWeight.w700,
-                      color: palette.textPrimary,
-                    ),
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    variant.tagline,
-                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                      color: palette.textSecondary,
-                      height: 1.3,
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  if (isSelected)
-                    MeshPill(
-                      label: 'Selected',
-                      tone: MeshPillTone.accent,
-                      icon: Icons.check_rounded,
-                    ),
-                ],
+                ),
               ),
             ),
           );
@@ -104,9 +114,10 @@ class ThemePicker extends StatelessWidget {
 }
 
 class _ColorDot extends StatelessWidget {
-  const _ColorDot({required this.color});
+  const _ColorDot({required this.color, required this.border});
 
   final Color color;
+  final Color border;
 
   @override
   Widget build(BuildContext context) {
@@ -117,7 +128,7 @@ class _ColorDot extends StatelessWidget {
         color: color,
         shape: BoxShape.circle,
         border: Border.all(
-          color: Colors.white.withValues(alpha: 0.2),
+          color: border.withValues(alpha: 0.8),
           width: 1,
         ),
       ),

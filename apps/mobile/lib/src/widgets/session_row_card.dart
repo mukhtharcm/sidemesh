@@ -251,7 +251,7 @@ class SessionRowCard extends StatelessWidget {
                 tooltip: favorite ? 'Remove favorite' : 'Add favorite',
                 visualDensity: VisualDensity.compact,
                 iconSize: 20,
-                constraints: const BoxConstraints(minWidth: 34, minHeight: 34),
+                constraints: const BoxConstraints(minWidth: 44, minHeight: 44),
                 icon: Icon(
                   favorite ? Icons.star_rounded : Icons.star_outline_rounded,
                   color: favorite ? colors.warning : colors.textTertiary,
