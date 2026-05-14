@@ -4,6 +4,7 @@ import 'dart:collection';
 import 'package:flutter/material.dart';
 
 import '../theme/app_colors.dart';
+import '../theme/app_tokens.dart';
 
 /// Shows a floating toast anchored to the bottom-right corner on wide windows
 /// (desktop) and bottom-center on phones. Runs through the root [Overlay] so
@@ -269,6 +270,7 @@ class _ToastOverlayState extends State<_ToastOverlay>
   @override
   Widget build(BuildContext context) {
     final media = MediaQuery.of(context);
+    final theme = Theme.of(context);
     final isWide = media.size.width > 640;
     final double right = isWide ? 20 : 12;
     final double left = isWide ? media.size.width - 440 - right : 12;
@@ -294,18 +296,18 @@ class _ToastOverlayState extends State<_ToastOverlay>
               child: Material(
                 color: Colors.transparent,
                 child: ConstrainedBox(
-                  constraints: const BoxConstraints(maxWidth: 440),
+                  constraints: const BoxConstraints(maxWidth: 420),
                   child: Container(
-                    padding: const EdgeInsets.fromLTRB(16, 12, 12, 12),
+                    padding: const EdgeInsets.fromLTRB(14, 12, 10, 12),
                     decoration: BoxDecoration(
-                      color: colors.surface,
-                      borderRadius: BorderRadius.circular(12),
-                      border: Border.all(color: colors.border),
+                      color: colors.surfaceElevated,
+                      borderRadius: BorderRadius.circular(AppRadii.control),
+                      border: Border.all(color: colors.borderStrong),
                       boxShadow: [
                         BoxShadow(
-                          color: Colors.black.withValues(alpha: 0.18),
-                          blurRadius: 18,
-                          offset: const Offset(0, 6),
+                          color: colors.canvas.withValues(alpha: 0.1),
+                          blurRadius: 14,
+                          offset: const Offset(0, 4),
                         ),
                       ],
                     ),
@@ -315,28 +317,29 @@ class _ToastOverlayState extends State<_ToastOverlay>
                         Flexible(
                           child: Text(
                             widget.message,
-                            style: TextStyle(
+                            style: theme.textTheme.bodyMedium?.copyWith(
                               color: colors.textPrimary,
-                              fontSize: 13.5,
-                              fontWeight: FontWeight.w500,
+                              fontWeight: FontWeight.w600,
+                              height: 1.25,
                             ),
                           ),
                         ),
                         if (widget.action != null) ...[
-                          const SizedBox(width: 10),
+                          const SizedBox(width: 8),
                           TextButton(
                             onPressed: () {
                               widget.action!.onPressed();
                               widget.controller.dismiss();
                             },
                             style: TextButton.styleFrom(
-                              foregroundColor: colors.accent,
+                              foregroundColor: colors.textPrimary,
                               padding: const EdgeInsets.symmetric(
                                 horizontal: 10,
+                                vertical: 8,
                               ),
-                              minimumSize: const Size(0, 32),
+                              minimumSize: const Size(0, 34),
                               visualDensity: VisualDensity.compact,
-                              textStyle: const TextStyle(
+                              textStyle: theme.textTheme.labelMedium?.copyWith(
                                 fontWeight: FontWeight.w700,
                               ),
                             ),
