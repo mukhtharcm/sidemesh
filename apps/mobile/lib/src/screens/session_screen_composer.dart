@@ -106,8 +106,8 @@ class _Composer extends StatelessWidget {
       style: Theme.of(context).textTheme.bodyMedium,
       decoration: InputDecoration(
         hintText: submitOnEnter
-            ? 'Message this session — Enter to send, Shift+Enter for newline'
-            : 'Message this session',
+            ? 'Reply here. Press Enter to send, Shift+Enter for a new line'
+            : 'Reply here',
         hintStyle: TextStyle(color: colors.textTertiary),
         border: InputBorder.none,
         enabledBorder: InputBorder.none,
@@ -501,7 +501,7 @@ class _ComposerPlusButton extends StatelessWidget {
       if (supportsImageInput)
         (Icons.add_photo_alternate_rounded, 'Attach image', onPickImages),
       if (supportsSkillInput && onAddSkillTrigger != null)
-        (Icons.auto_awesome_rounded, 'Add skill', onAddSkillTrigger!),
+        (Icons.auto_awesome_rounded, 'Insert skill', onAddSkillTrigger!),
       if (supportsFileMentions && onAddFileTrigger != null)
         (Icons.insert_drive_file_rounded, 'Mention file', onAddFileTrigger!),
     ];
@@ -530,7 +530,7 @@ class _ComposerPlusButton extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  'Add to message',
+                  'Add',
                   style: Theme.of(ctx).textTheme.titleMedium?.copyWith(
                     fontWeight: AppWeights.title,
                   ),
@@ -560,7 +560,7 @@ class _ComposerPlusButton extends StatelessWidget {
   Widget build(BuildContext context) {
     final colors = context.colors;
     return Tooltip(
-      message: 'Add to message',
+      message: 'Add',
       child: Material(
         color: Colors.transparent,
         child: InkWell(
@@ -690,8 +690,8 @@ class _SendButton extends StatelessWidget {
                     ? [
                         BoxShadow(
                           color: colors.accent.withValues(alpha: 0.3),
-                          blurRadius: 12,
-                          offset: const Offset(0, 4),
+                          blurRadius: 8,
+                          offset: const Offset(0, 3),
                         ),
                       ]
                     : const [],

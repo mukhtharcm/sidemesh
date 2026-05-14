@@ -194,7 +194,7 @@ class _SessionActionSheet extends StatelessWidget {
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
                                 Text(
-                                  'Session actions',
+                                  'More actions',
                                   style: Theme.of(context).textTheme.titleMedium
                                       ?.copyWith(
                                         color: colors.textPrimary,
@@ -261,11 +261,11 @@ class _SessionActionGroupCard extends StatelessWidget {
           padding: const EdgeInsets.only(left: 4, bottom: 7),
           child: Text(
             group.label,
-            style: monoStyle(
+            style: Theme.of(context).textTheme.labelSmall?.copyWith(
               color: colors.textSecondary,
-              fontSize: 10.5,
-              fontWeight: FontWeight.w800,
-            ).copyWith(letterSpacing: 0.8),
+              fontWeight: FontWeight.w700,
+              letterSpacing: 0.2,
+            ),
           ),
         ),
         DecoratedBox(
@@ -482,7 +482,11 @@ class _SessionHeader extends StatelessWidget {
             const SizedBox(width: 4),
             IconButton(
               onPressed: onDetails,
-              icon: Icon(Icons.tune_rounded, size: 18, color: colors.accent),
+              icon: Icon(
+                Icons.info_outline_rounded,
+                size: 18,
+                color: colors.accent,
+              ),
               tooltip: 'Session details',
               visualDensity: VisualDensity.compact,
               padding: const EdgeInsets.all(10),
@@ -527,13 +531,17 @@ class _GitSummaryPill extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: onTap,
-      child: MeshPill(
-        label: label,
-        icon: Icons.account_tree_rounded,
-        tone: dirty ? MeshPillTone.warning : MeshPillTone.neutral,
-        mono: true,
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        borderRadius: const BorderRadius.all(Radius.circular(999)),
+        onTap: onTap,
+        child: MeshPill(
+          label: label,
+          icon: Icons.account_tree_rounded,
+          tone: dirty ? MeshPillTone.warning : MeshPillTone.neutral,
+          mono: true,
+        ),
       ),
     );
   }
@@ -552,13 +560,17 @@ class _PinnedSummaryPill extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: onTap,
-      child: MeshPill(
-        label: '$count pinned',
-        icon: Icons.push_pin_rounded,
-        tone: active ? MeshPillTone.accent : MeshPillTone.neutral,
-        mono: true,
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        borderRadius: const BorderRadius.all(Radius.circular(999)),
+        onTap: onTap,
+        child: MeshPill(
+          label: '$count pinned',
+          icon: Icons.push_pin_rounded,
+          tone: active ? MeshPillTone.accent : MeshPillTone.neutral,
+          mono: true,
+        ),
       ),
     );
   }
@@ -710,7 +722,11 @@ class _SessionAppBarSubtitle extends StatelessWidget {
                 ),
               ],
               const SizedBox(width: 6),
-              Icon(Icons.tune_rounded, size: 14, color: colors.accent),
+              Icon(
+                Icons.info_outline_rounded,
+                size: 14,
+                color: colors.accent,
+              ),
             ],
           ),
         ),
