@@ -59,12 +59,8 @@ IconData _desktopSessionViewModeIcon(SessionViewMode mode) {
   };
 }
 
-
 class _OnboardingEmptyState extends StatelessWidget {
-  const _OnboardingEmptyState({
-    required this.colors,
-    required this.onAddHost,
-  });
+  const _OnboardingEmptyState({required this.colors, required this.onAddHost});
 
   final AppColors colors;
   final VoidCallback onAddHost;
@@ -91,11 +87,7 @@ class _OnboardingEmptyState extends StatelessWidget {
                   ),
                 ),
                 alignment: Alignment.center,
-                child: Icon(
-                  Icons.hub_rounded,
-                  size: 32,
-                  color: colors.accent,
-                ),
+                child: Icon(Icons.hub_rounded, size: 32, color: colors.accent),
               ),
               const SizedBox(height: 24),
               Text(
@@ -155,7 +147,8 @@ class _OnboardingEmptyState extends StatelessWidget {
                     ),
                     const SizedBox(height: 14),
                     _CommandBlock(
-                      text: 'npm install -g sidemesh\nsidemesh setup\nsidemesh pair',
+                      text:
+                          'npm install -g sidemesh\nsidemesh setup\nsidemesh pair',
                       colors: colors,
                     ),
                   ],
@@ -170,10 +163,7 @@ class _OnboardingEmptyState extends StatelessWidget {
 }
 
 class _CommandBlock extends StatelessWidget {
-  const _CommandBlock({
-    required this.text,
-    required this.colors,
-  });
+  const _CommandBlock({required this.text, required this.colors});
 
   final String text;
   final AppColors colors;
@@ -205,10 +195,7 @@ class _CommandBlock extends StatelessWidget {
                     children: [
                       Text(
                         '\$',
-                        style: monoStyle(
-                          color: colors.accent,
-                          fontSize: 12,
-                        ),
+                        style: monoStyle(color: colors.accent, fontSize: 12),
                       ),
                       const SizedBox(width: 8),
                       Expanded(
@@ -231,6 +218,7 @@ class _CommandBlock extends StatelessWidget {
     );
   }
 }
+
 class _ActiveSession {
   const _ActiveSession({
     required this.host,
@@ -848,12 +836,13 @@ class _DesktopShellState extends State<DesktopShell> {
     final ownerKey = _active != null
         ? '${_active!.host.id}|${_active!.session.id}'
         : 'shell';
+    final hasActiveSession = _active != null;
     _inspector.toggle(
       InspectorSurface(
         kind: InspectorSurfaceKind.debug,
         ownerKey: ownerKey,
-        title: 'Inspector (debug)',
-        icon: Icons.bug_report_rounded,
+        title: 'Side panel',
+        icon: Icons.tune_rounded,
         bodyBuilder: (context) {
           final colors = context.colors;
           return Padding(
@@ -862,7 +851,9 @@ class _DesktopShellState extends State<DesktopShell> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  'Inspector slot is working',
+                  hasActiveSession
+                      ? 'No extra details yet'
+                      : 'Open a session to use this panel',
                   style: Theme.of(context).textTheme.titleSmall?.copyWith(
                     color: colors.textPrimary,
                     fontWeight: AppWeights.title,
@@ -870,20 +861,15 @@ class _DesktopShellState extends State<DesktopShell> {
                 ),
                 const SizedBox(height: 8),
                 Text(
-                  'This is a debug surface. Real surfaces (search, file '
-                  'browser, git, details) will land in later phases. '
-                  'Toggle with \u2318\u21e7I.',
+                  hasActiveSession
+                      ? 'This side panel is reserved for extra details and '
+                            'tools for the current session.'
+                      : 'This side panel is reserved for extra details and '
+                            'tools. Open a machine or session to show them '
+                            'here.',
                   style: Theme.of(context).textTheme.bodySmall?.copyWith(
                     color: colors.textSecondary,
                     height: 1.4,
-                  ),
-                ),
-                const SizedBox(height: 12),
-                Text(
-                  'Owner: $ownerKey',
-                  style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                    color: colors.textTertiary,
-                    fontFamily: 'JetBrainsMono',
                   ),
                 ),
               ],
@@ -902,208 +888,214 @@ class _DesktopShellState extends State<DesktopShell> {
       body: Stack(
         children: [
           Shortcuts(
-        shortcuts: const <ShortcutActivator, Intent>{
-          SingleActivator(LogicalKeyboardKey.keyR, meta: true):
-              _RefreshIntent(),
-          SingleActivator(LogicalKeyboardKey.keyF, meta: true):
-              _FocusSearchIntent(),
-          SingleActivator(LogicalKeyboardKey.keyW, meta: true):
-              _CloseActiveSessionIntent(),
-          SingleActivator(LogicalKeyboardKey.keyI, meta: true, shift: true):
-              _ToggleInspectorDebugIntent(),
-          SingleActivator(LogicalKeyboardKey.slash, meta: true):
-              _ShowShortcutsIntent(),
-          SingleActivator(LogicalKeyboardKey.slash, meta: true, shift: true):
-              _ShowShortcutsIntent(),
-          SingleActivator(LogicalKeyboardKey.digit1, meta: true):
-              _SwitchSectionIntent(_SidebarSection.recent),
-          SingleActivator(LogicalKeyboardKey.digit2, meta: true):
-              _SwitchSectionIntent(_SidebarSection.inbox),
-          SingleActivator(LogicalKeyboardKey.digit3, meta: true):
-              _SwitchSectionIntent(_SidebarSection.hosts),
-        },
-        child: Actions(
-          actions: <Type, Action<Intent>>{
-            _RefreshIntent: CallbackAction<_RefreshIntent>(
-              onInvoke: (_) {
-                _loadHosts();
-                _bumpRefresh();
-                return null;
-              },
-            ),
-            _FocusSearchIntent: CallbackAction<_FocusSearchIntent>(
-              onInvoke: (_) {
-                _searchFocus.requestFocus();
-                _searchController.selection = TextSelection(
-                  baseOffset: 0,
-                  extentOffset: _searchController.text.length,
-                );
-                return null;
-              },
-            ),
-            _CloseActiveSessionIntent:
-                CallbackAction<_CloseActiveSessionIntent>(
+            shortcuts: const <ShortcutActivator, Intent>{
+              SingleActivator(LogicalKeyboardKey.keyR, meta: true):
+                  _RefreshIntent(),
+              SingleActivator(LogicalKeyboardKey.keyF, meta: true):
+                  _FocusSearchIntent(),
+              SingleActivator(LogicalKeyboardKey.keyW, meta: true):
+                  _CloseActiveSessionIntent(),
+              SingleActivator(LogicalKeyboardKey.keyI, meta: true, shift: true):
+                  _ToggleInspectorDebugIntent(),
+              SingleActivator(LogicalKeyboardKey.slash, meta: true):
+                  _ShowShortcutsIntent(),
+              SingleActivator(
+                LogicalKeyboardKey.slash,
+                meta: true,
+                shift: true,
+              ): _ShowShortcutsIntent(),
+              SingleActivator(LogicalKeyboardKey.digit1, meta: true):
+                  _SwitchSectionIntent(_SidebarSection.recent),
+              SingleActivator(LogicalKeyboardKey.digit2, meta: true):
+                  _SwitchSectionIntent(_SidebarSection.inbox),
+              SingleActivator(LogicalKeyboardKey.digit3, meta: true):
+                  _SwitchSectionIntent(_SidebarSection.hosts),
+            },
+            child: Actions(
+              actions: <Type, Action<Intent>>{
+                _RefreshIntent: CallbackAction<_RefreshIntent>(
                   onInvoke: (_) {
-                    if (_active != null) {
-                      setState(() => _active = null);
-                    }
+                    _loadHosts();
+                    _bumpRefresh();
                     return null;
                   },
                 ),
-            _ShowShortcutsIntent: CallbackAction<_ShowShortcutsIntent>(
-              onInvoke: (_) {
-                _showShortcutsSheet();
-                return null;
-              },
-            ),
-            _SwitchSectionIntent: CallbackAction<_SwitchSectionIntent>(
-              onInvoke: (intent) {
-                setState(() => _section = intent.section);
-                return null;
-              },
-            ),
-            _ToggleInspectorDebugIntent:
-                CallbackAction<_ToggleInspectorDebugIntent>(
+                _FocusSearchIntent: CallbackAction<_FocusSearchIntent>(
                   onInvoke: (_) {
-                    _toggleInspectorDebug();
+                    _searchFocus.requestFocus();
+                    _searchController.selection = TextSelection(
+                      baseOffset: 0,
+                      extentOffset: _searchController.text.length,
+                    );
                     return null;
                   },
                 ),
-          },
-          child: Focus(
-            autofocus: true,
-            child: InspectorScope(
-              controller: _inspector,
-              child: LayoutBuilder(
-                builder: (context, constraints) {
-                  return AnimatedBuilder(
-                    animation: _inspector,
-                    builder: (context, _) {
-                      final widths = _computePaneWidths(constraints.maxWidth);
-                      return Row(
-                        crossAxisAlignment: CrossAxisAlignment.stretch,
-                        children: [
-                          SizedBox(
-                            width: widths.sidebar,
-                            child: ListenableBuilder(
-                              listenable: ApprovalInboxStore.instance,
-                              builder: (context, _) => _Sidebar(
-                                titlebarInset: _titlebarInset,
+                _CloseActiveSessionIntent:
+                    CallbackAction<_CloseActiveSessionIntent>(
+                      onInvoke: (_) {
+                        if (_active != null) {
+                          setState(() => _active = null);
+                        }
+                        return null;
+                      },
+                    ),
+                _ShowShortcutsIntent: CallbackAction<_ShowShortcutsIntent>(
+                  onInvoke: (_) {
+                    _showShortcutsSheet();
+                    return null;
+                  },
+                ),
+                _SwitchSectionIntent: CallbackAction<_SwitchSectionIntent>(
+                  onInvoke: (intent) {
+                    setState(() => _section = intent.section);
+                    return null;
+                  },
+                ),
+                _ToggleInspectorDebugIntent:
+                    CallbackAction<_ToggleInspectorDebugIntent>(
+                      onInvoke: (_) {
+                        _toggleInspectorDebug();
+                        return null;
+                      },
+                    ),
+              },
+              child: Focus(
+                autofocus: true,
+                child: InspectorScope(
+                  controller: _inspector,
+                  child: LayoutBuilder(
+                    builder: (context, constraints) {
+                      return AnimatedBuilder(
+                        animation: _inspector,
+                        builder: (context, _) {
+                          final widths = _computePaneWidths(
+                            constraints.maxWidth,
+                          );
+                          return Row(
+                            crossAxisAlignment: CrossAxisAlignment.stretch,
+                            children: [
+                              SizedBox(
                                 width: widths.sidebar,
-                                hosts: _hosts,
-                                loading: _loading,
-                                api: _api,
-                                section: _section,
-                                refreshTick: _refreshTick,
-                                inboxCount: _inboxCount,
-                                activeCount: _activeCount,
-                                selectedSessionId: _active?.session.id,
-                                selectedHostId: _activeHost?.id,
-                                searchController: _searchController,
-                                searchFocus: _searchFocus,
-                                query: _query,
-                                onClearSearch: () {
-                                  _searchController.clear();
-                                },
-                                onSelectSection: (s) =>
-                                    setState(() => _section = s),
-                                onOpenSession: _openSession,
-                                onOpenSessionFromAction: (host, action) =>
-                                    _openSession(
-                                      host,
-                                      _sessionFromAction(action),
-                                    ),
-                                onOpenPendingSession:
-                                    (host, session, seed) async {
-                                      _openSession(
-                                        host,
-                                        session,
-                                        composerSeed: seed,
-                                      );
+                                child: ListenableBuilder(
+                                  listenable: ApprovalInboxStore.instance,
+                                  builder: (context, _) => _Sidebar(
+                                    titlebarInset: _titlebarInset,
+                                    width: widths.sidebar,
+                                    hosts: _hosts,
+                                    loading: _loading,
+                                    api: _api,
+                                    section: _section,
+                                    refreshTick: _refreshTick,
+                                    inboxCount: _inboxCount,
+                                    activeCount: _activeCount,
+                                    selectedSessionId: _active?.session.id,
+                                    selectedHostId: _activeHost?.id,
+                                    searchController: _searchController,
+                                    searchFocus: _searchFocus,
+                                    query: _query,
+                                    onClearSearch: () {
+                                      _searchController.clear();
                                     },
-                                onOpenHostDetail: _openHostDetail,
-                                onAddHost: () => _showHostEditor(),
-                                onStartSession: _startSessionFromSidebar,
-                                onEditHost: (h) => _showHostEditor(initial: h),
-                                onRemoveHost: _removeHost,
-                                onToggleHostEnabled: _toggleHostEnabled,
-                                onActiveCountChanged: (n) {
-                                  if (!mounted) return;
-                                  setState(() => _activeCount = n);
-                                },
-                                onInboxCountChanged: (n) {
-                                  if (!mounted || n == _inboxCount) return;
-                                  setState(() => _inboxCount = n);
-                                },
-                                onShowShortcuts: _showShortcutsSheet,
-                                onOpenSettings: _openSettings,
-                                onOpenUsage: _openUsage,
-                                recentViewMode: _recentViewMode,
-                                onRecentViewModeChanged: _setRecentViewMode,
+                                    onSelectSection: (s) =>
+                                        setState(() => _section = s),
+                                    onOpenSession: _openSession,
+                                    onOpenSessionFromAction: (host, action) =>
+                                        _openSession(
+                                          host,
+                                          _sessionFromAction(action),
+                                        ),
+                                    onOpenPendingSession:
+                                        (host, session, seed) async {
+                                          _openSession(
+                                            host,
+                                            session,
+                                            composerSeed: seed,
+                                          );
+                                        },
+                                    onOpenHostDetail: _openHostDetail,
+                                    onAddHost: () => _showHostEditor(),
+                                    onStartSession: _startSessionFromSidebar,
+                                    onEditHost: (h) =>
+                                        _showHostEditor(initial: h),
+                                    onRemoveHost: _removeHost,
+                                    onToggleHostEnabled: _toggleHostEnabled,
+                                    onActiveCountChanged: (n) {
+                                      if (!mounted) return;
+                                      setState(() => _activeCount = n);
+                                    },
+                                    onInboxCountChanged: (n) {
+                                      if (!mounted || n == _inboxCount) return;
+                                      setState(() => _inboxCount = n);
+                                    },
+                                    onShowShortcuts: _showShortcutsSheet,
+                                    onOpenSettings: _openSettings,
+                                    onOpenUsage: _openUsage,
+                                    recentViewMode: _recentViewMode,
+                                    onRecentViewModeChanged: _setRecentViewMode,
+                                  ),
+                                ),
                               ),
-                            ),
-                          ),
-                          _SidebarResizer(
-                            color: colors.border,
-                            onDrag: _resizeSidebar,
-                            onDragEnd: _persistSidebarWidth,
-                          ),
-                          SizedBox(
-                            width: widths.detail,
-                            child: _DetailPane(
-                              titlebarInset: _titlebarInset,
-                              active: _active,
-                              activeHost: _activeHost,
-                              showUsage: _showUsage,
-                              hosts: _hosts,
-                              enabledHosts: _enabledHosts,
-                              api: _api,
-                              onClose: () {
-                                final current = _active;
-                                if (current != null) {
-                                  _inspector.closeForOwner(
-                                    '${current.host.id}|${current.session.id}',
-                                  );
-                                }
-                                setState(() {
-                                  _active = null;
-                                  _activeHost = null;
-                                  _showUsage = false;
-                                });
-                              },
-                              onOpenSession: _openSession,
-                              onArchived: _handleActiveSessionArchived,
-                              onAddHost: () => _showHostEditor(),
-                              onShowHosts: () => setState(
-                                () => _section = _SidebarSection.hosts,
+                              _SidebarResizer(
+                                color: colors.border,
+                                onDrag: _resizeSidebar,
+                                onDragEnd: _persistSidebarWidth,
                               ),
-                            ),
-                          ),
-                          if (_inspector.current != null) ...[
-                            _SidebarResizer(
-                              color: colors.border,
-                              onDrag: _resizeInspector,
-                              onDragEnd: _persistInspectorWidth,
-                              onDoubleTap: _resetInspectorWidth,
-                            ),
-                            SizedBox(
-                              width: widths.inspector,
-                              child: _InspectorPane(
-                                surface: _inspector.current!,
-                                onClose: _inspector.close,
+                              SizedBox(
+                                width: widths.detail,
+                                child: _DetailPane(
+                                  titlebarInset: _titlebarInset,
+                                  active: _active,
+                                  activeHost: _activeHost,
+                                  showUsage: _showUsage,
+                                  hosts: _hosts,
+                                  enabledHosts: _enabledHosts,
+                                  api: _api,
+                                  onClose: () {
+                                    final current = _active;
+                                    if (current != null) {
+                                      _inspector.closeForOwner(
+                                        '${current.host.id}|${current.session.id}',
+                                      );
+                                    }
+                                    setState(() {
+                                      _active = null;
+                                      _activeHost = null;
+                                      _showUsage = false;
+                                    });
+                                  },
+                                  onOpenSession: _openSession,
+                                  onArchived: _handleActiveSessionArchived,
+                                  onAddHost: () => _showHostEditor(),
+                                  onShowHosts: () => setState(
+                                    () => _section = _SidebarSection.hosts,
+                                  ),
+                                ),
                               ),
-                            ),
-                          ],
-                        ],
+                              if (_inspector.current != null) ...[
+                                _SidebarResizer(
+                                  color: colors.border,
+                                  onDrag: _resizeInspector,
+                                  onDragEnd: _persistInspectorWidth,
+                                  onDoubleTap: _resetInspectorWidth,
+                                ),
+                                SizedBox(
+                                  width: widths.inspector,
+                                  child: _InspectorPane(
+                                    surface: _inspector.current!,
+                                    onClose: _inspector.close,
+                                  ),
+                                ),
+                              ],
+                            ],
+                          );
+                        },
                       );
                     },
-                  );
-                },
+                  ),
+                ),
               ),
             ),
           ),
-        ),
-      ),
           if (_showWelcome)
             DesktopWelcomeOverlay(
               themeController: ThemeScope.of(context),
@@ -1224,23 +1216,37 @@ class _Sidebar extends StatelessWidget {
       _SidebarSection.hosts => 'Hosts',
     };
     final subtitle = switch (section) {
-      _SidebarSection.recent => 'Resume work, scan activity, or start something new.',
-      _SidebarSection.inbox => 'Review approvals and pending replies without digging around.',
+      _SidebarSection.recent =>
+        'Resume work, scan activity, or start something new.',
+      _SidebarSection.inbox =>
+        'Review approvals and pending replies without digging around.',
       _SidebarSection.hosts => 'Manage the machines this app can reach.',
     };
-    final primaryLabel = switch ((hosts.isEmpty, enabledHosts.isEmpty, section)) {
+    final primaryLabel = switch ((
+      hosts.isEmpty,
+      enabledHosts.isEmpty,
+      section,
+    )) {
       (true, _, _) => 'Add host',
       (false, true, _) => 'Review hosts',
       (false, false, _SidebarSection.hosts) => 'Add host',
       _ => 'New session',
     };
-    final primaryIcon = switch ((hosts.isEmpty, enabledHosts.isEmpty, section)) {
+    final primaryIcon = switch ((
+      hosts.isEmpty,
+      enabledHosts.isEmpty,
+      section,
+    )) {
       (true, _, _) => Icons.add_link_rounded,
       (false, true, _) => Icons.hub_rounded,
       (false, false, _SidebarSection.hosts) => Icons.add_link_rounded,
       _ => Icons.add_rounded,
     };
-    final primaryOnTap = switch ((hosts.isEmpty, enabledHosts.isEmpty, section)) {
+    final primaryOnTap = switch ((
+      hosts.isEmpty,
+      enabledHosts.isEmpty,
+      section,
+    )) {
       (true, _, _) => onAddHost,
       (false, true, _) => () => onSelectSection(_SidebarSection.hosts),
       (false, false, _SidebarSection.hosts) => onAddHost,
@@ -1388,8 +1394,12 @@ class _Sidebar extends StatelessWidget {
                 controller: searchController,
                 focusNode: searchFocus,
                 onClear: onClearSearch,
-                viewMode: section == _SidebarSection.recent ? recentViewMode : null,
-                onViewModeChanged: section == _SidebarSection.recent ? onRecentViewModeChanged : null,
+                viewMode: section == _SidebarSection.recent
+                    ? recentViewMode
+                    : null,
+                onViewModeChanged: section == _SidebarSection.recent
+                    ? onRecentViewModeChanged
+                    : null,
               ),
             ),
             const NotificationPermissionBanner(
@@ -1757,9 +1767,8 @@ class _DetailPaneState extends State<_DetailPane> {
                           hasEnabledHosts
                               ? 'Choose a session or start a new one'
                               : 'Turn on a host',
-                          style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                            fontWeight: AppWeights.title,
-                          ),
+                          style: Theme.of(context).textTheme.titleMedium
+                              ?.copyWith(fontWeight: AppWeights.title),
                         ),
                         const SizedBox(height: 6),
                         ConstrainedBox(
