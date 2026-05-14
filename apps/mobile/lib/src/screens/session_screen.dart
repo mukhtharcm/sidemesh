@@ -4710,8 +4710,8 @@ class _SessionScreenState extends State<SessionScreen>
   Future<void> _showPinnedMessage(PinnedSessionMessage pin) async {
     await showModalBottomSheet<void>(
       context: context,
-      backgroundColor: context.colors.surface,
-      showDragHandle: true,
+      backgroundColor: Colors.transparent,
+      showDragHandle: false,
       useSafeArea: true,
       isScrollControlled: true,
       builder: (sheetContext) => _PinnedMessageSheet(
@@ -4782,8 +4782,8 @@ class _SessionScreenState extends State<SessionScreen>
     if (!mounted) return;
     await showModalBottomSheet<void>(
       context: context,
-      backgroundColor: context.colors.surface,
-      showDragHandle: true,
+      backgroundColor: Colors.transparent,
+      showDragHandle: false,
       useSafeArea: true,
       builder: (sheetContext) => _GitDetailsSheet(
         session: session,
@@ -4810,8 +4810,8 @@ class _SessionScreenState extends State<SessionScreen>
     if (!mounted) return;
     await showModalBottomSheet<void>(
       context: context,
-      backgroundColor: context.colors.surface,
-      showDragHandle: true,
+      backgroundColor: Colors.transparent,
+      showDragHandle: false,
       useSafeArea: true,
       isScrollControlled: true,
       builder: (context) => _GitDiffSheet(
