@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { EventEmitter } from "node:events";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import nodePath from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
@@ -162,6 +162,7 @@ const COPILOT_SESSION_MODES = [
 ] as const satisfies readonly CopilotSdkSessionMode[];
 const COPILOT_PLAN_READ_RETRY_DELAYS_MS = [25, 75, 150] as const;
 const COPILOT_APPROVAL_POLICIES = ["on-request", "never"] as const;
+const COPILOT_STATE_LOAD_RETRY_DELAYS_MS = [10, 25, 50] as const;
 
 export const COPILOT_PROVIDER_CAPABILITIES: AgentProviderCapabilities = {
   sessions: {
@@ -1806,67 +1807,76 @@ export class CopilotAgentProvider
   }
 
   private async loadState(): Promise<void> {
-    try {
-      const raw = await readFile(this.statePath, "utf8");
-      const parsed = JSON.parse(raw) as CopilotStateFile;
-      const archivedSessionIds = new Set(parsed.archivedSessionIds ?? []);
-      const restoredSessions = new Map<string, CopilotSessionState>();
-      let stateChangedOnLoad = false;
-      for (const item of parsed.sessions ?? []) {
-        const state: CopilotSessionState = {
-          thread: item.thread,
-          messages: item.messages ?? [],
-          activities: new Map(
-            (item.activities ?? []).map((activity) => [
-              activity.id,
-              normalizeStoredSessionActivity(activity),
-            ]),
-          ),
-          turns: item.turns ?? [],
-          runtime: normalizeStoredRuntime(item.runtime ?? null),
-          archived: item.archived === true,
-          nextSeq: item.nextSeq ?? item.messages?.length ?? 0,
-          draftAssistantMessages: new Map(
-            (item.draftAssistantMessages ?? []).map((draft) => [
-              draft.id,
-              normalizeStoredCopilotDraftAssistantMessage(draft),
-            ]),
-          ),
-          copilotSessionId: item.copilotSessionId ?? null,
-          copilotSessionCreated:
-            item.copilotSessionCreated ?? item.copilotSessionId != null,
-        };
-        const restoredPendingActions = (item.pendingActions ?? []).map(
-          clonePendingAction,
-        );
-        if (normalizeInactiveCopilotSessionState(state)) {
-          stateChangedOnLoad = true;
-        }
-        if (restoredPendingActions.length > 0) {
-          this.appendSystemMessage(
-            state,
-            interruptedPendingActionMessage(restoredPendingActions),
+    for (let attempt = 0; ; attempt += 1) {
+      try {
+        const raw = await readFile(this.statePath, "utf8");
+        const parsed = JSON.parse(raw) as CopilotStateFile;
+        const archivedSessionIds = new Set(parsed.archivedSessionIds ?? []);
+        const restoredSessions = new Map<string, CopilotSessionState>();
+        let stateChangedOnLoad = false;
+        for (const item of parsed.sessions ?? []) {
+          const state: CopilotSessionState = {
+            thread: item.thread,
+            messages: item.messages ?? [],
+            activities: new Map(
+              (item.activities ?? []).map((activity) => [
+                activity.id,
+                normalizeStoredSessionActivity(activity),
+              ]),
+            ),
+            turns: item.turns ?? [],
+            runtime: normalizeStoredRuntime(item.runtime ?? null),
+            archived: item.archived === true,
+            nextSeq: item.nextSeq ?? item.messages?.length ?? 0,
+            draftAssistantMessages: new Map(
+              (item.draftAssistantMessages ?? []).map((draft) => [
+                draft.id,
+                normalizeStoredCopilotDraftAssistantMessage(draft),
+              ]),
+            ),
+            copilotSessionId: item.copilotSessionId ?? null,
+            copilotSessionCreated:
+              item.copilotSessionCreated ?? item.copilotSessionId != null,
+          };
+          const restoredPendingActions = (item.pendingActions ?? []).map(
+            clonePendingAction,
           );
-          stateChangedOnLoad = true;
+          if (normalizeInactiveCopilotSessionState(state)) {
+            stateChangedOnLoad = true;
+          }
+          if (restoredPendingActions.length > 0) {
+            this.appendSystemMessage(
+              state,
+              interruptedPendingActionMessage(restoredPendingActions),
+            );
+            stateChangedOnLoad = true;
+          }
+          restoredSessions.set(state.thread.id, state);
         }
-        restoredSessions.set(state.thread.id, state);
+        this.archivedSessionIds.clear();
+        this.sessions.clear();
+        this.loadedSessionIds.clear();
+        this.activeTurns.clear();
+        this.planUpdateVersions.clear();
+        for (const id of archivedSessionIds) {
+          this.archivedSessionIds.add(id);
+        }
+        for (const [threadId, state] of restoredSessions) {
+          this.sessions.set(threadId, state);
+        }
+        if (stateChangedOnLoad) {
+          await this.saveState();
+        }
+        return;
+      } catch (error) {
+        if (isMissingFileError(error)) {
+          return;
+        }
+        if (attempt >= COPILOT_STATE_LOAD_RETRY_DELAYS_MS.length) {
+          return;
+        }
+        await sleep(COPILOT_STATE_LOAD_RETRY_DELAYS_MS[attempt]!);
       }
-      this.archivedSessionIds.clear();
-      this.sessions.clear();
-      this.loadedSessionIds.clear();
-      this.activeTurns.clear();
-      this.planUpdateVersions.clear();
-      for (const id of archivedSessionIds) {
-        this.archivedSessionIds.add(id);
-      }
-      for (const [threadId, state] of restoredSessions) {
-        this.sessions.set(threadId, state);
-      }
-      if (stateChangedOnLoad) {
-        await this.saveState();
-      }
-    } catch {
-      // Missing or corrupt provider state should not block daemon startup.
     }
   }
 
@@ -1913,7 +1923,9 @@ export class CopilotAgentProvider
         copilotSessionCreated: session.copilotSessionCreated,
       })),
     };
-    await writeFile(this.statePath, JSON.stringify(payload, null, 2));
+    const tmpPath = `${this.statePath}.${process.pid}.${randomUUID()}.tmp`;
+    await writeFile(tmpPath, JSON.stringify(payload, null, 2), "utf8");
+    await rename(tmpPath, this.statePath);
   }
 
   private get statePath(): string {
@@ -2004,6 +2016,15 @@ function displayNameFromModel(model: string): string {
     .filter(Boolean)
     .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
     .join(" ");
+}
+
+function isMissingFileError(error: unknown): boolean {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    "code" in error &&
+    (error as { code?: unknown }).code === "ENOENT"
+  );
 }
 
 function copilotModel(
