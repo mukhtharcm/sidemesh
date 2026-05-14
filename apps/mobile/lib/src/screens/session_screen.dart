@@ -728,6 +728,8 @@ class _BrowserDockCloseButton extends StatelessWidget {
   }
 }
 
+enum _ActivityMergeMode { incremental, snapshot }
+
 class _SessionScreenState extends State<SessionScreen>
     with WidgetsBindingObserver {
   static const _initialMessageLimit = 120;
@@ -2339,8 +2341,10 @@ class _SessionScreenState extends State<SessionScreen>
       // we'll replay them after the snapshot setState so they aren't clobbered.
       final bufferedEvents = List<LiveEvent>.from(_pendingLiveEvents);
       _pendingLiveEvents.clear();
-      final snapshotActivities = _mergeSnapshotActivitiesWithLocalCommands(
+      final snapshotActivities = _mergeIncomingActivities(
+        _activities,
         log.activities,
+        mode: _ActivityMergeMode.snapshot,
       );
       setState(() {
         _session = log.session;
@@ -2616,13 +2620,11 @@ class _SessionScreenState extends State<SessionScreen>
             });
         }
         if (delta.activities.isNotEmpty) {
-          final byId = <String, SessionActivity>{
-            for (final a in _activities) a.id: a,
-          };
-          for (final a in delta.activities) {
-            byId[a.id] = a;
-          }
-          mergedActivities = _sortActivities(byId.values.toList());
+          mergedActivities = _mergeIncomingActivities(
+            _activities,
+            delta.activities,
+            mode: _ActivityMergeMode.incremental,
+          );
         }
         _messages = mergedMessages;
         _activities = mergedActivities;
@@ -6056,16 +6058,11 @@ class _SessionScreenState extends State<SessionScreen>
   }
 
   void _upsertActivity(SessionActivity activity) {
-    final existingIndex = _activities.indexWhere(
-      (item) => item.id == activity.id,
+    _activities = _mergeIncomingActivities(
+      _activities,
+      [activity],
+      mode: _ActivityMergeMode.incremental,
     );
-    if (existingIndex == -1) {
-      _activities = _sortActivities([..._activities, activity]);
-      return;
-    }
-    final updated = [..._activities];
-    updated[existingIndex] = activity;
-    _activities = _sortActivities(updated);
   }
 
   List<SessionActivity> _sortActivities(List<SessionActivity> activities) {
@@ -6078,40 +6075,55 @@ class _SessionScreenState extends State<SessionScreen>
     return sorted;
   }
 
-  List<SessionActivity> _mergeSnapshotActivitiesWithLocalCommands(
-    List<SessionActivity> snapshotActivities,
-  ) {
-    if (_activities.isEmpty) {
-      return _sortActivities(snapshotActivities);
-    }
-    final byId = <String, SessionActivity>{
-      for (final activity in snapshotActivities) activity.id: activity,
+  List<SessionActivity> _mergeIncomingActivities(
+    List<SessionActivity> current,
+    Iterable<SessionActivity> incoming, {
+    required _ActivityMergeMode mode,
+  }) {
+    final currentById = <String, SessionActivity>{
+      for (final activity in current) activity.id: activity,
     };
-    var changed = false;
-    for (final activity in _activities) {
-      if (!_shouldPreserveLocalCommandActivity(activity)) {
-        continue;
-      }
-      final snapshotActivity = byId[activity.id];
-      if (snapshotActivity != null &&
-          _snapshotKeepsReadableCommandActivity(snapshotActivity)) {
-        continue;
-      }
-      byId[activity.id] = activity;
-      changed = true;
+    final byId = mode == _ActivityMergeMode.incremental
+        ? <String, SessionActivity>{...currentById}
+        : <String, SessionActivity>{};
+
+    for (final activity in incoming) {
+      byId[activity.id] = _chooseActivityMergeWinner(
+        existing: currentById[activity.id],
+        incoming: activity,
+      );
     }
-    if (!changed) {
-      return _sortActivities(snapshotActivities);
+
+    if (mode == _ActivityMergeMode.snapshot) {
+      for (final activity in current) {
+        if (!_isCommandLikeActivity(activity)) {
+          continue;
+        }
+        final snapshotActivity = byId[activity.id];
+        if (snapshotActivity != null &&
+            _hasReadableCommandActivity(snapshotActivity)) {
+          continue;
+        }
+        byId[activity.id] = activity;
+      }
     }
+
     return _sortActivities(byId.values.toList());
   }
 
-  bool _snapshotKeepsReadableCommandActivity(SessionActivity activity) {
-    return _shouldPreserveLocalCommandActivity(activity) &&
-        _activityHasReadableCommand(activity);
+  SessionActivity _chooseActivityMergeWinner({
+    required SessionActivity? existing,
+    required SessionActivity incoming,
+  }) {
+    if (existing != null &&
+        _hasReadableCommandActivity(existing) &&
+        !_hasReadableCommandActivity(incoming)) {
+      return existing;
+    }
+    return incoming;
   }
 
-  bool _shouldPreserveLocalCommandActivity(SessionActivity activity) {
+  bool _isCommandLikeActivity(SessionActivity activity) {
     if (activity.isCommand) {
       return true;
     }
@@ -6130,7 +6142,10 @@ class _SessionScreenState extends State<SessionScreen>
     return _toolArgsContainCommand(activity.toolArgs);
   }
 
-  bool _activityHasReadableCommand(SessionActivity activity) {
+  bool _hasReadableCommandActivity(SessionActivity activity) {
+    if (!_isCommandLikeActivity(activity)) {
+      return false;
+    }
     if ((activity.command ?? '').trim().isNotEmpty) {
       return true;
     }
