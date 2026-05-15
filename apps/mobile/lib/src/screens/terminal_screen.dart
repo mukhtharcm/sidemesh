@@ -556,7 +556,7 @@ xterm.TerminalTheme _terminalTheme(AppColors colors) {
     selection: colors.accentMuted.withValues(alpha: 0.7),
     foreground: colors.codeForeground,
     background: colors.codeBackground,
-    black: terminalColor(colors.textTertiary),
+    black: colors.textTertiary,
     red: terminalColor(colors.danger),
     green: terminalColor(colors.success),
     yellow: terminalColor(colors.warning),

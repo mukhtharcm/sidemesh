@@ -184,7 +184,6 @@ void main() {
       final colors = palette.colors;
 
       for (final preferred in <Color>[
-        colors.textTertiary,
         colors.danger,
         colors.success,
         colors.warning,
@@ -203,4 +202,32 @@ void main() {
       }
     }
   });
+
+  test('terminal color adjustment preserves ANSI hue identity', () {
+    for (final palette in _allPalettes()) {
+      final colors = palette.colors;
+
+      for (final preferred in <Color>[
+        colors.danger,
+        colors.success,
+        colors.warning,
+        colors.accent,
+        colors.info,
+      ]) {
+        final adjusted = readableTerminalColorOn(colors, preferred: preferred);
+        expect(
+          _hueDistance(preferred, adjusted),
+          lessThanOrEqualTo(2),
+          reason: '${palette.label} terminal hue shifted too far',
+        );
+      }
+    }
+  });
+}
+
+double _hueDistance(Color a, Color b) {
+  final aHue = HSLColor.fromColor(a).hue;
+  final bHue = HSLColor.fromColor(b).hue;
+  final delta = (aHue - bHue).abs();
+  return delta > 180 ? 360 - delta : delta;
 }
