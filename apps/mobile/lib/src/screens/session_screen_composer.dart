@@ -5,7 +5,7 @@ part of 'session_screen.dart';
 // Three-zone layout:
 //   Zone 3 — Suggestion trays (skill / file, above the shelf, animated in/out)
 //   Zone 2 — Context shelf   (chips: images, skills, files – horizontal scroll)
-//   Zone 1 — The bar          (context action | text field | model | send)
+//   Zone 1 — The bar          (text field | toolbar with context/model/send)
 // ─────────────────────────────────────────────────────────────────────────────
 
 class _Composer extends StatelessWidget {
@@ -171,8 +171,6 @@ class _Composer extends StatelessWidget {
     final bool showModelButton = modelLabel != null && onModelTap != null;
     final bool showThinkingButton =
         thinkingLabel != null && onThinkingTap != null;
-    final bool showMobileControlStrip =
-        !isDesktop && (showModelButton || showThinkingButton);
 
     final modelControlButton = showModelButton
         ? _ComposerModelButton(
@@ -182,6 +180,7 @@ class _Composer extends StatelessWidget {
             icon: Icons.memory_rounded,
             tooltipLabel: 'Choose model',
             onPressed: onModelTap!,
+            compact: !isDesktop,
           )
         : null;
     final thinkingControlButton = showThinkingButton
@@ -192,10 +191,23 @@ class _Composer extends StatelessWidget {
             icon: Icons.psychology_alt_rounded,
             tooltipLabel: 'Choose thinking level',
             onPressed: onThinkingTap!,
+            compact: !isDesktop,
           )
         : null;
+    final controlButtons = <Widget>[
+      ?modelControlButton,
+      ?thinkingControlButton,
+    ];
 
-    final inputRow = Row(
+    final textArea = Padding(
+      padding: EdgeInsets.symmetric(
+        horizontal: isDesktop ? 4 : 6,
+        vertical: isFocused ? 10 : 8,
+      ),
+      child: field,
+    );
+
+    final toolbarRow = Row(
       crossAxisAlignment: CrossAxisAlignment.end,
       children: [
         // Paste remains available through native shortcuts/menu; the visible
@@ -216,23 +228,17 @@ class _Composer extends StatelessWidget {
           const SizedBox(width: 6),
         ],
         Expanded(
-          child: Padding(
-            padding: EdgeInsets.symmetric(
-              horizontal: isDesktop ? 2 : 4,
-              vertical: isFocused ? 12 : 8,
-            ),
-            child: field,
-          ),
+          child: controlButtons.isEmpty
+              ? const SizedBox.shrink()
+              : Wrap(
+                  alignment: WrapAlignment.end,
+                  crossAxisAlignment: WrapCrossAlignment.center,
+                  spacing: 6,
+                  runSpacing: 6,
+                  children: controlButtons,
+                ),
         ),
-        if (isDesktop && modelControlButton != null) ...[
-          const SizedBox(width: 8),
-          modelControlButton,
-        ],
-        if (isDesktop && thinkingControlButton != null) ...[
-          const SizedBox(width: 6),
-          thinkingControlButton,
-        ],
-        const SizedBox(width: 6),
+        SizedBox(width: controlButtons.isEmpty ? 0 : 8),
         _SendButton(
           sending: sending,
           controller: controller,
@@ -244,51 +250,15 @@ class _Composer extends StatelessWidget {
       ],
     );
 
-    final barContent = showMobileControlStrip
-        ? Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Align(
-                alignment: Alignment.centerRight,
-                child: Wrap(
-                  alignment: WrapAlignment.end,
-                  spacing: 6,
-                  runSpacing: 6,
-                  children: [
-                    if (modelControlButton != null)
-                      _ComposerModelButton(
-                        label: modelLabel!,
-                        detail: modelDetail,
-                        customized: modelCustomized,
-                        icon: Icons.memory_rounded,
-                        tooltipLabel: 'Choose model',
-                        onPressed: onModelTap!,
-                        compact: true,
-                      ),
-                    if (thinkingControlButton != null)
-                      _ComposerModelButton(
-                        label: thinkingLabel!,
-                        detail: thinkingDetail,
-                        customized: thinkingCustomized,
-                        icon: Icons.psychology_alt_rounded,
-                        tooltipLabel: 'Choose thinking level',
-                        onPressed: onThinkingTap!,
-                        compact: true,
-                      ),
-                  ],
-                ),
-              ),
-              const SizedBox(height: 7),
-              Container(
-                height: 1,
-                color: colors.border.withValues(alpha: 0.7),
-              ),
-              const SizedBox(height: 2),
-              inputRow,
-            ],
-          )
-        : inputRow;
+    final barContent = Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        textArea,
+        SizedBox(height: isDesktop ? 6 : 8),
+        toolbarRow,
+      ],
+    );
 
     final barRow = AnimatedContainer(
       duration: const Duration(milliseconds: 150),
@@ -302,7 +272,12 @@ class _Composer extends StatelessWidget {
               : colors.border,
         ),
       ),
-      padding: EdgeInsets.fromLTRB(8, isDesktop ? 7 : 8, 8, isDesktop ? 7 : 8),
+      padding: EdgeInsets.fromLTRB(
+        isDesktop ? 10 : 9,
+        isDesktop ? 8 : 9,
+        isDesktop ? 10 : 9,
+        isDesktop ? 8 : 9,
+      ),
       child: barContent,
     );
 
@@ -726,8 +701,8 @@ class _ComposerModelButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colors = context.colors;
-    final maxWidth = compact ? 220.0 : 162.0;
-    final minHeight = compact ? 32.0 : 36.0;
+    final maxWidth = compact ? 136.0 : 154.0;
+    final minHeight = compact ? 32.0 : 34.0;
     return Tooltip(
       message: detail == null ? tooltipLabel : '$tooltipLabel: $detail',
       child: Material(
@@ -744,7 +719,7 @@ class _ComposerModelButton extends StatelessWidget {
             ),
             padding: EdgeInsets.symmetric(
               horizontal: compact ? 8 : 9,
-              vertical: compact ? 6 : 7,
+              vertical: compact ? 6 : 6,
             ),
             decoration: BoxDecoration(
               color: customized
