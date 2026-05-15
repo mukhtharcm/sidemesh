@@ -28,6 +28,45 @@ void main() {
     SharedPreferences.setMockInitialValues(<String, Object>{});
   });
 
+  testWidgets('desktop session focuses the composer after opening', (
+    tester,
+  ) async {
+    final api = _RichEventFakeApi();
+    addTearDown(api.dispose);
+
+    await _pumpApp(
+      tester,
+      SessionScreen(
+        host: _host('desktop-composer-focus'),
+        session: _session('desktop-composer-focus'),
+        api: api,
+        desktopMode: true,
+      ),
+      size: const Size(1180, 900),
+    );
+    await _pumpFrames(tester);
+
+    expect(_composerTextField(tester).focusNode?.hasFocus, isTrue);
+  });
+
+  testWidgets('mobile session does not autofocus the composer', (tester) async {
+    final api = _RichEventFakeApi();
+    addTearDown(api.dispose);
+
+    await _pumpApp(
+      tester,
+      SessionScreen(
+        host: _host('mobile-composer-focus'),
+        session: _session('mobile-composer-focus'),
+        api: api,
+      ),
+      size: const Size(390, 844),
+    );
+    await _pumpFrames(tester);
+
+    expect(_composerTextField(tester).focusNode?.hasFocus, isFalse);
+  });
+
   testWidgets(
     'session screen renders warning, plan, queue, and retry live events',
     (tester) async {
@@ -1623,6 +1662,16 @@ Future<void> _pumpFrames(WidgetTester tester) async {
   await tester.pump(const Duration(milliseconds: 50));
   await tester.pump(const Duration(milliseconds: 250));
   await tester.pump();
+}
+
+TextField _composerTextField(WidgetTester tester) {
+  final finder = find.byWidgetPredicate(
+    (widget) =>
+        widget is TextField &&
+        widget.decoration?.hintText?.startsWith('Reply here') == true,
+  );
+  expect(finder, findsOneWidget);
+  return tester.widget<TextField>(finder);
 }
 
 Future<void> _tapDesktopReload(WidgetTester tester) async {

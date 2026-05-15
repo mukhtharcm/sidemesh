@@ -846,6 +846,7 @@ class _SessionScreenState extends State<SessionScreen>
   bool _disposed = false;
   bool _retryingPendingSend = false;
   final Set<String> _completedPendingSendIds = <String>{};
+  bool _initialDesktopComposerFocusQueued = false;
   bool _restoreComposerFocusOnResume = false;
   bool _keepSessionUnread = false;
   int? _lastEventSeq;
@@ -1077,10 +1078,12 @@ class _SessionScreenState extends State<SessionScreen>
       return;
     }
     if (loadedCache) {
+      _queueInitialDesktopComposerFocus();
       unawaited(_refreshSessionFreshness());
       return;
     }
     await _loadSnapshot();
+    _queueInitialDesktopComposerFocus();
   }
 
   Future<void> _loadNodeInfo() async {
@@ -2197,7 +2200,7 @@ class _SessionScreenState extends State<SessionScreen>
           final shouldRestoreFocus = _restoreComposerFocusOnResume;
           _restoreComposerFocusOnResume = false;
           if (shouldRestoreFocus) {
-            _queueComposerFocusRestore();
+            _queueComposerFocusRestore(onlyIfSafe: true);
           }
           break;
         case AppLifecycleState.detached:
@@ -2223,10 +2226,49 @@ class _SessionScreenState extends State<SessionScreen>
   bool get _isMacDesktop =>
       widget.desktopMode && defaultTargetPlatform == TargetPlatform.macOS;
 
-  void _queueComposerFocusRestore() {
+  void _queueInitialDesktopComposerFocus() {
+    if (_initialDesktopComposerFocusQueued ||
+        !widget.desktopMode ||
+        widget.initialComposerSeed != null) {
+      return;
+    }
+    _initialDesktopComposerFocusQueued = true;
+    _queueComposerFocusRestore(onlyIfSafe: true);
+  }
+
+  bool _canAutoFocusComposer() {
+    if (!widget.desktopMode || _pendingAction != null) {
+      return false;
+    }
+    final route = ModalRoute.of(context);
+    if (route != null && !route.isCurrent) {
+      return false;
+    }
+    final primaryFocus = FocusManager.instance.primaryFocus;
+    if (primaryFocus == null || primaryFocus == _composerFocusNode) {
+      return true;
+    }
+    if (primaryFocus == _searchFocusNode) {
+      return false;
+    }
+    final focusContext = primaryFocus.context;
+    if (focusContext == null) {
+      return true;
+    }
+    if (focusContext.widget is EditableText ||
+        focusContext.findAncestorWidgetOfExactType<EditableText>() != null) {
+      return false;
+    }
+    return true;
+  }
+
+  void _queueComposerFocusRestore({bool onlyIfSafe = false}) {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       Future<void>.delayed(const Duration(milliseconds: 140), () {
         if (!mounted || _disposed) {
+          return;
+        }
+        if (onlyIfSafe && !_canAutoFocusComposer()) {
           return;
         }
         _composerFocusNode.requestFocus();
@@ -4379,6 +4421,9 @@ class _SessionScreenState extends State<SessionScreen>
     _refreshThinkingState();
     _syncSessionLiveActivity();
     _scrollToBottomFast(force: true);
+    if (widget.desktopMode) {
+      _queueComposerFocusRestore(onlyIfSafe: true);
+    }
     try {
       await widget.api.sendInput(
         widget.host,
@@ -4480,8 +4525,8 @@ class _SessionScreenState extends State<SessionScreen>
       });
       _refreshThinkingState();
       _syncSessionLiveActivity();
-      if (_isMacDesktop) {
-        _queueComposerFocusRestore();
+      if (widget.desktopMode) {
+        _queueComposerFocusRestore(onlyIfSafe: true);
       }
     } finally {
       if (mounted) {
