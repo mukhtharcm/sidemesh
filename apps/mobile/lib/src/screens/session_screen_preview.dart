@@ -8,6 +8,11 @@ class _StopAgentPill extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colors = context.colors;
+    final foreground = readableTextOn(
+      colors,
+      background: colors.danger,
+      preferred: colors.accentOn,
+    );
     return Material(
       color: colors.danger,
       shape: const StadiumBorder(),
@@ -24,13 +29,13 @@ class _StopAgentPill extends StatelessWidget {
               Icon(
                 Icons.stop_circle_rounded,
                 size: 16,
-                color: colors.userBubbleOn,
+                color: foreground,
               ),
               const SizedBox(width: 6),
               Text(
                 'Stop agent',
                 style: Theme.of(context).textTheme.labelMedium?.copyWith(
-                  color: colors.userBubbleOn,
+                  color: foreground,
                   fontWeight: FontWeight.w700,
                 ),
               ),

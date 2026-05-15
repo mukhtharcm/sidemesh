@@ -3,6 +3,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../local_notification_service.dart';
 import '../theme/app_colors.dart';
+import '../theme/color_contrast.dart';
 import 'app_snackbar.dart';
 import 'mesh_widgets.dart';
 
@@ -257,11 +258,12 @@ class _EnableButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colors = context.colors;
+    final foreground = readableActionForeground(colors, colors.accent);
     return FilledButton.icon(
       style: FilledButton.styleFrom(
         visualDensity: VisualDensity.compact,
         backgroundColor: colors.accent,
-        foregroundColor: colors.accentOn,
+        foregroundColor: foreground,
       ),
       onPressed: requesting ? null : onPressed,
       icon: requesting
@@ -270,7 +272,7 @@ class _EnableButton extends StatelessWidget {
               height: 14,
               child: CircularProgressIndicator(
                 strokeWidth: 2,
-                color: colors.accentOn,
+                color: foreground,
               ),
             )
           : const Icon(Icons.notifications_rounded, size: 16),

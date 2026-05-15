@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import '../../models.dart';
 import '../../search_query.dart';
 import '../../theme/app_colors.dart';
+import '../../theme/color_contrast.dart';
 import '../../theme/app_theme.dart';
 import '../../theme/app_tokens.dart';
 import '../../widgets/mesh_widgets.dart';
@@ -335,6 +336,7 @@ class _SearchFilterChip extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colors = context.colors;
+    final selectedForeground = readableActionForeground(colors, colors.accent);
     return Material(
       color: Colors.transparent,
       child: InkWell(
@@ -353,7 +355,7 @@ class _SearchFilterChip extends StatelessWidget {
           child: Text(
             label,
             style: Theme.of(context).textTheme.labelSmall?.copyWith(
-              color: selected ? colors.accentOn : colors.textSecondary,
+              color: selected ? selectedForeground : colors.textSecondary,
               fontWeight: AppWeights.emphasis,
               letterSpacing: 0.3,
             ),

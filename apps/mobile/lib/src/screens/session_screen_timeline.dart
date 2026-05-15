@@ -1022,9 +1022,23 @@ class _MessageBubble extends StatelessWidget {
       'assistant' => colors.assistantBubble,
       _ => colors.surfaceMuted,
     };
-    final textColor = isUser ? colors.userBubbleOn : colors.textPrimary;
+    final textColor = messageBodyColor(colors, userBubble: isUser);
     final metaColor = messageMetaColor(colors, userBubble: isUser);
     final assistantMetaColor = messageMetaColor(colors, userBubble: false);
+    final selectionForeground = readableTextOn(
+      colors,
+      background: bubbleColor,
+      preferred: textColor,
+    );
+    final bubbleSelectionTheme = TextSelectionThemeData(
+      cursorColor: selectionForeground,
+      selectionColor: selectionFillForBackground(
+        colors,
+        background: bubbleColor,
+        foreground: selectionForeground,
+      ),
+      selectionHandleColor: selectionForeground,
+    );
     final bodyStyle = Theme.of(context).textTheme.bodyMedium?.copyWith(
       color: textColor,
       height: 1.45,
@@ -1073,11 +1087,13 @@ class _MessageBubble extends StatelessWidget {
                 width: live ? 1.4 : 1,
               ),
             ),
-            child: Padding(
-              padding: messagePadding,
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
+            child: TextSelectionTheme(
+              data: bubbleSelectionTheme,
+              child: Padding(
+                padding: messagePadding,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
                   if (phaseLabel != null && hasAnswer)
                     Padding(
                       padding: const EdgeInsets.only(bottom: 6),
@@ -1189,7 +1205,8 @@ class _MessageBubble extends StatelessWidget {
                         ),
                       ),
                     ),
-                ],
+                  ],
+                ),
               ),
             ),
           ),

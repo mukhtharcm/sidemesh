@@ -1,47 +1,11 @@
 import 'package:flutter/material.dart';
 
 import 'theme/app_colors.dart';
+import 'theme/color_contrast.dart';
 import 'theme/app_tokens.dart';
 
-const double minimumReadableTextContrast = 4.5;
-
-double contrastRatio(Color foreground, Color background) {
-  final foregroundLuminance = foreground.computeLuminance();
-  final backgroundLuminance = background.computeLuminance();
-  final lighter = foregroundLuminance > backgroundLuminance
-      ? foregroundLuminance
-      : backgroundLuminance;
-  final darker = foregroundLuminance > backgroundLuminance
-      ? backgroundLuminance
-      : foregroundLuminance;
-  return (lighter + 0.05) / (darker + 0.05);
-}
-
-Color readableColorForBackground({
-  required Color background,
-  required Color preferred,
-  required Iterable<Color> fallbacks,
-  double minimumContrast = minimumReadableTextContrast,
-}) {
-  var best = preferred;
-  var bestContrast = contrastRatio(preferred, background);
-  if (bestContrast >= minimumContrast) {
-    return preferred;
-  }
-
-  for (final candidate in fallbacks) {
-    final candidateContrast = contrastRatio(candidate, background);
-    if (candidateContrast >= minimumContrast) {
-      return candidate;
-    }
-    if (candidateContrast > bestContrast) {
-      best = candidate;
-      bestContrast = candidateContrast;
-    }
-  }
-
-  return best;
-}
+export 'theme/color_contrast.dart'
+    show contrastRatio, minimumReadableTextContrast, readableColorForBackground;
 
 Color messageLinkColor(AppColors colors, {required bool userBubble}) {
   final background = userBubble ? colors.userBubble : colors.assistantBubble;
@@ -63,6 +27,16 @@ Color messageLinkColor(AppColors colors, {required bool userBubble}) {
     background: background,
     preferred: preferred,
     fallbacks: fallbacks,
+  );
+}
+
+Color messageBodyColor(AppColors colors, {required bool userBubble}) {
+  final background = userBubble ? colors.userBubble : colors.assistantBubble;
+  final preferred = userBubble ? colors.userBubbleOn : colors.textPrimary;
+  return readableTextOn(
+    colors,
+    background: background,
+    preferred: preferred,
   );
 }
 

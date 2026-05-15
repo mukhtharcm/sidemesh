@@ -12,6 +12,7 @@ import '../session_local_store.dart';
 import '../session_overrides_store.dart';
 import '../session_read_store.dart';
 import '../theme/app_colors.dart';
+import '../theme/color_contrast.dart';
 import '../theme/app_theme.dart';
 import '../theme/app_tokens.dart';
 import '../widgets/app_dialogs.dart';
@@ -550,7 +551,7 @@ class _EmbeddedHostHeader extends StatelessWidget {
             label: const Text('New session'),
             style: FilledButton.styleFrom(
               backgroundColor: colors.accent,
-              foregroundColor: colors.accentOn,
+              foregroundColor: readableActionForeground(colors, colors.accent),
               padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
             ),
           ),
@@ -1314,49 +1315,18 @@ class _TinyStatusPill extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colors = context.colors;
-    final (bg, fg, border) = switch (tone) {
-      MeshPillTone.neutral => (
-        colors.surfaceMuted,
-        colors.textTertiary,
-        colors.border,
-      ),
-      MeshPillTone.accent => (
-        colors.accentMuted,
-        colors.accent,
-        colors.accent.withValues(alpha: 0.35),
-      ),
-      MeshPillTone.success => (
-        colors.successMuted,
-        colors.success,
-        colors.success.withValues(alpha: 0.35),
-      ),
-      MeshPillTone.danger => (
-        colors.dangerMuted,
-        colors.danger,
-        colors.danger.withValues(alpha: 0.35),
-      ),
-      MeshPillTone.warning => (
-        colors.warningMuted,
-        colors.warning,
-        colors.warning.withValues(alpha: 0.35),
-      ),
-      MeshPillTone.info => (
-        colors.infoMuted,
-        colors.info,
-        colors.info.withValues(alpha: 0.35),
-      ),
-    };
+    final toneColors = meshPillColors(colors, tone);
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
       decoration: BoxDecoration(
-        color: bg,
+        color: toneColors.background,
         borderRadius: BorderRadius.circular(7),
-        border: Border.all(color: border),
+        border: Border.all(color: toneColors.border),
       ),
       child: Text(
         label,
         style: Theme.of(context).textTheme.labelSmall?.copyWith(
-          color: fg,
+          color: toneColors.foreground,
           fontWeight: AppWeights.title,
         ),
       ),

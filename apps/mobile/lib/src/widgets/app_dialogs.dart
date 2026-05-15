@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../theme/app_colors.dart';
+import '../theme/color_contrast.dart';
 import '../theme/app_tokens.dart';
 
 class MeshDialogScaffold extends StatelessWidget {
@@ -174,6 +175,11 @@ Future<bool> showMeshConfirmDialog(
     context: context,
     builder: (dialogContext) {
       final colors = dialogContext.colors;
+      final dangerForeground = readableTextOn(
+        colors,
+        background: colors.danger,
+        preferred: colors.accentOn,
+      );
       return MeshDialogScaffold(
         icon: icon,
         title: title,
@@ -189,7 +195,7 @@ Future<bool> showMeshConfirmDialog(
             style: danger
                 ? FilledButton.styleFrom(
                     backgroundColor: colors.danger,
-                    foregroundColor: colors.accentOn,
+                    foregroundColor: dangerForeground,
                   )
                 : null,
             onPressed: () => Navigator.of(dialogContext).pop(true),
