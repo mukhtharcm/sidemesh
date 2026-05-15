@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import 'app_colors.dart';
+import 'color_contrast.dart';
 import 'app_tokens.dart';
 import 'theme_controller.dart';
 
@@ -21,14 +22,46 @@ ThemeData _buildTheme(
   AppColors palette,
   AppTypographyPreferences typography,
 ) {
+  final actionForeground = readableActionForeground(palette, palette.accent);
+  final secondaryForeground = readableTextOn(
+    palette,
+    background: palette.info,
+    preferred: palette.accentOn,
+  );
+  final errorForeground = readableTextOn(
+    palette,
+    background: palette.danger,
+    preferred: palette.accentOn,
+  );
+  final accentOnSurface = readableTextOn(
+    palette,
+    background: palette.surface,
+    preferred: palette.accent,
+  );
+  final focusOutline = visibleUiColorOn(
+    palette,
+    background: palette.surface,
+    preferred: palette.accent,
+  );
+  final inputLabelColor = readableTextOn(
+    palette,
+    background: palette.surface,
+    preferred: palette.textSecondary,
+  );
+  final inputHintColor = readableTextOn(
+    palette,
+    background: palette.surface,
+    preferred: palette.textTertiary,
+    additionalFallbacks: <Color>[palette.textSecondary],
+  );
   final colorScheme = ColorScheme(
     brightness: brightness,
     primary: palette.accent,
-    onPrimary: palette.accentOn,
+    onPrimary: actionForeground,
     secondary: palette.info,
-    onSecondary: palette.accentOn,
+    onSecondary: secondaryForeground,
     error: palette.danger,
-    onError: palette.accentOn,
+    onError: errorForeground,
     surface: palette.surface,
     onSurface: palette.textPrimary,
     surfaceContainerHighest: palette.surfaceElevated,
@@ -52,6 +85,15 @@ ThemeData _buildTheme(
   return base.copyWith(
     textTheme: textTheme,
     extensions: <ThemeExtension<dynamic>>[palette],
+    textSelectionTheme: TextSelectionThemeData(
+      cursorColor: focusOutline,
+      selectionColor: selectionFillForBackground(
+        palette,
+        background: palette.surface,
+        foreground: palette.accent,
+      ),
+      selectionHandleColor: focusOutline,
+    ),
     appBarTheme: AppBarTheme(
       backgroundColor: palette.canvas,
       foregroundColor: palette.textPrimary,
@@ -86,7 +128,7 @@ ThemeData _buildTheme(
         borderRadius: AppShapes.input,
         side: BorderSide(color: palette.border),
       ),
-      actionTextColor: palette.accent,
+      actionTextColor: accentOnSurface,
     ),
     popupMenuTheme: PopupMenuThemeData(
       color: palette.surfaceElevated,
@@ -133,14 +175,14 @@ ThemeData _buildTheme(
       iconTheme: WidgetStateProperty.resolveWith((states) {
         final selected = states.contains(WidgetState.selected);
         return IconThemeData(
-          color: selected ? palette.accent : palette.textSecondary,
+          color: selected ? accentOnSurface : inputLabelColor,
           size: 22,
         );
       }),
       labelTextStyle: WidgetStateProperty.resolveWith((states) {
         final selected = states.contains(WidgetState.selected);
         return textTheme.labelMedium?.copyWith(
-          color: selected ? palette.accent : palette.textSecondary,
+          color: selected ? accentOnSurface : inputLabelColor,
           fontWeight: AppWeights.emphasis,
           letterSpacing: AppLetterSpacing.body,
         );
@@ -150,7 +192,7 @@ ThemeData _buildTheme(
     filledButtonTheme: FilledButtonThemeData(
       style: FilledButton.styleFrom(
         backgroundColor: palette.accent,
-        foregroundColor: palette.accentOn,
+        foregroundColor: actionForeground,
         disabledBackgroundColor: palette.surfaceMuted,
         disabledForegroundColor: palette.textTertiary,
         shape: RoundedRectangleBorder(borderRadius: AppShapes.input),
@@ -168,7 +210,7 @@ ThemeData _buildTheme(
     ),
     textButtonTheme: TextButtonThemeData(
       style: TextButton.styleFrom(
-        foregroundColor: palette.accent,
+        foregroundColor: accentOnSurface,
         textStyle: textTheme.labelLarge?.copyWith(fontWeight: AppWeights.title),
       ),
     ),
@@ -189,16 +231,16 @@ ThemeData _buildTheme(
       ),
       focusedBorder: OutlineInputBorder(
         borderRadius: AppShapes.input,
-        borderSide: BorderSide(color: palette.accent, width: 1.5),
+        borderSide: BorderSide(color: focusOutline, width: 1.5),
       ),
-      labelStyle: TextStyle(color: palette.textSecondary),
-      hintStyle: TextStyle(color: palette.textTertiary),
+      labelStyle: TextStyle(color: inputLabelColor),
+      hintStyle: TextStyle(color: inputHintColor),
       contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
     ),
     dividerTheme: DividerThemeData(color: palette.border, space: 1),
     floatingActionButtonTheme: FloatingActionButtonThemeData(
       backgroundColor: palette.accent,
-      foregroundColor: palette.accentOn,
+      foregroundColor: actionForeground,
       elevation: 0,
       highlightElevation: 0,
       shape: RoundedRectangleBorder(borderRadius: AppShapes.card),

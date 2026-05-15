@@ -823,6 +823,7 @@ class _SendButton extends StatelessWidget {
         final bgColor = sending
             ? colors.surfaceMuted
             : (canSend ? colors.accent : colors.surfaceMuted);
+        final activeForeground = readableActionForeground(colors, colors.accent);
         final hitSize = compact ? 36.0 : 44.0;
         final size = compact ? 36.0 : 38.0;
         final radius = compact ? AppRadii.iconWell : AppRadii.action;
@@ -859,7 +860,7 @@ class _SendButton extends StatelessWidget {
                           Icons.arrow_upward_rounded,
                           size: compact ? 19 : 22,
                           color: canSend
-                              ? colors.accentOn
+                              ? activeForeground
                               : colors.textTertiary,
                         ),
                 ),

@@ -12,6 +12,7 @@ import '../session_local_store.dart';
 import '../session_message_seed_store.dart';
 import '../session_policy_store.dart';
 import '../theme/app_colors.dart';
+import '../theme/color_contrast.dart';
 import '../theme/app_theme.dart';
 import '../widgets/app_snackbar.dart';
 import '../theme/app_tokens.dart';
@@ -1829,6 +1830,7 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
 
   Widget _buildFooter(BuildContext context) {
     final colors = context.colors;
+    final actionForeground = readableActionForeground(colors, colors.accent);
     return LayoutBuilder(
       builder: (context, constraints) {
         final compact = constraints.maxWidth < 560;
@@ -1845,7 +1847,7 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
                     height: 16,
                     child: CircularProgressIndicator(
                       strokeWidth: 2,
-                      color: colors.accentOn,
+                      color: actionForeground,
                     ),
                   )
                 : const Icon(Icons.play_arrow_rounded),
@@ -1866,7 +1868,7 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
                         height: 16,
                         child: CircularProgressIndicator(
                           strokeWidth: 2,
-                          color: colors.accentOn,
+                          color: actionForeground,
                         ),
                       )
                     : const Icon(Icons.play_arrow_rounded),

@@ -25,6 +25,7 @@ import '../session_overrides_store.dart';
 import '../session_read_store.dart';
 import '../session_send_outbox_store.dart';
 import '../theme/app_colors.dart';
+import '../theme/color_contrast.dart';
 import '../theme/app_theme.dart';
 import '../theme/app_tokens.dart';
 import '../widgets/app_snackbar.dart';
@@ -4659,6 +4660,11 @@ class _HostEditorToggle extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colors = context.colors;
+    final activeKnob = visibleUiColorOn(
+      colors,
+      background: colors.accent,
+      preferred: colors.accentOn,
+    );
     return AnimatedContainer(
       duration: const Duration(milliseconds: 180),
       curve: Curves.easeOutCubic,
@@ -4678,12 +4684,10 @@ class _HostEditorToggle extends StatelessWidget {
           width: 24,
           height: 24,
           decoration: BoxDecoration(
-            color: value ? colors.accentOn : colors.surface,
+            color: value ? activeKnob : colors.surface,
             shape: BoxShape.circle,
             border: Border.all(
-              color: value
-                  ? colors.accentOn.withValues(alpha: 0.7)
-                  : colors.border,
+              color: value ? activeKnob : colors.border,
             ),
           ),
         ),

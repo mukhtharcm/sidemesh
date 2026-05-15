@@ -130,7 +130,7 @@ const _codexAmberLight = AppColors(
   textTertiary: Color(0xFF9A8A75),
   accent: Color(0xFFCA6B1F),
   accentMuted: Color(0xFFF4DCC0),
-  accentOn: Color(0xFFFFFBF3),
+  accentOn: Color(0xFF1C1812),
   success: Color(0xFF1A7F37),
   successMuted: Color(0xFFDCF3E0),
   danger: Color(0xFFCF222E),
@@ -152,7 +152,7 @@ const _codexAmberLight = AppColors(
   diffHunkLine: Color(0xFF0969DA),
   diffGutterText: Color(0xFF1F2328),
   userBubble: Color(0xFFCA6B1F),
-  userBubbleOn: Color(0xFFFFFBF3),
+  userBubbleOn: Color(0xFF1C1812),
   assistantBubble: Color(0xFFFBF3E1),
   assistantBubbleBorder: Color(0xFFD9C8A8),
   composerBackground: Color(0xFFFFFBF3),
@@ -215,7 +215,7 @@ const _nordLight = AppColors(
   textTertiary: Color(0xFF7B8594),
   accent: Color(0xFF5E81AC), // nord10
   accentMuted: Color(0xFFD7E1EE),
-  accentOn: Color(0xFFFFFFFF),
+  accentOn: Color(0xFF0B0F14),
   success: Color(0xFF4A7A3F),
   successMuted: Color(0xFFDDEBD3),
   danger: Color(0xFF8B3A43),
@@ -237,7 +237,7 @@ const _nordLight = AppColors(
   diffHunkLine: Color(0xFF5E81AC),
   diffGutterText: Color(0xFF7B8594),
   userBubble: Color(0xFF5E81AC),
-  userBubbleOn: Color(0xFFFFFFFF),
+  userBubbleOn: Color(0xFF0B0F14),
   assistantBubble: Color(0xFFF8F9FB),
   assistantBubbleBorder: Color(0xFFD8DEE9),
   composerBackground: Color(0xFFFFFFFF),
@@ -471,7 +471,7 @@ const _rosePineDawn = AppColors(
   textTertiary: Color(0xFF9893A5), // muted
   accent: Color(0xFFD7827E), // rose
   accentMuted: Color(0xFFF4DDDB),
-  accentOn: Color(0xFFFFFFFF),
+  accentOn: Color(0xFF191724),
   success: Color(0xFF286983), // pine
   successMuted: Color(0xFFD2E0E9),
   danger: Color(0xFFB4637A), // love
@@ -493,7 +493,7 @@ const _rosePineDawn = AppColors(
   diffHunkLine: Color(0xFF56949F),
   diffGutterText: Color(0xFF9893A5),
   userBubble: Color(0xFF907AA9), // iris
-  userBubbleOn: Color(0xFFFFFFFF),
+  userBubbleOn: Color(0xFF191724),
   assistantBubble: Color(0xFFFFFAF3),
   assistantBubbleBorder: Color(0xFFDFDAD9),
   composerBackground: Color(0xFFFFFAF3),
@@ -556,7 +556,7 @@ const _tokyoDay = AppColors(
   textTertiary: Color(0xFF8990B3),
   accent: Color(0xFF2E7DE9), // blue
   accentMuted: Color(0xFFD4E1FA),
-  accentOn: Color(0xFFFFFFFF),
+  accentOn: Color(0xFF0B0F14),
   success: Color(0xFF587539),
   successMuted: Color(0xFFDBE6CB),
   danger: Color(0xFFF52A65),
@@ -567,7 +567,7 @@ const _tokyoDay = AppColors(
   infoMuted: Color(0xFFCCE3EC),
   codeBackground: Color(0xFFD6D8E0),
   codeBorder: Color(0xFFC1C5D4),
-  codeForeground: Color(0xFF3760BF),
+  codeForeground: Color(0xFF343B58),
   diffAddLine: Color(0xFFDBE6CB),
   diffAddGutter: Color(0xFFBAD29F),
   diffAddGlyph: Color(0xFF587539),
@@ -578,7 +578,7 @@ const _tokyoDay = AppColors(
   diffHunkLine: Color(0xFF2E7DE9),
   diffGutterText: Color(0xFF8990B3),
   userBubble: Color(0xFF2E7DE9),
-  userBubbleOn: Color(0xFFFFFFFF),
+  userBubbleOn: Color(0xFF0B0F14),
   assistantBubble: Color(0xFFE9E9EE),
   assistantBubbleBorder: Color(0xFFC1C5D4),
   composerBackground: Color(0xFFE9E9EE),

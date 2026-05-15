@@ -13,6 +13,7 @@ import '../live_activity_service.dart';
 import '../local_notification_service.dart';
 import '../models.dart';
 import '../theme/app_colors.dart';
+import '../theme/color_contrast.dart';
 import '../theme/app_theme.dart';
 import '../theme/app_tokens.dart';
 import '../widgets/app_snackbar.dart';
@@ -1348,7 +1349,14 @@ class _RailItem extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colors = context.colors;
-    final foreground = selected ? colors.accent : colors.textSecondary;
+    final foreground = selected
+        ? visibleUiColorOn(
+            colors,
+            background: colors.canvas,
+            preferred: colors.accent,
+          )
+        : colors.textSecondary;
+    final badgeForeground = readableActionForeground(colors, colors.accent);
     return Tooltip(
       message: label,
       child: Semantics(
@@ -1402,7 +1410,7 @@ class _RailItem extends StatelessWidget {
                           style: Theme.of(context).textTheme.labelSmall
                               ?.copyWith(
                                 color: selected
-                                    ? colors.accentOn
+                                    ? badgeForeground
                                     : colors.textSecondary,
                                 fontWeight: AppWeights.emphasis,
                                 height: 1,

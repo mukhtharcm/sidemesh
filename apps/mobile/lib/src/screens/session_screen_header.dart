@@ -600,6 +600,7 @@ class _JumpToLatestPill extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colors = context.colors;
+    final foreground = readableActionForeground(colors, colors.accent);
     return Material(
       color: colors.accent,
       shape: const StadiumBorder(),
@@ -616,13 +617,13 @@ class _JumpToLatestPill extends StatelessWidget {
               Icon(
                 Icons.arrow_downward_rounded,
                 size: 16,
-                color: colors.userBubbleOn,
+                color: foreground,
               ),
               const SizedBox(width: 6),
               Text(
                 'Jump to latest',
                 style: Theme.of(context).textTheme.labelMedium?.copyWith(
-                  color: colors.userBubbleOn,
+                  color: foreground,
                   fontWeight: FontWeight.w700,
                 ),
               ),
