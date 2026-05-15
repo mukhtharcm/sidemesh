@@ -27,6 +27,11 @@ void main() {
         reason: '${palette.label} user bubble contrast is too low',
       );
       expect(
+        contrastRatio(colors.userBubble, colors.accent),
+        greaterThanOrEqualTo(2.0),
+        reason: '${palette.label} user bubble is too close to accent',
+      );
+      expect(
         contrastRatio(colors.codeForeground, colors.codeBackground),
         greaterThanOrEqualTo(minimumReadableTextContrast),
         reason: '${palette.label} code contrast is too low',
