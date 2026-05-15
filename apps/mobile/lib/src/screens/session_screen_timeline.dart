@@ -1065,7 +1065,7 @@ class _MessageBubble extends StatelessWidget {
               : colors.assistantBubbleBorder
         : live
         ? colors.accent
-        : colors.userBubble;
+        : colors.accent.withValues(alpha: 0.28);
     final phaseLabel = live
         ? 'Writing'
         : message.phase == 'commentary'
