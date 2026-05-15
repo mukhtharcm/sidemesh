@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../theme/app_colors.dart';
+import '../theme/color_contrast.dart';
 import '../theme/app_tokens.dart';
 import 'mesh_widgets.dart';
 
@@ -27,6 +28,11 @@ class MeshBottomSheetScaffold extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colors = context.colors;
+    final iconForeground = readableSemanticForeground(
+      colors,
+      background: colors.accentMuted,
+      preferred: colors.accent,
+    );
     final maxHeight = MediaQuery.sizeOf(context).height * maxHeightFactor;
     return SafeArea(
       child: Padding(
@@ -77,7 +83,11 @@ class MeshBottomSheetScaffold extends StatelessWidget {
                               ),
                             ),
                             alignment: Alignment.center,
-                            child: Icon(icon, size: 19, color: colors.accent),
+                            child: Icon(
+                              icon,
+                              size: 19,
+                              color: iconForeground,
+                            ),
                           ),
                           const SizedBox(width: 12),
                           Expanded(

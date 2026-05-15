@@ -106,6 +106,57 @@ Color visibleUiColorOn(
   );
 }
 
+Color visibleBorderOn(
+  AppColors colors, {
+  required Color background,
+  required Color preferred,
+}) {
+  return readableColorForBackground(
+    background: background,
+    preferred: preferred,
+    fallbacks: <Color>[
+      colors.borderStrong,
+      colors.textSecondary,
+      colors.textPrimary,
+      _contrastInk,
+      _contrastPaper,
+    ],
+    minimumContrast: minimumUiContrast,
+  );
+}
+
+Color readableLinkOn(
+  AppColors colors, {
+  required Color background,
+  Color? preferred,
+}) {
+  return readableTextOn(
+    colors,
+    background: background,
+    preferred: preferred ?? colors.accent,
+    additionalFallbacks: <Color>[colors.info, colors.textPrimary],
+  );
+}
+
+Color readableTerminalColorOn(
+  AppColors colors, {
+  required Color preferred,
+}) {
+  return readableColorForBackground(
+    background: colors.codeBackground,
+    preferred: preferred,
+    fallbacks: <Color>[
+      colors.codeForeground,
+      colors.textPrimary,
+      colors.textSecondary,
+      colors.accentOn,
+      _contrastInk,
+      _contrastPaper,
+    ],
+    minimumContrast: minimumReadableTextContrast,
+  );
+}
+
 Color selectionFillForBackground(
   AppColors colors, {
   required Color background,

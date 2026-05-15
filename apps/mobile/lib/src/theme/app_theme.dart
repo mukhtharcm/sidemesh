@@ -54,6 +54,16 @@ ThemeData _buildTheme(
     preferred: palette.textTertiary,
     additionalFallbacks: <Color>[palette.textSecondary],
   );
+  final controlBorder = visibleBorderOn(
+    palette,
+    background: palette.surface,
+    preferred: palette.border,
+  );
+  final disabledControlForeground = visibleUiColorOn(
+    palette,
+    background: palette.surfaceMuted,
+    preferred: palette.textSecondary,
+  );
   final colorScheme = ColorScheme(
     brightness: brightness,
     primary: palette.accent,
@@ -194,7 +204,7 @@ ThemeData _buildTheme(
         backgroundColor: palette.accent,
         foregroundColor: actionForeground,
         disabledBackgroundColor: palette.surfaceMuted,
-        disabledForegroundColor: palette.textTertiary,
+        disabledForegroundColor: disabledControlForeground,
         shape: RoundedRectangleBorder(borderRadius: AppShapes.input),
         textStyle: textTheme.labelLarge?.copyWith(fontWeight: AppWeights.title),
         padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
@@ -203,7 +213,7 @@ ThemeData _buildTheme(
     outlinedButtonTheme: OutlinedButtonThemeData(
       style: OutlinedButton.styleFrom(
         foregroundColor: palette.textPrimary,
-        side: BorderSide(color: palette.border),
+        side: BorderSide(color: controlBorder),
         shape: RoundedRectangleBorder(borderRadius: AppShapes.input),
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 13),
       ),
@@ -223,11 +233,11 @@ ThemeData _buildTheme(
       hoverColor: palette.surfaceElevated,
       border: OutlineInputBorder(
         borderRadius: AppShapes.input,
-        borderSide: BorderSide(color: palette.border),
+        borderSide: BorderSide(color: controlBorder),
       ),
       enabledBorder: OutlineInputBorder(
         borderRadius: AppShapes.input,
-        borderSide: BorderSide(color: palette.border),
+        borderSide: BorderSide(color: controlBorder),
       ),
       focusedBorder: OutlineInputBorder(
         borderRadius: AppShapes.input,

@@ -1,3 +1,4 @@
+import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sidemesh_mobile/src/theme/app_colors.dart';
 import 'package:sidemesh_mobile/src/theme/app_palettes.dart';
@@ -70,6 +71,134 @@ void main() {
           contrastRatio(toneColors.foreground, toneColors.background),
           greaterThanOrEqualTo(minimumReadableTextContrast),
           reason: '${palette.label} $tone status contrast is too low',
+        );
+      }
+    }
+  });
+
+  test('shared helpers cover app chrome and component states', () {
+    for (final palette in _allPalettes()) {
+      final colors = palette.colors;
+      final composerMuted = Color.alphaBlend(
+        colors.surfaceMuted.withValues(alpha: 0.56),
+        colors.composerBackground,
+      );
+
+      expect(
+        contrastRatio(
+          visibleUiColorOn(
+            colors,
+            background: colors.surfaceMuted,
+            preferred: colors.textSecondary,
+          ),
+          colors.surfaceMuted,
+        ),
+        greaterThanOrEqualTo(minimumUiContrast),
+        reason: '${palette.label} quiet composer controls are too low',
+      );
+      expect(
+        contrastRatio(
+          visibleUiColorOn(
+            colors,
+            background: composerMuted,
+            preferred: colors.textSecondary,
+          ),
+          composerMuted,
+        ),
+        greaterThanOrEqualTo(minimumUiContrast),
+        reason: '${palette.label} composer muted button icon is too low',
+      );
+      expect(
+        contrastRatio(
+          visibleUiColorOn(
+            colors,
+            background: colors.accentMuted,
+            preferred: colors.accent,
+          ),
+          colors.accentMuted,
+        ),
+        greaterThanOrEqualTo(minimumUiContrast),
+        reason: '${palette.label} selected composer icon is too low',
+      );
+      expect(
+        contrastRatio(
+          readableSemanticForeground(
+            colors,
+            background: colors.accentMuted,
+            preferred: colors.accent,
+          ),
+          colors.accentMuted,
+        ),
+        greaterThanOrEqualTo(minimumReadableTextContrast),
+        reason: '${palette.label} sheet/dialog icon well is too low',
+      );
+      expect(
+        contrastRatio(
+          visibleUiColorOn(
+            colors,
+            background: colors.success,
+            preferred: colors.accentOn,
+          ),
+          colors.success,
+        ),
+        greaterThanOrEqualTo(minimumUiContrast),
+        reason: '${palette.label} solid semantic action icon is too low',
+      );
+      expect(
+        contrastRatio(
+          readableSemanticForeground(
+            colors,
+            background: colors.dangerMuted,
+            preferred: colors.danger,
+          ),
+          colors.dangerMuted,
+        ),
+        greaterThanOrEqualTo(minimumReadableTextContrast),
+        reason: '${palette.label} muted danger action foreground is too low',
+      );
+      expect(
+        contrastRatio(
+          readableLinkOn(colors, background: colors.surface),
+          colors.surface,
+        ),
+        greaterThanOrEqualTo(minimumReadableTextContrast),
+        reason: '${palette.label} default markdown link is too low',
+      );
+      expect(
+        contrastRatio(
+          visibleBorderOn(
+            colors,
+            background: colors.surface,
+            preferred: colors.border,
+          ),
+          colors.surface,
+        ),
+        greaterThanOrEqualTo(minimumUiContrast),
+        reason: '${palette.label} control border is too low',
+      );
+    }
+  });
+
+  test('terminal palette resolves readable ANSI colors', () {
+    for (final palette in _allPalettes()) {
+      final colors = palette.colors;
+
+      for (final preferred in <Color>[
+        colors.textTertiary,
+        colors.danger,
+        colors.success,
+        colors.warning,
+        colors.accent,
+        colors.info,
+        colors.textSecondary,
+      ]) {
+        expect(
+          contrastRatio(
+            readableTerminalColorOn(colors, preferred: preferred),
+            colors.codeBackground,
+          ),
+          greaterThanOrEqualTo(minimumReadableTextContrast),
+          reason: '${palette.label} terminal color is too low',
         );
       }
     }
