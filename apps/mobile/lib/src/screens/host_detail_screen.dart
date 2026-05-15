@@ -12,13 +12,49 @@ import '../session_local_store.dart';
 import '../session_overrides_store.dart';
 import '../session_read_store.dart';
 import '../theme/app_colors.dart';
+import '../theme/color_contrast.dart';
 import '../theme/app_theme.dart';
 import '../theme/app_tokens.dart';
+import '../widgets/app_dialogs.dart';
+import '../widgets/app_sheets.dart';
 import '../widgets/app_snackbar.dart';
 import '../widgets/mesh_widgets.dart';
 import '../widgets/session_row_card.dart';
 import 'create_session_sheet.dart';
 import 'terminal_screen.dart';
+
+String _hostEndpointLabel(String baseUrl) {
+  final uri = Uri.tryParse(baseUrl.trim());
+  if (uri == null || uri.host.isEmpty) {
+    return baseUrl.trim();
+  }
+  final hasDefaultPort =
+      !uri.hasPort ||
+      (uri.scheme == 'http' && uri.port == 80) ||
+      (uri.scheme == 'https' && uri.port == 443);
+  return hasDefaultPort ? uri.host : '${uri.host}:${uri.port}';
+}
+
+String _agentAvailabilityLabel(int count) {
+  final noun = count == 1 ? 'agent' : 'agents';
+  return '$count $noun available';
+}
+
+String _agentInUseLabel(String displayName) => 'In use: $displayName';
+
+String _agentViewingLabel(String displayName) => 'Viewing: $displayName';
+
+String _agentCommandLabel(String command) => 'Command: $command';
+
+String _releaseTrackLabel(String value) {
+  return value == 'bleeding-edge' ? 'Early access' : 'Stable';
+}
+
+String _releaseTrackDetail(String value) {
+  return value == 'bleeding-edge'
+      ? 'Early access · newest changes'
+      : 'Stable · tagged releases';
+}
 
 class HostDetailScreen extends StatefulWidget {
   const HostDetailScreen({
@@ -340,7 +376,7 @@ class _HostDetailScreenState extends State<HostDetailScreen>
           return MeshEmptyState(
             icon: Icons.wifi_off_rounded,
             title: 'Could not reach host',
-            body: snapshot.error.toString(),
+            body: friendlyError(snapshot.error!),
           );
         }
         final data = snapshot.data!;
@@ -380,9 +416,9 @@ class _HostDetailScreenState extends State<HostDetailScreen>
                     const SizedBox(height: AppSpacing.lg),
                     _SectionHeader(
                       icon: Icons.folder_open_rounded,
-                      title: 'Quick launch',
+                      title: 'Start from folder',
                       subtitle:
-                          '${data.workspaces.length} ${data.workspaces.length == 1 ? "folder" : "folders"}',
+                          '${data.workspaces.length} recent ${data.workspaces.length == 1 ? "folder" : "folders"}',
                     ),
                     const SizedBox(height: AppSpacing.sm),
                     _WorkspaceLaunchRow(
@@ -394,8 +430,8 @@ class _HostDetailScreenState extends State<HostDetailScreen>
                   const SizedBox(height: AppSpacing.xl),
                   _SectionHeader(
                     icon: Icons.medical_services_rounded,
-                    title: 'Host management',
-                    subtitle: 'Diagnostics and provider control.',
+                    title: 'Manage this machine',
+                    subtitle: 'Open tools, updates, and restart controls',
                   ),
                   const SizedBox(height: AppSpacing.sm),
                   _HostManagementCard(
@@ -417,7 +453,7 @@ class _HostDetailScreenState extends State<HostDetailScreen>
                     const MeshEmptyState(
                       icon: Icons.chat_bubble_outline_rounded,
                       title: 'No sessions yet',
-                      body: 'Tap "New session" to start one on this host.',
+                      body: 'Start a session on this machine to see it here.',
                     )
                   else
                     ...sortedSessions.map(
@@ -495,7 +531,7 @@ class _EmbeddedHostHeader extends StatelessWidget {
                 ),
                 const SizedBox(height: 2),
                 Text(
-                  host.baseUrl,
+                  _hostEndpointLabel(host.baseUrl),
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: monoStyle(color: colors.textTertiary, fontSize: 11),
@@ -515,7 +551,7 @@ class _EmbeddedHostHeader extends StatelessWidget {
             label: const Text('New session'),
             style: FilledButton.styleFrom(
               backgroundColor: colors.accent,
-              foregroundColor: colors.accentOn,
+              foregroundColor: readableActionForeground(colors, colors.accent),
               padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
             ),
           ),
@@ -770,7 +806,7 @@ class HostProviderContractScreen extends StatelessWidget {
     final title = node.label.isNotEmpty ? node.label : node.hostname;
     return Scaffold(
       backgroundColor: colors.canvas,
-      appBar: AppBar(title: Text('Provider contract')),
+      appBar: AppBar(title: Text('Agents on this machine')),
       body: ListView(
         padding: const EdgeInsets.fromLTRB(16, 8, 16, 32),
         children: [_ProviderContractDetailPanel(node: node, title: title)],
@@ -847,15 +883,14 @@ class _ProviderContractDetailPanelState
         ],
         const SizedBox(height: AppSpacing.lg),
         _CapabilitySummaryMatrix(
-          title: 'Provider-owned capabilities',
-          emptyText:
-              'This provider did not report any provider-owned capabilities.',
+          title: 'Agent features',
+          emptyText: 'This agent did not report any extra features.',
           groups: providerGroups,
         ),
         const SizedBox(height: AppSpacing.lg),
         _CapabilitySummaryMatrix(
-          title: 'Host-owned capabilities',
-          emptyText: 'This daemon did not report host capabilities.',
+          title: 'Machine features',
+          emptyText: 'This machine did not report any extra features.',
           groups: hostGroups,
         ),
       ],
@@ -920,12 +955,12 @@ class _ProviderContractOverviewCard extends StatelessWidget {
                     ),
                     const SizedBox(height: 2),
                     Text(
-                      '$selectedDisplayName - $selectedVersion',
+                      '$selectedDisplayName · $selectedVersion',
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
-                      style: monoStyle(
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
                         color: colors.textTertiary,
-                        fontSize: 11,
+                        height: 1.3,
                       ),
                     ),
                   ],
@@ -939,34 +974,30 @@ class _ProviderContractOverviewCard extends StatelessWidget {
             runSpacing: 8,
             children: [
               MeshPill(
-                label: 'active: ${node.provider}',
+                label: _agentInUseLabel(node.providerDisplayName),
                 icon: Icons.radio_button_checked_rounded,
                 tone: isViewingActiveProvider
                     ? MeshPillTone.success
                     : MeshPillTone.neutral,
-                mono: true,
               ),
               if (!isViewingActiveProvider)
                 MeshPill(
-                  label: 'viewing: $selectedProviderKind',
+                  label: _agentViewingLabel(selectedDisplayName),
                   icon: Icons.visibility_rounded,
                   tone: MeshPillTone.accent,
-                  mono: true,
                 ),
               if (selectedCommand != null)
                 MeshPill(
-                  label: 'command: $selectedCommand',
+                  label: _agentCommandLabel(selectedCommand!),
                   icon: Icons.terminal_rounded,
                   tone: MeshPillTone.neutral,
-                  mono: true,
                 ),
               MeshPill(
-                label: '${node.supportedProviders.length} supported',
+                label: _agentAvailabilityLabel(node.supportedProviders.length),
                 icon: Icons.extension_rounded,
                 tone: node.supportedProviders.isEmpty
                     ? MeshPillTone.warning
                     : MeshPillTone.info,
-                mono: true,
               ),
             ],
           ),
@@ -997,7 +1028,7 @@ class _ProviderDefinitionSection extends StatelessWidget {
       children: [
         _ContractSectionLabel(
           icon: Icons.extension_rounded,
-          title: 'Providers',
+          title: 'Available agents',
           detail: '${providers.length} available',
         ),
         const SizedBox(height: 8),
@@ -1083,19 +1114,22 @@ class _ProviderDefinitionRow extends StatelessWidget {
           ),
           if (active) ...[
             const SizedBox(width: 7),
-            _TinyStatusPill(label: 'active', tone: MeshPillTone.success),
+            _TinyStatusPill(label: 'In use', tone: MeshPillTone.success),
           ],
         ],
       ),
       subtitle: Text(
         [
-          provider.kind,
           if (provider.version.trim().isNotEmpty) provider.version.trim(),
-          if (command.trim().isNotEmpty) 'cmd $command',
-        ].join(' - '),
+          if (command.trim().isNotEmpty) _agentCommandLabel(command.trim()),
+          if (provider.version.trim().isEmpty && command.trim().isEmpty)
+            provider.kind,
+        ].join(' · '),
         maxLines: 1,
         overflow: TextOverflow.ellipsis,
-        style: monoStyle(color: colors.textTertiary, fontSize: 10.5),
+        style: Theme.of(
+          context,
+        ).textTheme.bodySmall?.copyWith(color: colors.textTertiary),
       ),
       trailing: selected
           ? Icon(Icons.check_rounded, color: colors.accent, size: 18)
@@ -1130,11 +1164,11 @@ class _CapabilitySummaryMatrix extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         _ContractSectionLabel(
-          icon: title.startsWith('Host')
+          icon: title.startsWith('Machine')
               ? Icons.dns_rounded
               : Icons.verified_user_rounded,
           title: title,
-          detail: total == 0 ? null : '$enabled/$total enabled',
+          detail: total == 0 ? null : '$enabled/$total ready',
         ),
         const SizedBox(height: 8),
         if (groups.isEmpty)
@@ -1263,7 +1297,9 @@ class _ContractSectionLabel extends StatelessWidget {
         if (detail != null)
           Text(
             detail!,
-            style: monoStyle(color: colors.textTertiary, fontSize: 10.5),
+            style: Theme.of(
+              context,
+            ).textTheme.bodySmall?.copyWith(color: colors.textTertiary),
           ),
       ],
     );
@@ -1279,50 +1315,18 @@ class _TinyStatusPill extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colors = context.colors;
-    final (bg, fg, border) = switch (tone) {
-      MeshPillTone.neutral => (
-        colors.surfaceMuted,
-        colors.textTertiary,
-        colors.border,
-      ),
-      MeshPillTone.accent => (
-        colors.accentMuted,
-        colors.accent,
-        colors.accent.withValues(alpha: 0.35),
-      ),
-      MeshPillTone.success => (
-        colors.successMuted,
-        colors.success,
-        colors.success.withValues(alpha: 0.35),
-      ),
-      MeshPillTone.danger => (
-        colors.dangerMuted,
-        colors.danger,
-        colors.danger.withValues(alpha: 0.35),
-      ),
-      MeshPillTone.warning => (
-        colors.warningMuted,
-        colors.warning,
-        colors.warning.withValues(alpha: 0.35),
-      ),
-      MeshPillTone.info => (
-        colors.infoMuted,
-        colors.info,
-        colors.info.withValues(alpha: 0.35),
-      ),
-    };
+    final toneColors = meshPillColors(colors, tone);
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
       decoration: BoxDecoration(
-        color: bg,
+        color: toneColors.background,
         borderRadius: BorderRadius.circular(7),
-        border: Border.all(color: border),
+        border: Border.all(color: toneColors.border),
       ),
       child: Text(
         label,
-        style: monoStyle(
-          color: fg,
-          fontSize: 10.5,
+        style: Theme.of(context).textTheme.labelSmall?.copyWith(
+          color: toneColors.foreground,
           fontWeight: AppWeights.title,
         ),
       ),
@@ -1387,8 +1391,7 @@ class _ProviderContractSummaryCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final colors = context.colors;
     final supportedProviders = node.supportedProviders.length;
-    final providerCountLabel =
-        '$supportedProviders ${supportedProviders == 1 ? "provider" : "providers"}';
+    final providerCountLabel = _agentAvailabilityLabel(supportedProviders);
     return MeshCard(
       tone: MeshCardTone.muted,
       padding: EdgeInsets.zero,
@@ -1426,19 +1429,19 @@ class _ProviderContractSummaryCard extends StatelessWidget {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        'Providers & capabilities',
+                        'Agents on this machine',
                         style: Theme.of(context).textTheme.titleSmall?.copyWith(
                           fontWeight: AppWeights.title,
                         ),
                       ),
                       const SizedBox(height: 3),
                       Text(
-                        '${node.providerDisplayName} active - $providerCountLabel supported',
+                        '${node.providerDisplayName} in use, $providerCountLabel',
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
-                        style: monoStyle(
+                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
                           color: colors.textSecondary,
-                          fontSize: 11,
+                          height: 1.3,
                         ),
                       ),
                     ],
@@ -1524,16 +1527,19 @@ class _ProviderContractCardState extends State<_ProviderContractCard> {
             child: Icon(Icons.hub_rounded, color: colors.info, size: 16),
           ),
           title: Text(
-            'Provider contract',
+            'Agents on this machine',
             style: Theme.of(
               context,
             ).textTheme.titleSmall?.copyWith(fontWeight: AppWeights.title),
           ),
           subtitle: Text(
-            '$selectedDisplayName - $selectedVersion',
+            '$selectedDisplayName · $selectedVersion',
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
-            style: monoStyle(color: colors.textSecondary, fontSize: 11),
+            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+              color: colors.textSecondary,
+              height: 1.3,
+            ),
           ),
           children: [
             Align(
@@ -1543,34 +1549,30 @@ class _ProviderContractCardState extends State<_ProviderContractCard> {
                 runSpacing: 8,
                 children: [
                   MeshPill(
-                    label: 'active: ${node.provider}',
+                    label: _agentInUseLabel(node.providerDisplayName),
                     icon: Icons.radio_button_checked_rounded,
                     tone: isViewingActiveProvider
                         ? MeshPillTone.success
                         : MeshPillTone.neutral,
-                    mono: true,
                   ),
                   if (!isViewingActiveProvider)
                     MeshPill(
-                      label: 'viewing: $_selectedProviderKind',
+                      label: _agentViewingLabel(selectedDisplayName),
                       icon: Icons.visibility_rounded,
                       tone: MeshPillTone.accent,
-                      mono: true,
                     ),
                   if (selectedCommand != null)
                     MeshPill(
-                      label: 'command: $selectedCommand',
+                      label: _agentCommandLabel(selectedCommand),
                       icon: Icons.terminal_rounded,
                       tone: MeshPillTone.neutral,
-                      mono: true,
                     ),
                   MeshPill(
-                    label: '${supportedProviders.length} supported',
+                    label: _agentAvailabilityLabel(supportedProviders.length),
                     icon: Icons.extension_rounded,
                     tone: supportedProviders.isEmpty
                         ? MeshPillTone.warning
                         : MeshPillTone.info,
-                    mono: true,
                   ),
                 ],
               ),
@@ -1590,15 +1592,14 @@ class _ProviderContractCardState extends State<_ProviderContractCard> {
             ],
             const SizedBox(height: 14),
             _CapabilityMatrix(
-              title: 'Provider-owned capabilities',
-              emptyText:
-                  'This provider did not report any provider-owned capabilities.',
+              title: 'Agent features',
+              emptyText: 'This agent did not report any extra features.',
               groups: providerGroups,
             ),
             const SizedBox(height: 12),
             _CapabilityMatrix(
-              title: 'Host-owned capabilities',
-              emptyText: 'This daemon did not report host capabilities.',
+              title: 'Machine features',
+              emptyText: 'This machine did not report any extra features.',
               groups: hostGroups,
             ),
           ],
@@ -1689,7 +1690,7 @@ class _ProviderDefinitionList extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text(
-          'Daemon-supported providers',
+          'Available agents',
           style: Theme.of(context).textTheme.labelLarge?.copyWith(
             color: colors.textSecondary,
             fontWeight: AppWeights.title,
@@ -1697,7 +1698,7 @@ class _ProviderDefinitionList extends StatelessWidget {
         ),
         const SizedBox(height: 4),
         Text(
-          'Tap a provider to inspect its contract.',
+          'Choose one to see what it can do.',
           style: Theme.of(
             context,
           ).textTheme.bodySmall?.copyWith(color: colors.textTertiary),
@@ -1712,7 +1713,7 @@ class _ProviderDefinitionList extends StatelessWidget {
                 final selected = provider.kind == selectedProvider;
                 return _ProviderSelectPill(
                   label: active
-                      ? '${provider.displayName} active'
+                      ? '${provider.displayName} in use'
                       : provider.displayName,
                   icon: active
                       ? Icons.check_circle_rounded
@@ -1756,7 +1757,7 @@ class _ProviderSelectPill extends StatelessWidget {
         child: AnimatedScale(
           duration: const Duration(milliseconds: 140),
           scale: selected ? 1.0 : 0.985,
-          child: MeshPill(label: label, icon: icon, tone: tone, mono: true),
+          child: MeshPill(label: label, icon: icon, tone: tone),
         ),
       ),
     );
@@ -1844,7 +1845,6 @@ class _CapabilityGroupRow extends StatelessWidget {
               MeshPill(
                 label: '${group.enabledCount}/${group.totalCount}',
                 tone: allEnabled ? MeshPillTone.success : MeshPillTone.warning,
-                mono: true,
               ),
             ],
           ),
@@ -1863,7 +1863,6 @@ class _CapabilityGroupRow extends StatelessWidget {
                         ? MeshPillTone.success
                         : MeshPillTone.neutral,
                     bold: false,
-                    mono: true,
                   );
                 })
                 .toList(growable: false),
@@ -1891,30 +1890,29 @@ class _SectionHeader extends StatelessWidget {
     return Padding(
       padding: const EdgeInsets.fromLTRB(2, 0, 2, 0),
       child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Icon(icon, size: 18, color: colors.accent),
+          Icon(icon, size: 18, color: colors.textTertiary),
           const SizedBox(width: 8),
           Expanded(
-            child: Row(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Expanded(
-                  child: Text(
-                    title,
-                    overflow: TextOverflow.ellipsis,
-                    style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                      fontWeight: AppWeights.title,
-                    ),
+                Text(
+                  title,
+                  overflow: TextOverflow.ellipsis,
+                  style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                    fontWeight: AppWeights.title,
                   ),
                 ),
-                const SizedBox(width: 8),
-                Flexible(
-                  child: Text(
-                    subtitle,
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                    textAlign: TextAlign.right,
-                    style: monoStyle(color: colors.textTertiary, fontSize: 11),
-                  ),
+                const SizedBox(height: 2),
+                Text(
+                  subtitle,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: Theme.of(
+                    context,
+                  ).textTheme.bodySmall?.copyWith(color: colors.textSecondary),
                 ),
               ],
             ),
@@ -1997,11 +1995,11 @@ String _capabilitySectionTitle(String key) {
   return switch (key) {
     'sessions' => 'Sessions',
     'input' => 'Input',
-    'interaction' => 'Interactive input',
+    'interaction' => 'Follow-ups',
     'approvals' => 'Approvals',
-    'configuration' => 'Configuration',
-    'runtimeControls' => 'Runtime controls',
-    'workspace' => 'Workspace',
+    'configuration' => 'Setup',
+    'runtimeControls' => 'Session controls',
+    'workspace' => 'Files & Git',
     _ => _humanizeCamelCase(key),
   };
 }
@@ -2025,21 +2023,21 @@ String _capabilityFeatureLabel(String key) {
     'localImage' => 'local image',
     'eventReplay' => 'event replay',
     'recentFallback' => 'recent fallback',
-    'skillManagement' => 'skill management',
-    'mode' => 'mode',
-    'reasoningEffort' => 'reasoning',
+    'skillManagement' => 'skills',
+    'mode' => 'work style',
+    'reasoningEffort' => 'thinking',
     'fastMode' => 'fast mode',
-    'approvalPolicy' => 'approval policy',
-    'sandboxMode' => 'sandbox',
-    'networkAccess' => 'network',
+    'approvalPolicy' => 'approvals',
+    'sandboxMode' => 'workspace access',
+    'networkAccess' => 'network access',
     'webSearch' => 'web search',
     'remoteGitDiff' => 'remote git diff',
     'gitStatus' => 'git status',
     'gitDiff' => 'git diff',
     'portForwarding' => 'port forwarding',
-    'approveForSession' => 'approve for session',
-    'userInput' => 'ask user',
-    'elicitation' => 'form requests',
+    'approveForSession' => 'remember approval',
+    'userInput' => 'ask for input',
+    'elicitation' => 'forms',
     _ => _humanizeCamelCase(key),
   };
 }
@@ -2193,7 +2191,7 @@ class _HostManagementCardState extends State<_HostManagementCard> {
     try {
       await widget.api.restartProvider(widget.host, widget.node.provider);
       if (!mounted) return;
-      showAppSnackBar(context, '$_providerDisplayName restarting…');
+      showAppSnackBar(context, 'Restarting $_providerDisplayName…');
     } catch (e) {
       if (!mounted) return;
       showAppSnackBar(context, 'Restart failed: ${friendlyError(e)}');
@@ -2208,7 +2206,7 @@ class _HostManagementCardState extends State<_HostManagementCard> {
     try {
       await widget.api.restartDaemon(widget.host);
       if (!mounted) return;
-      showAppSnackBar(context, 'Daemon restarting…');
+      showAppSnackBar(context, 'Restarting Sidemesh…');
     } catch (e) {
       if (!mounted) return;
       showAppSnackBar(context, 'Restart failed: ${friendlyError(e)}');
@@ -2221,40 +2219,48 @@ class _HostManagementCardState extends State<_HostManagementCard> {
     if (!_supportsChannelSelection || _savingUpdateChannel) return;
     final selected = await showModalBottomSheet<String>(
       context: context,
+      backgroundColor: Colors.transparent,
+      showDragHandle: false,
+      useSafeArea: true,
+      isScrollControlled: true,
       builder: (context) {
         final colors = context.colors;
-        return SafeArea(
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                MeshListRow(
-                  framed: false,
-                  dense: true,
-                  radius: AppRadii.control,
-                  leading: Icon(Icons.verified_rounded, color: colors.accent),
-                  title: const Text('Stable'),
-                  subtitle: const Text('Tagged releases'),
-                  trailing: _selectedUpdateChannel == 'stable'
-                      ? Icon(Icons.check_rounded, color: colors.accent)
-                      : null,
-                  onTap: () => Navigator.of(context).pop('stable'),
-                ),
-                MeshListRow(
-                  framed: false,
-                  dense: true,
-                  radius: AppRadii.control,
-                  leading: Icon(Icons.science_rounded, color: colors.accent),
-                  title: const Text('Bleeding edge'),
-                  subtitle: const Text('Latest commits from main'),
-                  trailing: _selectedUpdateChannel == 'bleeding-edge'
-                      ? Icon(Icons.check_rounded, color: colors.accent)
-                      : null,
-                  onTap: () => Navigator.of(context).pop('bleeding-edge'),
-                ),
-              ],
-            ),
+        return MeshBottomSheetScaffold(
+          icon: Icons.system_update_rounded,
+          title: 'Choose release track',
+          description:
+              'Stable gets tagged releases. Early access gets the newest changes.',
+          maxWidth: 560,
+          maxHeightFactor: 0.44,
+          child: ListView(
+            padding: EdgeInsets.zero,
+            shrinkWrap: true,
+            children: [
+              MeshListRow(
+                framed: false,
+                dense: true,
+                radius: AppRadii.control,
+                leading: Icon(Icons.verified_rounded, color: colors.accent),
+                title: const Text('Stable'),
+                subtitle: const Text('Tagged releases'),
+                trailing: _selectedUpdateChannel == 'stable'
+                    ? Icon(Icons.check_rounded, color: colors.accent)
+                    : null,
+                onTap: () => Navigator.of(context).pop('stable'),
+              ),
+              MeshListRow(
+                framed: false,
+                dense: true,
+                radius: AppRadii.control,
+                leading: Icon(Icons.science_rounded, color: colors.accent),
+                title: const Text('Early access'),
+                subtitle: const Text('Newest changes'),
+                trailing: _selectedUpdateChannel == 'bleeding-edge'
+                    ? Icon(Icons.check_rounded, color: colors.accent)
+                    : null,
+                onTap: () => Navigator.of(context).pop('bleeding-edge'),
+              ),
+            ],
           ),
         );
       },
@@ -2277,14 +2283,15 @@ class _HostManagementCardState extends State<_HostManagementCard> {
       showAppSnackBar(
         context,
         refreshFailed
-            ? 'Update channel set, but refresh failed.'
-            : selected == 'bleeding-edge'
-            ? 'Update channel set to bleeding edge.'
-            : 'Update channel set to stable.',
+            ? 'Release track saved, but refresh failed.'
+            : 'Release track set to ${_releaseTrackLabel(selected)}.',
       );
     } catch (e) {
       if (!mounted) return;
-      showAppSnackBar(context, 'Update channel failed: ${friendlyError(e)}');
+      showAppSnackBar(
+        context,
+        'Could not save the release track: ${friendlyError(e)}',
+      );
     } finally {
       if (mounted) setState(() => _savingUpdateChannel = false);
     }
@@ -2292,7 +2299,7 @@ class _HostManagementCardState extends State<_HostManagementCard> {
 
   String get _updateDialogTitle {
     if (_useBleedingEdgeForNextUpdate) {
-      return 'Update to latest main?';
+      return 'Install the newest Early access build?';
     }
     final current = widget.node.packageVersion;
     final latest = widget.node.latestVersion;
@@ -2300,7 +2307,7 @@ class _HostManagementCardState extends State<_HostManagementCard> {
         current.isNotEmpty &&
         latest != null &&
         latest.isNotEmpty) {
-      return 'Update from v$current → v$latest?';
+      return 'Update Sidemesh to v$latest?';
     }
     return 'Update Sidemesh?';
   }
@@ -2316,18 +2323,33 @@ class _HostManagementCardState extends State<_HostManagementCard> {
       bool skipNextTime = false;
       final confirmed = await showDialog<bool>(
         context: context,
-        builder: (context) => AlertDialog(
-          title: Text(_updateDialogTitle),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
+        builder: (dialogContext) => MeshDialogScaffold(
+          icon: Icons.system_update_alt_rounded,
+          title: _updateDialogTitle,
+          description: _useBleedingEdgeForNextUpdate
+              ? 'This installs the newest Early access build of Sidemesh on this machine.'
+              : 'This installs the latest available Sidemesh update on this machine.',
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(false),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.of(dialogContext).pop(true),
+              child: const Text('Update now'),
+            ),
+          ],
+          child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(
-                _useBleedingEdgeForNextUpdate
-                    ? 'This will update Sidemesh to the latest commit on main. All active terminal sessions, port forwards, and browser previews will be disconnected.'
-                    : 'All active terminal sessions, port forwards, and browser previews will be disconnected.',
+                'Open terminals, forwarded ports, and browser previews disconnect while the update starts.',
+                style: Theme.of(dialogContext).textTheme.bodySmall?.copyWith(
+                  color: dialogContext.colors.textSecondary,
+                  height: 1.4,
+                ),
               ),
-              const SizedBox(height: 12),
+              const SizedBox(height: 14),
               StatefulBuilder(
                 builder: (context, setLocalState) {
                   return MeshListRow(
@@ -2337,7 +2359,7 @@ class _HostManagementCardState extends State<_HostManagementCard> {
                     onTap: () {
                       setLocalState(() => skipNextTime = !skipNextTime);
                     },
-                    title: const Text("Don't ask again"),
+                    title: const Text('Skip this confirmation next time'),
                     trailing: Checkbox(
                       value: skipNextTime,
                       onChanged: (v) {
@@ -2349,16 +2371,6 @@ class _HostManagementCardState extends State<_HostManagementCard> {
               ),
             ],
           ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(context).pop(false),
-              child: const Text('Cancel'),
-            ),
-            TextButton(
-              onPressed: () => Navigator.of(context).pop(true),
-              child: const Text('Update'),
-            ),
-          ],
         ),
       );
 
@@ -2384,7 +2396,7 @@ class _HostManagementCardState extends State<_HostManagementCard> {
         _updateTargetLabel = _targetUpdateLabel();
         _updateChannelAtStart = _selectedUpdateChannel;
       });
-      showAppSnackBar(context, 'Updating Sidemesh…');
+      showAppSnackBar(context, 'Starting Sidemesh update…');
     } catch (e) {
       if (!mounted) return;
       showAppSnackBar(context, 'Update failed: ${friendlyError(e)}');
@@ -2410,8 +2422,8 @@ class _HostManagementCardState extends State<_HostManagementCard> {
   String _targetUpdateLabel() {
     if (_useBleedingEdgeForNextUpdate) {
       return widget.node.shortLatestCommitSha == null
-          ? 'latest main'
-          : 'main@${widget.node.shortLatestCommitSha}';
+          ? 'latest Early access build'
+          : 'Early access build ${widget.node.shortLatestCommitSha}';
     }
     final latestVersion = widget.node.latestVersion;
     if (latestVersion != null && latestVersion.isNotEmpty) {
@@ -2422,9 +2434,7 @@ class _HostManagementCardState extends State<_HostManagementCard> {
 
   String _updateChannelDetail() {
     final configured = _selectedUpdateChannel == widget.node.updateChannel;
-    final base = _useBleedingEdgeForNextUpdate
-        ? 'Bleeding edge · latest commits on main'
-        : 'Stable · tagged releases';
+    final base = _releaseTrackDetail(_selectedUpdateChannel);
     return configured ? base : '$base · next update only';
   }
 
@@ -2433,7 +2443,7 @@ class _HostManagementCardState extends State<_HostManagementCard> {
         HostStatusStore.instance.statusFor(widget.host.id).reachability ==
         HostReachability.offline;
     if (isOffline) {
-      return 'Host offline — cannot update';
+      return 'Machine offline, cannot update';
     }
     if (widget.checkingUpdateInfo) {
       return 'Checking for updates…';
@@ -2459,16 +2469,16 @@ class _HostManagementCardState extends State<_HostManagementCard> {
 
     if (!widget.node.updateAvailable) {
       if (hasCurrent) return 'Up to date · v$packageVersion';
-      return 'Up to date · Unknown version';
+      return 'Up to date · version unavailable';
     }
 
     if (hasCurrent && hasLatest) {
       return 'v$packageVersion → v$latestVersion';
     }
     if (hasCurrent) {
-      return 'Current: v$packageVersion';
+      return 'Current version: v$packageVersion';
     }
-    return 'Unknown version';
+    return 'Version unavailable';
   }
 
   IconData get _updateIcon {
@@ -2518,8 +2528,8 @@ class _HostManagementCardState extends State<_HostManagementCard> {
               if (widget.node.supportsHostCapability('workspace', 'terminal'))
                 _ManagementRow(
                   icon: Icons.terminal_rounded,
-                  label: 'New terminal',
-                  detail: 'Open a shell on ${widget.host.label}.',
+                  label: 'Open terminal',
+                  detail: 'Open a shell on this machine.',
                   busy: false,
                   onTap: _openTerminal,
                 ),
@@ -2528,8 +2538,8 @@ class _HostManagementCardState extends State<_HostManagementCard> {
               if (_supportsRestart)
                 _ManagementRow(
                   icon: Icons.refresh_rounded,
-                  label: 'Restart $_providerDisplayName provider',
-                  detail: 'Preserves terminals and port forwards.',
+                  label: 'Restart $_providerDisplayName',
+                  detail: 'Leaves terminals and forwarded ports running.',
                   busy: _restartingProvider,
                   onTap: _restartProvider,
                 ),
@@ -2538,7 +2548,7 @@ class _HostManagementCardState extends State<_HostManagementCard> {
               if (_supportsChannelSelection)
                 _ManagementRow(
                   icon: Icons.alt_route_rounded,
-                  label: 'Update channel',
+                  label: 'Release track',
                   detail: _updateChannelDetail(),
                   busy: _savingUpdateChannel,
                   onTap: _pickUpdateChannel,
@@ -2559,8 +2569,8 @@ class _HostManagementCardState extends State<_HostManagementCard> {
                 Divider(height: 1, indent: 46, color: colors.border),
               _ManagementRow(
                 icon: Icons.restart_alt_rounded,
-                label: 'Restart Sidemesh daemon',
-                detail: 'Full process restart — reconnect automatically.',
+                label: 'Restart Sidemesh',
+                detail: 'Reconnects automatically after the restart.',
                 busy: _restartingDaemon,
                 onTap: _restartDaemon,
               ),
@@ -2628,7 +2638,9 @@ class _UpdateProgressBanner extends StatelessWidget {
   String _successLabel() {
     if (updateChannel == 'bleeding-edge') {
       final sha = currentNode.shortCurrentCommitSha;
-      return sha == null ? 'latest main' : 'main@$sha';
+      return sha == null
+          ? 'latest Early access build'
+          : 'Early access build $sha';
     }
     final version = currentNode.packageVersion;
     if (version != null && version.isNotEmpty) {
@@ -2643,8 +2655,8 @@ class _UpdateProgressBanner extends StatelessWidget {
       colors: colors,
       icon: Icons.update_rounded,
       iconColor: colors.accent,
-      title: 'Updating to ${targetLabel ?? 'latest'}…',
-      subtitle: 'This may take 20–45 seconds',
+      title: 'Installing ${targetLabel ?? 'latest update'}…',
+      subtitle: 'This usually takes 20 to 45 seconds',
       showSpinner: true,
     );
   }
@@ -2668,8 +2680,8 @@ class _UpdateProgressBanner extends StatelessWidget {
         colors: colors,
         icon: Icons.error_outline_rounded,
         iconColor: colors.danger,
-        title: 'Update failed',
-        subtitle: 'Tap to retry',
+        title: 'Update did not finish',
+        subtitle: 'Tap to try again',
         showDismiss: true,
       ),
     );

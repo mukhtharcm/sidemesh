@@ -118,10 +118,15 @@ class _SessionActionGroup {
 }
 
 class _SessionActionSheet extends StatelessWidget {
-  const _SessionActionSheet({required this.session, required this.groups});
+  const _SessionActionSheet({
+    required this.session,
+    required this.groups,
+    this.desktop = false,
+  });
 
   final SessionSummary session;
   final List<_SessionActionGroup> groups;
+  final bool desktop;
 
   @override
   Widget build(BuildContext context) {
@@ -130,6 +135,113 @@ class _SessionActionSheet extends StatelessWidget {
     final visibleGroups = groups
         .where((group) => group.actions.isNotEmpty)
         .toList(growable: false);
+    final shape = desktop ? AppShapes.dialog : AppShapes.sheet;
+    final panel = DecoratedBox(
+      decoration: BoxDecoration(
+        color: colors.surfaceElevated,
+        borderRadius: shape,
+        border: Border.all(color: colors.border),
+        boxShadow: desktop
+            ? AppShadows.dialog(colors.textPrimary)
+            : AppShadows.sheet(colors.textPrimary),
+      ),
+      child: ClipRRect(
+        borderRadius: shape,
+        child: SingleChildScrollView(
+          padding: EdgeInsets.fromLTRB(14, desktop ? 14 : 10, 14, 14),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              if (!desktop) ...[
+                Center(
+                  child: Container(
+                    width: 38,
+                    height: 4,
+                    decoration: BoxDecoration(
+                      color: colors.borderStrong.withValues(alpha: 0.55),
+                      borderRadius: AppShapes.pill,
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 14),
+              ],
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Container(
+                    width: desktop ? 34 : 38,
+                    height: desktop ? 34 : 38,
+                    decoration: BoxDecoration(
+                      color: colors.accentMuted,
+                      borderRadius: AppShapes.iconWell,
+                      border: Border.all(
+                        color: colors.accent.withValues(alpha: 0.24),
+                      ),
+                    ),
+                    alignment: Alignment.center,
+                    child: Icon(
+                      Icons.auto_awesome_mosaic_rounded,
+                      size: desktop ? 18 : 19,
+                      color: colors.accent,
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'Session actions',
+                          style: Theme.of(context).textTheme.titleMedium
+                              ?.copyWith(
+                                color: colors.textPrimary,
+                                fontWeight: AppWeights.title,
+                                letterSpacing: -0.2,
+                              ),
+                        ),
+                        const SizedBox(height: 2),
+                        Text(
+                          session.title,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: Theme.of(context).textTheme.bodySmall
+                              ?.copyWith(
+                                color: colors.textSecondary,
+                                fontWeight: FontWeight.w600,
+                              ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  if (!desktop)
+                    MeshIconButton(
+                      icon: Icons.close_rounded,
+                      tooltip: 'Close',
+                      color: colors.textSecondary,
+                      onTap: () => Navigator.of(context).pop(),
+                    ),
+                ],
+              ),
+              const SizedBox(height: 14),
+              for (var index = 0; index < visibleGroups.length; index++)
+                Padding(
+                  padding: EdgeInsets.only(
+                    bottom: index == visibleGroups.length - 1 ? 0 : 12,
+                  ),
+                  child: _SessionActionGroupCard(
+                    group: visibleGroups[index],
+                    compact: desktop,
+                  ),
+                ),
+            ],
+          ),
+        ),
+      ),
+    );
+    if (desktop) {
+      return panel;
+    }
     return SafeArea(
       child: Padding(
         padding: const EdgeInsets.only(left: 10, top: 0, right: 10, bottom: 10),
@@ -137,108 +249,7 @@ class _SessionActionSheet extends StatelessWidget {
           alignment: Alignment.bottomCenter,
           child: ConstrainedBox(
             constraints: BoxConstraints(maxHeight: maxHeight),
-            child: DecoratedBox(
-              decoration: BoxDecoration(
-                color: colors.surfaceElevated,
-                borderRadius: AppShapes.sheet,
-                border: Border.all(color: colors.border),
-                boxShadow: [
-                  BoxShadow(
-                    color: colors.textPrimary.withValues(alpha: 0.12),
-                    blurRadius: 32,
-                    offset: const Offset(0, 18),
-                  ),
-                ],
-              ),
-              child: ClipRRect(
-                borderRadius: AppShapes.sheet,
-                child: SingleChildScrollView(
-                  padding: const EdgeInsets.only(left: 14, top: 10, right: 14, bottom: 14),
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      Center(
-                        child: Container(
-                          width: 38,
-                          height: 4,
-                          decoration: BoxDecoration(
-                            color: colors.borderStrong.withValues(alpha: 0.55),
-                            borderRadius: AppShapes.pill,
-                          ),
-                        ),
-                      ),
-                      const SizedBox(height: 14),
-                      Row(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Container(
-                            width: 38,
-                            height: 38,
-                            decoration: BoxDecoration(
-                              color: colors.accentMuted,
-                              borderRadius: AppShapes.input,
-                              border: Border.all(
-                                color: colors.accent.withValues(alpha: 0.24),
-                              ),
-                            ),
-                            child: Icon(
-                              Icons.auto_awesome_mosaic_rounded,
-                              size: 19,
-                              color: colors.accent,
-                            ),
-                          ),
-                          const SizedBox(width: 12),
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  'Session actions',
-                                  style: Theme.of(context).textTheme.titleMedium
-                                      ?.copyWith(
-                                        color: colors.textPrimary,
-                                        fontWeight: AppWeights.title,
-                                        letterSpacing: -0.2,
-                                      ),
-                                ),
-                                const SizedBox(height: 2),
-                                Text(
-                                  session.title,
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: Theme.of(context).textTheme.bodySmall
-                                      ?.copyWith(
-                                        color: colors.textSecondary,
-                                        fontWeight: FontWeight.w600,
-                                      ),
-                                ),
-                              ],
-                            ),
-                          ),
-                          MeshIconButton(
-                            icon: Icons.close_rounded,
-                            tooltip: 'Close',
-                            color: colors.textSecondary,
-                            onTap: () => Navigator.of(context).pop(),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 16),
-                      for (var index = 0; index < visibleGroups.length; index++)
-                        Padding(
-                          padding: EdgeInsets.only(
-                            bottom: index == visibleGroups.length - 1 ? 0 : 12,
-                          ),
-                          child: _SessionActionGroupCard(
-                            group: visibleGroups[index],
-                          ),
-                        ),
-                    ],
-                  ),
-                ),
-              ),
-            ),
+            child: panel,
           ),
         ),
       ),
@@ -247,9 +258,10 @@ class _SessionActionSheet extends StatelessWidget {
 }
 
 class _SessionActionGroupCard extends StatelessWidget {
-  const _SessionActionGroupCard({required this.group});
+  const _SessionActionGroupCard({required this.group, this.compact = false});
 
   final _SessionActionGroup group;
+  final bool compact;
 
   @override
   Widget build(BuildContext context) {
@@ -261,17 +273,17 @@ class _SessionActionGroupCard extends StatelessWidget {
           padding: const EdgeInsets.only(left: 4, bottom: 7),
           child: Text(
             group.label,
-            style: monoStyle(
+            style: Theme.of(context).textTheme.labelSmall?.copyWith(
               color: colors.textSecondary,
-              fontSize: 10.5,
-              fontWeight: FontWeight.w800,
-            ).copyWith(letterSpacing: 0.8),
+              fontWeight: FontWeight.w700,
+              letterSpacing: 0.2,
+            ),
           ),
         ),
         DecoratedBox(
           decoration: BoxDecoration(
             color: colors.surface,
-            borderRadius: AppShapes.card,
+            borderRadius: BorderRadius.circular(AppRadii.control),
             border: Border.all(color: colors.border),
           ),
           child: Column(
@@ -280,10 +292,13 @@ class _SessionActionGroupCard extends StatelessWidget {
                 if (index > 0)
                   Divider(
                     height: 1,
-                    indent: 58,
+                    indent: compact ? 52 : 58,
                     color: colors.border.withValues(alpha: 0.72),
                   ),
-                _SessionActionRow(action: group.actions[index]),
+                _SessionActionRow(
+                  action: group.actions[index],
+                  compact: compact,
+                ),
               ],
             ],
           ),
@@ -294,9 +309,10 @@ class _SessionActionGroupCard extends StatelessWidget {
 }
 
 class _SessionActionRow extends StatelessWidget {
-  const _SessionActionRow({required this.action});
+  const _SessionActionRow({required this.action, this.compact = false});
 
   final _SessionActionSpec action;
+  final bool compact;
 
   Color _toneColor(AppColors colors) {
     return switch (action.tone) {
@@ -317,14 +333,14 @@ class _SessionActionRow extends StatelessWidget {
       radius: AppRadii.control,
       onTap: () => Navigator.of(context).pop(action.value),
       leading: Container(
-        width: 34,
-        height: 34,
+        width: compact ? 30 : 34,
+        height: compact ? 30 : 34,
         decoration: BoxDecoration(
           color: tone.withValues(alpha: action.active ? 0.14 : 0.08),
-          borderRadius: BorderRadius.circular(AppRadii.control),
+          borderRadius: AppShapes.iconWell,
           border: Border.all(color: tone.withValues(alpha: 0.18)),
         ),
-        child: Icon(action.icon, size: 18, color: tone),
+        child: Icon(action.icon, size: compact ? 17 : 18, color: tone),
       ),
       title: Text(
         action.label,
@@ -482,7 +498,11 @@ class _SessionHeader extends StatelessWidget {
             const SizedBox(width: 4),
             IconButton(
               onPressed: onDetails,
-              icon: Icon(Icons.tune_rounded, size: 18, color: colors.accent),
+              icon: Icon(
+                Icons.info_outline_rounded,
+                size: 18,
+                color: colors.accent,
+              ),
               tooltip: 'Session details',
               visualDensity: VisualDensity.compact,
               padding: const EdgeInsets.all(10),
@@ -527,13 +547,17 @@ class _GitSummaryPill extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: onTap,
-      child: MeshPill(
-        label: label,
-        icon: Icons.account_tree_rounded,
-        tone: dirty ? MeshPillTone.warning : MeshPillTone.neutral,
-        mono: true,
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        borderRadius: const BorderRadius.all(Radius.circular(999)),
+        onTap: onTap,
+        child: MeshPill(
+          label: label,
+          icon: Icons.account_tree_rounded,
+          tone: dirty ? MeshPillTone.warning : MeshPillTone.neutral,
+          mono: true,
+        ),
       ),
     );
   }
@@ -552,13 +576,17 @@ class _PinnedSummaryPill extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: onTap,
-      child: MeshPill(
-        label: '$count pinned',
-        icon: Icons.push_pin_rounded,
-        tone: active ? MeshPillTone.accent : MeshPillTone.neutral,
-        mono: true,
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        borderRadius: const BorderRadius.all(Radius.circular(999)),
+        onTap: onTap,
+        child: MeshPill(
+          label: '$count pinned',
+          icon: Icons.push_pin_rounded,
+          tone: active ? MeshPillTone.accent : MeshPillTone.neutral,
+          mono: true,
+        ),
       ),
     );
   }
@@ -572,6 +600,7 @@ class _JumpToLatestPill extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colors = context.colors;
+    final foreground = readableActionForeground(colors, colors.accent);
     return Material(
       color: colors.accent,
       shape: const StadiumBorder(),
@@ -588,13 +617,13 @@ class _JumpToLatestPill extends StatelessWidget {
               Icon(
                 Icons.arrow_downward_rounded,
                 size: 16,
-                color: colors.userBubbleOn,
+                color: foreground,
               ),
               const SizedBox(width: 6),
               Text(
                 'Jump to latest',
                 style: Theme.of(context).textTheme.labelMedium?.copyWith(
-                  color: colors.userBubbleOn,
+                  color: foreground,
                   fontWeight: FontWeight.w700,
                 ),
               ),
@@ -654,7 +683,12 @@ class _SessionAppBarSubtitle extends StatelessWidget {
       child: InkWell(
         onTap: onDetails,
         child: Padding(
-          padding: const EdgeInsets.only(left: 16, top: 0, right: 10, bottom: 6),
+          padding: const EdgeInsets.only(
+            left: 16,
+            top: 0,
+            right: 10,
+            bottom: 6,
+          ),
           child: Row(
             children: [
               _HeaderStatusDot(
@@ -710,7 +744,7 @@ class _SessionAppBarSubtitle extends StatelessWidget {
                 ),
               ],
               const SizedBox(width: 6),
-              Icon(Icons.tune_rounded, size: 14, color: colors.accent),
+              Icon(Icons.info_outline_rounded, size: 14, color: colors.accent),
             ],
           ),
         ),
@@ -808,7 +842,9 @@ String? _contextUsageShortLabel(SessionRuntimeSummary? runtime) {
 
 MeshPillTone _contextUsageTone(SessionRuntimeSummary? runtime) {
   final context = runtime?.telemetry?.contextWindow;
-  if (context == null || context.tokenLimit <= 0 || context.currentTokens == null) {
+  if (context == null ||
+      context.tokenLimit <= 0 ||
+      context.currentTokens == null) {
     return MeshPillTone.neutral;
   }
   final used = context.currentTokens! / context.tokenLimit;
@@ -860,28 +896,25 @@ class _GitDetailsSheet extends StatelessWidget {
     final shortSha = status?.shortSha ?? gitInfo?.shortSha;
     final originUrl = status?.originUrl ?? gitInfo?.originUrl;
 
-    return SafeArea(
+    return MeshBottomSheetScaffold(
+      icon: Icons.account_tree_rounded,
+      title: 'Git details',
+      description:
+          'Review branch status, changed files, and the diffs available for this session.',
+      maxWidth: 920,
+      maxHeightFactor: 0.88,
       child: SingleChildScrollView(
-        padding: const EdgeInsets.only(left: 20, top: 8, right: 20, bottom: 28),
+        padding: const EdgeInsets.only(bottom: 6),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Row(
-              children: [
-                Expanded(
-                  child: Text(
-                    'Git details',
-                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                      fontWeight: AppWeights.title,
-                    ),
-                  ),
-                ),
-                IconButton(
-                  onPressed: loading ? null : onRefresh,
-                  icon: const Icon(Icons.refresh_rounded),
-                  tooltip: 'Refresh git status',
-                ),
-              ],
+            Align(
+              alignment: Alignment.centerRight,
+              child: OutlinedButton.icon(
+                onPressed: loading ? null : onRefresh,
+                icon: const Icon(Icons.refresh_rounded, size: 18),
+                label: const Text('Refresh'),
+              ),
             ),
             const SizedBox(height: 12),
             if (loading && status == null)
@@ -1085,87 +1118,71 @@ class _GitDiffSheet extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colors = context.colors;
-    return SizedBox(
-      height: MediaQuery.of(context).size.height * 0.86,
-      child: FutureBuilder<SessionGitDiff>(
-        future: future,
-        builder: (context, snapshot) {
-          final title = snapshot.data == null
-              ? 'Git diff'
-              : _gitDiffTitle(snapshot.data!);
-          return Padding(
-            padding: const EdgeInsets.only(left: 16, top: 8, right: 16, bottom: 20),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  title,
-                  style: Theme.of(
-                    context,
-                  ).textTheme.titleMedium?.copyWith(fontWeight: AppWeights.title),
-                ),
-                const SizedBox(height: 12),
-                Expanded(
-                  child: Builder(
-                    builder: (context) {
-                      if (snapshot.connectionState != ConnectionState.done) {
-                        return const Center(child: CircularProgressIndicator());
-                      }
-                      if (snapshot.hasError) {
-                        return MeshEmptyState(
-                          icon: Icons.error_outline_rounded,
-                          title: 'Could not load diff',
-                          body: friendlyError(
-                            snapshot.error ?? 'Unknown error',
-                          ),
-                        );
-                      }
-                      final diff = snapshot.data!;
-                      if (diff.diff.trim().isEmpty) {
-                        return MeshEmptyState(
-                          icon: Icons.check_rounded,
-                          title: 'No diff',
-                          body: 'Git did not report changes for this view.',
-                        );
-                      }
-                      return SingleChildScrollView(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.stretch,
-                          children: [
-                            if (diff.truncated)
-                              Padding(
-                                padding: const EdgeInsets.only(bottom: 10),
-                                child: MeshPill(
-                                  label:
-                                      'Truncated after ${diff.maxChars} chars',
-                                  icon: Icons.content_cut_rounded,
-                                  tone: MeshPillTone.warning,
-                                  mono: true,
-                                ),
-                              ),
-                            if (diff.baseSha != null)
-                              Padding(
-                                padding: const EdgeInsets.only(bottom: 10),
-                                child: Text(
-                                  'Base ${diff.baseSha}',
-                                  style: monoStyle(
-                                    color: colors.textSecondary,
-                                    fontSize: 11.5,
-                                  ),
-                                ),
-                              ),
-                            DiffView(diff: diff.diff),
-                          ],
+    return FutureBuilder<SessionGitDiff>(
+      future: future,
+      builder: (context, snapshot) {
+        final title = snapshot.data == null
+            ? 'Git diff'
+            : _gitDiffTitle(snapshot.data!);
+        return MeshBottomSheetScaffold(
+          icon: Icons.difference_rounded,
+          title: title,
+          description: 'Review the Git patch for this session.',
+          maxWidth: 980,
+          maxHeightFactor: 0.9,
+          child: Builder(
+            builder: (context) {
+              if (snapshot.connectionState != ConnectionState.done) {
+                return const Center(child: CircularProgressIndicator());
+              }
+              if (snapshot.hasError) {
+                return MeshEmptyState(
+                  icon: Icons.error_outline_rounded,
+                  title: 'Could not load diff',
+                  body: friendlyError(snapshot.error ?? 'Unknown error'),
+                );
+              }
+              final diff = snapshot.data!;
+              if (diff.diff.trim().isEmpty) {
+                return MeshEmptyState(
+                  icon: Icons.check_rounded,
+                  title: 'No diff',
+                  body: 'Git did not report changes for this view.',
+                );
+              }
+              return SingleChildScrollView(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    if (diff.truncated)
+                      Padding(
+                        padding: const EdgeInsets.only(bottom: 10),
+                        child: MeshPill(
+                          label: 'Truncated after ${diff.maxChars} chars',
+                          icon: Icons.content_cut_rounded,
+                          tone: MeshPillTone.warning,
+                          mono: true,
                         ),
-                      );
-                    },
-                  ),
+                      ),
+                    if (diff.baseSha != null)
+                      Padding(
+                        padding: const EdgeInsets.only(bottom: 10),
+                        child: Text(
+                          'Base ${diff.baseSha}',
+                          style: monoStyle(
+                            color: colors.textSecondary,
+                            fontSize: 11.5,
+                          ),
+                        ),
+                      ),
+                    DiffView(diff: diff.diff),
+                  ],
                 ),
-              ],
-            ),
-          );
-        },
-      ),
+              );
+            },
+          ),
+        );
+      },
     );
   }
 }
@@ -1185,72 +1202,28 @@ class _PinnedListSheet extends StatelessWidget {
     required this.refresh,
     required this.onOpen,
     required this.onUnpin,
-    required this.onClose,
   });
 
   final List<PinnedSessionMessage> Function() pinsBuilder;
   final Listenable refresh;
   final ValueChanged<PinnedSessionMessage> onOpen;
   final ValueChanged<PinnedSessionMessage> onUnpin;
-  final VoidCallback onClose;
 
   @override
   Widget build(BuildContext context) {
-    final colors = context.colors;
-    return ClipRRect(
-      borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
-      child: Container(
-        color: colors.surfaceElevated,
-        child: Column(
-          children: [
-            const SizedBox(height: 8),
-            Container(
-              width: 36,
-              height: 4,
-              decoration: BoxDecoration(
-                color: colors.border,
-                borderRadius: AppShapes.pill,
-              ),
-            ),
-            const SizedBox(height: 8),
-            Padding(
-              padding: const EdgeInsets.only(left: 16, top: 4, right: 8, bottom: 4),
-              child: Row(
-                children: [
-                  Icon(
-                    Icons.push_pin_rounded,
-                    size: 16,
-                    color: colors.textSecondary,
-                  ),
-                  const SizedBox(width: 8),
-                  Text(
-                    'Pinned messages',
-                    style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                      color: colors.textPrimary,
-                      fontWeight: FontWeight.w800,
-                    ),
-                  ),
-                  const Spacer(),
-                  IconButton(
-                    tooltip: 'Close',
-                    onPressed: onClose,
-                    icon: const Icon(Icons.close_rounded, size: 20),
-                  ),
-                ],
-              ),
-            ),
-            Divider(height: 1, color: colors.border),
-            Expanded(
-              child: ListenableBuilder(
-                listenable: refresh,
-                builder: (context, _) => PinnedListPanel(
-                  pins: pinsBuilder(),
-                  onOpen: onOpen,
-                  onUnpin: onUnpin,
-                ),
-              ),
-            ),
-          ],
+    return MeshBottomSheetScaffold(
+      icon: Icons.push_pin_rounded,
+      title: 'Pinned messages',
+      description:
+          'Jump back to saved messages or remove them from the pinned list.',
+      maxWidth: 760,
+      maxHeightFactor: 0.78,
+      child: ListenableBuilder(
+        listenable: refresh,
+        builder: (context, _) => PinnedListPanel(
+          pins: pinsBuilder(),
+          onOpen: onOpen,
+          onUnpin: onUnpin,
         ),
       ),
     );
@@ -1274,98 +1247,99 @@ class _PinnedMessageSheet extends StatelessWidget {
     final textStyle = Theme.of(
       context,
     ).textTheme.bodyMedium?.copyWith(color: colors.textPrimary, height: 1.45);
-    return SizedBox(
-      height: MediaQuery.of(context).size.height * 0.82,
-      child: Padding(
-        padding: const EdgeInsets.only(left: 18, top: 8, right: 18, bottom: 20),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                Icon(Icons.push_pin_rounded, size: 20, color: colors.warning),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: Text(
-                    'Pinned ${pin.roleLabel.toLowerCase()} message',
-                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                      color: colors.textPrimary,
-                      fontWeight: AppWeights.title,
-                    ),
-                  ),
+    final pinnedLinkStyle = linkTextStyleForBackground(
+      background: colors.surfaceMuted,
+      preferred: colors.accent,
+      fallbacks: [
+        colors.info,
+        colors.textPrimary,
+        colors.textSecondary,
+      ],
+      baseStyle: textStyle,
+    );
+    return MeshBottomSheetScaffold(
+      icon: Icons.push_pin_rounded,
+      title: 'Pinned ${pin.roleLabel.toLowerCase()} message',
+      description:
+          'Keep an important message visible while you work through this session.',
+      maxWidth: 920,
+      maxHeightFactor: 0.84,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Spacer(),
+              if (pin.hasText)
+                _MessageCopyButton(
+                  text: pin.text,
+                  tone: colors.textSecondary,
+                  accent: colors.accent,
                 ),
-                if (pin.hasText)
-                  _MessageCopyButton(
-                    text: pin.text,
-                    tone: colors.textSecondary,
-                    accent: colors.accent,
-                  ),
-                const SizedBox(width: 6),
-                TextButton.icon(
-                  onPressed: onUnpin,
-                  icon: const Icon(Icons.push_pin_rounded, size: 17),
-                  label: const Text('Unpin'),
-                ),
-              ],
-            ),
-            const SizedBox(height: 10),
-            Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              children: [
+              if (pin.hasText) const SizedBox(width: 6),
+              TextButton.icon(
+                onPressed: onUnpin,
+                icon: const Icon(Icons.push_pin_rounded, size: 17),
+                label: const Text('Unpin'),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              MeshPill(
+                label: pin.roleLabel,
+                icon: pin.role == 'assistant'
+                    ? Icons.smart_toy_rounded
+                    : Icons.person_outline_rounded,
+              ),
+              MeshPill(
+                label: 'Pinned ${_formatPinnedTimestamp(pin.pinnedAt)}',
+                icon: Icons.schedule_rounded,
+              ),
+              if (pin.attachmentCount > 0)
                 MeshPill(
-                  label: pin.roleLabel,
-                  icon: pin.role == 'assistant'
-                      ? Icons.smart_toy_rounded
-                      : Icons.person_outline_rounded,
+                  label:
+                      '${pin.attachmentCount} attachment${pin.attachmentCount == 1 ? '' : 's'}',
+                  icon: Icons.attachment_rounded,
                 ),
-                MeshPill(
-                  label: 'Pinned ${_formatPinnedTimestamp(pin.pinnedAt)}',
-                  icon: Icons.schedule_rounded,
+              if (pin.textTruncated)
+                const MeshPill(
+                  label: 'Stored preview truncated',
+                  icon: Icons.content_cut_rounded,
+                  tone: MeshPillTone.warning,
                 ),
-                if (pin.attachmentCount > 0)
-                  MeshPill(
-                    label:
-                        '${pin.attachmentCount} attachment${pin.attachmentCount == 1 ? '' : 's'}',
-                    icon: Icons.attachment_rounded,
-                  ),
-                if (pin.textTruncated)
-                  const MeshPill(
-                    label: 'Stored preview truncated',
-                    icon: Icons.content_cut_rounded,
-                    tone: MeshPillTone.warning,
-                  ),
-              ],
-            ),
-            const SizedBox(height: 14),
-            Expanded(
-              child: MeshCard(
-                tone: MeshCardTone.muted,
-                padding: const EdgeInsets.all(14),
-                child: SingleChildScrollView(
-                  child: pin.hasText
-                      ? (pin.role == 'assistant'
-                            ? _MarkdownMessageBody(
-                                text: pin.text,
-                                textColor: colors.textPrimary,
-                                onOpenFile: onOpenFile,
-                              )
-                            : _LinkifiedSelectableText(
-                                text: pin.text,
-                                style: textStyle,
-                                linkColor: colors.accent,
-                              ))
-                      : Text(
-                          pin.preview,
-                          style: textStyle?.copyWith(
-                            color: colors.textSecondary,
-                          ),
-                        ),
-                ),
+            ],
+          ),
+          const SizedBox(height: 14),
+          Expanded(
+            child: MeshCard(
+              tone: MeshCardTone.muted,
+              padding: const EdgeInsets.all(14),
+              child: SingleChildScrollView(
+                child: pin.hasText
+                    ? (pin.role == 'assistant'
+                          ? _MarkdownMessageBody(
+                              text: pin.text,
+                              textColor: colors.textPrimary,
+                              linkStyle: pinnedLinkStyle,
+                              onOpenFile: onOpenFile,
+                            )
+                          : _LinkifiedSelectableText(
+                              text: pin.text,
+                              style: textStyle,
+                              linkStyle: pinnedLinkStyle,
+                            ))
+                    : Text(
+                        pin.preview,
+                        style: textStyle?.copyWith(color: colors.textSecondary),
+                      ),
               ),
             ),
-          ],
-        ),
+          ),
+        ],
       ),
     );
   }
@@ -1888,10 +1862,14 @@ class _PendingActionCardState extends State<_PendingActionCard> {
     return [
       if (action.canApprove)
         FilledButton.icon(
-          onPressed: _responding ? null : () {
-              if (!_responding) setState(() => _responding = true);
-              widget.onRespond(PendingActionResponseDraft.approval('accept'));
-            },
+          onPressed: _responding
+              ? null
+              : () {
+                  if (!_responding) setState(() => _responding = true);
+                  widget.onRespond(
+                    PendingActionResponseDraft.approval('accept'),
+                  );
+                },
           icon: const Icon(Icons.check_rounded, size: 18),
           label: const Text('Approve'),
         ),
@@ -1905,10 +1883,14 @@ class _PendingActionCardState extends State<_PendingActionCard> {
         ),
       if (action.canDecline)
         MeshDangerAction(
-          onPressed: _responding ? null : () {
-              if (!_responding) setState(() => _responding = true);
-              widget.onRespond(PendingActionResponseDraft.approval('decline'));
-            },
+          onPressed: _responding
+              ? null
+              : () {
+                  if (!_responding) setState(() => _responding = true);
+                  widget.onRespond(
+                    PendingActionResponseDraft.approval('decline'),
+                  );
+                },
           icon: Icons.close_rounded,
           label: 'Decline',
         ),

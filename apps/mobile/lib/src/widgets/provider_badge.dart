@@ -3,7 +3,6 @@ import 'package:flutter/material.dart';
 import '../models.dart';
 import '../provider_labels.dart';
 import '../theme/app_colors.dart';
-import '../theme/app_theme.dart';
 
 class AgentProviderBadge extends StatelessWidget {
   const AgentProviderBadge({
@@ -25,11 +24,11 @@ class AgentProviderBadge extends StatelessWidget {
     }
 
     final colors = context.colors;
-    final fg = colors.info;
-    final bg = colors.infoMuted;
-    final border = colors.info.withValues(alpha: 0.38);
-    final fontSize = compact ? 10.5 : 11.5;
-    final iconSize = compact ? 11.0 : 13.0;
+    final fg = colors.textSecondary;
+    final bg = colors.surfaceMuted;
+    final border = colors.borderStrong.withValues(alpha: 0.68);
+    final fontSize = compact ? 10.5 : 11.2;
+    final iconSize = compact ? 11.0 : 12.0;
 
     return Container(
       padding: EdgeInsets.symmetric(
@@ -52,11 +51,11 @@ class AgentProviderBadge extends StatelessWidget {
               label,
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
-              style: monoStyle(
+              style: Theme.of(context).textTheme.labelSmall?.copyWith(
                 color: fg,
                 fontSize: fontSize,
-                fontWeight: FontWeight.w800,
-              ).copyWith(letterSpacing: 0.2),
+                fontWeight: FontWeight.w700,
+              ),
             ),
           ),
         ],

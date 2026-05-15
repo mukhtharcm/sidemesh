@@ -8,6 +8,11 @@ class _StopAgentPill extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colors = context.colors;
+    final foreground = readableTextOn(
+      colors,
+      background: colors.danger,
+      preferred: colors.accentOn,
+    );
     return Material(
       color: colors.danger,
       shape: const StadiumBorder(),
@@ -24,13 +29,13 @@ class _StopAgentPill extends StatelessWidget {
               Icon(
                 Icons.stop_circle_rounded,
                 size: 16,
-                color: colors.userBubbleOn,
+                color: foreground,
               ),
               const SizedBox(width: 6),
               Text(
-                'Interrupt agent',
+                'Stop agent',
                 style: Theme.of(context).textTheme.labelMedium?.copyWith(
-                  color: colors.userBubbleOn,
+                  color: foreground,
                   fontWeight: FontWeight.w700,
                 ),
               ),
@@ -77,7 +82,7 @@ class _PreviewTargetPickerSheetState extends State<_PreviewTargetPickerSheet> {
   void _submitManual() {
     final port = int.tryParse(_portController.text.trim());
     if (port == null || port < 1 || port > 65535) {
-      showAppSnackBar(context, 'Enter a valid localhost port between 1 and 65535.');
+      showAppSnackBar(context, 'Enter a port between 1 and 65535.');
       return;
     }
     Navigator.of(context).pop(
@@ -85,136 +90,92 @@ class _PreviewTargetPickerSheetState extends State<_PreviewTargetPickerSheet> {
         host: '127.0.0.1',
         port: port,
         scheme: _scheme,
-        sourceLabel: 'Preview localhost:$port',
+        sourceLabel: 'Port $port',
       ),
     );
   }
 
   @override
   Widget build(BuildContext context) {
-    final colors = context.colors;
     final bottomInset = MediaQuery.of(context).viewInsets.bottom;
-    return Padding(
-      padding: EdgeInsets.only(bottom: bottomInset),
-      child: SafeArea(
-        top: false,
-        child: Container(
-          decoration: BoxDecoration(
-            color: colors.surface,
-            borderRadius: const BorderRadius.vertical(top: Radius.circular(28)),
-            border: Border.all(color: colors.border),
-          ),
-          child: SingleChildScrollView(
-            padding: const EdgeInsets.fromLTRB(18, 8, 18, 24),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
+    return MeshBottomSheetScaffold(
+      icon: Icons.open_in_browser_rounded,
+      title: 'Open a preview',
+      description:
+          'Choose one of the web ports from this session, or enter one yourself.',
+      maxWidth: 680,
+      maxHeightFactor: 0.78,
+      child: SingleChildScrollView(
+        padding: EdgeInsets.only(bottom: bottomInset),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            if (widget.suggestions.isNotEmpty) ...[
+              Text(
+                'Detected ports',
+                style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                  color: context.colors.textSecondary,
+                  letterSpacing: 0.4,
+                ),
+              ),
+              const SizedBox(height: 8),
+              for (final suggestion in widget.suggestions)
+                _PreviewSuggestionTile(
+                  suggestion: suggestion,
+                  onTap: () => Navigator.of(context).pop(suggestion),
+                ),
+              const SizedBox(height: 18),
+            ],
+            Text(
+              'Enter a port',
+              style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                color: context.colors.textSecondary,
+                letterSpacing: 0.4,
+              ),
+            ),
+            const SizedBox(height: 8),
+            Row(
               children: [
-                Center(
-                  child: Container(
-                    width: 36,
-                    height: 4,
-                    decoration: BoxDecoration(
-                      color: colors.borderStrong.withValues(alpha: 0.55),
-                      borderRadius: AppShapes.pill,
+                Expanded(
+                  child: TextField(
+                    controller: _portController,
+                    keyboardType: TextInputType.number,
+                    decoration: const InputDecoration(
+                      labelText: 'Port',
+                      hintText: '3000',
                     ),
                   ),
                 ),
-                const SizedBox(height: 14),
-                Row(
-                  children: [
-                    Icon(
-                      Icons.open_in_browser_rounded,
-                      color: colors.accent,
-                      size: 22,
-                    ),
-                    const SizedBox(width: 10),
-                    Expanded(
-                      child: Text(
-                        'Preview web app',
-                        style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                          fontWeight: AppWeights.title,
-                        ),
-                      ),
-                    ),
+                const SizedBox(width: 12),
+                SegmentedButton<String>(
+                  segments: const [
+                    ButtonSegment<String>(value: 'http', label: Text('HTTP')),
+                    ButtonSegment<String>(value: 'https', label: Text('HTTPS')),
                   ],
-                ),
-                const SizedBox(height: 6),
-                Text(
-                  'Pick a localhost web port from this session or enter one manually. Browser previews run remotely on the host so modern dev servers stay fast.',
-                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                    color: colors.textSecondary,
-                    height: 1.4,
-                  ),
-                ),
-                if (widget.suggestions.isNotEmpty) ...[
-                  const SizedBox(height: 18),
-                  Text(
-                    'Suggested ports',
-                    style: Theme.of(context).textTheme.labelLarge?.copyWith(
-                      color: colors.textSecondary,
-                      letterSpacing: 0.4,
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  for (final suggestion in widget.suggestions)
-                    _PreviewSuggestionTile(
-                      suggestion: suggestion,
-                      onTap: () => Navigator.of(context).pop(suggestion),
-                    ),
-                ],
-                const SizedBox(height: 18),
-                Text(
-                  'Manual port',
-                  style: Theme.of(context).textTheme.labelLarge?.copyWith(
-                    color: colors.textSecondary,
-                    letterSpacing: 0.4,
-                  ),
-                ),
-                const SizedBox(height: 8),
-                Row(
-                  children: [
-                    Expanded(
-                      child: TextField(
-                        controller: _portController,
-                        keyboardType: TextInputType.number,
-                        decoration: const InputDecoration(
-                          labelText: 'Port',
-                          hintText: '3000',
-                        ),
-                      ),
-                    ),
-                    const SizedBox(width: 12),
-                    SegmentedButton<String>(
-                      segments: const [
-                        ButtonSegment<String>(value: 'http', label: Text('HTTP')),
-                        ButtonSegment<String>(value: 'https', label: Text('HTTPS')),
-                      ],
-                      selected: <String>{_scheme},
-                      onSelectionChanged: (selection) {
-                        if (selection.isEmpty) return;
-                        setState(() => _scheme = selection.first);
-                      },
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 18),
-                Row(
-                  children: [
-                    TextButton(
-                      onPressed: () => Navigator.of(context).pop(),
-                      child: const Text('Cancel'),
-                    ),
-                    const Spacer(),
-                    FilledButton.icon(
-                      onPressed: _submitManual,
-                      icon: const Icon(Icons.open_in_browser_rounded),
-                      label: const Text('Open preview'),
-                    ),
-                  ],
+                  selected: <String>{_scheme},
+                  onSelectionChanged: (selection) {
+                    if (selection.isEmpty) return;
+                    setState(() => _scheme = selection.first);
+                  },
                 ),
               ],
             ),
-          ),
+            const SizedBox(height: 18),
+            Row(
+              children: [
+                TextButton(
+                  onPressed: () => Navigator.of(context).pop(),
+                  child: const Text('Cancel'),
+                ),
+                const Spacer(),
+                FilledButton.icon(
+                  onPressed: _submitManual,
+                  icon: const Icon(Icons.open_in_browser_rounded),
+                  label: const Text('Open'),
+                ),
+              ],
+            ),
+          ],
         ),
       ),
     );
@@ -222,10 +183,7 @@ class _PreviewTargetPickerSheetState extends State<_PreviewTargetPickerSheet> {
 }
 
 class _PreviewSuggestionTile extends StatelessWidget {
-  const _PreviewSuggestionTile({
-    required this.suggestion,
-    required this.onTap,
-  });
+  const _PreviewSuggestionTile({required this.suggestion, required this.onTap});
 
   final BrowserPreviewTargetCandidate suggestion;
   final VoidCallback onTap;
@@ -265,9 +223,9 @@ class _PreviewSuggestionTile extends StatelessWidget {
           suggestion.sourceLabel,
           maxLines: 1,
           overflow: TextOverflow.ellipsis,
-          style: Theme.of(context).textTheme.bodySmall?.copyWith(
-            color: colors.textSecondary,
-          ),
+          style: Theme.of(
+            context,
+          ).textTheme.bodySmall?.copyWith(color: colors.textSecondary),
         ),
         trailing: MeshPill(
           label: suggestion.scheme.toUpperCase(),

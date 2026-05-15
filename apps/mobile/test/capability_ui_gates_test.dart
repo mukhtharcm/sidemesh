@@ -68,6 +68,192 @@ void main() {
     await tester.pump();
   });
 
+  testWidgets('desktop composer model chip opens the model picker only', (
+    tester,
+  ) async {
+    final host = _host('session-model-picker');
+    final session = _session('model-picker-session', provider: 'fake');
+    final api = _CapabilityFakeApi(
+      _nodeForCapabilities(_fullCapabilities),
+      models: const [_fakeModel],
+    );
+    addTearDown(api.dispose);
+
+    await _pumpApp(
+      tester,
+      SessionScreen(
+        host: host,
+        session: session,
+        api: api,
+        desktopMode: true,
+      ),
+      size: const Size(1180, 900),
+    );
+    await _pumpFrames(tester);
+
+    final modelTooltip = find.byWidgetPredicate(
+      (widget) =>
+          widget is Tooltip &&
+          widget.message?.startsWith('Choose model') == true,
+    );
+    final modelButton = find.descendant(
+      of: modelTooltip,
+      matching: find.byType(InkWell),
+    );
+    expect(modelButton, findsOneWidget);
+
+    await tester.tap(modelButton);
+    await _pumpFrames(tester);
+
+    expect(find.text('Choose a model'), findsOneWidget);
+    expect(find.text('Model and thinking'), findsNothing);
+    expect(find.text('Approvals'), findsNothing);
+
+    await tester.tap(find.text('Fake Balanced'));
+    await _pumpFrames(tester);
+
+    final config = SessionTurnConfigStore.instance.configFor(
+      host,
+      session.id,
+    );
+    expect(config.isEmpty, isTrue);
+
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pump();
+  });
+
+  testWidgets('desktop composer keeps typing area wide with model controls', (
+    tester,
+  ) async {
+    final session = _session('desktop-composer-width-session', provider: 'fake');
+    final api = _CapabilityFakeApi(
+      _nodeForCapabilities(_fullCapabilities),
+      models: const [_fakeModel],
+    );
+    addTearDown(api.dispose);
+
+    await _pumpApp(
+      tester,
+      SessionScreen(
+        host: _host('desktop-composer-width'),
+        session: session,
+        api: api,
+        desktopMode: true,
+      ),
+      size: const Size(720, 760),
+    );
+    await _pumpFrames(tester);
+
+    final composerWidth = tester.getSize(find.byType(TextField).first).width;
+    expect(composerWidth, greaterThan(420));
+
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pump();
+  });
+
+  testWidgets('mobile composer model chip opens the model picker only', (
+    tester,
+  ) async {
+    final host = _host('mobile-session-model-picker');
+    final session = _session('mobile-model-picker-session', provider: 'fake');
+    final api = _CapabilityFakeApi(
+      _nodeForCapabilities(_fullCapabilities),
+      models: const [_fakeModel],
+    );
+    addTearDown(api.dispose);
+
+    await _pumpApp(
+      tester,
+      SessionScreen(host: host, session: session, api: api),
+      size: const Size(390, 840),
+    );
+    await _pumpFrames(tester);
+
+    final modelTooltip = find.byWidgetPredicate(
+      (widget) =>
+          widget is Tooltip &&
+          widget.message?.startsWith('Choose model') == true,
+    );
+    final modelButton = find.descendant(
+      of: modelTooltip,
+      matching: find.byType(InkWell),
+    );
+    expect(modelButton, findsOneWidget);
+    expect(tester.getSize(modelButton).height, greaterThanOrEqualTo(44));
+
+    final visibleChip = find.descendant(
+      of: modelButton,
+      matching: find.byType(AnimatedContainer),
+    );
+    expect(visibleChip, findsOneWidget);
+    expect(tester.getSize(visibleChip).height, lessThanOrEqualTo(40));
+
+    await tester.tap(modelButton);
+    await _pumpFrames(tester);
+
+    expect(find.text('Choose a model'), findsOneWidget);
+    expect(find.text('Model and thinking'), findsNothing);
+    expect(find.text('Approvals'), findsNothing);
+
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pump();
+  });
+
+  testWidgets('composer thinking chip opens the thinking picker only', (
+    tester,
+  ) async {
+    final host = _host('session-thinking-picker');
+    final session = _session('thinking-picker-session', provider: 'fake');
+    final api = _CapabilityFakeApi(
+      _nodeForCapabilities(_fullCapabilities),
+      models: const [_fakeModel],
+    );
+    addTearDown(api.dispose);
+
+    await _pumpApp(
+      tester,
+      SessionScreen(
+        host: host,
+        session: session,
+        api: api,
+        desktopMode: true,
+      ),
+      size: const Size(1180, 900),
+    );
+    await _pumpFrames(tester);
+
+    final thinkingTooltip = find.byWidgetPredicate(
+      (widget) =>
+          widget is Tooltip &&
+          widget.message?.startsWith('Choose thinking level') == true,
+    );
+    final thinkingButton = find.descendant(
+      of: thinkingTooltip,
+      matching: find.byType(InkWell),
+    );
+    expect(thinkingButton, findsOneWidget);
+
+    await tester.tap(thinkingButton);
+    await _pumpFrames(tester);
+
+    expect(find.text('Choose thinking level'), findsOneWidget);
+    expect(find.text('Model and thinking'), findsNothing);
+    expect(find.text('Approvals'), findsNothing);
+
+    await tester.tap(find.text('Low'));
+    await _pumpFrames(tester);
+
+    final config = SessionTurnConfigStore.instance.configFor(
+      host,
+      session.id,
+    );
+    expect(config.model, isNull);
+    expect(config.reasoningEffort, 'low');
+
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pump();
+  });
+
   testWidgets(
     'session screen surfaces browser preview actions for preview-capable hosts',
     (tester) async {
@@ -183,7 +369,8 @@ void main() {
       ]);
       await tester.pump();
 
-      expect(find.text('/repo/ab.txt'), findsOneWidget);
+      expect(find.text('ab.txt'), findsOneWidget);
+      expect(find.text('/repo'), findsOneWidget);
 
       api.pendingSearch('a').complete(const <FsSearchResult>[
         FsSearchResult(
@@ -195,8 +382,56 @@ void main() {
       ]);
       await tester.pump();
 
-      expect(find.text('/repo/ab.txt'), findsOneWidget);
-      expect(find.text('/repo/a.txt'), findsNothing);
+      expect(find.text('ab.txt'), findsOneWidget);
+      expect(find.text('a.txt'), findsNothing);
+    },
+  );
+
+  testWidgets(
+    'file mention suggestions disambiguate duplicate file names with parent paths',
+    (tester) async {
+      final api = _FileSearchRaceApi(
+        _nodeForCapabilities(_fileMentionCapabilities),
+      );
+      addTearDown(api.dispose);
+
+      await _pumpApp(
+        tester,
+        SessionScreen(
+          host: _host('session-file-mention-duplicates'),
+          session: _session('file-mention-duplicates'),
+          api: api,
+          desktopMode: true,
+        ),
+        size: const Size(1180, 900),
+      );
+      await _pumpFrames(tester);
+
+      final composer = find.byType(TextField).first;
+      await tester.enterText(composer, '@main');
+      await tester.pump();
+
+      api.pendingSearch('main').complete(const <FsSearchResult>[
+        FsSearchResult(
+          path: 'apps/mobile/lib/main.dart',
+          name: 'main.dart',
+          isDirectory: false,
+          score: 120,
+        ),
+        FsSearchResult(
+          path: 'packages/cli/lib/main.dart',
+          name: 'main.dart',
+          isDirectory: false,
+          score: 110,
+        ),
+      ]);
+      await tester.pump();
+
+      expect(find.text('main.dart'), findsNWidgets(2));
+      expect(find.text('apps/mobile/lib'), findsOneWidget);
+      expect(find.text('packages/cli/lib'), findsOneWidget);
+      expect(find.text('apps/mobile/lib/main.dart'), findsNothing);
+      expect(find.text('packages/cli/lib/main.dart'), findsNothing);
     },
   );
 
@@ -226,18 +461,18 @@ void main() {
     );
     await _pumpFrames(tester);
 
-    expect(find.text('No adjustable controls'), findsOneWidget);
+    expect(find.text('Nothing to change here'), findsOneWidget);
     expect(
       find.text(
-        'Fake Test Provider does not advertise runtime controls for existing sessions.',
+        'Fake Test Provider does not offer session settings you can change after a run starts.',
       ),
       findsOneWidget,
     );
-    expect(find.text('Model & thinking'), findsNothing);
-    expect(find.text('Session mode'), findsNothing);
-    expect(find.text('Approval policy'), findsNothing);
-    expect(find.text('Sandbox'), findsNothing);
-    expect(find.text('Network'), findsNothing);
+    expect(find.text('Model and thinking'), findsNothing);
+    expect(find.text('Mode'), findsNothing);
+    expect(find.text('Approvals'), findsNothing);
+    expect(find.text('File access'), findsNothing);
+    expect(find.text('Internet access'), findsNothing);
   });
 
   testWidgets('session controls show advertised runtime controls', (
@@ -269,11 +504,11 @@ void main() {
     );
     await _pumpFrames(tester);
 
-    expect(find.text('Model & thinking'), findsOneWidget);
-    expect(find.text('Session mode'), findsOneWidget);
-    expect(find.text('Approval policy'), findsOneWidget);
-    expect(find.text('Sandbox'), findsOneWidget);
-    expect(find.text('Network'), findsOneWidget);
+    expect(find.text('Model and thinking'), findsOneWidget);
+    expect(find.text('Mode'), findsOneWidget);
+    expect(find.text('Approvals'), findsOneWidget);
+    expect(find.text('File access'), findsOneWidget);
+    expect(find.text('Internet access'), findsOneWidget);
   });
 
   testWidgets('session controls use provider-defined mode catalogs', (
@@ -332,12 +567,12 @@ void main() {
     );
     await _pumpFrames(tester);
 
-    await tester.tap(find.text('Tune launch'));
+    await tester.tap(find.text('Session setup'));
     await _pumpFrames(tester);
 
     expect(
       find.text(
-        'Fake Test Provider does not advertise profile or model controls.',
+        'Fake Test Provider does not offer profiles or model choices here.',
       ),
       findsOneWidget,
     );
@@ -367,11 +602,11 @@ void main() {
     );
     await _pumpFrames(tester);
 
-    await tester.tap(find.text('Tune launch'));
+    await tester.tap(find.text('Session setup'));
     await _pumpFrames(tester);
 
     expect(find.text('Profile'), findsOneWidget);
-    expect(find.text('Mode'), findsOneWidget);
+    expect(find.text('Work style'), findsOneWidget);
     expect(find.text('Model'), findsOneWidget);
     expect(find.text('Fast mode'), findsOneWidget);
     expect(find.text('Permissions'), findsOneWidget);
@@ -512,7 +747,7 @@ void main() {
       );
       await _pumpFrames(tester);
 
-      await tester.tap(find.text('Tune launch'));
+      await tester.tap(find.text('Session setup'));
       await _pumpFrames(tester);
       await tester.ensureVisible(find.text('Never ask').first);
       await _pumpFrames(tester);
@@ -578,7 +813,7 @@ void main() {
     );
     await _pumpFrames(tester);
 
-    await tester.tap(find.text('Tune launch'));
+    await tester.tap(find.text('Session setup'));
     await _pumpFrames(tester);
 
     expect(find.text('Ask when requested'), findsWidgets);
@@ -640,36 +875,36 @@ void main() {
     );
     await _pumpFrames(tester);
 
-    expect(find.text('Providers & capabilities'), findsOneWidget);
+    expect(find.text('Agents on this machine'), findsAtLeastNWidgets(1));
     expect(
-      find.text('Fake Test Provider active - 2 providers supported'),
+      find.text('Fake Test Provider in use, 2 agents available'),
       findsOneWidget,
     );
 
-    await tester.tap(find.text('Providers & capabilities'));
+    await tester.tap(find.text('Agents on this machine'));
     await _pumpFrames(tester);
 
-    expect(find.text('Provider contract'), findsOneWidget);
+    expect(find.text('Agents on this machine'), findsAtLeastNWidgets(1));
     expect(
-      find.text('Fake Test Provider - fake-provider 1.0.0'),
+      find.text('Fake Test Provider · fake-provider 1.0.0'),
       findsOneWidget,
     );
-    expect(find.text('active: fake'), findsOneWidget);
+    expect(find.text('In use: Fake Test Provider'), findsOneWidget);
     expect(find.text('Fake Test Provider'), findsOneWidget);
-    expect(find.text('active'), findsOneWidget);
+    expect(find.text('In use'), findsOneWidget);
     expect(find.text('Codex'), findsOneWidget);
-    expect(find.text('Provider-owned capabilities'), findsOneWidget);
-    expect(find.text('Runtime controls'), findsOneWidget);
+    expect(find.text('Agent features'), findsOneWidget);
+    expect(find.text('Session controls'), findsOneWidget);
     expect(find.text('web search'), findsOneWidget);
-    expect(find.text('Host-owned capabilities'), findsOneWidget);
+    expect(find.text('Machine features'), findsOneWidget);
     expect(find.text('git status'), findsOneWidget);
 
     await tester.tap(find.text('Codex'));
     await _pumpFrames(tester);
 
-    expect(find.text('Codex - codex-cli 0.125.0'), findsOneWidget);
-    expect(find.text('viewing: codex'), findsOneWidget);
-    expect(find.text('command: codex'), findsOneWidget);
+    expect(find.text('Codex · codex-cli 0.125.0'), findsOneWidget);
+    expect(find.text('Viewing: Codex'), findsOneWidget);
+    expect(find.text('Command: codex'), findsOneWidget);
     expect(find.text('Fake Test Provider'), findsOneWidget);
     expect(find.text('2/5'), findsOneWidget);
     expect(find.text('1/4'), findsOneWidget);
@@ -715,7 +950,7 @@ HostProfile _host(String id) => HostProfile(
   token: 'test-token',
 );
 
-SessionSummary _session(String id) {
+SessionSummary _session(String id, {String? provider}) {
   final now = DateTime(2026, 1, 1, 12);
   return SessionSummary(
     id: id,
@@ -725,7 +960,7 @@ SessionSummary _session(String id) {
     createdAt: now,
     updatedAt: now,
     source: 'fake',
-    provider: null,
+    provider: provider,
     status: 'loaded',
     runtime: null,
     gitInfo: null,

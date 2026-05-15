@@ -45,7 +45,7 @@ void main() {
 
     expect(find.byType(Scaffold), findsOneWidget);
     expect(find.text('Recent'), findsWidgets);
-    expect(find.text('Actions'), findsWidgets);
+    expect(find.text('Inbox'), findsWidgets);
     expect(find.text('Hosts'), findsWidgets);
 
     tester.view.resetPhysicalSize();

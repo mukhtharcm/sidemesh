@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../theme/app_colors.dart';
+import '../theme/color_contrast.dart';
 import '../theme/app_theme.dart';
 import '../theme/app_tokens.dart';
 
@@ -24,38 +25,10 @@ class MeshPill extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colors = context.colors;
-    final (bg, fg, border) = switch (tone) {
-      MeshPillTone.neutral => (
-        colors.surfaceMuted,
-        colors.textSecondary,
-        colors.border,
-      ),
-      MeshPillTone.accent => (
-        colors.accentMuted,
-        colors.accent,
-        colors.accent.withValues(alpha: 0.4),
-      ),
-      MeshPillTone.success => (
-        colors.successMuted,
-        colors.success,
-        colors.success.withValues(alpha: 0.4),
-      ),
-      MeshPillTone.danger => (
-        colors.dangerMuted,
-        colors.danger,
-        colors.danger.withValues(alpha: 0.4),
-      ),
-      MeshPillTone.warning => (
-        colors.warningMuted,
-        colors.warning,
-        colors.warning.withValues(alpha: 0.4),
-      ),
-      MeshPillTone.info => (
-        colors.infoMuted,
-        colors.info,
-        colors.info.withValues(alpha: 0.4),
-      ),
-    };
+    final toneColors = meshPillColors(colors, tone);
+    final bg = toneColors.background;
+    final fg = toneColors.foreground;
+    final border = toneColors.border;
 
     final textStyle = mono
         ? monoStyle(
@@ -102,6 +75,50 @@ class MeshPill extends StatelessWidget {
 }
 
 enum MeshPillTone { neutral, accent, success, danger, warning, info }
+
+({Color background, Color foreground, Color border}) meshPillColors(
+  AppColors colors,
+  MeshPillTone tone,
+) {
+  final (bg, preferredFg, preferredBorder) = switch (tone) {
+    MeshPillTone.neutral => (
+      colors.surfaceMuted,
+      colors.textSecondary,
+      colors.border,
+    ),
+    MeshPillTone.accent => (
+      colors.accentMuted,
+      colors.accent,
+      colors.accent.withValues(alpha: 0.4),
+    ),
+    MeshPillTone.success => (
+      colors.successMuted,
+      colors.success,
+      colors.success.withValues(alpha: 0.4),
+    ),
+    MeshPillTone.danger => (
+      colors.dangerMuted,
+      colors.danger,
+      colors.danger.withValues(alpha: 0.4),
+    ),
+    MeshPillTone.warning => (
+      colors.warningMuted,
+      colors.warning,
+      colors.warning.withValues(alpha: 0.4),
+    ),
+    MeshPillTone.info => (
+      colors.infoMuted,
+      colors.info,
+      colors.info.withValues(alpha: 0.4),
+    ),
+  };
+  final fg = readableSemanticForeground(
+    colors,
+    background: bg,
+    preferred: preferredFg,
+  );
+  return (background: bg, foreground: fg, border: preferredBorder);
+}
 
 /// Canonical Sidemesh surface primitive.
 ///
@@ -354,60 +371,26 @@ class MeshStatusBadge extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colors = context.colors;
-    final (bg, fg, border) = switch (tone) {
-      MeshStatusTone.neutral => (
-        colors.surfaceMuted,
-        colors.textSecondary,
-        colors.border,
-      ),
-      MeshStatusTone.running => (
-        colors.successMuted,
-        colors.success,
-        colors.success.withValues(alpha: 0.4),
-      ),
-      MeshStatusTone.waiting => (
-        colors.warningMuted,
-        colors.warning,
-        colors.warning.withValues(alpha: 0.42),
-      ),
-      MeshStatusTone.approval => (
-        colors.warningMuted,
-        colors.warning,
-        colors.warning.withValues(alpha: 0.52),
-      ),
-      MeshStatusTone.queued => (
-        colors.infoMuted,
-        colors.info,
-        colors.info.withValues(alpha: 0.42),
-      ),
-      MeshStatusTone.success => (
-        colors.successMuted,
-        colors.success,
-        colors.success.withValues(alpha: 0.4),
-      ),
-      MeshStatusTone.danger => (
-        colors.dangerMuted,
-        colors.danger,
-        colors.danger.withValues(alpha: 0.42),
-      ),
-      MeshStatusTone.offline => (
-        colors.surfaceMuted,
-        colors.textTertiary,
-        colors.border,
-      ),
-      MeshStatusTone.stale => (
-        colors.surfaceMuted,
-        colors.textSecondary,
-        colors.borderStrong.withValues(alpha: 0.72),
-      ),
-    };
+    final toneColors = meshStatusBadgeColors(colors, tone);
+    final bg = toneColors.background;
+    final fg = toneColors.foreground;
+    final border = toneColors.border;
     final horizontal = compact ? 7.0 : 9.0;
     final vertical = compact ? 3.0 : 4.0;
-    final textStyle = monoStyle(
-      color: fg,
-      fontSize: compact ? 10 : 10.8,
-      fontWeight: AppWeights.title,
-    ).copyWith(letterSpacing: AppLetterSpacing.caps);
+    final textStyle =
+        Theme.of(context).textTheme.labelSmall?.copyWith(
+          color: fg,
+          fontSize: compact ? 10.2 : 11,
+          fontWeight: AppWeights.emphasis,
+          letterSpacing: AppLetterSpacing.body,
+          height: 1.1,
+        ) ??
+        TextStyle(
+          color: fg,
+          fontSize: compact ? 10.2 : 11,
+          fontWeight: AppWeights.emphasis,
+          height: 1.1,
+        );
 
     return Container(
       padding: EdgeInsets.symmetric(horizontal: horizontal, vertical: vertical),
@@ -451,6 +434,65 @@ enum MeshStatusTone {
   danger,
   offline,
   stale,
+}
+
+({Color background, Color foreground, Color border}) meshStatusBadgeColors(
+  AppColors colors,
+  MeshStatusTone tone,
+) {
+  final (bg, preferredFg, preferredBorder) = switch (tone) {
+    MeshStatusTone.neutral => (
+      colors.surfaceMuted,
+      colors.textSecondary,
+      colors.border,
+    ),
+    MeshStatusTone.running => (
+      colors.successMuted,
+      colors.success,
+      colors.success.withValues(alpha: 0.4),
+    ),
+    MeshStatusTone.waiting => (
+      colors.warningMuted,
+      colors.warning,
+      colors.warning.withValues(alpha: 0.42),
+    ),
+    MeshStatusTone.approval => (
+      colors.warningMuted,
+      colors.warning,
+      colors.warning.withValues(alpha: 0.52),
+    ),
+    MeshStatusTone.queued => (
+      colors.infoMuted,
+      colors.info,
+      colors.info.withValues(alpha: 0.42),
+    ),
+    MeshStatusTone.success => (
+      colors.successMuted,
+      colors.success,
+      colors.success.withValues(alpha: 0.4),
+    ),
+    MeshStatusTone.danger => (
+      colors.dangerMuted,
+      colors.danger,
+      colors.danger.withValues(alpha: 0.42),
+    ),
+    MeshStatusTone.offline => (
+      colors.surfaceMuted,
+      colors.textTertiary,
+      colors.border,
+    ),
+    MeshStatusTone.stale => (
+      colors.surfaceMuted,
+      colors.textSecondary,
+      colors.borderStrong.withValues(alpha: 0.72),
+    ),
+  };
+  final fg = readableSemanticForeground(
+    colors,
+    background: bg,
+    preferred: preferredFg,
+  );
+  return (background: bg, foreground: fg, border: preferredBorder);
 }
 
 /// Deliberate destructive action primitive for approval and host/file surfaces.

@@ -10,6 +10,8 @@ import '../image_blob_cache_store.dart';
 import '../models.dart';
 import '../theme/app_colors.dart';
 import '../theme/app_theme.dart';
+import '../theme/app_tokens.dart';
+import '../widgets/app_dialogs.dart';
 import '../widgets/app_snackbar.dart';
 import '../widgets/markdown_content.dart';
 import '../widgets/mesh_widgets.dart';
@@ -133,8 +135,8 @@ class FileViewerPaneState extends State<FileViewerPane> {
         _file = file;
         _loading = false;
         _error = null;
-        _imagePreview = !_editing &&
-            _looksLikeImageFile(file.path, file.mimeHint);
+        _imagePreview =
+            !_editing && _looksLikeImageFile(file.path, file.mimeHint);
         if (!_editing) {
           _editController.text = file.contents;
         }
@@ -153,28 +155,34 @@ class FileViewerPaneState extends State<FileViewerPane> {
   Future<void> _save() async {
     final file = _file;
     if (file == null) return;
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (context) {
-        final colors = context.colors;
-        return AlertDialog(
-          title: const Text('Save file?'),
-          content: Text(
-            widget.path,
-            style: monoStyle(color: colors.textSecondary, fontSize: 12),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(context).pop(false),
-              child: const Text('Cancel'),
-            ),
-            FilledButton(
-              onPressed: () => Navigator.of(context).pop(true),
-              child: const Text('Save'),
-            ),
-          ],
-        );
-      },
+    final confirmed = await showMeshConfirmDialog(
+      context,
+      icon: Icons.save_outlined,
+      title: 'Save these changes?',
+      description:
+          'This will overwrite the file on the connected machine with what you see here now.',
+      confirmLabel: 'Save changes',
+      child: Builder(
+        builder: (dialogContext) {
+          final colors = dialogContext.colors;
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'File',
+                style: Theme.of(
+                  dialogContext,
+                ).textTheme.labelLarge?.copyWith(fontWeight: AppWeights.title),
+              ),
+              const SizedBox(height: 4),
+              SelectableText(
+                widget.path,
+                style: monoStyle(color: colors.textSecondary, fontSize: 12),
+              ),
+            ],
+          );
+        },
+      ),
     );
     if (confirmed != true) return;
     setState(() => _saving = true);
@@ -193,13 +201,16 @@ class FileViewerPaneState extends State<FileViewerPane> {
         _editing = false;
       });
       _bump();
-      showAppSnackBar(context, 'Saved ${baseName(widget.path)}');
+      showAppSnackBar(context, 'Saved changes');
       await _load(silent: true);
     } catch (error) {
       if (!mounted) return;
       setState(() => _saving = false);
       _bump();
-      showAppSnackBar(context, 'Save failed: ${friendlyError(error)}');
+      showAppSnackBar(
+        context,
+        'Could not save changes: ${friendlyError(error)}',
+      );
     }
   }
 
@@ -276,7 +287,7 @@ class FileViewerPaneState extends State<FileViewerPane> {
         padding: const EdgeInsets.all(24),
         child: MeshEmptyState(
           icon: Icons.error_outline_rounded,
-          title: "Couldn't open file",
+          title: 'Could not open file',
           body: friendlyError(_error!),
         ),
       );
@@ -317,9 +328,10 @@ class FileViewerPaneState extends State<FileViewerPane> {
         padding: const EdgeInsets.all(24),
         child: MeshEmptyState(
           icon: isImageFile ? Icons.image_rounded : Icons.description_rounded,
-          title: isImageFile ? 'Image file' : 'Binary file',
-          body:
-              '${formatBytes(file.size)} • ${file.mimeHint.isEmpty ? 'unknown type' : file.mimeHint}',
+          title: isImageFile ? 'Image file' : 'Preview unavailable',
+          body: isImageFile
+              ? '${formatBytes(file.size)} • Use Show image to open it.'
+              : '${formatBytes(file.size)} • ${file.mimeHint.isEmpty ? 'unknown type' : file.mimeHint}',
         ),
       );
     }
@@ -370,8 +382,7 @@ class FileViewerPaneState extends State<FileViewerPane> {
                     const SizedBox(width: 8),
                     Expanded(
                       child: Text(
-                        'Preview truncated at 2 MiB — file is '
-                        '${formatBytes(file.size)}.',
+                        'Showing the first 2 MiB of this ${formatBytes(file.size)} file.',
                         style: Theme.of(context).textTheme.bodySmall,
                       ),
                     ),
@@ -441,7 +452,7 @@ class FileViewerActions extends StatelessWidget {
                 : const Icon(Icons.save_rounded, size: 20),
           ),
         IconButton(
-          tooltip: editing ? 'Stop editing' : 'Edit',
+          tooltip: editing ? 'Done editing' : 'Edit',
           onPressed: canUseTextContents ? () => s?.toggleEdit() : null,
           icon: Icon(
             editing ? Icons.visibility_rounded : Icons.edit_rounded,
@@ -449,13 +460,13 @@ class FileViewerActions extends StatelessWidget {
           ),
         ),
         IconButton(
-          tooltip: 'Copy contents',
+          tooltip: 'Copy',
           onPressed: canUseTextContents ? () => s?.copyContents() : null,
           icon: const Icon(Icons.content_copy_rounded, size: 18),
         ),
         if (canPreviewMarkdown)
           IconButton(
-            tooltip: markdownPreview ? 'View source' : 'Preview markdown',
+            tooltip: markdownPreview ? 'View file' : 'Preview markdown',
             onPressed: hasFile && !editing
                 ? () => s?.toggleMarkdownPreview()
                 : null,
@@ -466,8 +477,10 @@ class FileViewerActions extends StatelessWidget {
           ),
         if (canPreviewImage)
           IconButton(
-            tooltip: imagePreview ? 'Hide image preview' : 'Preview image',
-            onPressed: hasFile && !editing ? () => s?.toggleImagePreview() : null,
+            tooltip: imagePreview ? 'View file' : 'Show image',
+            onPressed: hasFile && !editing
+                ? () => s?.toggleImagePreview()
+                : null,
             icon: Icon(
               imagePreview ? Icons.description_rounded : Icons.image_rounded,
               size: 18,

@@ -12,6 +12,8 @@ import '../models.dart';
 import '../theme/app_colors.dart';
 import '../theme/app_theme.dart';
 import '../theme/app_tokens.dart';
+import '../widgets/app_dialogs.dart';
+import '../widgets/app_sheets.dart';
 import '../widgets/app_snackbar.dart';
 import '../widgets/mesh_widgets.dart';
 import '../host_reconnect_scheduler.dart';
@@ -109,7 +111,7 @@ class _BrowserPreviewPaneState extends State<BrowserPreviewPane>
   int _frameWidth = 390;
   int _frameHeight = 844;
   Size? _lastPreviewBoxSize;
-  String? _status = 'Connecting to remote browser...';
+  String? _status = 'Connecting to preview...';
   String? _error;
   bool _inputRailConfigured = false;
   bool _inputRailOpen = false;
@@ -228,9 +230,7 @@ class _BrowserPreviewPaneState extends State<BrowserPreviewPane>
     _channel = channel;
     if (mounted) {
       setState(() {
-        _status = _frameBytes == null
-            ? 'Connecting to remote browser...'
-            : 'Reconnecting stream...';
+        _status = _frameBytes == null ? 'Connecting...' : 'Reconnecting...';
         _error = null;
         _networkAvailable = true;
         _networkUnavailableMessage = null;
@@ -250,11 +250,11 @@ class _BrowserPreviewPaneState extends State<BrowserPreviewPane>
         _firstFrameTimer?.cancel();
         if (_remoteClosed) {
           setState(() {
-            _status = 'Remote browser stopped.';
+            _status = 'Preview closed.';
           });
           return;
         }
-        _scheduleStreamReconnect('Viewer connection closed.');
+        _scheduleStreamReconnect('Preview connection ended.');
       },
       cancelOnError: true,
     );
@@ -272,8 +272,8 @@ class _BrowserPreviewPaneState extends State<BrowserPreviewPane>
     if (!mounted) return;
     setState(() {
       _status = manual
-          ? 'Stream paused. The remote browser is still running.'
-          : 'Stream paused while the app is in the background.';
+          ? 'Preview paused. The browser is still open.'
+          : 'Preview paused while the app was in the background.';
     });
   }
 
@@ -306,11 +306,7 @@ class _BrowserPreviewPaneState extends State<BrowserPreviewPane>
         _frameWidth = width;
         _frameHeight = height;
       });
-      _send({
-        'type': 'resize',
-        'width': width,
-        'height': height,
-      });
+      _send({'type': 'resize', 'width': width, 'height': height});
     });
   }
 
@@ -406,7 +402,7 @@ class _BrowserPreviewPaneState extends State<BrowserPreviewPane>
         widget.onStopped?.call(preview);
       }
       setState(() {
-        _status = 'Remote browser stopped.';
+        _status = 'Preview closed.';
         _error = null;
       });
       return;
@@ -427,9 +423,7 @@ class _BrowserPreviewPaneState extends State<BrowserPreviewPane>
         _networkAvailable = available;
         _networkUnavailableMessage = available
             ? null
-            : ((message != null && message.isNotEmpty)
-                  ? message
-                  : 'Network inspection is unavailable on this browser.');
+            : _friendlyNetworkUnavailableMessage(message);
       });
       return;
     }
@@ -579,7 +573,7 @@ class _BrowserPreviewPaneState extends State<BrowserPreviewPane>
     }
     setState(() {
       _storageLoading = false;
-      _storageError = error ?? 'Storage snapshot is unavailable.';
+      _storageError = error ?? 'Site data is unavailable right now.';
     });
   }
 
@@ -598,7 +592,7 @@ class _BrowserPreviewPaneState extends State<BrowserPreviewPane>
     }
     setState(() {
       _inspectorLoading = false;
-      _inspectorError = error ?? 'Inspector snapshot is unavailable.';
+      _inspectorError = error ?? 'Page details are unavailable right now.';
       _inspectorPickMode = false;
     });
   }
@@ -717,7 +711,7 @@ class _BrowserPreviewPaneState extends State<BrowserPreviewPane>
 
   void _showNetworkDetail(_NetworkEntry entry) {
     const disconnectedDetailMessage =
-        'Viewer is disconnected. Resume the stream to inspect request details.';
+        'Preview is paused. Resume it to open request details.';
     final cachedDetail = _networkDetails[entry.requestId];
     final shouldRequestDetail =
         _channel != null &&
@@ -765,10 +759,8 @@ class _BrowserPreviewPaneState extends State<BrowserPreviewPane>
         context: context,
         isScrollControlled: true,
         backgroundColor: Colors.transparent,
-        builder: (_) => _NetworkDetailSheet(
-          entry: entry,
-          detailListenable: detailNotifier,
-        ),
+        builder: (_) =>
+            _NetworkDetailSheet(entry: entry, detailListenable: detailNotifier),
       ).whenComplete(() async {
         await subscription.cancel();
         detailNotifier.dispose();
@@ -830,24 +822,13 @@ class _BrowserPreviewPaneState extends State<BrowserPreviewPane>
   }
 
   Future<void> _stopRemoteBrowser() async {
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Stop remote browser?'),
-        content: const Text(
-          'This shuts down the remote Chromium instance. You can start a new preview from the Ports screen any time.',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(false),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.of(context).pop(true),
-            child: const Text('Stop'),
-          ),
-        ],
-      ),
+    final confirmed = await showMeshConfirmDialog(
+      context,
+      icon: Icons.close_fullscreen_rounded,
+      title: 'Close this preview?',
+      description:
+          'This closes the browser window on the connected machine. You can start another preview any time.',
+      confirmLabel: 'Close preview',
     );
     if (confirmed != true || !mounted) return;
     try {
@@ -864,7 +845,7 @@ class _BrowserPreviewPaneState extends State<BrowserPreviewPane>
       if (!mounted) return;
       showAppSnackBar(
         context,
-        'Could not stop browser preview: ${friendlyError(error)}',
+        'Could not close preview: ${friendlyError(error)}',
       );
     }
   }
@@ -886,18 +867,11 @@ class _BrowserPreviewPaneState extends State<BrowserPreviewPane>
     // snap to the new dimensions immediately, before the server's `preview`
     // message round-trips back.
     setState(() {
-      _preview = _preview.copyWith(
-        width: result.width,
-        height: result.height,
-      );
+      _preview = _preview.copyWith(width: result.width, height: result.height);
       _frameWidth = result.width;
       _frameHeight = result.height;
     });
-    _send({
-      'type': 'resize',
-      'width': result.width,
-      'height': result.height,
-    });
+    _send({'type': 'resize', 'width': result.width, 'height': result.height});
   }
 
   bool _sendMessage(Map<String, dynamic> message) {
@@ -984,8 +958,7 @@ class _BrowserPreviewPaneState extends State<BrowserPreviewPane>
     if (_channel == null) {
       setState(() {
         _inspectorLoading = false;
-        _inspectorError =
-            'Viewer is disconnected. Resume the stream to inspect the page.';
+        _inspectorError = 'Preview is paused. Resume it to load page details.';
       });
       return;
     }
@@ -993,8 +966,7 @@ class _BrowserPreviewPaneState extends State<BrowserPreviewPane>
     if (!sent) {
       setState(() {
         _inspectorLoading = false;
-        _inspectorError =
-            'Viewer is disconnected. Resume the stream to inspect the page.';
+        _inspectorError = 'Preview is paused. Resume it to load page details.';
       });
       return;
     }
@@ -1010,8 +982,7 @@ class _BrowserPreviewPaneState extends State<BrowserPreviewPane>
     if (_channel == null) {
       setState(() {
         _storageLoading = false;
-        _storageError =
-            'Viewer is disconnected. Resume the stream to inspect storage.';
+        _storageError = 'Preview is paused. Resume it to load site data.';
       });
       return;
     }
@@ -1019,8 +990,7 @@ class _BrowserPreviewPaneState extends State<BrowserPreviewPane>
     if (!sent) {
       setState(() {
         _storageLoading = false;
-        _storageError =
-            'Viewer is disconnected. Resume the stream to inspect storage.';
+        _storageError = 'Preview is paused. Resume it to load site data.';
       });
       return;
     }
@@ -1034,8 +1004,7 @@ class _BrowserPreviewPaneState extends State<BrowserPreviewPane>
     if (_channel == null) {
       setState(() {
         _storageLoading = false;
-        _storageError =
-            'Viewer is disconnected. Resume the stream to edit storage.';
+        _storageError = 'Preview is paused. Resume it to edit site data.';
       });
       return;
     }
@@ -1043,8 +1012,7 @@ class _BrowserPreviewPaneState extends State<BrowserPreviewPane>
     if (!sent) {
       setState(() {
         _storageLoading = false;
-        _storageError =
-            'Viewer is disconnected. Resume the stream to edit storage.';
+        _storageError = 'Preview is paused. Resume it to edit site data.';
       });
       return;
     }
@@ -1058,20 +1026,15 @@ class _BrowserPreviewPaneState extends State<BrowserPreviewPane>
     if (_channel == null) {
       setState(() {
         _inspectorLoading = false;
-        _inspectorError =
-            'Viewer is disconnected. Resume the stream to inspect the page.';
+        _inspectorError = 'Preview is paused. Resume it to load page details.';
       });
       return;
     }
-    final sent = _sendMessage({
-      'type': 'inspectorSelectPath',
-      'path': path,
-    });
+    final sent = _sendMessage({'type': 'inspectorSelectPath', 'path': path});
     if (!sent) {
       setState(() {
         _inspectorLoading = false;
-        _inspectorError =
-            'Viewer is disconnected. Resume the stream to inspect the page.';
+        _inspectorError = 'Preview is paused. Resume it to load page details.';
       });
       return;
     }
@@ -1086,8 +1049,7 @@ class _BrowserPreviewPaneState extends State<BrowserPreviewPane>
     if (_channel == null) {
       setState(() {
         _inspectorLoading = false;
-        _inspectorError =
-            'Viewer is disconnected. Resume the stream to inspect the page.';
+        _inspectorError = 'Preview is paused. Resume it to load page details.';
       });
       return;
     }
@@ -1099,8 +1061,7 @@ class _BrowserPreviewPaneState extends State<BrowserPreviewPane>
     if (!sent) {
       setState(() {
         _inspectorLoading = false;
-        _inspectorError =
-            'Viewer is disconnected. Resume the stream to inspect the page.';
+        _inspectorError = 'Preview is paused. Resume it to load page details.';
       });
       return;
     }
@@ -1126,8 +1087,8 @@ class _BrowserPreviewPaneState extends State<BrowserPreviewPane>
       context: context,
       builder: (context) => _StorageEntryEditorDialog(
         title: existing == null
-            ? 'Add ${_storageAreaLabel(area)} entry'
-            : 'Edit ${_storageAreaLabel(area)} entry',
+            ? 'Add item to ${_storageAreaLabel(area)}'
+            : 'Edit ${_storageAreaLabel(area)} item',
         initialKey: existing?.key ?? '',
         initialValue: existing?.value ?? '',
         keyEnabled: existing == null,
@@ -1146,22 +1107,14 @@ class _BrowserPreviewPaneState extends State<BrowserPreviewPane>
     String area,
     _StorageEntry entry,
   ) async {
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: Text('Delete ${_storageAreaLabel(area)} entry?'),
-        content: Text('Remove `${entry.key}` from ${_storageAreaLabel(area)}?'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(false),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.of(context).pop(true),
-            child: const Text('Delete'),
-          ),
-        ],
-      ),
+    final confirmed = await showMeshConfirmDialog(
+      context,
+      icon: Icons.delete_outline_rounded,
+      title: 'Delete this ${_storageAreaLabel(area)} item?',
+      description:
+          'This removes `${entry.key}` from ${_storageAreaLabel(area)} for the current page.',
+      confirmLabel: 'Delete item',
+      danger: true,
     );
     if (confirmed != true) return;
     _performStorageAction({
@@ -1172,49 +1125,28 @@ class _BrowserPreviewPaneState extends State<BrowserPreviewPane>
   }
 
   Future<void> _confirmClearStorageArea(String area) async {
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: Text('Clear ${_storageAreaLabel(area)}?'),
-        content: Text(
-          'This removes every entry from ${_storageAreaLabel(area)} for the current page.',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(false),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.of(context).pop(true),
-            child: const Text('Clear'),
-          ),
-        ],
-      ),
+    final confirmed = await showMeshConfirmDialog(
+      context,
+      icon: Icons.clear_all_rounded,
+      title: 'Clear ${_storageAreaLabel(area)}?',
+      description:
+          'This removes every saved item from ${_storageAreaLabel(area)} for the current page.',
+      confirmLabel: 'Clear items',
+      danger: true,
     );
     if (confirmed != true) return;
-    _performStorageAction({
-      'type': 'storageClearEntries',
-      'area': area,
-    });
+    _performStorageAction({'type': 'storageClearEntries', 'area': area});
   }
 
   Future<void> _confirmDeleteCookie(_StorageCookie cookie) async {
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Delete cookie?'),
-        content: Text('Remove the `${cookie.name}` cookie from this page?'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(false),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.of(context).pop(true),
-            child: const Text('Delete'),
-          ),
-        ],
-      ),
+    final confirmed = await showMeshConfirmDialog(
+      context,
+      icon: Icons.cookie_outlined,
+      title: 'Delete this cookie?',
+      description:
+          'This removes the `${cookie.name}` cookie from the current page.',
+      confirmLabel: 'Delete cookie',
+      danger: true,
     );
     if (confirmed != true) return;
     _performStorageAction({
@@ -1226,24 +1158,14 @@ class _BrowserPreviewPaneState extends State<BrowserPreviewPane>
   }
 
   Future<void> _confirmClearCookies() async {
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Clear cookies?'),
-        content: const Text(
-          'This removes every cookie currently visible for the page.',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(false),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.of(context).pop(true),
-            child: const Text('Clear'),
-          ),
-        ],
-      ),
+    final confirmed = await showMeshConfirmDialog(
+      context,
+      icon: Icons.cookie_outlined,
+      title: 'Clear cookies?',
+      description:
+          'This removes every cookie currently available to the current page.',
+      confirmLabel: 'Clear cookies',
+      danger: true,
     );
     if (confirmed != true) return;
     _performStorageAction({'type': 'storageClearCookies'});
@@ -1419,9 +1341,8 @@ class _BrowserPreviewPaneState extends State<BrowserPreviewPane>
           onResize: () => unawaited(_showViewportSheet()),
           onToggleInput: _toggleInputRail,
           onToggleDevTools: _toggleDevTools,
-          onTogglePause: () => _clientPaused
-              ? _resumeStream()
-              : _pauseStream(manual: true),
+          onTogglePause: () =>
+              _clientPaused ? _resumeStream() : _pauseStream(manual: true),
           onOpenInWindow: widget.onOpenInWindow,
           onStop: widget.showHeader
               ? () => unawaited(_stopRemoteBrowser())
@@ -1454,8 +1375,7 @@ class _BrowserPreviewPaneState extends State<BrowserPreviewPane>
                               behavior: HitTestBehavior.opaque,
                               onTapDown: (details) =>
                                   _sendTapDown(details, size),
-                              onTapUp: (details) =>
-                                  _sendTapUp(details, size),
+                              onTapUp: (details) => _sendTapUp(details, size),
                               onVerticalDragUpdate: (details) =>
                                   _sendScroll(details, size),
                               onHorizontalDragUpdate: (details) =>
@@ -1468,8 +1388,9 @@ class _BrowserPreviewPaneState extends State<BrowserPreviewPane>
                                   Positioned.fill(
                                     child: IgnorePointer(
                                       child: _InspectorSelectionOverlay(
-                                        highlightRect:
-                                            _inspectorHighlightRect(size),
+                                        highlightRect: _inspectorHighlightRect(
+                                          size,
+                                        ),
                                         pickMode: _inspectorPickActive,
                                         hasSelection:
                                             _inspectorSnapshot?.selectedNode !=
@@ -1503,9 +1424,7 @@ class _BrowserPreviewPaneState extends State<BrowserPreviewPane>
                   top: 8,
                   left: 0,
                   right: 0,
-                  child: Center(
-                    child: _ReconnectingChip(message: _status!),
-                  ),
+                  child: Center(child: _ReconnectingChip(message: _status!)),
                 ),
               if (_clientPaused)
                 Positioned.fill(
@@ -1530,9 +1449,8 @@ class _BrowserPreviewPaneState extends State<BrowserPreviewPane>
             onResize: () => unawaited(_showViewportSheet()),
             onToggleInput: _toggleInputRail,
             onToggleDevTools: _toggleDevTools,
-            onTogglePause: () => _clientPaused
-                ? _resumeStream()
-                : _pauseStream(manual: true),
+            onTogglePause: () =>
+                _clientPaused ? _resumeStream() : _pauseStream(manual: true),
           ),
         if (_inputRailOpen)
           _InputRail(
@@ -1613,7 +1531,7 @@ class _BrowserPreviewPaneState extends State<BrowserPreviewPane>
             OutlinedButton.icon(
               onPressed: _retryPreviewStream,
               icon: const Icon(Icons.refresh_rounded),
-              label: const Text('Reconnect viewer'),
+              label: const Text('Reconnect preview'),
             ),
           ],
         ),
@@ -1629,7 +1547,7 @@ class _BrowserPreviewPaneState extends State<BrowserPreviewPane>
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 24),
             child: Text(
-              _status ?? 'Starting remote browser...',
+              _status ?? 'Starting preview...',
               textAlign: TextAlign.center,
               style: TextStyle(color: colors.textSecondary),
             ),
@@ -1706,9 +1624,7 @@ class _BrowserChromeBar extends StatelessWidget {
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
       decoration: BoxDecoration(
         color: colors.surface,
-        border: Border(
-          bottom: BorderSide(color: colors.border),
-        ),
+        border: Border(bottom: BorderSide(color: colors.border)),
       ),
       child: SafeArea(
         bottom: false,
@@ -1828,7 +1744,7 @@ class _BrowserChromeBar extends StatelessWidget {
                 icon: devToolsOpen
                     ? Icons.construction_rounded
                     : Icons.construction_outlined,
-                tooltip: devToolsOpen ? 'Hide DevTools' : 'DevTools',
+                tooltip: devToolsOpen ? 'Hide tools' : 'Tools',
                 color: devToolsOpen ? colors.accent : null,
                 onTap: onToggleDevTools,
               ),
@@ -1837,7 +1753,7 @@ class _BrowserChromeBar extends StatelessWidget {
                 icon: streamPaused
                     ? Icons.play_circle_outline_rounded
                     : Icons.pause_circle_outline_rounded,
-                tooltip: streamPaused ? 'Resume stream' : 'Pause stream',
+                tooltip: streamPaused ? 'Resume preview' : 'Pause preview',
                 color: streamPaused ? colors.success : null,
                 onTap: onTogglePause,
               ),
@@ -1845,7 +1761,7 @@ class _BrowserChromeBar extends StatelessWidget {
                 const SizedBox(width: 2),
                 _ChromeButton(
                   icon: Icons.open_in_new_rounded,
-                  tooltip: 'Open in new window',
+                  tooltip: 'Open in its own window',
                   color: colors.accent,
                   onTap: onOpenInWindow!,
                 ),
@@ -1863,7 +1779,7 @@ class _BrowserChromeBar extends StatelessWidget {
             if (onStop != null)
               _ChromeButton(
                 icon: Icons.stop_circle_rounded,
-                tooltip: 'Stop remote browser',
+                tooltip: 'Close preview',
                 color: colors.danger,
                 onTap: onStop!,
               ),
@@ -1901,11 +1817,7 @@ class _ChromeButton extends StatelessWidget {
             width: 32,
             height: 32,
             alignment: Alignment.center,
-            child: Icon(
-              icon,
-              size: 18,
-              color: color ?? colors.textSecondary,
-            ),
+            child: Icon(icon, size: 18, color: color ?? colors.textSecondary),
           ),
         ),
       ),
@@ -1949,9 +1861,7 @@ class _BrowserBottomToolbar extends StatelessWidget {
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
       decoration: BoxDecoration(
         color: colors.surface,
-        border: Border(
-          top: BorderSide(color: colors.border),
-        ),
+        border: Border(top: BorderSide(color: colors.border)),
       ),
       child: SafeArea(
         top: false,
@@ -2002,7 +1912,7 @@ class _BrowserBottomToolbar extends StatelessWidget {
                 icon: devToolsOpen
                     ? Icons.construction_rounded
                     : Icons.construction_outlined,
-                tooltip: 'DevTools',
+                tooltip: 'Tools',
                 color: devToolsOpen ? colors.accent : null,
                 onTap: onToggleDevTools,
               ),
@@ -2011,7 +1921,7 @@ class _BrowserBottomToolbar extends StatelessWidget {
                 icon: streamPaused
                     ? Icons.play_circle_outline_rounded
                     : Icons.pause_circle_outline_rounded,
-                tooltip: streamPaused ? 'Resume' : 'Pause',
+                tooltip: streamPaused ? 'Resume preview' : 'Pause preview',
                 color: streamPaused ? colors.success : null,
                 onTap: onTogglePause,
               ),
@@ -2106,38 +2016,34 @@ class _DevToolsPanel extends StatelessWidget {
       height: 380,
       decoration: BoxDecoration(
         color: colors.surface,
-        border: Border(
-          top: BorderSide(color: colors.border),
-        ),
+        border: Border(top: BorderSide(color: colors.border)),
       ),
       child: Column(
         children: [
           Container(
             height: 40,
             decoration: BoxDecoration(
-              border: Border(
-                bottom: BorderSide(color: colors.border),
-              ),
+              border: Border(bottom: BorderSide(color: colors.border)),
             ),
             child: Row(
               children: [
                 _DevTab(
-                  label: 'Console',
+                  label: 'Page log',
                   active: showingConsole,
                   onTap: () => onTabChanged(0),
                 ),
                 _DevTab(
-                  label: 'Network',
+                  label: 'Requests',
                   active: tabIndex == 1,
                   onTap: () => onTabChanged(1),
                 ),
                 _DevTab(
-                  label: 'Storage',
+                  label: 'Site data',
                   active: showingStorage,
                   onTap: () => onTabChanged(2),
                 ),
                 _DevTab(
-                  label: 'Inspector',
+                  label: 'Page details',
                   active: showingInspector,
                   onTap: () => onTabChanged(3),
                 ),
@@ -2147,8 +2053,8 @@ class _DevToolsPanel extends StatelessWidget {
                     key: const ValueKey('browserPreviewInspectorPickButton'),
                     icon: const Icon(Icons.ads_click_rounded, size: 18),
                     tooltip: inspectorPickMode
-                        ? 'Cancel element pick'
-                        : 'Pick element from page',
+                        ? 'Stop selecting from page'
+                        : 'Select from page',
                     color: inspectorPickMode ? colors.accent : null,
                     onPressed: onToggleInspectorPickMode,
                     visualDensity: VisualDensity.compact,
@@ -2162,8 +2068,8 @@ class _DevToolsPanel extends StatelessWidget {
                     ),
                     icon: const Icon(Icons.refresh_rounded, size: 18),
                     tooltip: showingStorage
-                        ? 'Refresh storage'
-                        : 'Refresh inspector',
+                        ? 'Refresh site data'
+                        : 'Refresh page details',
                     onPressed: showingStorage
                         ? onRefreshStorage
                         : onRefreshInspector,
@@ -2173,8 +2079,8 @@ class _DevToolsPanel extends StatelessWidget {
                   IconButton(
                     icon: const Icon(Icons.delete_outline_rounded, size: 18),
                     tooltip: showingConsole
-                        ? 'Clear console'
-                        : 'Clear network log',
+                        ? 'Clear messages'
+                        : 'Clear requests',
                     onPressed: showingConsole ? onClearConsole : onClearNetwork,
                     visualDensity: VisualDensity.compact,
                   ),
@@ -2184,10 +2090,7 @@ class _DevToolsPanel extends StatelessWidget {
           ),
           Expanded(
             child: showingConsole
-                ? _ConsoleTab(
-                    entries: consoleEntries,
-                    preview: preview,
-                  )
+                ? _ConsoleTab(entries: consoleEntries, preview: preview)
                 : showingStorage
                 ? _StorageTab(
                     snapshot: storageSnapshot,
@@ -2272,10 +2175,7 @@ class _DevTab extends StatelessWidget {
 }
 
 class _ConsoleTab extends StatelessWidget {
-  const _ConsoleTab({
-    required this.entries,
-    required this.preview,
-  });
+  const _ConsoleTab({required this.entries, required this.preview});
 
   final List<_ConsoleEntry> entries;
   final HostBrowserPreviewInfo preview;
@@ -2286,7 +2186,7 @@ class _ConsoleTab extends StatelessWidget {
     if (entries.isEmpty) {
       return Center(
         child: Text(
-          'No console output yet.',
+          'No page messages yet.',
           style: TextStyle(color: colors.textSecondary),
         ),
       );
@@ -2304,10 +2204,7 @@ class _ConsoleTab extends StatelessWidget {
 }
 
 class _ConsoleRow extends StatelessWidget {
-  const _ConsoleRow({
-    required this.entry,
-    required this.colors,
-  });
+  const _ConsoleRow({required this.entry, required this.colors});
 
   final _ConsoleEntry entry;
   final AppColors colors;
@@ -2356,10 +2253,7 @@ class _ConsoleRow extends StatelessWidget {
                 if (metadata.isNotEmpty)
                   Text(
                     metadata.join(' · '),
-                    style: TextStyle(
-                      color: colors.textTertiary,
-                      fontSize: 10,
-                    ),
+                    style: TextStyle(color: colors.textTertiary, fontSize: 10),
                   ),
               ],
             ),
@@ -2412,7 +2306,7 @@ class _InspectorSelectionOverlay extends StatelessWidget {
                 border: Border.all(color: colors.border),
               ),
               child: Text(
-                'Tap the page preview to inspect an element',
+                'Tap the preview to select something on the page',
                 style: const TextStyle(
                   color: Colors.white,
                   fontSize: 12,
@@ -2459,7 +2353,7 @@ class _InspectorTab extends StatelessWidget {
             mainAxisSize: MainAxisSize.min,
             children: [
               Text(
-                error ?? 'No inspector snapshot loaded yet.',
+                error ?? 'No page details loaded yet.',
                 textAlign: TextAlign.center,
                 style: TextStyle(color: colors.textSecondary),
               ),
@@ -2472,13 +2366,15 @@ class _InspectorTab extends StatelessWidget {
                   OutlinedButton.icon(
                     onPressed: onRefresh,
                     icon: const Icon(Icons.refresh_rounded),
-                    label: const Text('Load inspector'),
+                    label: const Text('Load page details'),
                   ),
                   OutlinedButton.icon(
                     onPressed: onTogglePickMode,
                     icon: const Icon(Icons.ads_click_rounded),
                     label: Text(
-                      pickMode ? 'Cancel pick mode' : 'Pick from page',
+                      pickMode
+                          ? 'Stop selecting from page'
+                          : 'Select from page',
                     ),
                   ),
                 ],
@@ -2498,7 +2394,7 @@ class _InspectorTab extends StatelessWidget {
           runSpacing: 8,
           children: [
             _StorageSummaryCard(
-              label: 'Selected',
+              label: 'Item',
               value: selectedNode?.selector ?? 'None',
             ),
             _StorageSummaryCard(
@@ -2522,11 +2418,8 @@ class _InspectorTab extends StatelessWidget {
               border: Border.all(color: colors.accent.withValues(alpha: 0.28)),
             ),
             child: Text(
-              'Tap anywhere on the preview above to inspect an element.',
-              style: TextStyle(
-                color: colors.textSecondary,
-                fontSize: 11,
-              ),
+              'Tap anywhere in the preview above to select something on the page.',
+              style: TextStyle(color: colors.textSecondary, fontSize: 11),
             ),
           ),
         ],
@@ -2542,16 +2435,11 @@ class _InspectorTab extends StatelessWidget {
             decoration: BoxDecoration(
               color: colors.danger.withValues(alpha: 0.10),
               borderRadius: BorderRadius.circular(12),
-              border: Border.all(
-                color: colors.danger.withValues(alpha: 0.24),
-              ),
+              border: Border.all(color: colors.danger.withValues(alpha: 0.24)),
             ),
             child: Text(
               error!,
-              style: TextStyle(
-                color: colors.textSecondary,
-                fontSize: 11,
-              ),
+              style: TextStyle(color: colors.textSecondary, fontSize: 11),
             ),
           ),
         ],
@@ -2572,25 +2460,22 @@ class _InspectorTab extends StatelessWidget {
                 ),
                 child: Text(
                   warning,
-                  style: TextStyle(
-                    color: colors.textSecondary,
-                    fontSize: 11,
-                  ),
+                  style: TextStyle(color: colors.textSecondary, fontSize: 11),
                 ),
               ),
             ),
         ],
         const SizedBox(height: 14),
         _StorageSection(
-          title: 'Selection',
+          title: 'Current selection',
           child: selectedNode == null
-              ? const _StorageEmpty(message: 'No element selected.')
+              ? const _StorageEmpty(message: 'Nothing selected.')
               : _InspectorSelectedNodeCard(node: selectedNode),
         ),
         _StorageSection(
-          title: 'DOM tree',
+          title: 'Page outline',
           child: snapshot!.treeRoot == null
-              ? const _StorageEmpty(message: 'DOM tree is unavailable.')
+              ? const _StorageEmpty(message: 'Page outline is unavailable.')
               : _InspectorTreeNodeView(
                   node: snapshot!.treeRoot!,
                   depth: 0,
@@ -2600,21 +2485,19 @@ class _InspectorTab extends StatelessWidget {
         _StorageSection(
           title: 'Attributes',
           child: selectedNode == null || selectedNode.attributes.isEmpty
-              ? const _StorageEmpty(message: 'No attributes for this node.')
+              ? const _StorageEmpty(message: 'No attributes for this item.')
               : _InspectorNameValueList(entries: selectedNode.attributes),
         ),
         _StorageSection(
-          title: 'Computed styles',
+          title: 'Styles',
           child: selectedNode == null || selectedNode.computedStyles.isEmpty
-              ? const _StorageEmpty(
-                  message: 'No computed styles were captured.',
-                )
+              ? const _StorageEmpty(message: 'No styles were captured.')
               : _InspectorNameValueList(entries: selectedNode.computedStyles),
         ),
         _StorageSection(
           title: 'Inline styles',
           child: selectedNode == null || selectedNode.inlineStyles.isEmpty
-              ? const _StorageEmpty(message: 'No inline styles on this node.')
+              ? const _StorageEmpty(message: 'No inline styles on this item.')
               : _InspectorNameValueList(entries: selectedNode.inlineStyles),
         ),
       ],
@@ -2659,19 +2542,13 @@ class _InspectorSelectedNodeCard extends StatelessWidget {
           const SizedBox(height: 4),
           Text(
             metadata.join(' · '),
-            style: TextStyle(
-              color: colors.textTertiary,
-              fontSize: 10,
-            ),
+            style: TextStyle(color: colors.textTertiary, fontSize: 10),
           ),
           if (node.textPreview != null && node.textPreview!.isNotEmpty) ...[
             const SizedBox(height: 8),
             SelectableText(
               node.textPreview!,
-              style: monoStyle(
-                color: colors.textSecondary,
-                fontSize: 11,
-              ),
+              style: monoStyle(color: colors.textSecondary, fontSize: 11),
             ),
           ],
         ],
@@ -2758,12 +2635,10 @@ class _InspectorTreeNodeView extends StatelessWidget {
                   const SizedBox(height: 4),
                   Text(
                     _inspectorPathLabel(node.path),
-                    style: TextStyle(
-                      color: colors.textTertiary,
-                      fontSize: 10,
-                    ),
+                    style: TextStyle(color: colors.textTertiary, fontSize: 10),
                   ),
-                  if (node.textPreview != null && node.textPreview!.isNotEmpty) ...[
+                  if (node.textPreview != null &&
+                      node.textPreview!.isNotEmpty) ...[
                     const SizedBox(height: 6),
                     Text(
                       node.textPreview!,
@@ -2790,11 +2665,8 @@ class _InspectorTreeNodeView extends StatelessWidget {
           Padding(
             padding: EdgeInsets.only(left: (depth + 1) * 14.0, bottom: 8),
             child: Text(
-              'More children are present but not shown in this snapshot.',
-              style: TextStyle(
-                color: colors.textTertiary,
-                fontSize: 10,
-              ),
+              'More items exist, but this snapshot does not show them.',
+              style: TextStyle(color: colors.textTertiary, fontSize: 10),
             ),
           ),
       ],
@@ -2811,39 +2683,38 @@ class _InspectorNameValueList extends StatelessWidget {
   Widget build(BuildContext context) {
     final colors = context.colors;
     return Column(
-      children: entries.map((entry) {
-        return Container(
-          width: double.infinity,
-          margin: const EdgeInsets.only(bottom: 10),
-          padding: const EdgeInsets.all(12),
-          decoration: BoxDecoration(
-            color: colors.canvas,
-            borderRadius: BorderRadius.circular(12),
-            border: Border.all(color: colors.border),
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                entry.name,
-                style: monoStyle(
-                  color: colors.textPrimary,
-                  fontSize: 11,
-                  fontWeight: FontWeight.w800,
-                ),
+      children: entries
+          .map((entry) {
+            return Container(
+              width: double.infinity,
+              margin: const EdgeInsets.only(bottom: 10),
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: colors.canvas,
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: colors.border),
               ),
-              const SizedBox(height: 6),
-              SelectableText(
-                entry.value,
-                style: monoStyle(
-                  color: colors.textSecondary,
-                  fontSize: 11,
-                ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    entry.name,
+                    style: monoStyle(
+                      color: colors.textPrimary,
+                      fontSize: 11,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+                  SelectableText(
+                    entry.value,
+                    style: monoStyle(color: colors.textSecondary, fontSize: 11),
+                  ),
+                ],
               ),
-            ],
-          ),
-        );
-      }).toList(growable: false),
+            );
+          })
+          .toList(growable: false),
     );
   }
 }
@@ -2887,7 +2758,7 @@ class _StorageTab extends StatelessWidget {
             mainAxisSize: MainAxisSize.min,
             children: [
               Text(
-                error ?? 'No storage snapshot loaded yet.',
+                error ?? 'No site data loaded yet.',
                 textAlign: TextAlign.center,
                 style: TextStyle(color: colors.textSecondary),
               ),
@@ -2895,7 +2766,7 @@ class _StorageTab extends StatelessWidget {
               OutlinedButton.icon(
                 onPressed: onRefresh,
                 icon: const Icon(Icons.refresh_rounded),
-                label: const Text('Load storage'),
+                label: const Text('Load site data'),
               ),
             ],
           ),
@@ -2919,7 +2790,7 @@ class _StorageTab extends StatelessWidget {
               value: '${snapshot!.cookies.length}',
             ),
             _StorageSummaryCard(
-              label: 'localStorage',
+              label: 'Local storage',
               value: '${snapshot!.localStorage.length}',
             ),
             _StorageSummaryCard(
@@ -2927,7 +2798,7 @@ class _StorageTab extends StatelessWidget {
               value: '${snapshot!.indexedDbDatabases.length}',
             ),
             _StorageSummaryCard(
-              label: 'sessionStorage',
+              label: 'Session storage',
               value: '${snapshot!.sessionStorage.length}',
             ),
             _StorageSummaryCard(
@@ -2948,16 +2819,11 @@ class _StorageTab extends StatelessWidget {
             decoration: BoxDecoration(
               color: colors.danger.withValues(alpha: 0.10),
               borderRadius: BorderRadius.circular(12),
-              border: Border.all(
-                color: colors.danger.withValues(alpha: 0.24),
-              ),
+              border: Border.all(color: colors.danger.withValues(alpha: 0.24)),
             ),
             child: Text(
               error!,
-              style: TextStyle(
-                color: colors.textSecondary,
-                fontSize: 11,
-              ),
+              style: TextStyle(color: colors.textSecondary, fontSize: 11),
             ),
           ),
         ],
@@ -2978,10 +2844,7 @@ class _StorageTab extends StatelessWidget {
                 ),
                 child: Text(
                   warning,
-                  style: TextStyle(
-                    color: colors.textSecondary,
-                    fontSize: 11,
-                  ),
+                  style: TextStyle(color: colors.textSecondary, fontSize: 11),
                 ),
               ),
             ),
@@ -2989,34 +2852,36 @@ class _StorageTab extends StatelessWidget {
         if (snapshot!.usageBreakdown.isNotEmpty) ...[
           const SizedBox(height: 14),
           _StorageSection(
-            title: 'Usage breakdown',
+            title: 'Storage use',
             child: Column(
-              children: snapshot!.usageBreakdown.map((entry) {
-                return Padding(
-                  padding: const EdgeInsets.only(bottom: 8),
-                  child: Row(
-                    children: [
-                      Expanded(
-                        child: Text(
-                          _storageUsageTypeLabel(entry.storageType),
-                          style: TextStyle(
-                            color: colors.textSecondary,
-                            fontSize: 11,
+              children: snapshot!.usageBreakdown
+                  .map((entry) {
+                    return Padding(
+                      padding: const EdgeInsets.only(bottom: 8),
+                      child: Row(
+                        children: [
+                          Expanded(
+                            child: Text(
+                              _storageUsageTypeLabel(entry.storageType),
+                              style: TextStyle(
+                                color: colors.textSecondary,
+                                fontSize: 11,
+                              ),
+                            ),
                           ),
-                        ),
+                          Text(
+                            _formatNetworkBytes(entry.usage),
+                            style: monoStyle(
+                              color: colors.textPrimary,
+                              fontSize: 11,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                        ],
                       ),
-                      Text(
-                        _formatNetworkBytes(entry.usage),
-                        style: monoStyle(
-                          color: colors.textPrimary,
-                          fontSize: 11,
-                          fontWeight: FontWeight.w700,
-                        ),
-                      ),
-                    ],
-                  ),
-                );
-              }).toList(growable: false),
+                    );
+                  })
+                  .toList(growable: false),
             ),
           ),
         ],
@@ -3025,9 +2890,11 @@ class _StorageTab extends StatelessWidget {
           child: snapshot!.indexedDbDatabases.isEmpty
               ? _StorageEmpty(message: 'No IndexedDB databases found.')
               : Column(
-                  children: snapshot!.indexedDbDatabases.map((database) {
-                    return _IndexedDbDatabaseCard(database: database);
-                  }).toList(growable: false),
+                  children: snapshot!.indexedDbDatabases
+                      .map((database) {
+                        return _IndexedDbDatabaseCard(database: database);
+                      })
+                      .toList(growable: false),
                 ),
         ),
         const SizedBox(height: 14),
@@ -3044,26 +2911,30 @@ class _StorageTab extends StatelessWidget {
           child: snapshot!.cookies.isEmpty
               ? _StorageEmpty(message: 'No cookies found for this page.')
               : Column(
-                  children: snapshot!.cookies.map((cookie) {
-                    return _StorageCookieRow(
-                      cookie: cookie,
-                      onDelete: () => onDeleteCookie(cookie),
-                    );
-                  }).toList(growable: false),
+                  children: snapshot!.cookies
+                      .map((cookie) {
+                        return _StorageCookieRow(
+                          cookie: cookie,
+                          onDelete: () => onDeleteCookie(cookie),
+                        );
+                      })
+                      .toList(growable: false),
                 ),
         ),
         _StorageSection(
-          title: 'localStorage',
+          title: 'Local storage',
           actions: [
             _StorageSectionButton(
               icon: Icons.add_rounded,
-              tooltip: 'Add localStorage entry',
-              buttonKey: const ValueKey('browserPreviewStorageAdd-localStorage'),
+              tooltip: 'Add local storage item',
+              buttonKey: const ValueKey(
+                'browserPreviewStorageAdd-localStorage',
+              ),
               onTap: () => onAddStorageEntry('localStorage'),
             ),
             _StorageSectionButton(
               icon: Icons.delete_sweep_outlined,
-              tooltip: 'Clear localStorage',
+              tooltip: 'Clear local storage',
               buttonKey: const ValueKey(
                 'browserPreviewStorageClear-localStorage',
               ),
@@ -3073,24 +2944,27 @@ class _StorageTab extends StatelessWidget {
             ),
           ],
           child: snapshot!.localStorage.isEmpty
-              ? _StorageEmpty(message: 'No localStorage entries found.')
+              ? _StorageEmpty(message: 'No local storage items found.')
               : Column(
-                  children: snapshot!.localStorage.map((entry) {
-                    return _StorageEntryRow(
-                      entry: entry,
-                      onEdit: () => onEditStorageEntry('localStorage', entry),
-                      onDelete: () =>
-                          onDeleteStorageEntry('localStorage', entry),
-                    );
-                  }).toList(growable: false),
+                  children: snapshot!.localStorage
+                      .map((entry) {
+                        return _StorageEntryRow(
+                          entry: entry,
+                          onEdit: () =>
+                              onEditStorageEntry('localStorage', entry),
+                          onDelete: () =>
+                              onDeleteStorageEntry('localStorage', entry),
+                        );
+                      })
+                      .toList(growable: false),
                 ),
         ),
         _StorageSection(
-          title: 'sessionStorage',
+          title: 'Session storage',
           actions: [
             _StorageSectionButton(
               icon: Icons.add_rounded,
-              tooltip: 'Add sessionStorage entry',
+              tooltip: 'Add session storage item',
               buttonKey: const ValueKey(
                 'browserPreviewStorageAdd-sessionStorage',
               ),
@@ -3098,7 +2972,7 @@ class _StorageTab extends StatelessWidget {
             ),
             _StorageSectionButton(
               icon: Icons.delete_sweep_outlined,
-              tooltip: 'Clear sessionStorage',
+              tooltip: 'Clear session storage',
               buttonKey: const ValueKey(
                 'browserPreviewStorageClear-sessionStorage',
               ),
@@ -3108,16 +2982,19 @@ class _StorageTab extends StatelessWidget {
             ),
           ],
           child: snapshot!.sessionStorage.isEmpty
-              ? _StorageEmpty(message: 'No sessionStorage entries found.')
+              ? _StorageEmpty(message: 'No session storage items found.')
               : Column(
-                  children: snapshot!.sessionStorage.map((entry) {
-                    return _StorageEntryRow(
-                      entry: entry,
-                      onEdit: () => onEditStorageEntry('sessionStorage', entry),
-                      onDelete: () =>
-                          onDeleteStorageEntry('sessionStorage', entry),
-                    );
-                  }).toList(growable: false),
+                  children: snapshot!.sessionStorage
+                      .map((entry) {
+                        return _StorageEntryRow(
+                          entry: entry,
+                          onEdit: () =>
+                              onEditStorageEntry('sessionStorage', entry),
+                          onDelete: () =>
+                              onDeleteStorageEntry('sessionStorage', entry),
+                        );
+                      })
+                      .toList(growable: false),
                 ),
         ),
       ],
@@ -3126,10 +3003,7 @@ class _StorageTab extends StatelessWidget {
 }
 
 class _StorageSummaryCard extends StatelessWidget {
-  const _StorageSummaryCard({
-    required this.label,
-    required this.value,
-  });
+  const _StorageSummaryCard({required this.label, required this.value});
 
   final String label;
   final String value;
@@ -3245,10 +3119,7 @@ class _StorageEmpty extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colors = context.colors;
-    return Text(
-      message,
-      style: TextStyle(color: colors.textSecondary),
-    );
+    return Text(message, style: TextStyle(color: colors.textSecondary));
   }
 }
 
@@ -3284,10 +3155,7 @@ class _IndexedDbDatabaseCard extends StatelessWidget {
           const SizedBox(height: 4),
           Text(
             'Version ${database.version ?? '?'} · $storeCount ${storeCount == 1 ? 'object store' : 'object stores'}',
-            style: TextStyle(
-              color: colors.textTertiary,
-              fontSize: 10,
-            ),
+            style: TextStyle(color: colors.textTertiary, fontSize: 10),
           ),
           if (database.objectStores.isNotEmpty) ...[
             const SizedBox(height: 10),
@@ -3350,10 +3218,7 @@ class _IndexedDbDatabaseCard extends StatelessWidget {
 }
 
 class _StorageCookieRow extends StatelessWidget {
-  const _StorageCookieRow({
-    required this.cookie,
-    required this.onDelete,
-  });
+  const _StorageCookieRow({required this.cookie, required this.onDelete});
 
   final _StorageCookie cookie;
   final VoidCallback onDelete;
@@ -3408,18 +3273,12 @@ class _StorageCookieRow extends StatelessWidget {
           const SizedBox(height: 4),
           SelectableText(
             cookie.value,
-            style: monoStyle(
-              color: colors.textSecondary,
-              fontSize: 11,
-            ),
+            style: monoStyle(color: colors.textSecondary, fontSize: 11),
           ),
           const SizedBox(height: 6),
           Text(
             metadata.join(' · '),
-            style: TextStyle(
-              color: colors.textTertiary,
-              fontSize: 10,
-            ),
+            style: TextStyle(color: colors.textTertiary, fontSize: 10),
           ),
         ],
       ),
@@ -3488,10 +3347,7 @@ class _StorageEntryRow extends StatelessWidget {
           const SizedBox(height: 6),
           SelectableText(
             entry.value,
-            style: monoStyle(
-              color: colors.textSecondary,
-              fontSize: 11,
-            ),
+            style: monoStyle(color: colors.textSecondary, fontSize: 11),
           ),
         ],
       ),
@@ -3538,57 +3394,46 @@ class _StorageEntryEditorDialogState extends State<_StorageEntryEditorDialog> {
   void _submit() {
     final key = _keyController.text.trim();
     if (key.isEmpty) return;
-    Navigator.of(context).pop(
-      _StorageEntryDraft(
-        key: key,
-        value: _valueController.text,
-      ),
-    );
+    Navigator.of(
+      context,
+    ).pop(_StorageEntryDraft(key: key, value: _valueController.text));
   }
 
   @override
   Widget build(BuildContext context) {
-    return AlertDialog(
-      title: Text(widget.title),
-      content: SizedBox(
-        width: 420,
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            TextField(
-              controller: _keyController,
-              autofocus: true,
-              readOnly: !widget.keyEnabled,
-              decoration: const InputDecoration(
-                labelText: 'Key',
-                border: OutlineInputBorder(),
-              ),
-              onSubmitted: (_) => _submit(),
-            ),
-            const SizedBox(height: 12),
-            TextField(
-              controller: _valueController,
-              maxLines: 4,
-              minLines: 2,
-              decoration: const InputDecoration(
-                labelText: 'Value',
-                border: OutlineInputBorder(),
-              ),
-              onSubmitted: (_) => _submit(),
-            ),
-          ],
-        ),
-      ),
+    return MeshDialogScaffold(
+      icon: Icons.edit_note_rounded,
+      title: widget.title,
+      description:
+          'Keys identify each saved item for the current page. The value is stored exactly as entered.',
+      maxWidth: 480,
       actions: [
         TextButton(
           onPressed: () => Navigator.of(context).pop(),
           child: const Text('Cancel'),
         ),
-        FilledButton(
-          onPressed: _submit,
-          child: const Text('Save'),
-        ),
+        FilledButton(onPressed: _submit, child: const Text('Save item')),
       ],
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          TextField(
+            controller: _keyController,
+            autofocus: true,
+            readOnly: !widget.keyEnabled,
+            decoration: const InputDecoration(labelText: 'Key'),
+            onSubmitted: (_) => _submit(),
+          ),
+          const SizedBox(height: 12),
+          TextField(
+            controller: _valueController,
+            maxLines: 4,
+            minLines: 2,
+            decoration: const InputDecoration(labelText: 'Value'),
+            onSubmitted: (_) => _submit(),
+          ),
+        ],
+      ),
     );
   }
 }
@@ -3628,9 +3473,7 @@ class _NetworkTab extends StatelessWidget {
         Container(
           padding: const EdgeInsets.fromLTRB(8, 8, 8, 6),
           decoration: BoxDecoration(
-            border: Border(
-              bottom: BorderSide(color: colors.border),
-            ),
+            border: Border(bottom: BorderSide(color: colors.border)),
           ),
           child: Column(
             children: [
@@ -3706,7 +3549,7 @@ class _NetworkTab extends StatelessWidget {
                     padding: const EdgeInsets.symmetric(horizontal: 20),
                     child: Text(
                       networkUnavailableMessage ??
-                          'Network inspection is unavailable on this browser.',
+                          'Request details are unavailable in this browser.',
                       textAlign: TextAlign.center,
                       style: TextStyle(color: colors.textSecondary),
                     ),
@@ -3716,7 +3559,7 @@ class _NetworkTab extends StatelessWidget {
               ? Center(
                   child: Text(
                     searchQuery.trim().isEmpty
-                        ? 'No network requests yet.'
+                        ? 'No requests yet.'
                         : 'No requests match your search.',
                     style: TextStyle(color: colors.textSecondary),
                   ),
@@ -3739,10 +3582,7 @@ class _NetworkTab extends StatelessWidget {
 }
 
 class _NetworkRow extends StatelessWidget {
-  const _NetworkRow({
-    required this.entry,
-    required this.onTap,
-  });
+  const _NetworkRow({required this.entry, required this.onTap});
 
   final _NetworkEntry entry;
   final VoidCallback onTap;
@@ -3824,20 +3664,14 @@ class _NetworkRow extends StatelessWidget {
                     _networkDisplayLocation(entry.url),
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                      color: colors.textSecondary,
-                      fontSize: 11,
-                    ),
+                    style: TextStyle(color: colors.textSecondary, fontSize: 11),
                   ),
                   const SizedBox(height: 3),
                   Text(
                     subtitleParts.join(' · '),
                     maxLines: 2,
                     overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                      color: colors.textTertiary,
-                      fontSize: 10,
-                    ),
+                    style: TextStyle(color: colors.textTertiary, fontSize: 10),
                   ),
                 ],
               ),
@@ -3870,164 +3704,135 @@ class _NetworkDetailSheet extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colors = context.colors;
-    final maxHeight = MediaQuery.sizeOf(context).height * 0.85;
-    return Container(
-      decoration: BoxDecoration(
-        color: colors.surface,
-        borderRadius: const BorderRadius.vertical(top: Radius.circular(18)),
-      ),
-      child: SafeArea(
-        top: false,
-        child: ConstrainedBox(
-          constraints: BoxConstraints(maxHeight: maxHeight),
-          child: ValueListenableBuilder<_NetworkDetail?>(
-            valueListenable: detailListenable,
-            builder: (context, detail, _) {
-              return Column(
+    return MeshBottomSheetScaffold(
+      icon: Icons.travel_explore_rounded,
+      title: _networkDisplayName(entry.url),
+      description:
+          'Review request details, headers, and captured payloads for this page request.',
+      maxWidth: 960,
+      maxHeightFactor: 0.86,
+      child: ValueListenableBuilder<_NetworkDetail?>(
+        valueListenable: detailListenable,
+        builder: (context, detail, _) {
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(18, 14, 18, 10),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Row(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Expanded(
-                              child: Text(
-                                _networkDisplayName(entry.url),
-                                style: Theme.of(context).textTheme.titleMedium
-                                    ?.copyWith(
-                                      color: colors.textPrimary,
-                                      fontWeight: AppWeights.title,
-                                    ),
-                              ),
-                            ),
-                            const SizedBox(width: 8),
-                            _NetworkDetailActionsButton(
-                              entry: entry,
-                              detail: detail,
-                            ),
-                          ],
-                        ),
-                        const SizedBox(height: 6),
-                        SelectableText(
-                          entry.url,
-                          style: monoStyle(
-                            color: colors.textSecondary,
-                            fontSize: 11,
-                          ),
-                        ),
-                        const SizedBox(height: 10),
-                        Wrap(
-                          spacing: 8,
-                          runSpacing: 8,
-                          children: [
-                            _NetworkMetaChip(label: entry.method),
-                            _NetworkMetaChip(
-                              label: _networkStatusLabel(detail ?? entry),
-                            ),
-                            _NetworkMetaChip(
-                              label: _networkResourceTypeLabel(
-                                detail?.resourceType ?? entry.resourceType,
-                              ),
-                            ),
-                            if ((detail?.mimeType ?? entry.mimeType) != null)
-                              _NetworkMetaChip(
-                                label: detail?.mimeType ?? entry.mimeType!,
-                              ),
-                            if ((detail?.encodedDataLength ??
-                                    entry.encodedDataLength) !=
-                                null)
-                              _NetworkMetaChip(
-                                label: _formatNetworkBytes(
-                                  detail?.encodedDataLength ??
-                                      entry.encodedDataLength!,
-                                ),
-                              ),
-                            if ((detail?.durationMs ?? entry.durationMs) != null)
-                              _NetworkMetaChip(
-                                label:
-                                    '${detail?.durationMs ?? entry.durationMs} ms',
-                              ),
-                            if ((detail?.servedFromCache ??
-                                    entry.servedFromCache))
-                              const _NetworkMetaChip(label: 'cache'),
-                          ],
-                        ),
-                      ],
+                  Expanded(
+                    child: SelectableText(
+                      entry.url,
+                      style: monoStyle(
+                        color: colors.textSecondary,
+                        fontSize: 11,
+                      ),
                     ),
                   ),
-                  Divider(height: 1, color: colors.border),
-                  Expanded(
-                    child: detail == null
-                        ? const Center(child: CircularProgressIndicator())
-                        : ListView(
-                            padding: const EdgeInsets.fromLTRB(18, 14, 18, 18),
-                            children: [
-                              if (detail.errorText != null &&
-                                  detail.errorText!.isNotEmpty)
-                                _NetworkSection(
-                                  title: 'Request error',
-                                  child: SelectableText(
-                                    detail.errorText!,
-                                    style: TextStyle(color: colors.danger),
-                                  ),
-                                ),
-                              if (detail.requestHeaders.isNotEmpty)
-                                _NetworkSection(
-                                  title: 'Request headers',
-                                  child: _HeaderList(
-                                    headers: detail.requestHeaders,
-                                  ),
-                                ),
-                              if (_networkShouldShowRequestBody(detail))
-                                _NetworkSection(
-                                  title: 'Request body',
-                                  child: _NetworkPayloadView(
-                                    body: detail.requestBody,
-                                    bodyError: detail.requestBodyError,
-                                    mimeType: _networkRequestMimeType(detail),
-                                    bodyBase64Encoded: false,
-                                    emptyMessage:
-                                        'No request body captured for this request.',
-                                  ),
-                                ),
-                              if (detail.responseHeaders.isNotEmpty)
-                                _NetworkSection(
-                                  title: 'Response headers',
-                                  child: _HeaderList(
-                                    headers: detail.responseHeaders,
-                                  ),
-                                ),
-                              if (_networkShouldShowWebSocketMessages(detail))
-                                _NetworkSection(
-                                  title: 'Messages',
-                                  child: _NetworkWebSocketMessagesView(
-                                    messages: detail.webSocketMessages,
-                                  ),
-                                ),
-                              if (_networkShouldShowResponseBody(detail))
-                                _NetworkSection(
-                                  title: 'Response body',
-                                  child: _NetworkPayloadView(
-                                    body: detail.body,
-                                    bodyError: detail.bodyError,
-                                    mimeType: detail.mimeType ?? '',
-                                    bodyBase64Encoded: detail.bodyBase64Encoded,
-                                    emptyMessage:
-                                        'No response body captured for this request.',
-                                  ),
-                                ),
-                            ],
-                          ),
-                  ),
+                  const SizedBox(width: 8),
+                  _NetworkDetailActionsButton(entry: entry, detail: detail),
                 ],
-              );
-            },
-          ),
-        ),
+              ),
+              const SizedBox(height: 10),
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: [
+                  _NetworkMetaChip(label: entry.method),
+                  _NetworkMetaChip(label: _networkStatusLabel(detail ?? entry)),
+                  _NetworkMetaChip(
+                    label: _networkResourceTypeLabel(
+                      detail?.resourceType ?? entry.resourceType,
+                    ),
+                  ),
+                  if ((detail?.mimeType ?? entry.mimeType) != null)
+                    _NetworkMetaChip(
+                      label: detail?.mimeType ?? entry.mimeType!,
+                    ),
+                  if ((detail?.encodedDataLength ?? entry.encodedDataLength) !=
+                      null)
+                    _NetworkMetaChip(
+                      label: _formatNetworkBytes(
+                        detail?.encodedDataLength ?? entry.encodedDataLength!,
+                      ),
+                    ),
+                  if ((detail?.durationMs ?? entry.durationMs) != null)
+                    _NetworkMetaChip(
+                      label: '${detail?.durationMs ?? entry.durationMs} ms',
+                    ),
+                  if ((detail?.servedFromCache ?? entry.servedFromCache))
+                    const _NetworkMetaChip(label: 'cache'),
+                ],
+              ),
+              const SizedBox(height: 12),
+              Divider(height: 1, color: colors.border),
+              const SizedBox(height: 12),
+              Expanded(
+                child: detail == null
+                    ? const Center(child: CircularProgressIndicator())
+                    : ListView(
+                        padding: EdgeInsets.zero,
+                        children: [
+                          if (detail.errorText != null &&
+                              detail.errorText!.isNotEmpty)
+                            _NetworkSection(
+                              title: 'Request error',
+                              child: SelectableText(
+                                detail.errorText!,
+                                style: TextStyle(color: colors.danger),
+                              ),
+                            ),
+                          if (detail.requestHeaders.isNotEmpty)
+                            _NetworkSection(
+                              title: 'Request headers',
+                              child: _HeaderList(
+                                headers: detail.requestHeaders,
+                              ),
+                            ),
+                          if (_networkShouldShowRequestBody(detail))
+                            _NetworkSection(
+                              title: 'Request body',
+                              child: _NetworkPayloadView(
+                                body: detail.requestBody,
+                                bodyError: detail.requestBodyError,
+                                mimeType: _networkRequestMimeType(detail),
+                                bodyBase64Encoded: false,
+                                emptyMessage:
+                                    'No request body captured for this request.',
+                              ),
+                            ),
+                          if (detail.responseHeaders.isNotEmpty)
+                            _NetworkSection(
+                              title: 'Response headers',
+                              child: _HeaderList(
+                                headers: detail.responseHeaders,
+                              ),
+                            ),
+                          if (_networkShouldShowWebSocketMessages(detail))
+                            _NetworkSection(
+                              title: 'Messages',
+                              child: _NetworkWebSocketMessagesView(
+                                messages: detail.webSocketMessages,
+                              ),
+                            ),
+                          if (_networkShouldShowResponseBody(detail))
+                            _NetworkSection(
+                              title: 'Response body',
+                              child: _NetworkPayloadView(
+                                body: detail.body,
+                                bodyError: detail.bodyError,
+                                mimeType: detail.mimeType ?? '',
+                                bodyBase64Encoded: detail.bodyBase64Encoded,
+                                emptyMessage:
+                                    'No response body captured for this request.',
+                              ),
+                            ),
+                        ],
+                      ),
+              ),
+            ],
+          );
+        },
       ),
     );
   }
@@ -4090,7 +3895,10 @@ class _NetworkSection extends StatelessWidget {
 }
 
 class _NetworkDetailActionsButton extends StatelessWidget {
-  const _NetworkDetailActionsButton({required this.entry, required this.detail});
+  const _NetworkDetailActionsButton({
+    required this.entry,
+    required this.detail,
+  });
 
   final _NetworkEntry entry;
   final _NetworkDetail? detail;
@@ -4100,12 +3908,8 @@ class _NetworkDetailActionsButton extends StatelessWidget {
     return PopupMenuButton<_NetworkCopyAction>(
       tooltip: 'Copy request details',
       icon: const Icon(Icons.copy_all_rounded, size: 18),
-      onSelected: (action) => _copyNetworkDetailAction(
-        context,
-        action,
-        entry,
-        detail,
-      ),
+      onSelected: (action) =>
+          _copyNetworkDetailAction(context, action, entry, detail),
       itemBuilder: (context) {
         final items = <PopupMenuEntry<_NetworkCopyAction>>[
           const PopupMenuItem<_NetworkCopyAction>(
@@ -4160,38 +3964,37 @@ class _HeaderList extends StatelessWidget {
   Widget build(BuildContext context) {
     final colors = context.colors;
     return Column(
-      children: headers.entries.map((entry) {
-        return Padding(
-          padding: const EdgeInsets.only(bottom: 6),
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Expanded(
-                flex: 2,
-                child: SelectableText(
-                  entry.key,
-                  style: monoStyle(
-                    color: colors.textSecondary,
-                    fontSize: 11,
-                    fontWeight: FontWeight.w700,
+      children: headers.entries
+          .map((entry) {
+            return Padding(
+              padding: const EdgeInsets.only(bottom: 6),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Expanded(
+                    flex: 2,
+                    child: SelectableText(
+                      entry.key,
+                      style: monoStyle(
+                        color: colors.textSecondary,
+                        fontSize: 11,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
                   ),
-                ),
-              ),
-              const SizedBox(width: 10),
-              Expanded(
-                flex: 3,
-                child: SelectableText(
-                  entry.value,
-                  style: monoStyle(
-                    color: colors.textPrimary,
-                    fontSize: 11,
+                  const SizedBox(width: 10),
+                  Expanded(
+                    flex: 3,
+                    child: SelectableText(
+                      entry.value,
+                      style: monoStyle(color: colors.textPrimary, fontSize: 11),
+                    ),
                   ),
-                ),
+                ],
               ),
-            ],
-          ),
-        );
-      }).toList(growable: false),
+            );
+          })
+          .toList(growable: false),
     );
   }
 }
@@ -4221,10 +4024,7 @@ class _NetworkPayloadView extends StatelessWidget {
       );
     }
     if (body == null) {
-      return Text(
-        emptyMessage,
-        style: TextStyle(color: colors.textSecondary),
-      );
+      return Text(emptyMessage, style: TextStyle(color: colors.textSecondary));
     }
     if (bodyBase64Encoded && mimeType.startsWith('image/')) {
       try {
@@ -4255,10 +4055,7 @@ class _NetworkPayloadView extends StatelessWidget {
       ),
       child: SelectableText(
         _prettyNetworkBody(body!, mimeType),
-        style: monoStyle(
-          color: colors.textPrimary,
-          fontSize: 11,
-        ),
+        style: monoStyle(color: colors.textPrimary, fontSize: 11),
       ),
     );
   }
@@ -4279,83 +4076,85 @@ class _NetworkWebSocketMessagesView extends StatelessWidget {
       );
     }
     return Column(
-      children: messages.map((message) {
-        final directionColor = switch (message.direction) {
-          'sent' => colors.accent,
-          'received' => colors.success,
-          'error' => colors.danger,
-          _ => colors.textSecondary,
-        };
-        final directionLabel = switch (message.direction) {
-          'sent' => 'Sent',
-          'received' => 'Recv',
-          'error' => 'Err',
-          _ => message.direction,
-        };
-        final payloadText = _webSocketMessagePayloadText(message);
-        final meta = <String>[
-          directionLabel,
-          _formatConsoleTimestamp(message.timestamp),
-          if (message.opcode != null) 'opcode ${message.opcode}',
-        ];
-        return Container(
-          width: double.infinity,
-          margin: const EdgeInsets.only(bottom: 10),
-          padding: const EdgeInsets.all(12),
-          decoration: BoxDecoration(
-            color: colors.canvas,
-            borderRadius: BorderRadius.circular(12),
-            border: Border.all(color: colors.border),
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
+      children: messages
+          .map((message) {
+            final directionColor = switch (message.direction) {
+              'sent' => colors.accent,
+              'received' => colors.success,
+              'error' => colors.danger,
+              _ => colors.textSecondary,
+            };
+            final directionLabel = switch (message.direction) {
+              'sent' => 'Sent',
+              'received' => 'Recv',
+              'error' => 'Err',
+              _ => message.direction,
+            };
+            final payloadText = _webSocketMessagePayloadText(message);
+            final meta = <String>[
+              directionLabel,
+              _formatConsoleTimestamp(message.timestamp),
+              if (message.opcode != null) 'opcode ${message.opcode}',
+            ];
+            return Container(
+              width: double.infinity,
+              margin: const EdgeInsets.only(bottom: 10),
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: colors.canvas,
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: colors.border),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 8,
-                      vertical: 3,
-                    ),
-                    decoration: BoxDecoration(
-                      color: directionColor.withValues(alpha: 0.14),
-                      borderRadius: BorderRadius.circular(999),
-                    ),
-                    child: Text(
-                      directionLabel,
-                      style: monoStyle(
-                        color: directionColor,
-                        fontSize: 10,
-                        fontWeight: FontWeight.w800,
+                  Row(
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 8,
+                          vertical: 3,
+                        ),
+                        decoration: BoxDecoration(
+                          color: directionColor.withValues(alpha: 0.14),
+                          borderRadius: BorderRadius.circular(999),
+                        ),
+                        child: Text(
+                          directionLabel,
+                          style: monoStyle(
+                            color: directionColor,
+                            fontSize: 10,
+                            fontWeight: FontWeight.w800,
+                          ),
+                        ),
                       ),
-                    ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          meta.join(' · '),
+                          style: TextStyle(
+                            color: colors.textTertiary,
+                            fontSize: 10,
+                          ),
+                        ),
+                      ),
+                    ],
                   ),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: Text(
-                      meta.join(' · '),
-                      style: TextStyle(
-                        color: colors.textTertiary,
-                        fontSize: 10,
-                      ),
+                  const SizedBox(height: 8),
+                  SelectableText(
+                    payloadText,
+                    style: monoStyle(
+                      color: message.direction == 'error'
+                          ? colors.danger
+                          : colors.textPrimary,
+                      fontSize: 11,
                     ),
                   ),
                 ],
               ),
-              const SizedBox(height: 8),
-              SelectableText(
-                payloadText,
-                style: monoStyle(
-                  color: message.direction == 'error'
-                      ? colors.danger
-                      : colors.textPrimary,
-                  fontSize: 11,
-                ),
-              ),
-            ],
-          ),
-        );
-      }).toList(growable: false),
+            );
+          })
+          .toList(growable: false),
     );
   }
 }
@@ -4510,10 +4309,7 @@ class _InspectorSelectedNode {
 }
 
 class _InspectorNameValue {
-  const _InspectorNameValue({
-    required this.name,
-    required this.value,
-  });
+  const _InspectorNameValue({required this.name, required this.value});
 
   factory _InspectorNameValue.fromJson(Map<dynamic, dynamic> json) =>
       _InspectorNameValue(
@@ -4632,10 +4428,7 @@ class _StorageCookie {
 }
 
 class _StorageEntry {
-  const _StorageEntry({
-    required this.key,
-    required this.value,
-  });
+  const _StorageEntry({required this.key, required this.value});
 
   factory _StorageEntry.fromJson(Map<dynamic, dynamic> json) => _StorageEntry(
     key: json['key']?.toString() ?? '',
@@ -4647,10 +4440,7 @@ class _StorageEntry {
 }
 
 class _StorageUsage {
-  const _StorageUsage({
-    required this.storageType,
-    required this.usage,
-  });
+  const _StorageUsage({required this.storageType, required this.usage});
 
   factory _StorageUsage.fromJson(Map<dynamic, dynamic> json) => _StorageUsage(
     storageType: json['storageType']?.toString() ?? '',
@@ -4725,10 +4515,7 @@ class _IndexedDbIndex {
 }
 
 class _StorageEntryDraft {
-  const _StorageEntryDraft({
-    required this.key,
-    required this.value,
-  });
+  const _StorageEntryDraft({required this.key, required this.value});
 
   final String key;
   final String value;
@@ -4848,7 +4635,9 @@ class _NetworkEntry implements _NetworkSummaryLike {
       requestId: requestId,
       method: other.method.isEmpty ? method : other.method,
       url: other.url.isEmpty ? url : other.url,
-      resourceType: other.resourceType.isEmpty ? resourceType : other.resourceType,
+      resourceType: other.resourceType.isEmpty
+          ? resourceType
+          : other.resourceType,
       startedAt: other.startedAt,
       status: other.status ?? status,
       mimeType: other.mimeType ?? mimeType,
@@ -5160,7 +4949,9 @@ String _prettyNetworkBody(String body, String mimeType) {
   if (mimeType.contains('x-www-form-urlencoded')) {
     try {
       final parts = Uri.splitQueryString(body);
-      return parts.entries.map((entry) => '${entry.key}=${entry.value}').join('\n');
+      return parts.entries
+          .map((entry) => '${entry.key}=${entry.value}')
+          .join('\n');
     } catch (_) {
       return body;
     }
@@ -5350,18 +5141,18 @@ String _storageQuotaLabel(_StorageSnapshot snapshot) {
 String _storageAreaLabel(String area) {
   switch (area) {
     case 'localStorage':
-      return 'localStorage';
+      return 'local storage';
     case 'sessionStorage':
-      return 'sessionStorage';
+      return 'session storage';
     default:
-      return 'storage';
+      return 'site data';
   }
 }
 
 String _storageUsageTypeLabel(String type) {
   switch (type) {
     case 'local_storage':
-      return 'localStorage';
+      return 'Local storage';
     case 'cache_storage':
       return 'Cache Storage';
     case 'service_workers':
@@ -5369,6 +5160,20 @@ String _storageUsageTypeLabel(String type) {
     default:
       return type.replaceAll('_', ' ');
   }
+}
+
+String _friendlyNetworkUnavailableMessage(String? message) {
+  if (message == null || message.trim().isEmpty) {
+    return 'Request details are unavailable in this browser.';
+  }
+  final normalized = message.trim();
+  if (normalized.startsWith('Network inspection is unavailable')) {
+    return normalized.replaceFirst(
+      'Network inspection is unavailable',
+      'Request details are unavailable',
+    );
+  }
+  return normalized;
 }
 
 String _storageCookieExpiryLabel(int? expiresSeconds) {
@@ -5407,13 +5212,18 @@ Future<void> _copyNetworkDetailAction(
 ) async {
   final text = switch (action) {
     _NetworkCopyAction.url => entry.url,
-    _NetworkCopyAction.requestHeaders =>
-      _networkHeadersText(detail?.requestHeaders ?? const <String, String>{}),
-    _NetworkCopyAction.responseHeaders =>
-      _networkHeadersText(detail?.responseHeaders ?? const <String, String>{}),
+    _NetworkCopyAction.requestHeaders => _networkHeadersText(
+      detail?.requestHeaders ?? const <String, String>{},
+    ),
+    _NetworkCopyAction.responseHeaders => _networkHeadersText(
+      detail?.responseHeaders ?? const <String, String>{},
+    ),
     _NetworkCopyAction.requestBody => detail?.requestBody ?? '',
     _NetworkCopyAction.responseBody => detail?.body ?? '',
-    _NetworkCopyAction.curl when detail != null => _networkCurlCommand(entry, detail),
+    _NetworkCopyAction.curl when detail != null => _networkCurlCommand(
+      entry,
+      detail,
+    ),
     _ => '',
   };
   if (text.isEmpty) {
@@ -5537,7 +5347,9 @@ class _PausedPreviewOverlay extends StatelessWidget {
                 ),
                 const SizedBox(height: 10),
                 Text(
-                  manualPause ? 'Viewer paused' : 'Viewer is sleeping',
+                  manualPause
+                      ? 'Preview paused'
+                      : 'Preview paused in background',
                   style: Theme.of(context).textTheme.titleMedium?.copyWith(
                     color: colors.textPrimary,
                     fontWeight: FontWeight.w800,
@@ -5546,8 +5358,8 @@ class _PausedPreviewOverlay extends StatelessWidget {
                 const SizedBox(height: 6),
                 Text(
                   manualPause
-                      ? 'The remote browser is still running. Resume when you want fresh frames again.'
-                      : 'Sidemesh paused the stream while the app was backgrounded. Resume to reconnect.',
+                      ? 'The browser is still open. Resume when you want live updates again.'
+                      : 'Sidemesh paused the live view while the app was in the background. Resume to reconnect.',
                   textAlign: TextAlign.center,
                   style: TextStyle(color: colors.textSecondary, height: 1.35),
                 ),
@@ -5555,7 +5367,7 @@ class _PausedPreviewOverlay extends StatelessWidget {
                 FilledButton.icon(
                   onPressed: onResume,
                   icon: const Icon(Icons.play_arrow_rounded),
-                  label: const Text('Resume stream'),
+                  label: const Text('Resume preview'),
                 ),
               ],
             ),
@@ -5607,7 +5419,7 @@ class _InputRail extends StatelessWidget {
                   const SizedBox(width: 8),
                   Expanded(
                     child: Text(
-                      showSpecialKeys ? 'Page input' : 'Keyboard relay',
+                      showSpecialKeys ? 'Type into page' : 'Send keys',
                       style: TextStyle(
                         color: colors.textSecondary,
                         fontWeight: FontWeight.w700,
@@ -5795,7 +5607,6 @@ class _ViewportResizeSheetState extends State<_ViewportResizeSheet> {
 
   @override
   Widget build(BuildContext context) {
-    final colors = context.colors;
     final keyboardInset = MediaQuery.viewInsetsOf(context).bottom;
     final presets = <_ViewportPreset>[
       const _ViewportPreset('Phone', 390, 844, 'Mobile portrait'),
@@ -5810,32 +5621,18 @@ class _ViewportResizeSheetState extends State<_ViewportResizeSheet> {
           'Match this Sidemesh pane',
         ),
     ];
-    return Container(
-      decoration: BoxDecoration(
-        color: colors.surface,
-        borderRadius: const BorderRadius.vertical(top: Radius.circular(16)),
-      ),
-      child: SafeArea(
-        top: false,
-        child: Padding(
-          padding: EdgeInsets.fromLTRB(18, 12, 18, 18 + keyboardInset),
-          child: Column(
-          mainAxisSize: MainAxisSize.min,
+    return MeshBottomSheetScaffold(
+      icon: Icons.aspect_ratio_rounded,
+      title: 'Resize browser viewport',
+      description:
+          'This changes the remote Chromium viewport, not just the local image scale.',
+      maxWidth: 760,
+      maxHeightFactor: 0.72,
+      child: SingleChildScrollView(
+        padding: EdgeInsets.only(bottom: keyboardInset),
+        child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(
-              'Resize browser viewport',
-              style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                color: colors.textPrimary,
-                fontWeight: AppWeights.title,
-              ),
-            ),
-            const SizedBox(height: 6),
-            Text(
-              'This changes the remote Chromium viewport, not just the local image scale.',
-              style: TextStyle(color: colors.textSecondary, height: 1.35),
-            ),
-            const SizedBox(height: 16),
             Wrap(
               spacing: 8,
               runSpacing: 8,
@@ -5884,8 +5681,7 @@ class _ViewportResizeSheetState extends State<_ViewportResizeSheet> {
           ],
         ),
       ),
-    ),
-  );
+    );
   }
 
   void _submitCustom() {

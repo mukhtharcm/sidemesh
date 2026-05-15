@@ -32,7 +32,7 @@ void main() {
     );
     await tester.pump(const Duration(milliseconds: 100));
 
-    expect(find.text('Keep your coding agents\nwithin reach.'), findsOneWidget);
+    expect(find.text('Stay in control\naway from your desk.'), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
 
@@ -61,6 +61,6 @@ void main() {
       await tester.pump(const Duration(milliseconds: 400));
     }
 
-    expect(find.text('Set up your daemon'), findsOneWidget);
+    expect(find.text('Add your first machine'), findsOneWidget);
   });
 }

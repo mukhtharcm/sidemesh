@@ -16,6 +16,7 @@ class SessionControlsSheet extends StatefulWidget {
     required this.runtimeNetworkAccess,
     required this.policyStore,
     required this.turnConfigStore,
+    this.useBottomSheetChrome = true,
   });
 
   final ApiClient api;
@@ -31,6 +32,7 @@ class SessionControlsSheet extends StatefulWidget {
   final bool? runtimeNetworkAccess;
   final SessionPolicyStore policyStore;
   final SessionTurnConfigStore turnConfigStore;
+  final bool useBottomSheetChrome;
 
   @override
   State<SessionControlsSheet> createState() => _SessionControlsSheetState();
@@ -199,14 +201,14 @@ class _SessionControlsSheetState extends State<SessionControlsSheet> {
     if (selected != null) {
       return selected.displayName;
     }
-    return _effectiveModelValue ?? 'Use provider default';
+    return _effectiveModelValue ?? 'Use session default';
   }
 
   String get _effectiveModelDescription {
     if (_loadingModels) {
       final provider = _runtimeModelProvider;
       if (provider != null) {
-        return 'Loading models from this session\'s $provider provider.';
+        return 'Loading models for this session…';
       }
       return 'Loading the available models from this host.';
     }
@@ -219,7 +221,7 @@ class _SessionControlsSheetState extends State<SessionControlsSheet> {
     }
     final provider = _runtimeModelProvider;
     if (provider != null) {
-      return 'Use the current $provider provider for new turns.';
+      return 'Use the current model source for new turns.';
     }
     return 'Use the host default model for new turns.';
   }
@@ -407,12 +409,14 @@ class _SessionControlsSheetState extends State<SessionControlsSheet> {
     });
 
     try {
-      final models = await widget.api.fetchModels(
-        widget.host,
-        cwd: widget.session.cwd,
-        agentProvider: widget.session.provider,
-        provider: _runtimeModelProvider,
-      );
+      final models = [
+        ...await widget.api.fetchModels(
+          widget.host,
+          cwd: widget.session.cwd,
+          agentProvider: widget.session.provider,
+          provider: _runtimeModelProvider,
+        ),
+      ];
       models.sort(_compareModelEntries);
       if (!mounted) {
         return;
@@ -430,8 +434,8 @@ class _SessionControlsSheetState extends State<SessionControlsSheet> {
         _loadingModels = false;
         _modelsError = models.isEmpty
             ? _runtimeModelProvider == null
-                  ? 'This provider did not return any models for this host.'
-                  : 'No models returned for provider $_runtimeModelProvider.'
+                  ? 'No models are available from this host right now.'
+                  : 'No models were returned for this session.'
             : null;
       });
       _coerceTurnConfigForSelectedModel();
@@ -487,8 +491,8 @@ class _SessionControlsSheetState extends State<SessionControlsSheet> {
 
     final selected = await showModalBottomSheet<ModelCatalogEntry>(
       context: context,
-      backgroundColor: context.colors.surface,
-      showDragHandle: true,
+      backgroundColor: Colors.transparent,
+      showDragHandle: false,
       useSafeArea: true,
       isScrollControlled: true,
       builder: (sheetContext) => _ModelPickerSheet(
@@ -567,8 +571,8 @@ class _SessionControlsSheetState extends State<SessionControlsSheet> {
     showAppSnackBar(
       context,
       savedPolicy.isEmpty && savedTurnConfig.isEmpty
-          ? 'Session will use default controls on your next fresh turn.'
-          : 'Applied on your next fresh turn.',
+          ? 'This session will use the default settings on the next reply.'
+          : 'Changes will apply on the next reply.',
     );
   }
 
@@ -709,6 +713,375 @@ class _SessionControlsSheetState extends State<SessionControlsSheet> {
         showReasoningControls ||
         _showFastSection ||
         showPolicyControls;
+    final intro =
+        'Choose the model, mode, approvals, file access, and internet behavior for the next reply in this session. If the agent is already working, the changes wait for the current reply to finish.';
+    final content = Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        if (!showAnyControls) ...[
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(14),
+            decoration: BoxDecoration(
+              color: colors.surfaceMuted,
+              borderRadius: BorderRadius.circular(14),
+              border: Border.all(color: colors.border),
+            ),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Icon(
+                  Icons.info_outline_rounded,
+                  color: colors.textSecondary,
+                  size: 20,
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Nothing to change here',
+                        style: theme.textTheme.titleSmall?.copyWith(
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        '$_providerName does not offer session settings you can change after a run starts.',
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          color: colors.textSecondary,
+                          height: 1.35,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ] else ...[
+          if (showModeControls) ...[
+            Text(
+              'Mode',
+              style: theme.textTheme.labelLarge?.copyWith(
+                color: colors.textSecondary,
+                letterSpacing: 0.4,
+              ),
+            ),
+            const SizedBox(height: 8),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children:
+                  <String?>[
+                    null,
+                    ..._availableModeChoices.map((mode) => mode.id),
+                  ].map((mode) {
+                    final selected = mode == _effectiveMode;
+                    final fromRuntime =
+                        mode != null &&
+                        _turnConfig.mode == null &&
+                        widget.runtimeMode == mode;
+                    return _ReasoningChoiceChip(
+                      label: _sessionModeChoiceLabel(
+                        mode,
+                        _availableModeChoices,
+                      ),
+                      selected: selected,
+                      isDefault: mode == null || fromRuntime,
+                      defaultLabel: mode == null ? 'inherit' : 'current',
+                      onTap: () {
+                        setState(() {
+                          _turnConfig = _normalisedTurnConfig(
+                            _turnConfig.copyWith(mode: mode),
+                          );
+                        });
+                      },
+                    );
+                  }).toList(),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              _sessionModeDescription(
+                _effectiveMode,
+                providerName: _providerName,
+                modes: _availableModeChoices,
+              ),
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: colors.textSecondary,
+                height: 1.35,
+              ),
+            ),
+          ],
+          if (showModelControls) ...[
+            const SizedBox(height: 20),
+            Text(
+              showReasoningControls ? 'Model and thinking' : 'Model',
+              style: theme.textTheme.labelLarge?.copyWith(
+                color: colors.textSecondary,
+                letterSpacing: 0.4,
+              ),
+            ),
+            const SizedBox(height: 8),
+            _ModelSelectionCard(
+              title: 'Model',
+              value: _effectiveModelLabel,
+              subtitle: _effectiveModelDescription,
+              loading: _loadingModels,
+              error: _modelsError,
+              currentValue: _turnConfig.model != null
+                  ? widget.runtimeModel
+                  : null,
+              badges: <String>[
+                ?_runtimeModelProvider,
+                if (selectedModel?.isAutoModel ?? false) 'auto',
+                if (selectedModel?.isDefault ?? false) 'default',
+                if (_turnConfig.model != null) 'next turn',
+              ],
+              onTap: _chooseModel,
+              onRetry: () {
+                unawaited(_loadModels());
+              },
+            ),
+          ],
+          if (showReasoningControls) ...[
+            const SizedBox(height: 18),
+            Text(
+              'Reasoning effort',
+              style: theme.textTheme.labelLarge?.copyWith(
+                color: colors.textSecondary,
+                letterSpacing: 0.4,
+              ),
+            ),
+            const SizedBox(height: 8),
+            if (_loadingModels && _models.isEmpty)
+              const LinearProgressIndicator(minHeight: 3)
+            else if (_selectedModelIsAuto)
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: colors.surfaceMuted,
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: colors.border),
+                ),
+                child: Text(
+                  'Auto models choose the thinking effort themselves. The agent will use ${_reasoningEffortLabel(effectiveReasoning ?? selectedModel?.defaultReasoningEffort ?? 'medium')}.',
+                  style: theme.textTheme.bodyMedium?.copyWith(
+                    color: colors.textSecondary,
+                    height: 1.35,
+                  ),
+                ),
+              )
+            else if (_supportedReasoningOptions.isEmpty)
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: colors.surfaceMuted,
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: colors.border),
+                ),
+                child: Text(
+                  'This model does not expose adjustable thinking effort.',
+                  style: theme.textTheme.bodyMedium?.copyWith(
+                    color: colors.textSecondary,
+                    height: 1.35,
+                  ),
+                ),
+              )
+            else ...[
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: _supportedReasoningOptions.map((option) {
+                  final isDefault =
+                      selectedModel != null &&
+                      option.reasoningEffort ==
+                          selectedModel.defaultReasoningEffort;
+                  final selected = option.reasoningEffort == effectiveReasoning;
+                  return _ReasoningChoiceChip(
+                    label: _reasoningEffortLabel(option.reasoningEffort),
+                    selected: selected,
+                    isDefault: isDefault,
+                    onTap: () {
+                      setState(() {
+                        _turnConfig = _normalisedTurnConfig(
+                          _turnConfig.copyWith(
+                            reasoningEffort: option.reasoningEffort,
+                          ),
+                        );
+                      });
+                    },
+                  );
+                }).toList(),
+              ),
+              if (reasoningDescription != null &&
+                  reasoningDescription.trim().isNotEmpty) ...[
+                const SizedBox(height: 8),
+                Text(
+                  reasoningDescription.trim(),
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: colors.textSecondary,
+                    height: 1.35,
+                  ),
+                ),
+              ],
+            ],
+          ],
+          if (_showFastSection) ...[
+            const SizedBox(height: 18),
+            Text(
+              'Speed',
+              style: theme.textTheme.labelLarge?.copyWith(
+                color: colors.textSecondary,
+                letterSpacing: 0.4,
+              ),
+            ),
+            const SizedBox(height: 8),
+            _FastModeTile(
+              value: _effectiveFastMode,
+              enabled: _selectedModelSupportsFast,
+              onChanged: (value) {
+                setState(() {
+                  _turnConfig = _normalisedTurnConfig(
+                    _turnConfig.copyWith(fastMode: value),
+                  );
+                });
+              },
+            ),
+          ],
+          if (showPolicyControls) ...[
+            const SizedBox(height: 18),
+            if (showAutopilot) ...[
+              _PolicyAutopilotCard(
+                active: _isAutopilot,
+                onTap: _applyAutopilot,
+                colors: colors,
+              ),
+              const SizedBox(height: 22),
+            ],
+            if (_supportsApprovalPolicy) ...[
+              Text(
+                'Approvals',
+                style: theme.textTheme.labelLarge?.copyWith(
+                  color: colors.textSecondary,
+                  letterSpacing: 0.4,
+                ),
+              ),
+              const SizedBox(height: 8),
+              for (final policy in _approvalOptions)
+                _PolicyRadioTile<ApprovalPolicy>(
+                  value: policy,
+                  groupValue: _effectiveApproval,
+                  title: policy.label,
+                  subtitle: policy.description,
+                  fromRuntime:
+                      _policy.approval == null &&
+                      widget.runtimeApproval == policy,
+                  onSelected: (value) {
+                    setState(() {
+                      _policy = _policy.copyWith(approval: value);
+                    });
+                  },
+                ),
+            ],
+            if (_supportsApprovalPolicy && _supportsSandboxMode)
+              const SizedBox(height: 18),
+            if (_supportsSandboxMode) ...[
+              Text(
+                'File access',
+                style: theme.textTheme.labelLarge?.copyWith(
+                  color: colors.textSecondary,
+                  letterSpacing: 0.4,
+                ),
+              ),
+              const SizedBox(height: 8),
+              for (final sandbox in SandboxMode.values)
+                _PolicyRadioTile<SandboxMode>(
+                  value: sandbox,
+                  groupValue: _effectiveSandbox,
+                  title: sandbox.label,
+                  subtitle: sandbox.description,
+                  fromRuntime:
+                      _policy.sandbox == null &&
+                      widget.runtimeSandbox == sandbox,
+                  danger: sandbox == SandboxMode.dangerFullAccess,
+                  onSelected: (value) {
+                    setState(() {
+                      _policy = _policy.copyWith(sandbox: value);
+                    });
+                  },
+                ),
+            ],
+            if ((_supportsApprovalPolicy || _supportsSandboxMode) &&
+                _supportsNetworkAccess)
+              const SizedBox(height: 18),
+            if (_supportsNetworkAccess) ...[
+              Text(
+                'Internet access',
+                style: theme.textTheme.labelLarge?.copyWith(
+                  color: colors.textSecondary,
+                  letterSpacing: 0.4,
+                ),
+              ),
+              const SizedBox(height: 8),
+              _PolicyNetworkTile(
+                value: _effectiveNetworkOn,
+                disabled: _networkToggleDisabled,
+                subtitle: _networkToggleDisabled
+                    ? 'Full access already includes internet access.'
+                    : (_effectiveSandbox == SandboxMode.workspaceWrite ||
+                          _effectiveSandbox == SandboxMode.readOnly)
+                    ? 'Let tools like gh, curl, or pip use the internet. Off by default for read-only and workspace-write modes.'
+                    : 'Let tools use the internet.',
+                onChanged: (value) {
+                  setState(() {
+                    _policy = _policy.copyWith(networkAccess: value);
+                  });
+                },
+              ),
+            ],
+          ],
+        ],
+        const SizedBox(height: 22),
+        Row(
+          children: [
+            TextButton.icon(
+              onPressed: _reset,
+              icon: const Icon(Icons.restart_alt_rounded, size: 18),
+              label: const Text('Reset'),
+            ),
+            const Spacer(),
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(),
+              child: const Text('Cancel'),
+            ),
+            const SizedBox(width: 8),
+            FilledButton.icon(
+              onPressed: _save,
+              icon: const Icon(Icons.check_rounded, size: 18),
+              label: const Text('Apply'),
+            ),
+          ],
+        ),
+      ],
+    );
+
+    if (widget.useBottomSheetChrome) {
+      return MeshBottomSheetScaffold(
+        icon: Icons.tune_rounded,
+        title: 'Session controls',
+        description: intro,
+        maxWidth: 760,
+        maxHeightFactor: 0.9,
+        child: SingleChildScrollView(
+          padding: EdgeInsets.only(bottom: bottomInset),
+          child: content,
+        ),
+      );
+    }
 
     return Padding(
       padding: EdgeInsets.only(bottom: bottomInset),
@@ -719,378 +1092,22 @@ class _SessionControlsSheetState extends State<SessionControlsSheet> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Row(
-                children: [
-                  Icon(Icons.tune_rounded, color: colors.accent, size: 22),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: Text(
-                      'Session controls',
-                      style: theme.textTheme.titleMedium?.copyWith(
-                        fontWeight: AppWeights.title,
-                      ),
-                    ),
-                  ),
-                ],
+              Text(
+                'Session controls',
+                style: theme.textTheme.titleMedium?.copyWith(
+                  fontWeight: AppWeights.title,
+                ),
               ),
               const SizedBox(height: 6),
               Text(
-                'Change how the agent handles the model, thinking effort, Fast mode, approvals, file access and network for this session. Applied on your next fresh turn. If the agent is already responding, these changes wait until the current turn finishes.',
+                intro,
                 style: theme.textTheme.bodyMedium?.copyWith(
                   color: colors.textSecondary,
                   height: 1.4,
                 ),
               ),
-              if (!showAnyControls) ...[
-                const SizedBox(height: 20),
-                Container(
-                  width: double.infinity,
-                  padding: const EdgeInsets.all(14),
-                  decoration: BoxDecoration(
-                    color: colors.surfaceMuted,
-                    borderRadius: BorderRadius.circular(14),
-                    border: Border.all(color: colors.border),
-                  ),
-                  child: Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Icon(
-                        Icons.info_outline_rounded,
-                        color: colors.textSecondary,
-                        size: 20,
-                      ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              'No adjustable controls',
-                              style: theme.textTheme.titleSmall?.copyWith(
-                                fontWeight: FontWeight.w700,
-                              ),
-                            ),
-                            const SizedBox(height: 2),
-                            Text(
-                              '$_providerName does not advertise runtime controls for existing sessions.',
-                              style: theme.textTheme.bodySmall?.copyWith(
-                                color: colors.textSecondary,
-                                height: 1.35,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ] else ...[
-                if (showModeControls) ...[
-                  const SizedBox(height: 20),
-                  Text(
-                    'Session mode',
-                    style: theme.textTheme.labelLarge?.copyWith(
-                      color: colors.textSecondary,
-                      letterSpacing: 0.4,
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  Wrap(
-                    spacing: 8,
-                    runSpacing: 8,
-                    children: <String?>[
-                      null,
-                      ..._availableModeChoices.map((mode) => mode.id),
-                    ].map((mode) {
-                      final selected = mode == _effectiveMode;
-                      final fromRuntime =
-                          mode != null &&
-                          _turnConfig.mode == null &&
-                          widget.runtimeMode == mode;
-                      return _ReasoningChoiceChip(
-                        label: _sessionModeChoiceLabel(
-                          mode,
-                          _availableModeChoices,
-                        ),
-                        selected: selected,
-                        isDefault: mode == null || fromRuntime,
-                        defaultLabel: mode == null ? 'inherit' : 'current',
-                        onTap: () {
-                          setState(() {
-                            _turnConfig = _normalisedTurnConfig(
-                              _turnConfig.copyWith(mode: mode),
-                            );
-                          });
-                        },
-                      );
-                    }).toList(),
-                  ),
-                  const SizedBox(height: 8),
-                  Text(
-                    _sessionModeDescription(
-                      _effectiveMode,
-                      providerName: _providerName,
-                      modes: _availableModeChoices,
-                    ),
-                    style: theme.textTheme.bodySmall?.copyWith(
-                      color: colors.textSecondary,
-                      height: 1.35,
-                    ),
-                  ),
-                ],
-                if (showModelControls) ...[
-                  const SizedBox(height: 20),
-                  Text(
-                    showReasoningControls ? 'Model & thinking' : 'Model',
-                    style: theme.textTheme.labelLarge?.copyWith(
-                      color: colors.textSecondary,
-                      letterSpacing: 0.4,
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  _ModelSelectionCard(
-                    title: 'Model',
-                    value: _effectiveModelLabel,
-                    subtitle: _effectiveModelDescription,
-                    loading: _loadingModels,
-                    error: _modelsError,
-                    currentValue: _turnConfig.model != null
-                        ? widget.runtimeModel
-                        : null,
-                    badges: <String>[
-                      ?_runtimeModelProvider,
-                      if (selectedModel?.isAutoModel ?? false) 'auto',
-                      if (selectedModel?.isDefault ?? false) 'default',
-                      if (_turnConfig.model != null) 'next turn',
-                    ],
-                    onTap: _chooseModel,
-                    onRetry: () {
-                      unawaited(_loadModels());
-                    },
-                  ),
-                ],
-                if (showReasoningControls) ...[
-                  const SizedBox(height: 18),
-                  Text(
-                    'Reasoning effort',
-                    style: theme.textTheme.labelLarge?.copyWith(
-                      color: colors.textSecondary,
-                      letterSpacing: 0.4,
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  if (_loadingModels && _models.isEmpty)
-                    const LinearProgressIndicator(minHeight: 3)
-                  else if (_selectedModelIsAuto)
-                    Container(
-                      width: double.infinity,
-                      padding: const EdgeInsets.all(12),
-                      decoration: BoxDecoration(
-                        color: colors.surfaceMuted,
-                        borderRadius: BorderRadius.circular(12),
-                        border: Border.all(color: colors.border),
-                      ),
-                      child: Text(
-                        'Auto models choose the thinking effort themselves. The agent will use ${_reasoningEffortLabel(effectiveReasoning ?? selectedModel?.defaultReasoningEffort ?? 'medium')}.',
-                        style: theme.textTheme.bodyMedium?.copyWith(
-                          color: colors.textSecondary,
-                          height: 1.35,
-                        ),
-                      ),
-                    )
-                  else if (_supportedReasoningOptions.isEmpty)
-                    Container(
-                      width: double.infinity,
-                      padding: const EdgeInsets.all(12),
-                      decoration: BoxDecoration(
-                        color: colors.surfaceMuted,
-                        borderRadius: BorderRadius.circular(12),
-                        border: Border.all(color: colors.border),
-                      ),
-                      child: Text(
-                        'This model does not expose adjustable thinking effort.',
-                        style: theme.textTheme.bodyMedium?.copyWith(
-                          color: colors.textSecondary,
-                          height: 1.35,
-                        ),
-                      ),
-                    )
-                  else ...[
-                    Wrap(
-                      spacing: 8,
-                      runSpacing: 8,
-                      children: _supportedReasoningOptions.map((option) {
-                        final isDefault =
-                            selectedModel != null &&
-                            option.reasoningEffort ==
-                                selectedModel.defaultReasoningEffort;
-                        final selected =
-                            option.reasoningEffort == effectiveReasoning;
-                        return _ReasoningChoiceChip(
-                          label: _reasoningEffortLabel(option.reasoningEffort),
-                          selected: selected,
-                          isDefault: isDefault,
-                          onTap: () {
-                            setState(() {
-                              _turnConfig = _normalisedTurnConfig(
-                                _turnConfig.copyWith(
-                                  reasoningEffort: option.reasoningEffort,
-                                ),
-                              );
-                            });
-                          },
-                        );
-                      }).toList(),
-                    ),
-                    if (reasoningDescription != null &&
-                        reasoningDescription.trim().isNotEmpty) ...[
-                      const SizedBox(height: 8),
-                      Text(
-                        reasoningDescription.trim(),
-                        style: theme.textTheme.bodySmall?.copyWith(
-                          color: colors.textSecondary,
-                          height: 1.35,
-                        ),
-                      ),
-                    ],
-                  ],
-                ],
-                if (_showFastSection) ...[
-                  const SizedBox(height: 18),
-                  Text(
-                    'Speed',
-                    style: theme.textTheme.labelLarge?.copyWith(
-                      color: colors.textSecondary,
-                      letterSpacing: 0.4,
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  _FastModeTile(
-                    value: _effectiveFastMode,
-                    enabled: _selectedModelSupportsFast,
-                    onChanged: (value) {
-                      setState(() {
-                        _turnConfig = _normalisedTurnConfig(
-                          _turnConfig.copyWith(fastMode: value),
-                        );
-                      });
-                    },
-                  ),
-                ],
-                if (showPolicyControls) ...[
-                  const SizedBox(height: 18),
-                  if (showAutopilot) ...[
-                    _PolicyAutopilotCard(
-                      active: _isAutopilot,
-                      onTap: _applyAutopilot,
-                      colors: colors,
-                    ),
-                    const SizedBox(height: 22),
-                  ],
-                  if (_supportsApprovalPolicy) ...[
-                    Text(
-                      'Approval policy',
-                      style: theme.textTheme.labelLarge?.copyWith(
-                        color: colors.textSecondary,
-                        letterSpacing: 0.4,
-                      ),
-                    ),
-                    const SizedBox(height: 8),
-                    for (final policy in _approvalOptions)
-                      _PolicyRadioTile<ApprovalPolicy>(
-                        value: policy,
-                        groupValue: _effectiveApproval,
-                        title: policy.label,
-                        subtitle: policy.description,
-                        fromRuntime:
-                            _policy.approval == null &&
-                            widget.runtimeApproval == policy,
-                        onSelected: (value) {
-                          setState(() {
-                            _policy = _policy.copyWith(approval: value);
-                          });
-                        },
-                      ),
-                  ],
-                  if (_supportsApprovalPolicy && _supportsSandboxMode)
-                    const SizedBox(height: 18),
-                  if (_supportsSandboxMode) ...[
-                    Text(
-                      'Sandbox',
-                      style: theme.textTheme.labelLarge?.copyWith(
-                        color: colors.textSecondary,
-                        letterSpacing: 0.4,
-                      ),
-                    ),
-                    const SizedBox(height: 8),
-                    for (final sandbox in SandboxMode.values)
-                      _PolicyRadioTile<SandboxMode>(
-                        value: sandbox,
-                        groupValue: _effectiveSandbox,
-                        title: sandbox.label,
-                        subtitle: sandbox.description,
-                        fromRuntime:
-                            _policy.sandbox == null &&
-                            widget.runtimeSandbox == sandbox,
-                        danger: sandbox == SandboxMode.dangerFullAccess,
-                        onSelected: (value) {
-                          setState(() {
-                            _policy = _policy.copyWith(sandbox: value);
-                          });
-                        },
-                      ),
-                  ],
-                  if ((_supportsApprovalPolicy || _supportsSandboxMode) &&
-                      _supportsNetworkAccess)
-                    const SizedBox(height: 18),
-                  if (_supportsNetworkAccess) ...[
-                    Text(
-                      'Network',
-                      style: theme.textTheme.labelLarge?.copyWith(
-                        color: colors.textSecondary,
-                        letterSpacing: 0.4,
-                      ),
-                    ),
-                    const SizedBox(height: 8),
-                    _PolicyNetworkTile(
-                      value: _effectiveNetworkOn,
-                      disabled: _networkToggleDisabled,
-                      subtitle: _networkToggleDisabled
-                          ? 'Full access already grants network. Toggle locked.'
-                          : (_effectiveSandbox == SandboxMode.workspaceWrite ||
-                                _effectiveSandbox == SandboxMode.readOnly)
-                          ? 'Allow outbound network for tools like gh, curl, pip. Off by default for read-only / workspace-write.'
-                          : 'Allow outbound network.',
-                      onChanged: (value) {
-                        setState(() {
-                          _policy = _policy.copyWith(networkAccess: value);
-                        });
-                      },
-                    ),
-                  ],
-                ],
-              ],
-              const SizedBox(height: 22),
-              Row(
-                children: [
-                  TextButton.icon(
-                    onPressed: _reset,
-                    icon: const Icon(Icons.restart_alt_rounded, size: 18),
-                    label: const Text('Reset to defaults'),
-                  ),
-                  const Spacer(),
-                  TextButton(
-                    onPressed: () => Navigator.of(context).pop(),
-                    child: const Text('Cancel'),
-                  ),
-                  const SizedBox(width: 8),
-                  FilledButton.icon(
-                    onPressed: _save,
-                    icon: const Icon(Icons.check_rounded, size: 18),
-                    label: const Text('Save'),
-                  ),
-                ],
-              ),
+              const SizedBox(height: 18),
+              content,
             ],
           ),
         ),
@@ -1139,9 +1156,9 @@ class _ModelSelectionCard extends StatelessWidget {
               Expanded(
                 child: Text(
                   title,
-                  style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                    fontWeight: FontWeight.w700,
-                  ),
+                  style: Theme.of(
+                    context,
+                  ).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w700),
                 ),
               ),
               if (loading)
@@ -1184,7 +1201,7 @@ class _ModelSelectionCard extends StatelessWidget {
               currentValue!.trim() != value.trim()) ...[
             const SizedBox(height: 8),
             Text(
-              'Current thread: ${currentValue!.trim()}',
+              'Current setting: ${currentValue!.trim()}',
               style: Theme.of(
                 context,
               ).textTheme.bodySmall?.copyWith(color: colors.textSecondary),
@@ -1288,8 +1305,8 @@ class _FastModeTile extends StatelessWidget {
                 const SizedBox(height: 2),
                 Text(
                   enabled
-                      ? 'Ask for the fast service tier on your next fresh turn.'
-                      : 'This model does not advertise Fast mode.',
+                      ? 'Prefer the faster service tier on the next reply.'
+                      : 'This model does not support Fast mode.',
                   style: Theme.of(context).textTheme.bodySmall?.copyWith(
                     color: colors.textSecondary,
                     height: 1.35,
@@ -1359,129 +1376,201 @@ class _ModelPickerSheetState extends State<_ModelPickerSheet> {
         })
         .toList(growable: false);
 
-    return FractionallySizedBox(
-      heightFactor: 0.82,
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(20, 8, 20, 24),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              'Choose model',
-              style: Theme.of(
-                context,
-              ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w700),
+    return MeshBottomSheetScaffold(
+      icon: Icons.memory_rounded,
+      title: 'Choose a model',
+      description: widget.providerName == null
+          ? 'Pick the model for the next reply. Auto models keep things simple, while named models let you choose thinking effort.'
+          : 'Pick the model for the next reply in this session.',
+      maxWidth: 760,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          TextField(
+            controller: _queryController,
+            decoration: const InputDecoration(
+              prefixIcon: Icon(Icons.search_rounded),
+              hintText: 'Search models',
             ),
-            const SizedBox(height: 6),
-            Text(
-              widget.providerName == null
-                  ? 'Pick the model for your next fresh turn. Auto models stay simple; specific models let you adjust thinking effort.'
-                  : 'Pick the model for your next fresh turn on this session\'s ${widget.providerName} provider.',
-              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                color: colors.textSecondary,
-                height: 1.4,
-              ),
-            ),
-            const SizedBox(height: 16),
-            TextField(
-              controller: _queryController,
-              decoration: const InputDecoration(
-                prefixIcon: Icon(Icons.search_rounded),
-                hintText: 'Search models',
-              ),
-            ),
-            const SizedBox(height: 14),
-            Expanded(
-              child: filtered.isEmpty
-                  ? Center(
-                      child: Text(
-                        'No models match that search.',
-                        style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                          color: colors.textSecondary,
-                        ),
+          ),
+          const SizedBox(height: 14),
+          Expanded(
+            child: filtered.isEmpty
+                ? Center(
+                    child: Text(
+                      'No models match that search.',
+                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                        color: colors.textSecondary,
                       ),
-                    )
-                  : ListView.separated(
-                      itemCount: filtered.length,
-                      separatorBuilder: (_, _) => const SizedBox(height: 8),
-                      itemBuilder: (context, index) {
-                        final model = filtered[index];
-                        final isCurrent =
-                            model.model == _trimmedOrNull(widget.currentModel);
-                        return MeshSurface(
-                          onTap: () => Navigator.of(context).pop(model),
-                          selected: isCurrent,
-                          tone: MeshSurfaceTone.muted,
-                          radius: AppRadii.control,
-                          padding: const EdgeInsets.all(14),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Row(
-                                children: [
-                                  Expanded(
-                                    child: Text(
-                                      model.displayName,
-                                      style: Theme.of(context)
-                                          .textTheme
-                                          .titleSmall
-                                          ?.copyWith(
-                                            fontWeight: FontWeight.w700,
-                                          ),
-                                    ),
+                    ),
+                  )
+                : ListView.separated(
+                    itemCount: filtered.length,
+                    separatorBuilder: (_, _) => const SizedBox(height: 8),
+                    itemBuilder: (context, index) {
+                      final model = filtered[index];
+                      final isCurrent =
+                          model.model == _trimmedOrNull(widget.currentModel);
+                      return MeshSurface(
+                        onTap: () => Navigator.of(context).pop(model),
+                        selected: isCurrent,
+                        tone: MeshSurfaceTone.muted,
+                        radius: AppRadii.control,
+                        padding: const EdgeInsets.all(14),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Row(
+                              children: [
+                                Expanded(
+                                  child: Text(
+                                    model.displayName,
+                                    style: Theme.of(context)
+                                        .textTheme
+                                        .titleSmall
+                                        ?.copyWith(fontWeight: FontWeight.w700),
                                   ),
-                                  if (isCurrent)
-                                    const _InlineBadge(label: 'current'),
-                                ],
-                              ),
-                              const SizedBox(height: 4),
-                              Text(
-                                model.model,
-                                style: monoStyle(
-                                  color: colors.textSecondary,
-                                  fontSize: 12,
-                                  fontWeight: FontWeight.w600,
                                 ),
+                                if (isCurrent)
+                                  const _InlineBadge(label: 'current'),
+                              ],
+                            ),
+                            const SizedBox(height: 4),
+                            Text(
+                              model.model,
+                              style: monoStyle(
+                                color: colors.textSecondary,
+                                fontSize: 12,
+                                fontWeight: FontWeight.w600,
                               ),
-                              const SizedBox(height: 8),
-                              Wrap(
-                                spacing: 8,
-                                runSpacing: 8,
-                                children: [
-                                  if (widget.providerName != null)
-                                    _InlineBadge(label: widget.providerName!),
-                                  if (model.isAutoModel)
-                                    const _InlineBadge(label: 'auto'),
-                                  if (model.isDefault)
-                                    const _InlineBadge(label: 'default'),
-                                  if (model.supportsFastMode)
-                                    const _InlineBadge(label: 'fast'),
-                                  ...model.supportedReasoningEfforts.take(3).map(
-                                        (option) => _InlineBadge(
-                                          label: _reasoningEffortLabel(
-                                            option.reasoningEffort,
-                                          ),
+                            ),
+                            const SizedBox(height: 8),
+                            Wrap(
+                              spacing: 8,
+                              runSpacing: 8,
+                              children: [
+                                if (widget.providerName != null)
+                                  _InlineBadge(label: widget.providerName!),
+                                if (model.isAutoModel)
+                                  const _InlineBadge(label: 'auto'),
+                                if (model.isDefault)
+                                  const _InlineBadge(label: 'default'),
+                                if (model.supportsFastMode)
+                                  const _InlineBadge(label: 'fast'),
+                                ...model.supportedReasoningEfforts
+                                    .take(3)
+                                    .map(
+                                      (option) => _InlineBadge(
+                                        label: _reasoningEffortLabel(
+                                          option.reasoningEffort,
                                         ),
                                       ),
-                                ],
-                              ),
-                              const SizedBox(height: 8),
-                              Text(
-                                model.description,
-                                style: Theme.of(context).textTheme.bodySmall
-                                    ?.copyWith(
-                                      color: colors.textSecondary,
-                                      height: 1.35,
                                     ),
-                              ),
-                            ],
+                              ],
+                            ),
+                            const SizedBox(height: 8),
+                            Text(
+                              model.description,
+                              style: Theme.of(context).textTheme.bodySmall
+                                  ?.copyWith(
+                                    color: colors.textSecondary,
+                                    height: 1.35,
+                                  ),
+                            ),
+                          ],
+                        ),
+                      );
+                    },
+                  ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _ReasoningPickerSheet extends StatelessWidget {
+  const _ReasoningPickerSheet({
+    required this.options,
+    required this.currentReasoning,
+    required this.defaultReasoning,
+    required this.modelLabel,
+  });
+
+  final List<ModelReasoningEffortOption> options;
+  final String currentReasoning;
+  final String defaultReasoning;
+  final String modelLabel;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    return MeshBottomSheetScaffold(
+      icon: Icons.psychology_alt_rounded,
+      title: 'Choose thinking level',
+      description:
+          'Set how much thinking the next reply should use with $modelLabel.',
+      maxWidth: 520,
+      maxHeightFactor: 0.72,
+      child: ListView.separated(
+        itemCount: options.length,
+        separatorBuilder: (_, _) => const SizedBox(height: 8),
+        itemBuilder: (context, index) {
+          final option = options[index];
+          final selected = option.reasoningEffort == currentReasoning;
+          final isDefault = option.reasoningEffort == defaultReasoning;
+          return MeshSurface(
+            onTap: () =>
+                Navigator.of(context).pop(option.reasoningEffort),
+            selected: selected,
+            tone: MeshSurfaceTone.muted,
+            radius: AppRadii.control,
+            padding: const EdgeInsets.all(14),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Icon(
+                  Icons.psychology_alt_rounded,
+                  size: 19,
+                  color: selected ? colors.accent : colors.textSecondary,
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Expanded(
+                            child: Text(
+                              _reasoningEffortLabel(option.reasoningEffort),
+                              style: Theme.of(context).textTheme.titleSmall
+                                  ?.copyWith(fontWeight: FontWeight.w700),
+                            ),
                           ),
-                        );
-                      },
-                    ),
+                          if (selected) const _InlineBadge(label: 'current'),
+                          if (!selected && isDefault)
+                            const _InlineBadge(label: 'default'),
+                        ],
+                      ),
+                      if (option.description.trim().isNotEmpty) ...[
+                        const SizedBox(height: 6),
+                        Text(
+                          option.description.trim(),
+                          style: Theme.of(context).textTheme.bodySmall
+                              ?.copyWith(
+                                color: colors.textSecondary,
+                                height: 1.35,
+                              ),
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+              ],
             ),
-          ],
-        ),
+          );
+        },
       ),
     );
   }
@@ -1542,7 +1631,7 @@ class _PolicyAutopilotCard extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  'Autopilot — never ask again',
+                  'Hands-off mode',
                   style: Theme.of(context).textTheme.titleSmall?.copyWith(
                     fontWeight: FontWeight.w700,
                     color: colors.textPrimary,
@@ -1550,7 +1639,7 @@ class _PolicyAutopilotCard extends StatelessWidget {
                 ),
                 const SizedBox(height: 2),
                 Text(
-                  'Approval = never · Sandbox = full access · Network = on. The agent runs without pausing for approvals and can hit the internet.',
+                  'Approvals off, full file access, internet on. The agent keeps going without stopping to ask you first.',
                   style: Theme.of(context).textTheme.bodySmall?.copyWith(
                     color: colors.textSecondary,
                     height: 1.35,
@@ -1602,7 +1691,7 @@ class _PolicyNetworkTile extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  'Allow outbound network',
+                  'Use the internet',
                   style: Theme.of(context).textTheme.titleSmall?.copyWith(
                     fontWeight: FontWeight.w600,
                     color: colors.textPrimary,
@@ -1780,16 +1869,14 @@ String _sessionModeDescription(
     return description.trim();
   }
   return switch (value) {
-    null =>
-      'Leave mode alone and keep the current $providerName session behavior.',
+    null => 'Keep the current mode for the next reply.',
     'interactive' =>
       'Interactive keeps the agent conversational and approval-oriented.',
     'plan' =>
       'Plan focuses on outlining or analyzing before it starts making changes.',
     'autopilot' =>
-      'Autopilot lets the provider run with its most self-directed execution mode.',
-    _ =>
-      '$providerName will switch to ${providerModeLabel(value, modes)} mode on the next fresh turn.',
+      'Autopilot lets the agent keep going with fewer interruptions.',
+    _ => 'The next reply will use ${providerModeLabel(value, modes)} mode.',
   };
 }
 

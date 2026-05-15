@@ -80,7 +80,7 @@ class TerminalKeyCategory {
 List<TerminalKeyCategory> defaultTerminalKeyCategories() => [
   const TerminalKeyCategory(
     id: 'nav',
-    label: 'Nav',
+    label: 'Navigation',
     actions: [
       TerminalKeyAction(label: 'Esc', key: xterm.TerminalKey.escape),
       TerminalKeyAction(label: 'Tab', key: xterm.TerminalKey.tab),
@@ -102,38 +102,114 @@ List<TerminalKeyCategory> defaultTerminalKeyCategories() => [
     id: 'edit',
     label: 'Edit',
     actions: [
-      TerminalKeyAction(label: 'Ctrl+A', key: xterm.TerminalKey.keyA, ctrl: true),
-      TerminalKeyAction(label: 'Ctrl+E', key: xterm.TerminalKey.keyE, ctrl: true),
-      TerminalKeyAction(label: 'Ctrl+U', key: xterm.TerminalKey.keyU, ctrl: true),
-      TerminalKeyAction(label: 'Ctrl+K', key: xterm.TerminalKey.keyK, ctrl: true),
-      TerminalKeyAction(label: 'Ctrl+W', key: xterm.TerminalKey.keyW, ctrl: true),
-      TerminalKeyAction(label: 'Ctrl+Y', key: xterm.TerminalKey.keyY, ctrl: true),
-      TerminalKeyAction(label: 'Ctrl+P', key: xterm.TerminalKey.keyP, ctrl: true),
-      TerminalKeyAction(label: 'Ctrl+N', key: xterm.TerminalKey.keyN, ctrl: true),
+      TerminalKeyAction(
+        label: 'Ctrl+A',
+        key: xterm.TerminalKey.keyA,
+        ctrl: true,
+      ),
+      TerminalKeyAction(
+        label: 'Ctrl+E',
+        key: xterm.TerminalKey.keyE,
+        ctrl: true,
+      ),
+      TerminalKeyAction(
+        label: 'Ctrl+U',
+        key: xterm.TerminalKey.keyU,
+        ctrl: true,
+      ),
+      TerminalKeyAction(
+        label: 'Ctrl+K',
+        key: xterm.TerminalKey.keyK,
+        ctrl: true,
+      ),
+      TerminalKeyAction(
+        label: 'Ctrl+W',
+        key: xterm.TerminalKey.keyW,
+        ctrl: true,
+      ),
+      TerminalKeyAction(
+        label: 'Ctrl+Y',
+        key: xterm.TerminalKey.keyY,
+        ctrl: true,
+      ),
+      TerminalKeyAction(
+        label: 'Ctrl+P',
+        key: xterm.TerminalKey.keyP,
+        ctrl: true,
+      ),
+      TerminalKeyAction(
+        label: 'Ctrl+N',
+        key: xterm.TerminalKey.keyN,
+        ctrl: true,
+      ),
       TerminalKeyAction(label: 'Home', key: xterm.TerminalKey.home),
       TerminalKeyAction(label: 'End', key: xterm.TerminalKey.end),
     ],
   ),
   const TerminalKeyCategory(
     id: 'ctrl',
-    label: 'Ctrl',
+    label: 'Shortcuts',
     actions: [
-      TerminalKeyAction(label: 'Ctrl+C', key: xterm.TerminalKey.keyC, ctrl: true),
-      TerminalKeyAction(label: 'Ctrl+D', key: xterm.TerminalKey.keyD, ctrl: true),
-      TerminalKeyAction(label: 'Ctrl+Z', key: xterm.TerminalKey.keyZ, ctrl: true),
-      TerminalKeyAction(label: 'Ctrl+L', key: xterm.TerminalKey.keyL, ctrl: true),
-      TerminalKeyAction(label: 'Ctrl+R', key: xterm.TerminalKey.keyR, ctrl: true),
-      TerminalKeyAction(label: 'Ctrl+S', key: xterm.TerminalKey.keyS, ctrl: true),
-      TerminalKeyAction(label: 'Ctrl+Q', key: xterm.TerminalKey.keyQ, ctrl: true),
-      TerminalKeyAction(label: 'Ctrl+G', key: xterm.TerminalKey.keyG, ctrl: true),
-      TerminalKeyAction(label: 'Ctrl+X', key: xterm.TerminalKey.keyX, ctrl: true),
-      TerminalKeyAction(label: 'Ctrl+V', key: xterm.TerminalKey.keyV, ctrl: true),
-      TerminalKeyAction(label: 'Ctrl+O', key: xterm.TerminalKey.keyO, ctrl: true),
+      TerminalKeyAction(
+        label: 'Ctrl+C',
+        key: xterm.TerminalKey.keyC,
+        ctrl: true,
+      ),
+      TerminalKeyAction(
+        label: 'Ctrl+D',
+        key: xterm.TerminalKey.keyD,
+        ctrl: true,
+      ),
+      TerminalKeyAction(
+        label: 'Ctrl+Z',
+        key: xterm.TerminalKey.keyZ,
+        ctrl: true,
+      ),
+      TerminalKeyAction(
+        label: 'Ctrl+L',
+        key: xterm.TerminalKey.keyL,
+        ctrl: true,
+      ),
+      TerminalKeyAction(
+        label: 'Ctrl+R',
+        key: xterm.TerminalKey.keyR,
+        ctrl: true,
+      ),
+      TerminalKeyAction(
+        label: 'Ctrl+S',
+        key: xterm.TerminalKey.keyS,
+        ctrl: true,
+      ),
+      TerminalKeyAction(
+        label: 'Ctrl+Q',
+        key: xterm.TerminalKey.keyQ,
+        ctrl: true,
+      ),
+      TerminalKeyAction(
+        label: 'Ctrl+G',
+        key: xterm.TerminalKey.keyG,
+        ctrl: true,
+      ),
+      TerminalKeyAction(
+        label: 'Ctrl+X',
+        key: xterm.TerminalKey.keyX,
+        ctrl: true,
+      ),
+      TerminalKeyAction(
+        label: 'Ctrl+V',
+        key: xterm.TerminalKey.keyV,
+        ctrl: true,
+      ),
+      TerminalKeyAction(
+        label: 'Ctrl+O',
+        key: xterm.TerminalKey.keyO,
+        ctrl: true,
+      ),
     ],
   ),
   const TerminalKeyCategory(
     id: 'sym',
-    label: 'Sym',
+    label: 'Symbols',
     actions: [
       TerminalKeyAction(label: '|', rawText: '|'),
       TerminalKeyAction(label: '~', rawText: '~'),
@@ -169,7 +245,7 @@ List<TerminalKeyCategory> defaultTerminalKeyCategories() => [
   ),
   const TerminalKeyCategory(
     id: 'fn',
-    label: 'Fn',
+    label: 'Function',
     actions: [
       TerminalKeyAction(label: 'F1', key: xterm.TerminalKey.f1),
       TerminalKeyAction(label: 'F2', key: xterm.TerminalKey.f2),

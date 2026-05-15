@@ -50,7 +50,7 @@ void main() {
     test('serialises and deserialises a category', () {
       const category = TerminalKeyCategory(
         id: 'nav',
-        label: 'Nav',
+        label: 'Navigation',
         actions: [
           TerminalKeyAction(label: 'Esc', key: xterm.TerminalKey.escape),
           TerminalKeyAction(label: '↑', key: xterm.TerminalKey.arrowUp),
@@ -60,7 +60,7 @@ void main() {
       final restored = TerminalKeyCategory.fromJson(json);
 
       expect(restored.id, 'nav');
-      expect(restored.label, 'Nav');
+      expect(restored.label, 'Navigation');
       expect(restored.actions.length, 2);
       expect(restored.actions[0].label, 'Esc');
       expect(restored.actions[0].key, xterm.TerminalKey.escape);
@@ -74,7 +74,9 @@ void main() {
     });
 
     test('nav category includes escape and arrows', () {
-      final nav = defaultTerminalKeyCategories().firstWhere((c) => c.id == 'nav');
+      final nav = defaultTerminalKeyCategories().firstWhere(
+        (c) => c.id == 'nav',
+      );
       final labels = nav.actions.map((a) => a.label).toList();
       expect(labels, contains('Esc'));
       expect(labels, contains('↑'));
@@ -84,7 +86,9 @@ void main() {
     });
 
     test('ctrl category includes ctrl combos', () {
-      final ctrl = defaultTerminalKeyCategories().firstWhere((c) => c.id == 'ctrl');
+      final ctrl = defaultTerminalKeyCategories().firstWhere(
+        (c) => c.id == 'ctrl',
+      );
       final labels = ctrl.actions.map((a) => a.label).toList();
       expect(labels, contains('Ctrl+C'));
       expect(labels, contains('Ctrl+D'));
@@ -92,7 +96,9 @@ void main() {
     });
 
     test('sym category includes pipe and backslash', () {
-      final sym = defaultTerminalKeyCategories().firstWhere((c) => c.id == 'sym');
+      final sym = defaultTerminalKeyCategories().firstWhere(
+        (c) => c.id == 'sym',
+      );
       final labels = sym.actions.map((a) => a.label).toList();
       expect(labels, contains('|'));
       expect(labels, contains(r'\'));

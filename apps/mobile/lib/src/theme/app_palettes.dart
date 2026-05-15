@@ -17,53 +17,56 @@ enum ThemeVariant {
   /// shipped — adding new variants is fine, renaming old ones breaks existing
   /// installs.
   String get id => switch (this) {
-        ThemeVariant.codexAmber => 'codex_amber',
-        ThemeVariant.nord => 'nord',
-        ThemeVariant.dracula => 'dracula',
-        ThemeVariant.catppuccin => 'catppuccin',
-        ThemeVariant.rosePine => 'rose_pine',
-        ThemeVariant.tokyoNight => 'tokyo_night',
-      };
+    ThemeVariant.codexAmber => 'codex_amber',
+    ThemeVariant.nord => 'nord',
+    ThemeVariant.dracula => 'dracula',
+    ThemeVariant.catppuccin => 'catppuccin',
+    ThemeVariant.rosePine => 'rose_pine',
+    ThemeVariant.tokyoNight => 'tokyo_night',
+  };
 
   /// Human-readable label shown in the Appearance picker.
   String get label => switch (this) {
-        ThemeVariant.codexAmber => 'Amber',
-        ThemeVariant.nord => 'Slate',
-        ThemeVariant.dracula => 'Plum',
-        ThemeVariant.catppuccin => 'Mist',
-        ThemeVariant.rosePine => 'Clay',
-        ThemeVariant.tokyoNight => 'Harbor',
-      };
+    ThemeVariant.codexAmber => 'Warm',
+    ThemeVariant.nord => 'Slate',
+    ThemeVariant.dracula => 'Deep',
+    ThemeVariant.catppuccin => 'Soft',
+    ThemeVariant.rosePine => 'Rose',
+    ThemeVariant.tokyoNight => 'Night',
+  };
 
   /// Short description shown below the label in the picker.
   String get tagline => switch (this) {
-        ThemeVariant.codexAmber => 'Warm neutrals with amber accents',
-        ThemeVariant.nord => 'Cool slate with restrained blue',
-        ThemeVariant.dracula => 'Deep plum with stronger contrast',
-        ThemeVariant.catppuccin => 'Soft neutrals with gentle accents',
-        ThemeVariant.rosePine => 'Muted rose with warm contrast',
-        ThemeVariant.tokyoNight => 'Night navy with crisp blue accents',
-      };
+    ThemeVariant.codexAmber => 'Warm neutral surfaces',
+    ThemeVariant.nord => 'Cool neutral surfaces',
+    ThemeVariant.dracula => 'Higher contrast with plum accents',
+    ThemeVariant.catppuccin => 'Soft neutral surfaces',
+    ThemeVariant.rosePine => 'Muted rose with warm contrast',
+    ThemeVariant.tokyoNight => 'Dark blue with clear contrast',
+  };
 
   AppColors get dark => switch (this) {
-        ThemeVariant.codexAmber => _codexAmberDark,
-        ThemeVariant.nord => _nordDark,
-        ThemeVariant.dracula => _draculaDark,
-        ThemeVariant.catppuccin => _catppuccinMocha,
-        ThemeVariant.rosePine => _rosePineDark,
-        ThemeVariant.tokyoNight => _tokyoNightDark,
-      };
+    ThemeVariant.codexAmber => _codexAmberDark,
+    ThemeVariant.nord => _nordDark,
+    ThemeVariant.dracula => _draculaDark,
+    ThemeVariant.catppuccin => _catppuccinMocha,
+    ThemeVariant.rosePine => _rosePineDark,
+    ThemeVariant.tokyoNight => _tokyoNightDark,
+  };
 
   AppColors get light => switch (this) {
-        ThemeVariant.codexAmber => _codexAmberLight,
-        ThemeVariant.nord => _nordLight,
-        ThemeVariant.dracula => _draculaLight,
-        ThemeVariant.catppuccin => _catppuccinLatte,
-        ThemeVariant.rosePine => _rosePineDawn,
-        ThemeVariant.tokyoNight => _tokyoDay,
-      };
+    ThemeVariant.codexAmber => _codexAmberLight,
+    ThemeVariant.nord => _nordLight,
+    ThemeVariant.dracula => _draculaLight,
+    ThemeVariant.catppuccin => _catppuccinLatte,
+    ThemeVariant.rosePine => _rosePineDawn,
+    ThemeVariant.tokyoNight => _tokyoDay,
+  };
 
-  static ThemeVariant fromId(String? id, {ThemeVariant fallback = ThemeVariant.nord}) {
+  static ThemeVariant fromId(
+    String? id, {
+    ThemeVariant fallback = ThemeVariant.nord,
+  }) {
     for (final variant in ThemeVariant.values) {
       if (variant.id == id) return variant;
     }
@@ -108,8 +111,8 @@ const _codexAmberDark = AppColors(
   diffMetaLine: Color(0xFF9AA7B4),
   diffHunkLine: Color(0xFF58A6FF),
   diffGutterText: Color(0xFF6E7A87),
-  userBubble: Color(0xFFE78A3C),
-  userBubbleOn: Color(0xFF0B0F14),
+  userBubble: Color(0xFF3A2818),
+  userBubbleOn: Color(0xFFE6EDF3),
   assistantBubble: Color(0xFF12171F),
   assistantBubbleBorder: Color(0xFF232B37),
   composerBackground: Color(0xFF12171F),
@@ -127,7 +130,7 @@ const _codexAmberLight = AppColors(
   textTertiary: Color(0xFF9A8A75),
   accent: Color(0xFFCA6B1F),
   accentMuted: Color(0xFFF4DCC0),
-  accentOn: Color(0xFFFFFBF3),
+  accentOn: Color(0xFF1C1812),
   success: Color(0xFF1A7F37),
   successMuted: Color(0xFFDCF3E0),
   danger: Color(0xFFCF222E),
@@ -148,8 +151,8 @@ const _codexAmberLight = AppColors(
   diffMetaLine: Color(0xFF6D5B49),
   diffHunkLine: Color(0xFF0969DA),
   diffGutterText: Color(0xFF1F2328),
-  userBubble: Color(0xFFCA6B1F),
-  userBubbleOn: Color(0xFFFFFBF3),
+  userBubble: Color(0xFFF4DCC0),
+  userBubbleOn: Color(0xFF1C1812),
   assistantBubble: Color(0xFFFBF3E1),
   assistantBubbleBorder: Color(0xFFD9C8A8),
   composerBackground: Color(0xFFFFFBF3),
@@ -161,29 +164,29 @@ const _codexAmberLight = AppColors(
 // ---------------------------------------------------------------------------
 
 const _nordDark = AppColors(
-  canvas: Color(0xFF242933),            // darker than nord0 for contrast
-  surface: Color(0xFF2E3440),           // nord0
-  surfaceElevated: Color(0xFF3B4252),   // nord1
+  canvas: Color(0xFF242933), // darker than nord0 for contrast
+  surface: Color(0xFF2E3440), // nord0
+  surfaceElevated: Color(0xFF3B4252), // nord1
   surfaceMuted: Color(0xFF353B48),
-  border: Color(0xFF434C5E),            // nord2
-  borderStrong: Color(0xFF4C566A),      // nord3
-  textPrimary: Color(0xFFECEFF4),       // nord6
-  textSecondary: Color(0xFFD8DEE9),     // nord4
+  border: Color(0xFF434C5E), // nord2
+  borderStrong: Color(0xFF4C566A), // nord3
+  textPrimary: Color(0xFFECEFF4), // nord6
+  textSecondary: Color(0xFFD8DEE9), // nord4
   textTertiary: Color(0xFF8892A6),
-  accent: Color(0xFF88C0D0),            // nord8 (frost)
+  accent: Color(0xFF88C0D0), // nord8 (frost)
   accentMuted: Color(0xFF2A3A44),
   accentOn: Color(0xFF1C232D),
-  success: Color(0xFFA3BE8C),           // nord14
+  success: Color(0xFFA3BE8C), // nord14
   successMuted: Color(0xFF2A3528),
-  danger: Color(0xFFBF616A),            // nord11
+  danger: Color(0xFFBF616A), // nord11
   dangerMuted: Color(0xFF3A2226),
-  warning: Color(0xFFEBCB8B),           // nord13
+  warning: Color(0xFFEBCB8B), // nord13
   warningMuted: Color(0xFF3A331E),
-  info: Color(0xFF81A1C1),              // nord9
+  info: Color(0xFF81A1C1), // nord9
   infoMuted: Color(0xFF233040),
   codeBackground: Color(0xFF292E39),
   codeBorder: Color(0xFF434C5E),
-  codeForeground: Color(0xFFE5E9F0),    // nord5
+  codeForeground: Color(0xFFE5E9F0), // nord5
   diffAddLine: Color(0xFF2E3C2C),
   diffAddGutter: Color(0xFF3A4C34),
   diffAddGlyph: Color(0xFFA3BE8C),
@@ -193,7 +196,7 @@ const _nordDark = AppColors(
   diffMetaLine: Color(0xFFD8DEE9),
   diffHunkLine: Color(0xFF81A1C1),
   diffGutterText: Color(0xFF8892A6),
-  userBubble: Color(0xFF5E81AC),        // nord10 (frost deep)
+  userBubble: Color(0xFF2A3A44),
   userBubbleOn: Color(0xFFECEFF4),
   assistantBubble: Color(0xFF2E3440),
   assistantBubbleBorder: Color(0xFF434C5E),
@@ -201,18 +204,18 @@ const _nordDark = AppColors(
 );
 
 const _nordLight = AppColors(
-  canvas: Color(0xFFECEFF4),            // nord6
+  canvas: Color(0xFFECEFF4), // nord6
   surface: Color(0xFFF8F9FB),
   surfaceElevated: Color(0xFFFFFFFF),
-  surfaceMuted: Color(0xFFE5E9F0),      // nord5
-  border: Color(0xFFD8DEE9),            // nord4
+  surfaceMuted: Color(0xFFE5E9F0), // nord5
+  border: Color(0xFFD8DEE9), // nord4
   borderStrong: Color(0xFFB9C1CF),
-  textPrimary: Color(0xFF2E3440),       // nord0
-  textSecondary: Color(0xFF4C566A),     // nord3
+  textPrimary: Color(0xFF2E3440), // nord0
+  textSecondary: Color(0xFF4C566A), // nord3
   textTertiary: Color(0xFF7B8594),
-  accent: Color(0xFF5E81AC),            // nord10
+  accent: Color(0xFF5E81AC), // nord10
   accentMuted: Color(0xFFD7E1EE),
-  accentOn: Color(0xFFFFFFFF),
+  accentOn: Color(0xFF0B0F14),
   success: Color(0xFF4A7A3F),
   successMuted: Color(0xFFDDEBD3),
   danger: Color(0xFF8B3A43),
@@ -233,8 +236,8 @@ const _nordLight = AppColors(
   diffMetaLine: Color(0xFF4C566A),
   diffHunkLine: Color(0xFF5E81AC),
   diffGutterText: Color(0xFF7B8594),
-  userBubble: Color(0xFF5E81AC),
-  userBubbleOn: Color(0xFFFFFFFF),
+  userBubble: Color(0xFFD7E1EE),
+  userBubbleOn: Color(0xFF2E3440),
   assistantBubble: Color(0xFFF8F9FB),
   assistantBubbleBorder: Color(0xFFD8DEE9),
   composerBackground: Color(0xFFFFFFFF),
@@ -256,7 +259,7 @@ const _draculaDark = AppColors(
   textPrimary: Color(0xFFF8F8F2),
   textSecondary: Color(0xFFBFBFC2),
   textTertiary: Color(0xFF6272A4),
-  accent: Color(0xFFBD93F9),            // purple
+  accent: Color(0xFFBD93F9), // purple
   accentMuted: Color(0xFF3A2E5C),
   accentOn: Color(0xFF1E1F29),
   success: Color(0xFF50FA7B),
@@ -279,8 +282,8 @@ const _draculaDark = AppColors(
   diffMetaLine: Color(0xFFBFBFC2),
   diffHunkLine: Color(0xFF8BE9FD),
   diffGutterText: Color(0xFF6272A4),
-  userBubble: Color(0xFFFF79C6),        // pink
-  userBubbleOn: Color(0xFF1E1F29),
+  userBubble: Color(0xFF3A2E5C),
+  userBubbleOn: Color(0xFFF8F8F2),
   assistantBubble: Color(0xFF282A36),
   assistantBubbleBorder: Color(0xFF44475A),
   composerBackground: Color(0xFF282A36),
@@ -296,7 +299,7 @@ const _draculaLight = AppColors(
   textPrimary: Color(0xFF22212C),
   textSecondary: Color(0xFF575360),
   textTertiary: Color(0xFF8A8894),
-  accent: Color(0xFF7F4FC7),            // dracula purple, darkened
+  accent: Color(0xFF7F4FC7), // dracula purple, darkened
   accentMuted: Color(0xFFE9DEF8),
   accentOn: Color(0xFFFFFFFF),
   success: Color(0xFF2C8B45),
@@ -319,8 +322,8 @@ const _draculaLight = AppColors(
   diffMetaLine: Color(0xFF575360),
   diffHunkLine: Color(0xFF1F93AD),
   diffGutterText: Color(0xFF8A8894),
-  userBubble: Color(0xFFC23B88),        // dracula pink, darkened for light bg
-  userBubbleOn: Color(0xFFFFFFFF),
+  userBubble: Color(0xFFE9DEF8),
+  userBubbleOn: Color(0xFF22212C),
   assistantBubble: Color(0xFFFFFFFF),
   assistantBubbleBorder: Color(0xFFD9D9E3),
   composerBackground: Color(0xFFFFFFFF),
@@ -332,25 +335,25 @@ const _draculaLight = AppColors(
 // ---------------------------------------------------------------------------
 
 const _catppuccinMocha = AppColors(
-  canvas: Color(0xFF181825),            // mantle
-  surface: Color(0xFF1E1E2E),           // base
-  surfaceElevated: Color(0xFF313244),   // surface0
-  surfaceMuted: Color(0xFF45475A),      // surface1
+  canvas: Color(0xFF181825), // mantle
+  surface: Color(0xFF1E1E2E), // base
+  surfaceElevated: Color(0xFF313244), // surface0
+  surfaceMuted: Color(0xFF45475A), // surface1
   border: Color(0xFF313244),
-  borderStrong: Color(0xFF585B70),      // surface2
-  textPrimary: Color(0xFFCDD6F4),       // text
-  textSecondary: Color(0xFFA6ADC8),     // subtext0
-  textTertiary: Color(0xFF7F849C),      // overlay1
-  accent: Color(0xFFCBA6F7),            // mauve
+  borderStrong: Color(0xFF585B70), // surface2
+  textPrimary: Color(0xFFCDD6F4), // text
+  textSecondary: Color(0xFFA6ADC8), // subtext0
+  textTertiary: Color(0xFF7F849C), // overlay1
+  accent: Color(0xFFCBA6F7), // mauve
   accentMuted: Color(0xFF3C2E4E),
   accentOn: Color(0xFF1E1E2E),
-  success: Color(0xFFA6E3A1),           // green
+  success: Color(0xFFA6E3A1), // green
   successMuted: Color(0xFF243828),
-  danger: Color(0xFFF38BA8),            // red
+  danger: Color(0xFFF38BA8), // red
   dangerMuted: Color(0xFF3E212A),
-  warning: Color(0xFFF9E2AF),           // yellow
+  warning: Color(0xFFF9E2AF), // yellow
   warningMuted: Color(0xFF3D3620),
-  info: Color(0xFF89B4FA),              // blue
+  info: Color(0xFF89B4FA), // blue
   infoMuted: Color(0xFF1F2C47),
   codeBackground: Color(0xFF181825),
   codeBorder: Color(0xFF313244),
@@ -364,24 +367,24 @@ const _catppuccinMocha = AppColors(
   diffMetaLine: Color(0xFFA6ADC8),
   diffHunkLine: Color(0xFF89B4FA),
   diffGutterText: Color(0xFF7F849C),
-  userBubble: Color(0xFFCBA6F7),        // mauve
-  userBubbleOn: Color(0xFF1E1E2E),
+  userBubble: Color(0xFF3C2E4E),
+  userBubbleOn: Color(0xFFCDD6F4),
   assistantBubble: Color(0xFF1E1E2E),
   assistantBubbleBorder: Color(0xFF313244),
   composerBackground: Color(0xFF1E1E2E),
 );
 
 const _catppuccinLatte = AppColors(
-  canvas: Color(0xFFE6E9EF),            // mantle
-  surface: Color(0xFFEFF1F5),           // base
+  canvas: Color(0xFFE6E9EF), // mantle
+  surface: Color(0xFFEFF1F5), // base
   surfaceElevated: Color(0xFFFFFFFF),
-  surfaceMuted: Color(0xFFDCE0E8),      // crust
-  border: Color(0xFFCCD0DA),            // surface0
-  borderStrong: Color(0xFFBCC0CC),      // surface1
-  textPrimary: Color(0xFF4C4F69),       // text
-  textSecondary: Color(0xFF6C6F85),     // subtext0
-  textTertiary: Color(0xFF8C8FA1),      // overlay2
-  accent: Color(0xFF8839EF),            // mauve
+  surfaceMuted: Color(0xFFDCE0E8), // crust
+  border: Color(0xFFCCD0DA), // surface0
+  borderStrong: Color(0xFFBCC0CC), // surface1
+  textPrimary: Color(0xFF4C4F69), // text
+  textSecondary: Color(0xFF6C6F85), // subtext0
+  textTertiary: Color(0xFF8C8FA1), // overlay2
+  accent: Color(0xFF8839EF), // mauve
   accentMuted: Color(0xFFE9DBFB),
   accentOn: Color(0xFFFFFFFF),
   success: Color(0xFF40A02B),
@@ -404,8 +407,8 @@ const _catppuccinLatte = AppColors(
   diffMetaLine: Color(0xFF6C6F85),
   diffHunkLine: Color(0xFF1E66F5),
   diffGutterText: Color(0xFF8C8FA1),
-  userBubble: Color(0xFF8839EF),
-  userBubbleOn: Color(0xFFFFFFFF),
+  userBubble: Color(0xFFE9DBFB),
+  userBubbleOn: Color(0xFF4C4F69),
   assistantBubble: Color(0xFFFFFFFF),
   assistantBubbleBorder: Color(0xFFCCD0DA),
   composerBackground: Color(0xFFFFFFFF),
@@ -417,25 +420,25 @@ const _catppuccinLatte = AppColors(
 // ---------------------------------------------------------------------------
 
 const _rosePineDark = AppColors(
-  canvas: Color(0xFF191724),            // base
-  surface: Color(0xFF1F1D2E),           // surface
-  surfaceElevated: Color(0xFF26233A),   // overlay
+  canvas: Color(0xFF191724), // base
+  surface: Color(0xFF1F1D2E), // surface
+  surfaceElevated: Color(0xFF26233A), // overlay
   surfaceMuted: Color(0xFF2A273F),
   border: Color(0xFF393552),
-  borderStrong: Color(0xFF524F67),      // highlight-high
-  textPrimary: Color(0xFFE0DEF4),       // text
+  borderStrong: Color(0xFF524F67), // highlight-high
+  textPrimary: Color(0xFFE0DEF4), // text
   textSecondary: Color(0xFFA9A4BA),
-  textTertiary: Color(0xFF6E6A86),      // muted
-  accent: Color(0xFFEBBCBA),            // rose
+  textTertiary: Color(0xFF6E6A86), // muted
+  accent: Color(0xFFEBBCBA), // rose
   accentMuted: Color(0xFF3C2B30),
   accentOn: Color(0xFF191724),
-  success: Color(0xFF31748F),           // pine (used as "info"-ish in rp; repurposed)
+  success: Color(0xFF31748F), // pine (used as "info"-ish in rp; repurposed)
   successMuted: Color(0xFF1B2F3A),
-  danger: Color(0xFFEB6F92),            // love
+  danger: Color(0xFFEB6F92), // love
   dangerMuted: Color(0xFF3A1D2A),
-  warning: Color(0xFFF6C177),           // gold
+  warning: Color(0xFFF6C177), // gold
   warningMuted: Color(0xFF3A2E1C),
-  info: Color(0xFF9CCFD8),              // foam
+  info: Color(0xFF9CCFD8), // foam
   infoMuted: Color(0xFF1C3036),
   codeBackground: Color(0xFF1F1D2E),
   codeBorder: Color(0xFF393552),
@@ -449,33 +452,33 @@ const _rosePineDark = AppColors(
   diffMetaLine: Color(0xFFA9A4BA),
   diffHunkLine: Color(0xFF9CCFD8),
   diffGutterText: Color(0xFF6E6A86),
-  userBubble: Color(0xFFC4A7E7),        // iris
-  userBubbleOn: Color(0xFF191724),
+  userBubble: Color(0xFF3C2B30),
+  userBubbleOn: Color(0xFFE0DEF4),
   assistantBubble: Color(0xFF1F1D2E),
   assistantBubbleBorder: Color(0xFF393552),
   composerBackground: Color(0xFF1F1D2E),
 );
 
 const _rosePineDawn = AppColors(
-  canvas: Color(0xFFFAF4ED),            // base
-  surface: Color(0xFFFFFAF3),           // surface
+  canvas: Color(0xFFFAF4ED), // base
+  surface: Color(0xFFFFFAF3), // surface
   surfaceElevated: Color(0xFFFFFFFF),
-  surfaceMuted: Color(0xFFF2E9E1),      // overlay
-  border: Color(0xFFDFDAD9),            // highlight-med-ish
+  surfaceMuted: Color(0xFFF2E9E1), // overlay
+  border: Color(0xFFDFDAD9), // highlight-med-ish
   borderStrong: Color(0xFFCECACD),
-  textPrimary: Color(0xFF575279),       // text
-  textSecondary: Color(0xFF797593),     // subtle
-  textTertiary: Color(0xFF9893A5),      // muted
-  accent: Color(0xFFD7827E),            // rose
+  textPrimary: Color(0xFF575279), // text
+  textSecondary: Color(0xFF797593), // subtle
+  textTertiary: Color(0xFF9893A5), // muted
+  accent: Color(0xFFD7827E), // rose
   accentMuted: Color(0xFFF4DDDB),
-  accentOn: Color(0xFFFFFFFF),
-  success: Color(0xFF286983),           // pine
+  accentOn: Color(0xFF191724),
+  success: Color(0xFF286983), // pine
   successMuted: Color(0xFFD2E0E9),
-  danger: Color(0xFFB4637A),            // love
+  danger: Color(0xFFB4637A), // love
   dangerMuted: Color(0xFFF0D2DA),
-  warning: Color(0xFFEA9D34),           // gold
+  warning: Color(0xFFEA9D34), // gold
   warningMuted: Color(0xFFFBE6C7),
-  info: Color(0xFF56949F),              // foam
+  info: Color(0xFF56949F), // foam
   infoMuted: Color(0xFFD2E4E8),
   codeBackground: Color(0xFFF2E9E1),
   codeBorder: Color(0xFFDFDAD9),
@@ -489,8 +492,8 @@ const _rosePineDawn = AppColors(
   diffMetaLine: Color(0xFF797593),
   diffHunkLine: Color(0xFF56949F),
   diffGutterText: Color(0xFF9893A5),
-  userBubble: Color(0xFF907AA9),        // iris
-  userBubbleOn: Color(0xFFFFFFFF),
+  userBubble: Color(0xFFF4DDDB),
+  userBubbleOn: Color(0xFF575279),
   assistantBubble: Color(0xFFFFFAF3),
   assistantBubbleBorder: Color(0xFFDFDAD9),
   composerBackground: Color(0xFFFFFAF3),
@@ -511,7 +514,7 @@ const _tokyoNightDark = AppColors(
   textPrimary: Color(0xFFC0CAF5),
   textSecondary: Color(0xFF9AA5CE),
   textTertiary: Color(0xFF565F89),
-  accent: Color(0xFF7AA2F7),            // blue
+  accent: Color(0xFF7AA2F7), // blue
   accentMuted: Color(0xFF1F2C4D),
   accentOn: Color(0xFF1A1B26),
   success: Color(0xFF9ECE6A),
@@ -534,8 +537,8 @@ const _tokyoNightDark = AppColors(
   diffMetaLine: Color(0xFF9AA5CE),
   diffHunkLine: Color(0xFF7DCFFF),
   diffGutterText: Color(0xFF565F89),
-  userBubble: Color(0xFF7AA2F7),
-  userBubbleOn: Color(0xFF16161E),
+  userBubble: Color(0xFF1F2C4D),
+  userBubbleOn: Color(0xFFC0CAF5),
   assistantBubble: Color(0xFF1A1B26),
   assistantBubbleBorder: Color(0xFF2F334D),
   composerBackground: Color(0xFF1A1B26),
@@ -548,12 +551,12 @@ const _tokyoDay = AppColors(
   surfaceMuted: Color(0xFFD6D8E0),
   border: Color(0xFFC1C5D4),
   borderStrong: Color(0xFFA8AEC0),
-  textPrimary: Color(0xFF3760BF),       // tokyo-day uses blue primary for text-ish
+  textPrimary: Color(0xFF3760BF), // tokyo-day uses blue primary for text-ish
   textSecondary: Color(0xFF6172B0),
   textTertiary: Color(0xFF8990B3),
-  accent: Color(0xFF2E7DE9),            // blue
+  accent: Color(0xFF2E7DE9), // blue
   accentMuted: Color(0xFFD4E1FA),
-  accentOn: Color(0xFFFFFFFF),
+  accentOn: Color(0xFF0B0F14),
   success: Color(0xFF587539),
   successMuted: Color(0xFFDBE6CB),
   danger: Color(0xFFF52A65),
@@ -564,7 +567,7 @@ const _tokyoDay = AppColors(
   infoMuted: Color(0xFFCCE3EC),
   codeBackground: Color(0xFFD6D8E0),
   codeBorder: Color(0xFFC1C5D4),
-  codeForeground: Color(0xFF3760BF),
+  codeForeground: Color(0xFF343B58),
   diffAddLine: Color(0xFFDBE6CB),
   diffAddGutter: Color(0xFFBAD29F),
   diffAddGlyph: Color(0xFF587539),
@@ -574,8 +577,8 @@ const _tokyoDay = AppColors(
   diffMetaLine: Color(0xFF6172B0),
   diffHunkLine: Color(0xFF2E7DE9),
   diffGutterText: Color(0xFF8990B3),
-  userBubble: Color(0xFF2E7DE9),
-  userBubbleOn: Color(0xFFFFFFFF),
+  userBubble: Color(0xFFDCE8FD),
+  userBubbleOn: Color(0xFF3760BF),
   assistantBubble: Color(0xFFE9E9EE),
   assistantBubbleBorder: Color(0xFFC1C5D4),
   composerBackground: Color(0xFFE9E9EE),

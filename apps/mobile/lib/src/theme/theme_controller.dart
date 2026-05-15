@@ -13,15 +13,15 @@ enum InterfaceFontFamily {
   };
 
   String get label => switch (this) {
-    InterfaceFontFamily.spaceGrotesk => 'Space Grotesk',
-    InterfaceFontFamily.systemSans => 'System Sans',
+    InterfaceFontFamily.spaceGrotesk => 'Brand Sans',
+    InterfaceFontFamily.systemSans => 'System',
   };
 
   String get description => switch (this) {
     InterfaceFontFamily.spaceGrotesk =>
-      'Adds extra character for users who prefer a branded look.',
+      'Adds a little more character to headings and controls.',
     InterfaceFontFamily.systemSans =>
-      'Uses the platform UI font for a calmer, more native feel.',
+      'Matches the platform UI for a calmer, more familiar feel.',
   };
 
   String? get fontFamily => switch (this) {
@@ -58,9 +58,9 @@ enum TextSizePreset {
   };
 
   String get description => switch (this) {
-    TextSizePreset.compact => 'Tighter density for smaller screens.',
-    TextSizePreset.standard => 'Balanced spacing and density.',
-    TextSizePreset.large => 'More relaxed reading size.',
+    TextSizePreset.compact => 'Fits more on screen.',
+    TextSizePreset.standard => 'Balanced size and spacing.',
+    TextSizePreset.large => 'Easier to read at a glance.',
   };
 
   double get factor => switch (this) {

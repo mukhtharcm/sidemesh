@@ -2,8 +2,8 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 import '../theme/app_colors.dart';
+import '../theme/app_tokens.dart';
 import '../theme/app_palettes.dart';
-import '../theme/app_theme.dart';
 import '../theme/theme_controller.dart';
 import 'mesh_widgets.dart';
 
@@ -18,21 +18,15 @@ Future<void> showAppearanceSheet(BuildContext context) {
       context: context,
       builder: (dialogContext) => Dialog(
         backgroundColor: Colors.transparent,
-        insetPadding: const EdgeInsets.symmetric(horizontal: 28, vertical: 22),
+        insetPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 20),
         child: ConstrainedBox(
           constraints: const BoxConstraints(maxWidth: 820, maxHeight: 760),
           child: DecoratedBox(
             decoration: BoxDecoration(
-              color: colors.surface,
-              borderRadius: BorderRadius.circular(24),
+              color: colors.surfaceElevated,
+              borderRadius: AppShapes.dialog,
               border: Border.all(color: colors.border),
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.black.withValues(alpha: 0.18),
-                  blurRadius: 36,
-                  offset: const Offset(0, 18),
-                ),
-              ],
+              boxShadow: AppShadows.dialog(colors.textPrimary),
             ),
             child: const _AppearanceSheet(embedded: true),
           ),
@@ -80,8 +74,8 @@ class _AppearanceSheet extends StatelessWidget {
             decoration: BoxDecoration(
               color: colors.surface,
               borderRadius: embedded
-                  ? BorderRadius.circular(24)
-                  : const BorderRadius.vertical(top: Radius.circular(24)),
+                  ? AppShapes.dialog
+                  : AppShapes.sheetTop,
               border: embedded
                   ? null
                   : Border(top: BorderSide(color: colors.border)),
@@ -95,12 +89,7 @@ class _AppearanceSheet extends StatelessWidget {
                       : MediaQuery.sizeOf(context).height * 0.85,
                 ),
                 child: SingleChildScrollView(
-                  padding: EdgeInsets.fromLTRB(
-                    20,
-                    embedded ? 20 : 10,
-                    20,
-                    20,
-                  ),
+                  padding: EdgeInsets.fromLTRB(20, embedded ? 20 : 10, 20, 20),
                   child: Column(
                     mainAxisSize: MainAxisSize.min,
                     crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -112,7 +101,7 @@ class _AppearanceSheet extends StatelessWidget {
                       Row(
                         children: [
                           Icon(
-                            Icons.palette_rounded,
+                            Icons.tune_rounded,
                             size: 20,
                             color: colors.accent,
                           ),
@@ -130,12 +119,28 @@ class _AppearanceSheet extends StatelessWidget {
                           ),
                         ],
                       ),
+                      const SizedBox(height: 6),
+                      Text(
+                        'Choose the color mode, accent, and text settings that feel easiest to use.',
+                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color: colors.textSecondary,
+                        ),
+                      ),
                       const SizedBox(height: 18),
-                      _SectionLabel(text: 'Brightness'),
+                      _AppearanceSummaryCard(controller: controller),
+                      const SizedBox(height: 18),
+                      const _SectionLabel(
+                        text: 'Color mode',
+                        subtitle: 'Pick how bright the app should be.',
+                      ),
                       const SizedBox(height: 8),
                       _BrightnessSegmented(controller: controller),
                       const SizedBox(height: 22),
-                      _SectionLabel(text: 'Theme'),
+                      const _SectionLabel(
+                        text: 'Accent',
+                        subtitle:
+                            'Choose the palette used for highlights and status accents.',
+                      ),
                       const SizedBox(height: 10),
                       _SwatchGrid(
                         controller: controller,
@@ -143,7 +148,11 @@ class _AppearanceSheet extends StatelessWidget {
                         compact: compactThemeGrid,
                       ),
                       SizedBox(height: compactThemeGrid ? 16 : 22),
-                      _SectionLabel(text: 'Typography'),
+                      const _SectionLabel(
+                        text: 'Text',
+                        subtitle:
+                            'Adjust the app font and reading size without changing session content.',
+                      ),
                       const SizedBox(height: 10),
                       _TypographyCard(controller: controller),
                       const SizedBox(height: 8),
@@ -171,21 +180,98 @@ class _AppearanceSheet extends StatelessWidget {
 }
 
 class _SectionLabel extends StatelessWidget {
-  const _SectionLabel({required this.text});
+  const _SectionLabel({required this.text, this.subtitle});
   final String text;
+  final String? subtitle;
 
   @override
   Widget build(BuildContext context) {
     final colors = context.colors;
-    return Text(
-      text.toUpperCase(),
-      style: Theme.of(context).textTheme.labelSmall?.copyWith(
-        color: colors.textTertiary,
-        fontWeight: FontWeight.w700,
-        letterSpacing: 1.1,
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          text,
+          style: Theme.of(context).textTheme.labelLarge?.copyWith(
+            color: colors.textSecondary,
+            fontWeight: FontWeight.w700,
+          ),
+        ),
+        if (subtitle != null) ...[
+          const SizedBox(height: 3),
+          Text(
+            subtitle!,
+            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+              color: colors.textTertiary,
+              height: 1.35,
+            ),
+          ),
+        ],
+      ],
+    );
+  }
+}
+
+class _AppearanceSummaryCard extends StatelessWidget {
+  const _AppearanceSummaryCard({required this.controller});
+
+  final ThemeController controller;
+
+  @override
+  Widget build(BuildContext context) {
+    return MeshSurface(
+      tone: MeshSurfaceTone.muted,
+      radius: AppRadii.control,
+      padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'Changes the app look only.',
+            style: Theme.of(
+              context,
+            ).textTheme.labelLarge?.copyWith(fontWeight: FontWeight.w700),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            'Session content, code, and terminal output stay the same.',
+            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+              color: context.colors.textSecondary,
+              height: 1.35,
+            ),
+          ),
+          const SizedBox(height: 10),
+          Wrap(
+            spacing: AppSpacing.sm,
+            runSpacing: AppSpacing.sm,
+            children: [
+              MeshPill(
+                label: _themeModeLabel(controller.mode),
+                icon: Icons.brightness_6_rounded,
+              ),
+              MeshPill(
+                label: controller.variant.label,
+                icon: Icons.palette_outlined,
+              ),
+              MeshPill(
+                label: controller.typography.interfaceScale.label,
+                icon: Icons.format_size_rounded,
+                tone: MeshPillTone.neutral,
+              ),
+            ],
+          ),
+        ],
       ),
     );
   }
+}
+
+String _themeModeLabel(ThemeMode mode) {
+  return switch (mode) {
+    ThemeMode.system => 'System mode',
+    ThemeMode.light => 'Light mode',
+    ThemeMode.dark => 'Dark mode',
+  };
 }
 
 class _BrightnessSegmented extends StatelessWidget {
@@ -201,14 +287,14 @@ class _BrightnessSegmented extends StatelessWidget {
         child: Material(
           color: Colors.transparent,
           child: InkWell(
-            borderRadius: BorderRadius.circular(10),
+            borderRadius: AppShapes.action,
             onTap: () => controller.setMode(mode),
             child: AnimatedContainer(
               duration: const Duration(milliseconds: 140),
               padding: const EdgeInsets.symmetric(vertical: 10),
               decoration: BoxDecoration(
                 color: selected ? colors.accentMuted : Colors.transparent,
-                borderRadius: BorderRadius.circular(10),
+                borderRadius: AppShapes.action,
                 border: Border.all(
                   color: selected ? colors.accent : Colors.transparent,
                   width: 1,
@@ -317,162 +403,92 @@ class _SwatchCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final frameColors = context.colors;
     final palette = isDark ? variant.dark : variant.light;
+    final radius = BorderRadius.circular(compact ? 12 : 14);
+    final previewHeight = compact ? 32.0 : 74.0;
     return Material(
       color: Colors.transparent,
       child: InkWell(
-        borderRadius: BorderRadius.circular(compact ? 12 : 14),
+        borderRadius: radius,
         onTap: onTap,
         child: AnimatedContainer(
           duration: const Duration(milliseconds: 140),
           decoration: BoxDecoration(
             color: frameColors.surface,
-            borderRadius: BorderRadius.circular(compact ? 12 : 14),
+            borderRadius: radius,
             border: Border.all(
               color: selected ? frameColors.accent : frameColors.border,
               width: selected ? 2 : 1,
             ),
           ),
           child: ClipRRect(
-            borderRadius: BorderRadius.circular(
-              compact
-                  ? (selected ? 10 : 11)
-                  : (selected ? 12 : 13),
-            ),
+            borderRadius: BorderRadius.circular(compact ? 10 : 12),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                if (compact)
-                  SizedBox(
-                    height: 40,
-                    child: Stack(
-                      children: [
-                        Container(color: palette.canvas),
-                        Positioned(
-                          left: 8,
-                          right: 8,
-                          top: 6,
-                          bottom: 6,
-                          child: Container(
-                            decoration: BoxDecoration(
-                              color: palette.surface,
-                              borderRadius: BorderRadius.circular(7),
-                              border: Border.all(color: palette.border),
-                            ),
-                            padding: const EdgeInsets.all(5),
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                              children: [
-                                Row(
-                                  children: [
-                                    _dot(palette.accent, compact: true),
-                                    const SizedBox(width: 3),
-                                    _dot(palette.info, compact: true),
-                                    const SizedBox(width: 3),
-                                    _dot(palette.success, compact: true),
-                                  ],
-                                ),
-                                Align(
-                                  alignment: Alignment.centerRight,
-                                  child: Container(
-                                    height: 7,
-                                    width: 24,
-                                    decoration: BoxDecoration(
-                                      color: palette.userBubble,
-                                      borderRadius: BorderRadius.circular(4),
-                                    ),
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                        ),
-                        if (selected)
-                          Positioned(
-                            right: 4,
-                            top: 4,
-                            child: Container(
-                              padding: const EdgeInsets.all(2.5),
-                              decoration: BoxDecoration(
-                                color: frameColors.accent,
-                                shape: BoxShape.circle,
-                              ),
-                              child: Icon(
-                                Icons.check_rounded,
-                                size: 10,
-                                color: frameColors.accentOn,
-                              ),
-                            ),
-                          ),
-                      ],
-                    ),
-                  )
-                else
-                  Expanded(
+                SizedBox(
+                  height: previewHeight,
                   child: Stack(
                     children: [
-                      // Canvas background
                       Container(color: palette.canvas),
-                      // Mini bubble / surface strip mimicking an assistant bubble
                       Positioned(
                         left: compact ? 8 : 10,
                         right: compact ? 8 : 10,
-                        top: compact ? 8 : 10,
-                        bottom: compact ? 8 : 10,
+                        top: compact ? 6 : 10,
                         child: Container(
+                          height: compact ? 14 : 28,
                           decoration: BoxDecoration(
                             color: palette.surface,
-                            borderRadius: BorderRadius.circular(compact ? 7 : 8),
+                            borderRadius: BorderRadius.circular(
+                              compact ? 8 : 10,
+                            ),
                             border: Border.all(color: palette.border),
-                          ),
-                          padding: EdgeInsets.all(compact ? 7 : 8),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                            children: [
-                              Row(
-                                children: [
-                                  _dot(palette.accent),
-                                  const SizedBox(width: 4),
-                                  _dot(palette.info),
-                                  const SizedBox(width: 4),
-                                  _dot(palette.success),
-                                ],
-                              ),
-                              Container(
-                                width: compact ? 28 : 34,
-                                height: compact ? 4 : 5,
-                                decoration: BoxDecoration(
-                                  color: palette.textPrimary.withValues(
-                                    alpha: 0.7,
-                                  ),
-                                  borderRadius: BorderRadius.circular(3),
-                                ),
-                              ),
-                              Align(
-                                alignment: Alignment.centerRight,
-                                child: Container(
-                                  height: compact ? 12 : 14,
-                                  width: compact ? 32 : 40,
-                                  decoration: BoxDecoration(
-                                    color: palette.userBubble,
-                                    borderRadius: BorderRadius.circular(6),
-                                  ),
-                                ),
-                              ),
-                            ],
                           ),
                         ),
                       ),
+                      Positioned(
+                        left: compact ? 8 : 10,
+                        bottom: compact ? 6 : 14,
+                        child: Container(
+                          width: compact ? 28 : 42,
+                          height: compact ? 6 : 10,
+                          decoration: BoxDecoration(
+                            color: palette.accent,
+                            borderRadius: BorderRadius.circular(999),
+                          ),
+                        ),
+                      ),
+                      Positioned(
+                        right: compact ? 8 : 10,
+                        bottom: compact ? 6 : 14,
+                        child: Container(
+                          width: compact ? 18 : 24,
+                          height: compact ? 6 : 10,
+                          decoration: BoxDecoration(
+                            color: palette.surfaceElevated,
+                            borderRadius: BorderRadius.circular(999),
+                            border: Border.all(color: palette.border),
+                          ),
+                        ),
+                      ),
+                      if (selected)
+                        Positioned(
+                          right: compact ? 6 : 8,
+                          top: compact ? 5 : 8,
+                          child: Icon(
+                            Icons.check_circle_rounded,
+                            size: compact ? 14 : 18,
+                            color: frameColors.accent,
+                          ),
+                        ),
                     ],
                   ),
                 ),
                 Container(
                   padding: EdgeInsets.fromLTRB(
-                    compact ? 9 : 10,
-                    compact ? 7 : 8,
-                    compact ? 9 : 10,
                     compact ? 8 : 10,
+                    compact ? 5 : 8,
+                    compact ? 8 : 10,
+                    compact ? 6 : 10,
                   ),
                   color: frameColors.surface,
                   child: Column(
@@ -494,12 +510,13 @@ class _SwatchCard extends StatelessWidget {
                         const SizedBox(height: 2),
                         Text(
                           variant.tagline,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                            color: frameColors.textTertiary,
-                            fontSize: 11,
-                          ),
+                          maxLines: 2,
+                          overflow: TextOverflow.fade,
+                          style: Theme.of(context).textTheme.bodySmall
+                              ?.copyWith(
+                                color: frameColors.textTertiary,
+                                fontSize: 11,
+                              ),
                         ),
                       ],
                     ],
@@ -512,12 +529,6 @@ class _SwatchCard extends StatelessWidget {
       ),
     );
   }
-
-  Widget _dot(Color color, {bool compact = false}) => Container(
-    width: compact ? 4 : 6,
-    height: compact ? 4 : 6,
-    decoration: BoxDecoration(color: color, shape: BoxShape.circle),
-  );
 }
 
 class _TypographyCard extends StatelessWidget {
@@ -533,21 +544,21 @@ class _TypographyCard extends StatelessWidget {
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
         color: colors.surface,
-        borderRadius: BorderRadius.circular(18),
+        borderRadius: AppShapes.dialog,
         border: Border.all(color: colors.border),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           Text(
-            'Typography',
+            'Readability',
             style: Theme.of(
               context,
             ).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w700),
           ),
           const SizedBox(height: 4),
           Text(
-            'Tune the interface voice and reading density without changing session content.',
+            'Choose the app font and reading size without changing session content.',
             style: Theme.of(
               context,
             ).textTheme.bodySmall?.copyWith(color: colors.textSecondary),
@@ -555,7 +566,7 @@ class _TypographyCard extends StatelessWidget {
           const SizedBox(height: 14),
           _TypographyPreview(controller: controller),
           const SizedBox(height: 14),
-          _PreferenceLabel(text: 'Interface font'),
+          _PreferenceLabel(text: 'App font'),
           const SizedBox(height: 8),
           for (final family in InterfaceFontFamily.values)
             Padding(
@@ -570,7 +581,7 @@ class _TypographyCard extends StatelessWidget {
               ),
             ),
           const SizedBox(height: 16),
-          _PreferenceLabel(text: 'Interface size'),
+          _PreferenceLabel(text: 'Text size'),
           const SizedBox(height: 8),
           _SegmentedChoiceRow<TextSizePreset>(
             groupValue: typography.interfaceScale,
@@ -619,22 +630,45 @@ class _TypographyPreview extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
-            'Recent sessions stay readable at a glance.',
+            'Recent sessions are easy to scan.',
             style: Theme.of(
               context,
             ).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w700),
           ),
           const SizedBox(height: 6),
           Text(
-            'Approval prompts, transcripts, and host controls all pick up these preferences immediately.',
+            'Titles, timestamps, and approval messages update right away.',
             style: Theme.of(
               context,
             ).textTheme.bodySmall?.copyWith(color: colors.textSecondary),
           ),
           const SizedBox(height: 10),
-          Text(
-            '~/workspace/sidemesh/apps/mobile',
-            style: monoStyle(color: colors.accent, fontSize: 11.5),
+          Container(
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: colors.surface,
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: colors.border),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Review failing notification tests',
+                  style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                    fontWeight: FontWeight.w700,
+                    color: colors.textPrimary,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  'Studio Mac · Waiting for approval · 2 min ago',
+                  style: Theme.of(
+                    context,
+                  ).textTheme.bodySmall?.copyWith(color: colors.textSecondary),
+                ),
+              ],
+            ),
           ),
           const SizedBox(height: 8),
           Wrap(
@@ -807,14 +841,14 @@ class _SegmentedChoiceButton<T> extends StatelessWidget {
     return Material(
       color: Colors.transparent,
       child: InkWell(
-        borderRadius: BorderRadius.circular(10),
+        borderRadius: AppShapes.action,
         onTap: () => onSelected(value),
         child: AnimatedContainer(
           duration: const Duration(milliseconds: 140),
           padding: const EdgeInsets.symmetric(vertical: 10),
           decoration: BoxDecoration(
             color: selected ? colors.accentMuted : Colors.transparent,
-            borderRadius: BorderRadius.circular(10),
+            borderRadius: AppShapes.action,
             border: Border.all(
               color: selected ? colors.accent : Colors.transparent,
             ),

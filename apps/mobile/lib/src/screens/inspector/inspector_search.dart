@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import '../../models.dart';
 import '../../search_query.dart';
 import '../../theme/app_colors.dart';
+import '../../theme/color_contrast.dart';
 import '../../theme/app_theme.dart';
 import '../../theme/app_tokens.dart';
 import '../../widgets/mesh_widgets.dart';
@@ -198,7 +199,7 @@ class _SearchPanelState extends State<SearchPanel> {
                       decoration: InputDecoration(
                         isCollapsed: true,
                         border: InputBorder.none,
-                        hintText: 'Search transcript',
+                        hintText: 'Search this session',
                         hintStyle: TextStyle(
                           color: colors.textTertiary,
                           fontSize: 14,
@@ -268,7 +269,7 @@ class _SearchPanelState extends State<SearchPanel> {
                 ),
                 const SizedBox(width: 6),
                 _SearchFilterChip(
-                  label: 'Activities',
+                  label: 'Actions',
                   selected: _filter == _SearchFilter.activities,
                   onTap: () =>
                       setState(() => _filter = _SearchFilter.activities),
@@ -277,7 +278,7 @@ class _SearchPanelState extends State<SearchPanel> {
                 Text(
                   hasQuery
                       ? '${results.length} match${results.length == 1 ? '' : 'es'}'
-                      : '${results.length} entr${results.length == 1 ? 'y' : 'ies'}',
+                      : '${results.length} item${results.length == 1 ? '' : 's'}',
                   style: theme.textTheme.labelSmall?.copyWith(
                     color: colors.textTertiary,
                     fontFeatures: const [FontFeature.tabularFigures()],
@@ -335,6 +336,7 @@ class _SearchFilterChip extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colors = context.colors;
+    final selectedForeground = readableActionForeground(colors, colors.accent);
     return Material(
       color: Colors.transparent,
       child: InkWell(
@@ -353,7 +355,7 @@ class _SearchFilterChip extends StatelessWidget {
           child: Text(
             label,
             style: Theme.of(context).textTheme.labelSmall?.copyWith(
-              color: selected ? colors.accentOn : colors.textSecondary,
+              color: selected ? selectedForeground : colors.textSecondary,
               fontWeight: AppWeights.emphasis,
               letterSpacing: 0.3,
             ),
@@ -380,10 +382,10 @@ class _SearchPanelEmptyState extends StatelessWidget {
       icon: hasQuery ? Icons.search_off_rounded : Icons.search_rounded,
       title: hasQuery
           ? 'No matches for "$query"'
-          : 'Search messages and activities',
+          : 'Search this session',
       body: hasQuery
-          ? 'Try a different term or switch filter.'
-          : 'Searching $totalRecords loaded entries.',
+          ? 'Try another word or switch the filter.'
+          : 'Search across $totalRecords loaded items.',
     );
   }
 }
@@ -637,52 +639,52 @@ class _SearchResultExpanded extends StatelessWidget {
       );
     }
 
-    addLine('type', activity.type);
-    addLine('status', activity.status);
+    addLine('Kind', _friendlyActivityType(activity.type));
+    addLine('Status', activity.status);
     if ((activity.command ?? '').isNotEmpty) {
-      addLine('command', activity.command!);
+      addLine('Command', activity.command!);
     }
     if ((activity.toolName ?? '').isNotEmpty) {
-      addLine('tool', activity.toolName!);
+      addLine('Tool', activity.toolName!);
     }
     if ((activity.toolTitle ?? '').isNotEmpty) {
-      addLine('title', activity.toolTitle!);
+      addLine('Title', activity.toolTitle!);
     }
     if ((activity.toolCategory ?? '').isNotEmpty) {
-      addLine('tool category', activity.toolCategory!);
+      addLine('Group', activity.toolCategory!);
     }
     if ((activity.toolAction ?? '').isNotEmpty) {
-      addLine('tool action', activity.toolAction!);
+      addLine('Action', activity.toolAction!);
     }
     if ((activity.toolTarget ?? '').isNotEmpty) {
-      addLine('tool target', activity.toolTarget!);
+      addLine('Target', activity.toolTarget!);
     }
     if (activity.toolTargets.isNotEmpty) {
-      addLine('tool targets', activity.toolTargets.join('\n  '));
+      addLine('Targets', activity.toolTargets.join('\n  '));
     }
     if ((activity.toolUrl ?? '').isNotEmpty) {
-      addLine('tool url', activity.toolUrl!);
+      addLine('Link', activity.toolUrl!);
     }
     if ((activity.toolQuery ?? '').isNotEmpty) {
-      addLine('tool query', activity.toolQuery!);
+      addLine('Search', activity.toolQuery!);
     }
     if ((activity.toolMode ?? '').isNotEmpty) {
-      addLine('tool mode', activity.toolMode!);
+      addLine('Mode', activity.toolMode!);
     }
-    if ((activity.cwd ?? '').isNotEmpty) addLine('cwd', activity.cwd!);
-    if ((activity.query ?? '').isNotEmpty) addLine('query', activity.query!);
+    if ((activity.cwd ?? '').isNotEmpty) addLine('Folder', activity.cwd!);
+    if ((activity.query ?? '').isNotEmpty) addLine('Query', activity.query!);
     if (activity.queries.isNotEmpty) {
-      addLine('queries', activity.queries.join(' · '));
+      addLine('Queries', activity.queries.join(' · '));
     }
     if ((activity.targetUrl ?? '').isNotEmpty) {
-      addLine('url', activity.targetUrl!);
+      addLine('Page', activity.targetUrl!);
     }
     if ((activity.savedPath ?? '').isNotEmpty) {
-      addLine('saved', activity.savedPath!);
+      addLine('Saved file', activity.savedPath!);
     }
     if (activity.changes.isNotEmpty) {
       addLine(
-        'paths',
+        'Files',
         activity.changes.map((c) => c.path).join('\n  '),
       );
     }
@@ -738,6 +740,18 @@ IconData _iconForActivity(String type) {
     default:
       return Icons.bolt_rounded;
   }
+}
+
+String _friendlyActivityType(String type) {
+  return switch (type) {
+    'command' => 'Command',
+    'tool' => 'Tool',
+    'file_change' => 'File change',
+    'turn_diff' => 'Changes',
+    'web_search' => 'Web search',
+    'image_generation' => 'Image',
+    _ => type.replaceAll('_', ' '),
+  };
 }
 
 String _activityPreviewBody(SessionActivity activity) {

@@ -42,7 +42,7 @@ void main() {
     );
 
     expect(find.text('Cortex dev workstation'), findsOneWidget);
-    expect(find.text('http://cortex-dev.local:8899/workspace'), findsOneWidget);
+    expect(find.text('cortex-dev.local:8899'), findsOneWidget);
     expect(find.byIcon(Icons.more_horiz_rounded), findsOneWidget);
     expect(find.byIcon(Icons.edit_rounded), findsNothing);
     expect(find.byIcon(Icons.delete_outline), findsNothing);

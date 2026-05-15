@@ -1,6 +1,4 @@
 import 'dart:async';
-import 'dart:ui';
-
 import 'package:flutter/material.dart';
 
 import '../onboarding_store.dart';
@@ -8,14 +6,13 @@ import '../theme/app_colors.dart';
 import '../theme/app_theme.dart';
 import '../theme/theme_controller.dart';
 import '../widgets/mesh_widgets.dart';
-import '../widgets/theme_picker.dart';
 
-enum _OnboardingTab { welcome, setup, shortcuts, theme }
+enum _OnboardingTab { overview, setup, shortcuts }
 
 /// A desktop welcome center with tabbed sections.
 ///
-/// Covers the window with a blurred backdrop and a wide card.
-/// Users can explore Welcome, Setup, Shortcuts, and Appearance tabs.
+/// Covers the window with a wide setup card.
+/// Users can explore Overview, Connect, and Shortcuts tabs.
 /// Non-blocking — dismiss via the close button or clicking outside.
 class DesktopWelcomeOverlay extends StatefulWidget {
   const DesktopWelcomeOverlay({
@@ -36,7 +33,7 @@ class DesktopWelcomeOverlay extends StatefulWidget {
 class _DesktopWelcomeOverlayState extends State<DesktopWelcomeOverlay>
     with SingleTickerProviderStateMixin {
   late final AnimationController _anim;
-  _OnboardingTab _tab = _OnboardingTab.welcome;
+  _OnboardingTab _tab = _OnboardingTab.overview;
 
   @override
   void initState() {
@@ -71,32 +68,32 @@ class _DesktopWelcomeOverlayState extends State<DesktopWelcomeOverlay>
       animation: _anim,
       builder: (context, child) {
         final t = Curves.easeOutCubic.transform(_anim.value);
+        final lift = 18 * (1 - t);
         return GestureDetector(
           onTap: _dismiss,
           child: Container(
             constraints: const BoxConstraints.expand(),
             color: colors.canvas.withValues(alpha: 0.55 * t),
-            child: BackdropFilter(
-              filter: ImageFilter.blur(sigmaX: 12 * t, sigmaY: 12 * t),
-              child: Center(
-                child: GestureDetector(
-                  onTap: () {},
-                  child: Opacity(
-                    opacity: t,
+            child: Center(
+              child: GestureDetector(
+                onTap: () {},
+                child: Opacity(
+                  opacity: t,
+                  child: Transform.translate(
+                    offset: Offset(0, lift),
                     child: Padding(
-                      padding: const EdgeInsets.all(40),
+                      padding: const EdgeInsets.all(28),
                       child: ConstrainedBox(
                         constraints: const BoxConstraints(
-                          maxWidth: 960,
-                          minWidth: 640,
-                          maxHeight: 720,
+                          maxWidth: 880,
+                          minWidth: 560,
+                          maxHeight: 680,
                         ),
                         child: MeshCard(
                           tone: MeshCardTone.elevated,
-                          padding: const EdgeInsets.all(32),
+                          padding: const EdgeInsets.all(28),
                           child: _Content(
                             colors: colors,
-                            themeController: widget.themeController,
                             onDismiss: _dismiss,
                             onMarkCompleteAndDismiss: _markCompleteAndDismiss,
                             onAddHost: widget.onAddHost,
@@ -120,7 +117,6 @@ class _DesktopWelcomeOverlayState extends State<DesktopWelcomeOverlay>
 class _Content extends StatelessWidget {
   const _Content({
     required this.colors,
-    required this.themeController,
     required this.onDismiss,
     required this.onMarkCompleteAndDismiss,
     required this.activeTab,
@@ -129,7 +125,6 @@ class _Content extends StatelessWidget {
   });
 
   final AppColors colors;
-  final ThemeController themeController;
   final VoidCallback onDismiss;
   final VoidCallback onMarkCompleteAndDismiss;
   final _OnboardingTab activeTab;
@@ -179,7 +174,7 @@ class _Content extends StatelessWidget {
             const Spacer(),
             _SubtleButton(
               onTap: onMarkCompleteAndDismiss,
-              label: 'Skip',
+              label: 'Close',
               colors: colors,
             ),
           ],
@@ -196,8 +191,9 @@ class _Content extends StatelessWidget {
         Expanded(
           child: SingleChildScrollView(
             child: switch (activeTab) {
-              _OnboardingTab.welcome => _WelcomeTab(
+              _OnboardingTab.overview => _WelcomeTab(
                 colors: colors,
+                onOpenSetup: () => onTabChanged(_OnboardingTab.setup),
                 onMarkCompleteAndDismiss: onMarkCompleteAndDismiss,
               ),
               _OnboardingTab.setup => _SetupTab(
@@ -206,9 +202,6 @@ class _Content extends StatelessWidget {
                 onDismiss: onDismiss,
               ),
               _OnboardingTab.shortcuts => const _ShortcutsTab(),
-              _OnboardingTab.theme => _ThemeTab(
-                controller: themeController,
-              ),
             },
           ),
         ),
@@ -235,10 +228,9 @@ class _TabBar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final tabs = <(_OnboardingTab, String, IconData)>[
-      (_OnboardingTab.welcome, 'Welcome', Icons.waving_hand_rounded),
-      (_OnboardingTab.setup, 'Setup', Icons.terminal_rounded),
+      (_OnboardingTab.overview, 'Overview', Icons.grid_view_rounded),
+      (_OnboardingTab.setup, 'Connect', Icons.link_rounded),
       (_OnboardingTab.shortcuts, 'Shortcuts', Icons.keyboard_rounded),
-      (_OnboardingTab.theme, 'Appearance', Icons.palette_rounded),
     ];
     return Row(
       children: tabs.map((entry) {
@@ -300,10 +292,12 @@ class _TabBar extends StatelessWidget {
 class _WelcomeTab extends StatelessWidget {
   const _WelcomeTab({
     required this.colors,
+    required this.onOpenSetup,
     required this.onMarkCompleteAndDismiss,
   });
 
   final AppColors colors;
+  final VoidCallback onOpenSetup;
   final VoidCallback onMarkCompleteAndDismiss;
 
   @override
@@ -312,7 +306,7 @@ class _WelcomeTab extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text(
-          'Keep your coding agents within reach.',
+          'Connect one machine, then keep working from here.',
           style: Theme.of(context).textTheme.headlineMedium?.copyWith(
             fontWeight: FontWeight.w800,
             color: colors.textPrimary,
@@ -324,7 +318,7 @@ class _WelcomeTab extends StatelessWidget {
         ConstrainedBox(
           constraints: const BoxConstraints(maxWidth: 520),
           child: Text(
-            'Run a small daemon on your machine, then keep an eye on sessions, approvals, files, and terminals from this desktop app.',
+            'Sidemesh is easiest to learn once one machine is paired. After that, you can watch sessions, approvals, files, and terminals without leaving this app.',
             style: Theme.of(context).textTheme.bodyLarge?.copyWith(
               color: colors.textSecondary,
               height: 1.5,
@@ -339,27 +333,22 @@ class _WelcomeTab extends StatelessWidget {
           children: [
             _FeatureChip(
               icon: Icons.chat_bubble_outline_rounded,
-              label: 'Chat with agents',
+              label: 'Sessions',
               colors: colors,
             ),
             _FeatureChip(
-              icon: Icons.code_rounded,
-              label: 'Review diffs',
+              icon: Icons.rule_folder_rounded,
+              label: 'Approvals',
               colors: colors,
             ),
             _FeatureChip(
               icon: Icons.folder_open_rounded,
-              label: 'Browse files',
+              label: 'Files',
               colors: colors,
             ),
             _FeatureChip(
               icon: Icons.terminal_rounded,
-              label: 'Live terminal',
-              colors: colors,
-            ),
-            _FeatureChip(
-              icon: Icons.notifications_active_rounded,
-              label: 'Approval alerts',
+              label: 'Terminal',
               colors: colors,
             ),
           ],
@@ -372,9 +361,9 @@ class _WelcomeTab extends StatelessWidget {
         Row(
           children: [
             FilledButton.icon(
-              onPressed: onMarkCompleteAndDismiss,
-              icon: const Icon(Icons.check_rounded, size: 18),
-              label: const Text('Get started'),
+              onPressed: onOpenSetup,
+              icon: const Icon(Icons.link_rounded, size: 18),
+              label: const Text('Connect a machine'),
             ),
             const SizedBox(width: 12),
             OutlinedButton(
@@ -447,7 +436,7 @@ class _SetupTab extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text(
-          'Install the daemon',
+          'Connect a machine',
           style: Theme.of(context).textTheme.titleLarge?.copyWith(
             fontWeight: FontWeight.w800,
             color: colors.textPrimary,
@@ -457,7 +446,7 @@ class _SetupTab extends StatelessWidget {
         ConstrainedBox(
           constraints: const BoxConstraints(maxWidth: 520),
           child: Text(
-            'Sidemesh needs a small daemon running on the machine you want to control. Run these commands in your terminal, then connect this app.',
+            'Run these commands on the machine you want to manage, then use the add-machine flow in this app.',
             style: Theme.of(context).textTheme.bodyMedium?.copyWith(
               color: colors.textSecondary,
               height: 1.5,
@@ -480,6 +469,13 @@ class _SetupTab extends StatelessWidget {
           colors: colors,
         ),
         const SizedBox(height: 24),
+        Text(
+          'If Sidemesh is already running there, you can skip straight to adding the machine here.',
+          style: Theme.of(context).textTheme.bodySmall?.copyWith(
+            color: colors.textTertiary,
+          ),
+        ),
+        const SizedBox(height: 20),
         if (onAddHost != null)
           Row(
             children: [
@@ -489,15 +485,12 @@ class _SetupTab extends StatelessWidget {
                   onDismiss();
                 },
                 icon: const Icon(Icons.add_rounded, size: 18),
-                label: const Text('Add your first host'),
+                label: const Text('Add a machine'),
               ),
               const SizedBox(width: 12),
               OutlinedButton(
-                onPressed: () {
-                  onAddHost!();
-                  onDismiss();
-                },
-                child: const Text('Enter manually'),
+                onPressed: onDismiss,
+                child: const Text('Close'),
               ),
             ],
           ),
@@ -583,7 +576,7 @@ class _ShortcutsTab extends StatelessWidget {
         ),
         const SizedBox(height: 8),
         Text(
-          'Every action has a shortcut. Learn them once, fly forever.',
+          'A few shortcuts are enough to move around quickly. You can learn the rest as you go.',
           style: Theme.of(context).textTheme.bodyMedium?.copyWith(
             color: colors.textSecondary,
           ),
@@ -612,46 +605,6 @@ class _ShortcutsTab extends StatelessWidget {
               ),
             );
           }).toList(),
-        ),
-      ],
-    );
-  }
-}
-
-// ---------------------------------------------------------------------------
-// Theme tab
-// ---------------------------------------------------------------------------
-
-class _ThemeTab extends StatelessWidget {
-  const _ThemeTab({required this.controller});
-
-  final ThemeController controller;
-
-  @override
-  Widget build(BuildContext context) {
-    final colors = context.colors;
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          'Choose an appearance',
-          style: Theme.of(context).textTheme.titleLarge?.copyWith(
-            fontWeight: FontWeight.w800,
-            color: colors.textPrimary,
-          ),
-        ),
-        const SizedBox(height: 8),
-        Text(
-          'Pick a calmer or stronger palette. You can change this anytime in Settings.',
-          style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-            color: colors.textSecondary,
-          ),
-        ),
-        const SizedBox(height: 20),
-        ThemePicker(
-          controller: controller,
-          height: 240,
-          cardWidth: 140,
         ),
       ],
     );
