@@ -262,7 +262,7 @@ class _DesktopShellState extends State<DesktopShell> {
   // Reserve space under the macOS titlebar so traffic lights & drag area
   // stay clean. 28pt matches the standard NSWindow titlebar height.
   static const double _titlebarInset = 28;
-  static const double _railWidth = 92;
+  static const double _railWidth = 76;
   static const double _defaultSidebarWidth = 352;
   static const double _minSidebarWidth = 300;
   static const double _maxSidebarWidth = 440;
@@ -1225,14 +1225,6 @@ String _sidebarSectionTitle(_SidebarSection section) {
   };
 }
 
-String _sidebarSectionCaption(_SidebarSection section) {
-  return switch (section) {
-    _SidebarSection.recent => 'Resume work or start something new.',
-    _SidebarSection.inbox => 'Approvals and pending replies.',
-    _SidebarSection.hosts => 'Machines this app can reach.',
-  };
-}
-
 IconData _sidebarSectionIcon(_SidebarSection section) {
   return switch (section) {
     _SidebarSection.recent => Icons.chat_bubble_outline_rounded,
@@ -1275,20 +1267,21 @@ class _DesktopRail extends StatelessWidget {
           Tooltip(
             message: 'Sidemesh',
             child: Container(
-              width: 38,
-              height: 38,
+              width: 34,
+              height: 34,
               decoration: BoxDecoration(
-                color: colors.accentMuted,
-                borderRadius: BorderRadius.circular(13),
-                border: Border.all(
-                  color: colors.accent.withValues(alpha: 0.28),
-                ),
+                color: colors.surfaceMuted,
+                borderRadius: BorderRadius.circular(11),
               ),
               alignment: Alignment.center,
-              child: Icon(Icons.hub_rounded, size: 20, color: colors.accent),
+              child: Icon(
+                Icons.hub_rounded,
+                size: 18,
+                color: colors.textSecondary,
+              ),
             ),
           ),
-          const SizedBox(height: 18),
+          const SizedBox(height: 16),
           _RailItem(
             selected: section == _SidebarSection.recent,
             icon: _sidebarSectionIcon(_SidebarSection.recent),
@@ -1296,7 +1289,7 @@ class _DesktopRail extends StatelessWidget {
             badge: activeCount > 0 ? activeCount.toString() : null,
             onTap: () => onSelectSection(_SidebarSection.recent),
           ),
-          const SizedBox(height: 8),
+          const SizedBox(height: 6),
           _RailItem(
             selected: section == _SidebarSection.inbox,
             icon: _sidebarSectionIcon(_SidebarSection.inbox),
@@ -1304,7 +1297,7 @@ class _DesktopRail extends StatelessWidget {
             badge: inboxCount > 0 ? inboxCount.toString() : null,
             onTap: () => onSelectSection(_SidebarSection.inbox),
           ),
-          const SizedBox(height: 8),
+          const SizedBox(height: 6),
           _RailItem(
             selected: section == _SidebarSection.hosts,
             icon: _sidebarSectionIcon(_SidebarSection.hosts),
@@ -1365,91 +1358,58 @@ class _RailItem extends StatelessWidget {
         child: Material(
           color: Colors.transparent,
           child: InkWell(
-            borderRadius: BorderRadius.circular(16),
+            borderRadius: BorderRadius.circular(14),
             onTap: onTap,
-            child: AnimatedContainer(
-              duration: const Duration(milliseconds: 150),
-              curve: Curves.easeOutCubic,
-              width: 74,
-              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 8),
-              decoration: BoxDecoration(
-                color: selected ? colors.surface : Colors.transparent,
-                borderRadius: BorderRadius.circular(16),
-                border: Border.all(
-                  color: selected
-                      ? colors.borderStrong
-                      : Colors.transparent,
-                ),
-              ),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
+            child: SizedBox(
+              width: 54,
+              height: 48,
+              child: Stack(
+                alignment: Alignment.center,
+                clipBehavior: Clip.none,
                 children: [
-                  Stack(
-                    clipBehavior: Clip.none,
-                    children: [
-                      Container(
-                        width: 34,
-                        height: 34,
-                        decoration: BoxDecoration(
-                          color: selected
-                              ? colors.accentMuted
-                              : colors.surfaceMuted,
-                          borderRadius: BorderRadius.circular(11),
-                          border: Border.all(
-                            color: selected
-                                ? colors.accent.withValues(alpha: 0.26)
-                                : colors.border,
-                          ),
-                        ),
-                        alignment: Alignment.center,
-                        child: Icon(icon, size: 17, color: foreground),
-                      ),
-                      if (badge != null)
-                        Positioned(
-                          top: -5,
-                          right: -8,
-                          child: Container(
-                            constraints: const BoxConstraints(minWidth: 18),
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 5,
-                              vertical: 2,
-                            ),
-                            decoration: BoxDecoration(
-                              color: selected
-                                  ? colors.accent
-                                  : colors.surfaceElevated,
-                              borderRadius: BorderRadius.circular(999),
-                              border: Border.all(color: colors.border),
-                            ),
-                            child: Text(
-                              badge!,
-                              textAlign: TextAlign.center,
-                              style: Theme.of(context).textTheme.labelSmall
-                                  ?.copyWith(
-                                    color: selected
-                                        ? colors.accentOn
-                                        : colors.textSecondary,
-                                    fontWeight: AppWeights.emphasis,
-                                    height: 1,
-                                  ),
-                            ),
-                          ),
-                        ),
-                    ],
-                  ),
-                  const SizedBox(height: 6),
-                  Text(
-                    label,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                      color: foreground,
-                      fontWeight: selected
-                          ? AppWeights.title
-                          : AppWeights.emphasis,
-                      height: 1.1,
+                  AnimatedContainer(
+                    duration: const Duration(milliseconds: 150),
+                    curve: Curves.easeOutCubic,
+                    width: 38,
+                    height: 38,
+                    decoration: BoxDecoration(
+                      color: selected
+                          ? colors.accentMuted.withValues(alpha: 0.72)
+                          : Colors.transparent,
+                      borderRadius: BorderRadius.circular(12),
                     ),
+                    alignment: Alignment.center,
+                    child: Icon(icon, size: 18, color: foreground),
                   ),
+                  if (badge != null)
+                    Positioned(
+                      top: 3,
+                      right: 3,
+                      child: Container(
+                        constraints: const BoxConstraints(minWidth: 17),
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 5,
+                          vertical: 2,
+                        ),
+                        decoration: BoxDecoration(
+                          color: selected ? colors.accent : colors.canvas,
+                          borderRadius: BorderRadius.circular(999),
+                          border: Border.all(color: colors.border),
+                        ),
+                        child: Text(
+                          badge!,
+                          textAlign: TextAlign.center,
+                          style: Theme.of(context).textTheme.labelSmall
+                              ?.copyWith(
+                                color: selected
+                                    ? colors.accentOn
+                                    : colors.textSecondary,
+                                fontWeight: AppWeights.emphasis,
+                                height: 1,
+                              ),
+                        ),
+                      ),
+                    ),
                 ],
               ),
             ),
@@ -1485,8 +1445,8 @@ class _RailUtilityButton extends StatelessWidget {
             borderRadius: BorderRadius.circular(12),
             onTap: onTap,
             child: SizedBox(
-              width: 44,
-              height: 36,
+              width: 48,
+              height: 38,
               child: Icon(icon, size: 18, color: colors.textSecondary),
             ),
           ),
@@ -1590,18 +1550,16 @@ class _Sidebar extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            SizedBox(height: titlebarInset + 14),
+            SizedBox(height: titlebarInset + 12),
             Padding(
-              padding: const EdgeInsets.fromLTRB(18, 0, 18, 12),
+              padding: const EdgeInsets.fromLTRB(16, 0, 16, 10),
               child: _ListPaneHeader(
                 title: _sidebarSectionTitle(section),
-                caption: _sidebarSectionCaption(section),
-                icon: _sidebarSectionIcon(section),
                 trailing: headerAction,
               ),
             ),
             Padding(
-              padding: const EdgeInsets.fromLTRB(18, 0, 18, 10),
+              padding: const EdgeInsets.fromLTRB(16, 0, 16, 10),
               child: _SidebarSearchField(
                 controller: searchController,
                 focusNode: searchFocus,
@@ -1612,7 +1570,7 @@ class _Sidebar extends StatelessWidget {
                 recentViewMode != null &&
                 onRecentViewModeChanged != null)
               Padding(
-                padding: const EdgeInsets.fromLTRB(18, 0, 18, 12),
+                padding: const EdgeInsets.fromLTRB(16, 0, 16, 10),
                 child: _RecentControlsBar(
                   value: recentViewMode!,
                   filters: recentFilters,
@@ -1624,7 +1582,7 @@ class _Sidebar extends StatelessWidget {
               ),
             if (!canStartSession && section == _SidebarSection.recent)
               Padding(
-                padding: const EdgeInsets.fromLTRB(18, 0, 18, 12),
+                padding: const EdgeInsets.fromLTRB(16, 0, 16, 10),
                 child: Text(
                   hosts.isEmpty
                       ? 'Add a machine to start your first session.'
@@ -1636,7 +1594,7 @@ class _Sidebar extends StatelessWidget {
                 ),
               ),
             const NotificationPermissionBanner(
-              margin: EdgeInsets.fromLTRB(18, 0, 18, 12),
+              margin: EdgeInsets.fromLTRB(16, 0, 16, 10),
               compact: true,
             ),
             Expanded(
@@ -1675,62 +1633,36 @@ class _Sidebar extends StatelessWidget {
 class _ListPaneHeader extends StatelessWidget {
   const _ListPaneHeader({
     required this.title,
-    required this.caption,
-    required this.icon,
     required this.trailing,
   });
 
   final String title;
-  final String caption;
-  final IconData icon;
   final Widget trailing;
 
   @override
   Widget build(BuildContext context) {
     final colors = context.colors;
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Container(
-          width: 34,
-          height: 34,
-          decoration: BoxDecoration(
-            color: colors.accentMuted,
-            borderRadius: BorderRadius.circular(11),
-            border: Border.all(color: colors.accent.withValues(alpha: 0.24)),
-          ),
-          alignment: Alignment.center,
-          child: Icon(icon, size: 17, color: colors.accent),
-        ),
-        const SizedBox(width: 12),
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                title,
-                style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                  color: colors.textPrimary,
-                  fontWeight: AppWeights.title,
-                  letterSpacing: AppLetterSpacing.headline,
-                ),
+    return SizedBox(
+      height: 34,
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: [
+          Expanded(
+            child: Text(
+              title,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                color: colors.textPrimary,
+                fontWeight: AppWeights.title,
+                letterSpacing: AppLetterSpacing.headline,
               ),
-              const SizedBox(height: 2),
-              Text(
-                caption,
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
-                style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                  color: colors.textSecondary,
-                  height: 1.25,
-                ),
-              ),
-            ],
+            ),
           ),
-        ),
-        const SizedBox(width: 12),
-        trailing,
-      ],
+          const SizedBox(width: 10),
+          trailing,
+        ],
+      ),
     );
   }
 }
@@ -1752,29 +1684,39 @@ class _ListPaneActionButton extends StatelessWidget {
     final enabled = onTap != null;
     return Tooltip(
       message: enabled ? label : 'No machine ready',
-      child: MeshSurface(
-        onTap: onTap,
-        enabled: enabled,
-        selected: enabled,
-        radius: AppRadii.control,
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(
-              icon,
-              size: 16,
-              color: enabled ? colors.accent : colors.textTertiary,
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          borderRadius: AppShapes.badge,
+          onTap: onTap,
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 140),
+            curve: Curves.easeOutCubic,
+            padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 7),
+            decoration: BoxDecoration(
+              color: enabled ? colors.canvas : colors.surfaceMuted,
+              borderRadius: AppShapes.badge,
+              border: Border.all(color: colors.border),
             ),
-            const SizedBox(width: 5),
-            Text(
-              label,
-              style: Theme.of(context).textTheme.labelMedium?.copyWith(
-                color: enabled ? colors.accent : colors.textTertiary,
-                fontWeight: AppWeights.title,
-              ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(
+                  icon,
+                  size: 15,
+                  color: enabled ? colors.accent : colors.textTertiary,
+                ),
+                const SizedBox(width: 5),
+                Text(
+                  label,
+                  style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                    color: enabled ? colors.accent : colors.textTertiary,
+                    fontWeight: AppWeights.emphasis,
+                  ),
+                ),
+              ],
             ),
-          ],
+          ),
         ),
       ),
     );
@@ -1801,8 +1743,8 @@ class _RecentControlsBar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Wrap(
-      spacing: 8,
-      runSpacing: 8,
+      spacing: 6,
+      runSpacing: 6,
       crossAxisAlignment: WrapCrossAlignment.center,
       children: [
         PopupMenuButton<SessionViewMode>(
@@ -1883,14 +1825,16 @@ class _RecentFilterToken extends StatelessWidget {
     final token = AnimatedContainer(
       duration: const Duration(milliseconds: 140),
       curve: Curves.easeOutCubic,
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+      padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 7),
       decoration: BoxDecoration(
-        color: selected ? colors.accentMuted : colors.canvas,
+        color: selected
+            ? colors.accentMuted.withValues(alpha: 0.72)
+            : Colors.transparent,
         borderRadius: AppShapes.badge,
         border: Border.all(
           color: selected
-              ? colors.accent.withValues(alpha: 0.34)
-              : colors.border,
+              ? colors.accent.withValues(alpha: 0.28)
+              : Colors.transparent,
         ),
       ),
       child: Row(
@@ -1902,7 +1846,7 @@ class _RecentFilterToken extends StatelessWidget {
             label,
             style: Theme.of(context).textTheme.labelMedium?.copyWith(
               color: selected ? colors.textPrimary : colors.textSecondary,
-              fontWeight: selected ? AppWeights.title : AppWeights.emphasis,
+              fontWeight: selected ? AppWeights.emphasis : AppWeights.body,
             ),
           ),
           if (trailingIcon != null) ...[

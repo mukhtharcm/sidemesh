@@ -88,9 +88,8 @@ class SessionRowCard extends StatelessWidget {
     if (dense) {
       // Compact variant for the desktop sidebar — plain InkWell with tinted
       // selection fill, no card chrome.
-      final bgColor = selected ? colors.accentMuted : Colors.transparent;
-      final borderColor = selected
-          ? colors.accent.withValues(alpha: 0.35)
+      final bgColor = selected
+          ? colors.accentMuted.withValues(alpha: 0.48)
           : Colors.transparent;
       return Material(
         color: Colors.transparent,
@@ -103,7 +102,6 @@ class SessionRowCard extends StatelessWidget {
             decoration: BoxDecoration(
               color: bgColor,
               borderRadius: AppShapes.badge,
-              border: Border.all(color: borderColor),
             ),
             child: Row(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -139,9 +137,7 @@ class SessionRowCard extends StatelessWidget {
                               style: theme.textTheme.bodyMedium?.copyWith(
                                     fontWeight: AppWeights.body,
                                     height: 1.25,
-                                    color: selected
-                                        ? colors.accent
-                                        : colors.textPrimary,
+                                    color: colors.textPrimary,
                                   ),
                             ),
                           ),

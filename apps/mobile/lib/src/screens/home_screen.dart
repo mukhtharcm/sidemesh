@@ -3590,13 +3590,10 @@ class _HostRowCard extends StatelessWidget {
                 duration: const Duration(milliseconds: 120),
                 padding: const EdgeInsets.fromLTRB(10, 9, 6, 10),
                 decoration: BoxDecoration(
-                  color: selected ? colors.accentMuted : Colors.transparent,
+                  color: selected
+                      ? colors.accentMuted.withValues(alpha: 0.48)
+                      : Colors.transparent,
                   borderRadius: BorderRadius.circular(AppRadii.control),
-                  border: Border.all(
-                    color: selected
-                        ? colors.accent.withValues(alpha: 0.35)
-                        : Colors.transparent,
-                  ),
                 ),
                 child: Row(
                   children: [
@@ -3642,7 +3639,7 @@ class _HostRowCard extends StatelessWidget {
                                   fontWeight: AppWeights.body,
                                   height: 1.25,
                                   color: host.enabled
-                                      ? (selected ? colors.accent : null)
+                                      ? colors.textPrimary
                                       : colors.textTertiary,
                                 ),
                           ),
