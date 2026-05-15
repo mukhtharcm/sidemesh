@@ -196,7 +196,7 @@ const _nordDark = AppColors(
   diffMetaLine: Color(0xFFD8DEE9),
   diffHunkLine: Color(0xFF81A1C1),
   diffGutterText: Color(0xFF8892A6),
-  userBubble: Color(0xFF5E81AC), // nord10 (frost deep)
+  userBubble: Color(0xFF4C6E8D), // darkened frost for AA text contrast
   userBubbleOn: Color(0xFFECEFF4),
   assistantBubble: Color(0xFF2E3440),
   assistantBubbleBorder: Color(0xFF434C5E),

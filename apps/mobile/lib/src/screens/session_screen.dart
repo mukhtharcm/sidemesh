@@ -19,6 +19,7 @@ import '../api_client.dart';
 import '../host_status_store.dart';
 import '../image_blob_cache_store.dart';
 import '../live_activity_service.dart';
+import '../message_text_styles.dart';
 import '../models.dart';
 import '../fs_models.dart';
 import '../pending_send_recovery.dart';
