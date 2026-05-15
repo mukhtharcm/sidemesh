@@ -6961,7 +6961,7 @@ class _SessionScreenState extends State<SessionScreen>
     final showStopPill = isCompact && _running && _supportsSessionInterrupt;
     final showWaitingState = !_loading && timelineEntries.isEmpty && _running;
     final freshnessTopPadding =
-        widget.desktopMode && _pendingAction == null ? 10.0 : 0.0;
+        widget.desktopMode && _pendingAction == null ? 8.0 : 0.0;
     final bodyContent = Column(
       children: [
         if (!isCompact && !widget.desktopMode)

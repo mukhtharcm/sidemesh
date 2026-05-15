@@ -38,21 +38,21 @@ class _CachedTranscriptStrip extends StatelessWidget {
     return MeshSurface(
       tone: MeshSurfaceTone.warning,
       radius: AppRadii.control,
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 6),
       child: Row(
         children: [
           if (refreshing)
             SizedBox(
-              width: 12,
-              height: 12,
+              width: 11,
+              height: 11,
               child: CircularProgressIndicator(
-                strokeWidth: 1.4,
+                strokeWidth: 1.35,
                 color: colors.warning,
               ),
             )
           else
-            Icon(icon, size: 14, color: colors.warning),
-          const SizedBox(width: 9),
+            Icon(icon, size: 13, color: colors.warning),
+          const SizedBox(width: 8),
           Expanded(
             child: Text(
               text,
@@ -60,8 +60,8 @@ class _CachedTranscriptStrip extends StatelessWidget {
               overflow: TextOverflow.ellipsis,
               style: monoStyle(
                 color: colors.textSecondary,
-                fontSize: 11,
-                fontWeight: FontWeight.w700,
+                fontSize: 10.5,
+                fontWeight: FontWeight.w600,
               ),
             ),
           ),
@@ -70,12 +70,15 @@ class _CachedTranscriptStrip extends StatelessWidget {
             GestureDetector(
               onTap: onRetry,
               behavior: HitTestBehavior.opaque,
-              child: Text(
-                'Retry',
-                style: monoStyle(
-                  color: colors.warning,
-                  fontSize: 11,
-                  fontWeight: FontWeight.w800,
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+                child: Text(
+                  'Retry',
+                  style: monoStyle(
+                    color: colors.warning,
+                    fontSize: 10.5,
+                    fontWeight: FontWeight.w700,
+                  ),
                 ),
               ),
             ),
