@@ -127,6 +127,8 @@ class _Composer extends StatelessWidget {
         border: InputBorder.none,
         enabledBorder: InputBorder.none,
         focusedBorder: InputBorder.none,
+        filled: false,
+        fillColor: Colors.transparent,
         isDense: true,
         // Padding is handled by the animated pill container below.
         contentPadding: EdgeInsets.zero,
@@ -268,8 +270,8 @@ class _Composer extends StatelessWidget {
         borderRadius: BorderRadius.circular(isDesktop ? 10 : AppRadii.control),
         border: Border.all(
           color: isFocused
-              ? colors.accent.withValues(alpha: 0.65)
-              : colors.border,
+              ? colors.accent.withValues(alpha: 0.42)
+              : colors.border.withValues(alpha: 0.82),
         ),
       ),
       padding: EdgeInsets.fromLTRB(
