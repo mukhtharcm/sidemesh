@@ -210,7 +210,7 @@ class _Composer extends StatelessWidget {
     );
 
     final toolbarRow = Row(
-      crossAxisAlignment: CrossAxisAlignment.end,
+      crossAxisAlignment: CrossAxisAlignment.center,
       children: [
         // Paste remains available through native shortcuts/menu; the visible
         // action here is only for adding new context.
@@ -393,6 +393,10 @@ class _ComposerContextShelf extends StatelessWidget {
   Widget build(BuildContext context) {
     final colors = context.colors;
 
+    final duplicateFileNames = _duplicateFileNameKeys(
+      files.map((item) => item.file),
+    );
+
     // Build chip list: images first, then skills, then file mentions.
     final chips = <Widget>[
       for (final a in attachments)
@@ -437,7 +441,13 @@ class _ComposerContextShelf extends StatelessWidget {
             size: 14,
             color: colors.textTertiary,
           ),
-          label: f.file.name,
+          label: _fileShelfLabel(
+            f.file,
+            showParent:
+                duplicateFileNames.contains(_fileNameKey(f.file)) &&
+                !isDesktop,
+          ),
+          sublabel: isDesktop ? _compactFileParentPath(f.file) : null,
           onRemove: () => onRemoveFile(f.file.path),
         ),
     ];
@@ -487,7 +497,7 @@ class _ComposerShelfChip extends StatelessWidget {
           icon,
           const SizedBox(width: 6),
           ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 120),
+            constraints: BoxConstraints(maxWidth: sublabel != null ? 170 : 150),
             child: sublabel != null
                 ? Column(
                     mainAxisSize: MainAxisSize.min,
@@ -629,18 +639,24 @@ class _ComposerPlusButton extends StatelessWidget {
         child: InkWell(
           borderRadius: AppShapes.badge,
           onTap: enabled ? () => _handleTap(context) : null,
-          child: Container(
-            width: 40,
-            height: 40,
-            decoration: BoxDecoration(
-              color: colors.surfaceMuted.withValues(alpha: 0.56),
-              borderRadius: AppShapes.badge,
-              border: Border.all(color: colors.border),
-            ),
-            child: Icon(
-              Icons.add_rounded,
-              color: enabled ? colors.textSecondary : colors.textTertiary,
-              size: 21,
+          child: SizedBox(
+            width: 44,
+            height: 44,
+            child: Center(
+              child: Container(
+                width: 38,
+                height: 38,
+                decoration: BoxDecoration(
+                  color: colors.surfaceMuted.withValues(alpha: 0.56),
+                  borderRadius: AppShapes.badge,
+                  border: Border.all(color: colors.border),
+                ),
+                child: Icon(
+                  Icons.add_rounded,
+                  color: enabled ? colors.textSecondary : colors.textTertiary,
+                  size: 20,
+                ),
+              ),
             ),
           ),
         ),
@@ -704,7 +720,8 @@ class _ComposerModelButton extends StatelessWidget {
   Widget build(BuildContext context) {
     final colors = context.colors;
     final maxWidth = compact ? 136.0 : 154.0;
-    final minHeight = compact ? 40.0 : 34.0;
+    final minHeight = compact ? 38.0 : 34.0;
+    final hitPadding = compact ? 3.0 : 0.0;
     return Tooltip(
       message: detail == null ? tooltipLabel : '$tooltipLabel: $detail',
       child: Material(
@@ -712,56 +729,59 @@ class _ComposerModelButton extends StatelessWidget {
         child: InkWell(
           borderRadius: AppShapes.badge,
           onTap: onPressed,
-          child: AnimatedContainer(
-            duration: const Duration(milliseconds: 140),
-            curve: Curves.easeOutCubic,
-            constraints: BoxConstraints(
-              maxWidth: maxWidth,
-              minHeight: minHeight,
-            ),
-            padding: EdgeInsets.symmetric(
-              horizontal: compact ? 10 : 9,
-              vertical: compact ? 8 : 6,
-            ),
-            decoration: BoxDecoration(
-              color: customized
-                  ? colors.accentMuted
-                  : colors.surfaceMuted.withValues(alpha: 0.56),
-              borderRadius: AppShapes.badge,
-              border: Border.all(
-                color: customized
-                    ? colors.accent.withValues(alpha: 0.38)
-                    : colors.border,
+          child: Padding(
+            padding: EdgeInsets.symmetric(vertical: hitPadding),
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 140),
+              curve: Curves.easeOutCubic,
+              constraints: BoxConstraints(
+                maxWidth: maxWidth,
+                minHeight: minHeight,
               ),
-            ),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Icon(
-                  icon,
-                  size: compact ? 14 : 15,
-                  color: customized ? colors.accent : colors.textSecondary,
+              padding: EdgeInsets.symmetric(
+                horizontal: compact ? 9 : 9,
+                vertical: compact ? 7 : 6,
+              ),
+              decoration: BoxDecoration(
+                color: customized
+                    ? colors.accentMuted
+                    : colors.surfaceMuted.withValues(alpha: 0.56),
+                borderRadius: AppShapes.badge,
+                border: Border.all(
+                  color: customized
+                      ? colors.accent.withValues(alpha: 0.38)
+                      : colors.border,
                 ),
-                const SizedBox(width: 6),
-                Flexible(
-                  child: Text(
-                    label,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: monoStyle(
-                      color: colors.textPrimary,
-                      fontSize: compact ? 11 : 11.5,
-                      fontWeight: AppWeights.title,
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(
+                    icon,
+                    size: compact ? 14 : 15,
+                    color: customized ? colors.accent : colors.textSecondary,
+                  ),
+                  const SizedBox(width: 6),
+                  Flexible(
+                    child: Text(
+                      label,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: monoStyle(
+                        color: colors.textPrimary,
+                        fontSize: compact ? 11 : 11.5,
+                        fontWeight: AppWeights.title,
+                      ),
                     ),
                   ),
-                ),
-                const SizedBox(width: 4),
-                Icon(
-                  Icons.expand_more_rounded,
-                  size: 16,
-                  color: colors.textTertiary,
-                ),
-              ],
+                  const SizedBox(width: 4),
+                  Icon(
+                    Icons.expand_more_rounded,
+                    size: 16,
+                    color: colors.textTertiary,
+                  ),
+                ],
+              ),
             ),
           ),
         ),
@@ -803,38 +823,47 @@ class _SendButton extends StatelessWidget {
         final bgColor = sending
             ? colors.surfaceMuted
             : (canSend ? colors.accent : colors.surfaceMuted);
-        final size = compact ? 36.0 : 40.0;
+        final hitSize = compact ? 36.0 : 44.0;
+        final size = compact ? 36.0 : 38.0;
         final radius = compact ? AppRadii.iconWell : AppRadii.action;
         return Material(
           color: Colors.transparent,
           child: InkWell(
             borderRadius: BorderRadius.circular(radius),
             onTap: canSend ? onSend : null,
-            child: Container(
-              width: size,
-              height: size,
-              decoration: BoxDecoration(
-                color: bgColor,
-                borderRadius: BorderRadius.circular(radius),
-                border: showActive
-                    ? null
-                    : Border.all(color: colors.border),
+            child: SizedBox(
+              width: hitSize,
+              height: hitSize,
+              child: Center(
+                child: Container(
+                  width: size,
+                  height: size,
+                  decoration: BoxDecoration(
+                    color: bgColor,
+                    borderRadius: BorderRadius.circular(radius),
+                    border: showActive
+                        ? null
+                        : Border.all(color: colors.border),
+                  ),
+                  alignment: Alignment.center,
+                  child: sending
+                      ? SizedBox(
+                          width: 18,
+                          height: 18,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                            color: colors.textSecondary,
+                          ),
+                        )
+                      : Icon(
+                          Icons.arrow_upward_rounded,
+                          size: compact ? 19 : 22,
+                          color: canSend
+                              ? colors.accentOn
+                              : colors.textTertiary,
+                        ),
+                ),
               ),
-              alignment: Alignment.center,
-              child: sending
-                  ? SizedBox(
-                      width: 18,
-                      height: 18,
-                      child: CircularProgressIndicator(
-                        strokeWidth: 2,
-                        color: colors.textSecondary,
-                      ),
-                    )
-                  : Icon(
-                      Icons.arrow_upward_rounded,
-                      size: compact ? 19 : 24,
-                      color: canSend ? colors.accentOn : colors.textTertiary,
-                    ),
             ),
           ),
         );
@@ -1122,6 +1151,7 @@ class _ComposerFileSuggestionTrayState
         ),
       );
     } else {
+      final duplicateNames = _duplicateFileNameKeys(widget.suggestions);
       final maxHeight = math.min(
         300.0,
         MediaQuery.sizeOf(context).height * 0.40,
@@ -1137,8 +1167,14 @@ class _ComposerFileSuggestionTrayState
             shrinkWrap: true,
             padding: EdgeInsets.zero,
             itemCount: widget.suggestions.length,
-            itemBuilder: (context, index) =>
-                _buildFileRow(context, widget.suggestions[index]),
+            itemBuilder: (context, index) {
+              final file = widget.suggestions[index];
+              return _buildFileRow(
+                context,
+                file,
+                ambiguousName: duplicateNames.contains(_fileNameKey(file)),
+              );
+            },
           ),
         ),
       );
@@ -1155,28 +1191,147 @@ class _ComposerFileSuggestionTrayState
     );
   }
 
-  Widget _buildFileRow(BuildContext context, FsSearchResult file) {
+  Widget _buildFileRow(
+    BuildContext context,
+    FsSearchResult file, {
+    required bool ambiguousName,
+  }) {
     final colors = context.colors;
     return MeshListRow(
       framed: false,
       dense: true,
       radius: AppRadii.control,
       onTap: () => widget.onSelectFile(file),
-      leading: Icon(
-        file.isDirectory
-            ? Icons.folder_rounded
-            : Icons.insert_drive_file_rounded,
-        size: 16,
-        color: colors.textTertiary,
+      leading: Container(
+        width: 28,
+        height: 28,
+        decoration: BoxDecoration(
+          color: colors.surfaceMuted,
+          borderRadius: AppShapes.action,
+          border: Border.all(color: colors.border),
+        ),
+        alignment: Alignment.center,
+        child: Icon(
+          file.isDirectory
+              ? Icons.folder_rounded
+              : Icons.insert_drive_file_rounded,
+          size: 15,
+          color: colors.textTertiary,
+        ),
       ),
       title: Text(
-        file.path,
-        style: TextStyle(color: colors.textPrimary, fontSize: 13),
+        _fileDisplayName(file),
+        style: Theme.of(
+          context,
+        ).textTheme.labelLarge?.copyWith(fontWeight: AppWeights.emphasis),
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+      ),
+      subtitle: Text(
+        _compactFileParentPath(file, maxSegments: ambiguousName ? 4 : 3),
+        style: monoStyle(color: colors.textTertiary, fontSize: 11),
         maxLines: 1,
         overflow: TextOverflow.ellipsis,
       ),
     );
   }
+}
+
+Set<String> _duplicateFileNameKeys(Iterable<FsSearchResult> files) {
+  final counts = <String, int>{};
+  for (final file in files) {
+    final key = _fileNameKey(file);
+    counts[key] = (counts[key] ?? 0) + 1;
+  }
+  return {
+    for (final entry in counts.entries)
+      if (entry.value > 1) entry.key,
+  };
+}
+
+String _fileNameKey(FsSearchResult file) =>
+    _fileDisplayName(file).toLowerCase();
+
+String _fileShelfLabel(FsSearchResult file, {required bool showParent}) {
+  final name = _fileDisplayName(file);
+  if (!showParent) {
+    return name;
+  }
+  return '$name · ${_compactFileParentPath(file, maxSegments: 2)}';
+}
+
+String _fileDisplayName(FsSearchResult file) {
+  final name = file.name.trim();
+  if (name.isNotEmpty) {
+    return name;
+  }
+  var path = file.path.trim();
+  while (path.endsWith('/') && path.length > 1) {
+    path = path.substring(0, path.length - 1);
+  }
+  if (path.isEmpty) {
+    return 'file';
+  }
+  final slash = path.lastIndexOf('/');
+  return slash < 0 ? path : path.substring(slash + 1);
+}
+
+String _compactFileParentPath(
+  FsSearchResult file, {
+  int maxSegments = 3,
+}) {
+  final parent = _fileParentPath(file.path);
+  if (parent.isEmpty) {
+    return 'workspace root';
+  }
+  return _compactPath(parent, maxSegments: maxSegments);
+}
+
+String _fileParentPath(String rawPath) {
+  var path = rawPath.trim();
+  while (path.endsWith('/') && path.length > 1) {
+    path = path.substring(0, path.length - 1);
+  }
+  final slash = path.lastIndexOf('/');
+  if (slash < 0) {
+    return '';
+  }
+  if (slash == 0) {
+    return '/';
+  }
+  return path.substring(0, slash);
+}
+
+String _compactPath(String rawPath, {int maxSegments = 3}) {
+  final path = rawPath.trim();
+  if (path.isEmpty || path == '/') {
+    return path;
+  }
+  final segments = path.split('/').where((part) => part.isNotEmpty).toList();
+  if (segments.isEmpty) {
+    return path;
+  }
+  final visible = segments.length > maxSegments
+      ? segments.sublist(segments.length - maxSegments)
+      : segments;
+  final prefix = segments.length > maxSegments
+      ? '.../'
+      : path.startsWith('/')
+      ? '/'
+      : '';
+  return '$prefix${visible.join('/')}';
+}
+
+String _fileMentionToken(FsSearchResult file) {
+  final path = file.path.trim();
+  if (!file.isDirectory) {
+    return '@$path';
+  }
+  var directoryPath = path;
+  while (directoryPath.endsWith('/') && directoryPath.length > 1) {
+    directoryPath = directoryPath.substring(0, directoryPath.length - 1);
+  }
+  return '@$directoryPath/';
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
