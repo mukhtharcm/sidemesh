@@ -1221,10 +1221,7 @@ class _SessionScreenState extends State<SessionScreen>
             score: 0,
           );
           draftFileMentions.add(
-            _ComposerFileMention(
-              file: file,
-              tokenText: file.isDirectory ? '@${file.path}/' : '@${file.path}',
-            ),
+            _ComposerFileMention(file: file, tokenText: _fileMentionToken(file)),
           );
         default:
           continue;
@@ -3898,7 +3895,7 @@ class _SessionScreenState extends State<SessionScreen>
       return;
     }
 
-    final tokenText = file.isDirectory ? '@${file.path}/' : '@${file.path}';
+    final tokenText = _fileMentionToken(file);
     final value = _composerController.value;
     final text = value.text;
     final replaced = text.replaceRange(active.start, active.end, '$tokenText ');

@@ -179,6 +179,14 @@ void main() {
       matching: find.byType(InkWell),
     );
     expect(modelButton, findsOneWidget);
+    expect(tester.getSize(modelButton).height, greaterThanOrEqualTo(44));
+
+    final visibleChip = find.descendant(
+      of: modelButton,
+      matching: find.byType(AnimatedContainer),
+    );
+    expect(visibleChip, findsOneWidget);
+    expect(tester.getSize(visibleChip).height, lessThanOrEqualTo(40));
 
     await tester.tap(modelButton);
     await _pumpFrames(tester);
@@ -361,7 +369,8 @@ void main() {
       ]);
       await tester.pump();
 
-      expect(find.text('/repo/ab.txt'), findsOneWidget);
+      expect(find.text('ab.txt'), findsOneWidget);
+      expect(find.text('/repo'), findsOneWidget);
 
       api.pendingSearch('a').complete(const <FsSearchResult>[
         FsSearchResult(
@@ -373,8 +382,56 @@ void main() {
       ]);
       await tester.pump();
 
-      expect(find.text('/repo/ab.txt'), findsOneWidget);
-      expect(find.text('/repo/a.txt'), findsNothing);
+      expect(find.text('ab.txt'), findsOneWidget);
+      expect(find.text('a.txt'), findsNothing);
+    },
+  );
+
+  testWidgets(
+    'file mention suggestions disambiguate duplicate file names with parent paths',
+    (tester) async {
+      final api = _FileSearchRaceApi(
+        _nodeForCapabilities(_fileMentionCapabilities),
+      );
+      addTearDown(api.dispose);
+
+      await _pumpApp(
+        tester,
+        SessionScreen(
+          host: _host('session-file-mention-duplicates'),
+          session: _session('file-mention-duplicates'),
+          api: api,
+          desktopMode: true,
+        ),
+        size: const Size(1180, 900),
+      );
+      await _pumpFrames(tester);
+
+      final composer = find.byType(TextField).first;
+      await tester.enterText(composer, '@main');
+      await tester.pump();
+
+      api.pendingSearch('main').complete(const <FsSearchResult>[
+        FsSearchResult(
+          path: 'apps/mobile/lib/main.dart',
+          name: 'main.dart',
+          isDirectory: false,
+          score: 120,
+        ),
+        FsSearchResult(
+          path: 'packages/cli/lib/main.dart',
+          name: 'main.dart',
+          isDirectory: false,
+          score: 110,
+        ),
+      ]);
+      await tester.pump();
+
+      expect(find.text('main.dart'), findsNWidgets(2));
+      expect(find.text('apps/mobile/lib'), findsOneWidget);
+      expect(find.text('packages/cli/lib'), findsOneWidget);
+      expect(find.text('apps/mobile/lib/main.dart'), findsNothing);
+      expect(find.text('packages/cli/lib/main.dart'), findsNothing);
     },
   );
 
