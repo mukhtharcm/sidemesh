@@ -35,6 +35,11 @@ class MeshDialogScaffold extends StatelessWidget {
     final colors = context.colors;
     final accent = danger ? colors.danger : colors.accent;
     final muted = danger ? colors.dangerMuted : colors.accentMuted;
+    final iconForeground = readableSemanticForeground(
+      colors,
+      background: muted,
+      preferred: accent,
+    );
     final narrowScreen = MediaQuery.sizeOf(context).width < 420;
     return Dialog(
       backgroundColor: Colors.transparent,
@@ -76,7 +81,11 @@ class MeshDialogScaffold extends StatelessWidget {
                               ),
                             ),
                             alignment: Alignment.center,
-                            child: Icon(icon, size: 18, color: accent),
+                            child: Icon(
+                              icon,
+                              size: 18,
+                              color: iconForeground,
+                            ),
                           ),
                           const SizedBox(width: 12),
                           Expanded(

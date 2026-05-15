@@ -4,6 +4,7 @@ import 'package:url_launcher/url_launcher.dart';
 
 import '../theme/app_colors.dart';
 import '../theme/app_theme.dart';
+import '../theme/color_contrast.dart';
 import 'app_snackbar.dart';
 import 'syntax_code_block.dart';
 
@@ -12,12 +13,14 @@ class MarkdownContent extends StatelessWidget {
     super.key,
     required this.text,
     required this.textColor,
+    this.backgroundColor,
     this.linkStyle,
     this.onOpenFile,
   });
 
   final String text;
   final Color textColor;
+  final Color? backgroundColor;
   final TextStyle? linkStyle;
   final void Function(String path)? onOpenFile;
 
@@ -30,6 +33,11 @@ class MarkdownContent extends StatelessWidget {
       height: 1.5,
     );
     final markdownText = _autoLinkBareUrlsForMarkdown(text);
+    final linkBackground = backgroundColor ?? colors.surface;
+    final fallbackLinkColor = readableLinkOn(
+      colors,
+      background: linkBackground,
+    );
 
     return GptMarkdown(
       markdownText,
@@ -40,11 +48,11 @@ class MarkdownContent extends StatelessWidget {
         _openLink(context, href);
       },
       linkBuilder: (context, linkText, url, style) {
+        final linkColor = linkStyle?.color ?? fallbackLinkColor;
         final effectiveLinkStyle = style.merge(linkStyle).copyWith(
-          color: linkStyle?.color ?? colors.accent,
+          color: linkColor,
           decoration: linkStyle?.decoration ?? TextDecoration.underline,
-          decorationColor:
-              linkStyle?.decorationColor ?? linkStyle?.color ?? colors.accent,
+          decorationColor: linkStyle?.decorationColor ?? linkColor,
           decorationThickness: linkStyle?.decorationThickness ?? 1.2,
         );
         return Text.rich(
