@@ -122,6 +122,35 @@ void main() {
     await tester.pump();
   });
 
+  testWidgets('desktop composer keeps typing area wide with model controls', (
+    tester,
+  ) async {
+    final session = _session('desktop-composer-width-session', provider: 'fake');
+    final api = _CapabilityFakeApi(
+      _nodeForCapabilities(_fullCapabilities),
+      models: const [_fakeModel],
+    );
+    addTearDown(api.dispose);
+
+    await _pumpApp(
+      tester,
+      SessionScreen(
+        host: _host('desktop-composer-width'),
+        session: session,
+        api: api,
+        desktopMode: true,
+      ),
+      size: const Size(720, 760),
+    );
+    await _pumpFrames(tester);
+
+    final composerWidth = tester.getSize(find.byType(TextField).first).width;
+    expect(composerWidth, greaterThan(420));
+
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pump();
+  });
+
   testWidgets('mobile composer model chip opens the model picker only', (
     tester,
   ) async {
