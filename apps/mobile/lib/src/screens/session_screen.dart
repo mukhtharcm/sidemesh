@@ -19,9 +19,11 @@ import '../api_client.dart';
 import '../host_status_store.dart';
 import '../image_blob_cache_store.dart';
 import '../live_activity_service.dart';
+import '../message_text_styles.dart';
 import '../models.dart';
 import '../fs_models.dart';
 import '../pending_send_recovery.dart';
+import '../provider_labels.dart';
 import '../search_query.dart';
 import 'browser_preview_screen.dart';
 import 'create_session_sheet.dart';
@@ -53,10 +55,13 @@ import '../session_turn_config_store.dart';
 import '../session_preview_candidates.dart';
 import '../session_runtime.dart';
 import '../theme/app_colors.dart';
+import '../theme/color_contrast.dart';
 import '../theme/app_theme.dart';
 import '../theme/app_tokens.dart';
 import '../windowing.dart';
 import '../widgets/app_snackbar.dart';
+import '../widgets/app_dialogs.dart';
+import '../widgets/app_sheets.dart';
 import '../widgets/composer_paste_text_action.dart';
 import '../widgets/markdown_content.dart';
 import '../widgets/diff_view.dart';
@@ -115,10 +120,7 @@ class SessionComposerSeed {
 }
 
 class _DockedBrowserPreview {
-  const _DockedBrowserPreview({
-    required this.preview,
-    this.expanded = true,
-  });
+  const _DockedBrowserPreview({required this.preview, this.expanded = true});
 
   final HostBrowserPreviewInfo preview;
   final bool expanded;
@@ -132,6 +134,213 @@ class _DockedBrowserPreview {
     return _DockedBrowserPreview(
       preview: preview ?? this.preview,
       expanded: expanded ?? this.expanded,
+    );
+  }
+}
+
+class _DesktopSessionTitle extends StatelessWidget {
+  const _DesktopSessionTitle({
+    required this.session,
+    required this.running,
+    required this.canRename,
+    required this.onRename,
+  });
+
+  final SessionSummary session;
+  final bool running;
+  final bool canRename;
+  final VoidCallback onRename;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    final title = Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Flexible(
+          child: Text(
+            session.title,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: Theme.of(context).textTheme.titleMedium?.copyWith(
+              color: colors.textPrimary,
+              fontWeight: AppWeights.title,
+              letterSpacing: AppLetterSpacing.headline,
+            ),
+          ),
+        ),
+        if (canRename) ...[
+          const SizedBox(width: 5),
+          Icon(Icons.edit_rounded, size: 13, color: colors.textTertiary),
+        ],
+      ],
+    );
+
+    final titleContent = canRename
+        ? Tooltip(
+            message: 'Rename session',
+            child: Semantics(
+              button: true,
+              label: 'Rename session',
+              child: Material(
+                color: Colors.transparent,
+                child: InkWell(
+                  borderRadius: AppShapes.badge,
+                  onTap: onRename,
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 5),
+                    child: title,
+                  ),
+                ),
+              ),
+            ),
+          )
+        : title;
+
+    return Row(
+      children: [
+        if (running) ...[const LivePulse(), const SizedBox(width: 9)],
+        Expanded(child: titleContent),
+        const SizedBox(width: 8),
+        if (session.provider != null) ...[
+          AgentProviderBadge(providerKind: session.provider, compact: true),
+          const SizedBox(width: 8),
+        ],
+        _DesktopSessionStatusBadge(running: running),
+      ],
+    );
+  }
+}
+
+class _DesktopSessionCommandBar extends StatelessWidget {
+  const _DesktopSessionCommandBar({
+    required this.running,
+    required this.canStop,
+    required this.onStop,
+    required this.onNewSession,
+    required this.onMore,
+  });
+
+  final bool running;
+  final bool canStop;
+  final VoidCallback onStop;
+  final VoidCallback onNewSession;
+  final VoidCallback onMore;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        if (running && canStop) ...[
+          MeshIconButton(
+            icon: Icons.stop_circle_rounded,
+            tooltip: 'Stop agent',
+            color: colors.danger,
+            onTap: onStop,
+            semanticLabel: 'Stop agent',
+          ),
+          const SizedBox(width: 6),
+        ],
+        _DesktopHeaderTextButton(
+          icon: Icons.add_rounded,
+          label: 'New session',
+          onTap: onNewSession,
+        ),
+        const SizedBox(width: 6),
+        MeshIconButton(
+          icon: Icons.more_horiz_rounded,
+          tooltip: running
+              ? 'Session actions (agent running)'
+              : 'Session actions',
+          color: colors.textSecondary,
+          onTap: onMore,
+        ),
+      ],
+    );
+  }
+}
+
+class _DesktopHeaderTextButton extends StatelessWidget {
+  const _DesktopHeaderTextButton({
+    required this.icon,
+    required this.label,
+    required this.onTap,
+  });
+
+  final IconData icon;
+  final String label;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    return Tooltip(
+      message: label,
+      child: Semantics(
+        button: true,
+        label: label,
+        child: MeshSurface(
+          onTap: onTap,
+          radius: AppRadii.control,
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 0),
+          child: SizedBox(
+            height: 44,
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(icon, size: 17, color: colors.textSecondary),
+                const SizedBox(width: 7),
+                Text(
+                  label,
+                  style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                    color: colors.textPrimary,
+                    fontWeight: AppWeights.title,
+                    letterSpacing: -0.1,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _DesktopSessionStatusBadge extends StatelessWidget {
+  const _DesktopSessionStatusBadge({required this.running});
+
+  final bool running;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    final color = running ? colors.success : colors.textSecondary;
+    return Container(
+      height: 24,
+      padding: const EdgeInsets.symmetric(horizontal: 8),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: running ? 0.1 : 0.06),
+        borderRadius: AppShapes.badge,
+        border: Border.all(color: color.withValues(alpha: 0.18)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          _HeaderStatusDot(color: color),
+          const SizedBox(width: 5),
+          Text(
+            running ? 'running' : 'idle',
+            style: monoStyle(
+              color: color,
+              fontSize: 10.5,
+              fontWeight: FontWeight.w800,
+            ),
+          ),
+        ],
+      ),
     );
   }
 }
@@ -193,7 +402,7 @@ class _SessionBrowserPreviewDock extends StatelessWidget {
                       ),
                       const SizedBox(width: 8),
                       MeshPill(
-                        label: 'parked',
+                        label: 'paused',
                         tone: MeshPillTone.warning,
                         icon: Icons.pause_rounded,
                         mono: true,
@@ -202,7 +411,7 @@ class _SessionBrowserPreviewDock extends StatelessWidget {
                   ),
                   const SizedBox(height: 3),
                   Text(
-                    'Tap to resume · $target',
+                    'Tap to reopen · $target',
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: monoStyle(color: colors.textSecondary, fontSize: 11),
@@ -240,7 +449,7 @@ class _SessionBrowserPreviewDock extends StatelessWidget {
                       Row(
                         children: [
                           Text(
-                            'Browser lens',
+                            'Browser preview',
                             style: Theme.of(context).textTheme.labelMedium
                                 ?.copyWith(
                                   color: colors.textSecondary,
@@ -250,7 +459,7 @@ class _SessionBrowserPreviewDock extends StatelessWidget {
                           ),
                           const SizedBox(width: 8),
                           MeshPill(
-                            label: 'live',
+                            label: 'open',
                             tone: MeshPillTone.success,
                             icon: Icons.bolt_rounded,
                             mono: true,
@@ -521,6 +730,8 @@ class _BrowserDockCloseButton extends StatelessWidget {
   }
 }
 
+enum _ActivityMergeMode { incremental, snapshot }
+
 class _SessionScreenState extends State<SessionScreen>
     with WidgetsBindingObserver {
   static const _initialMessageLimit = 120;
@@ -757,6 +968,14 @@ class _SessionScreenState extends State<SessionScreen>
   bool get _supportsProviderRestart =>
       _supportsProviderCapability('lifecycle', 'restart');
 
+  bool get _supportsComposerModelPicker =>
+      _supportsProviderCapability('configuration', 'models') &&
+      _supportsProviderCapability('runtimeControls', 'model');
+
+  bool get _supportsComposerThinkingPicker =>
+      _supportsComposerModelPicker &&
+      _supportsProviderCapability('runtimeControls', 'reasoningEffort');
+
   bool _supportsGitDiffKind(String kind) {
     if (kind == 'remote') {
       return _supportsProviderCapability('workspace', 'remoteGitDiff');
@@ -800,11 +1019,18 @@ class _SessionScreenState extends State<SessionScreen>
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
-    
+
     _pinsStore.ensureLoaded();
     _pinsStore.addListener(_handlePinsChanged);
     _sendOutbox.addListener(_handleSendOutboxChanged);
     _policyStore.ensureLoaded();
+    unawaited(
+      _turnConfigStore.ensureLoaded().then((_) {
+        if (mounted && !_disposed) {
+          setState(() {});
+        }
+      }),
+    );
     _readStore.ensureLoaded();
     _composerController.addListener(_handleComposerChanged);
     _composerFocusNode.addListener(_handleComposerFocusChanged);
@@ -997,10 +1223,7 @@ class _SessionScreenState extends State<SessionScreen>
             score: 0,
           );
           draftFileMentions.add(
-            _ComposerFileMention(
-              file: file,
-              tokenText: file.isDirectory ? '@${file.path}/' : '@${file.path}',
-            ),
+            _ComposerFileMention(file: file, tokenText: _fileMentionToken(file)),
           );
         default:
           continue;
@@ -1357,21 +1580,22 @@ class _SessionScreenState extends State<SessionScreen>
       useSafeArea: true,
       backgroundColor: Colors.transparent,
       builder: (sheetContext) {
-        final size = MediaQuery.of(sheetContext).size;
-        return Padding(
-          padding: EdgeInsets.only(
-            bottom: MediaQuery.of(sheetContext).viewInsets.bottom,
-          ),
-          child: SizedBox(
-            height: size.height * 0.85,
-            child: SearchPanel(
-              controller: _searchController,
-              focusNode: _searchFocusNode,
-              records: records,
-              onClose: () => Navigator.of(sheetContext).maybePop(),
-              showDragHandle: true,
-              showCloseButton: false,
-            ),
+        final bottomInset = MediaQuery.of(sheetContext).viewInsets.bottom;
+        return MeshBottomSheetScaffold(
+          icon: Icons.search_rounded,
+          title: 'Search this session',
+          description:
+              'Look through messages, activities, and tool results without leaving the session.',
+          maxWidth: 760,
+          maxHeightFactor: 0.88,
+          padding: EdgeInsets.fromLTRB(14, 10, 14, 14 + bottomInset),
+          child: SearchPanel(
+            controller: _searchController,
+            focusNode: _searchFocusNode,
+            records: records,
+            onClose: () => Navigator.of(sheetContext).maybePop(),
+            showDragHandle: false,
+            showCloseButton: false,
           ),
         );
       },
@@ -1446,36 +1670,21 @@ class _SessionScreenState extends State<SessionScreen>
       isScrollControlled: true,
       useSafeArea: true,
       backgroundColor: Colors.transparent,
-      builder: (sheetContext) {
-        final size = MediaQuery.of(sheetContext).size;
-        return Padding(
-          padding: EdgeInsets.only(
-            bottom: MediaQuery.of(sheetContext).viewInsets.bottom,
-          ),
-          child: SizedBox(
-            height: size.height * 0.75,
-            child: _PinnedListSheet(
-              pinsBuilder: _currentPins,
-              refresh: _pinsStore,
-              onOpen: (pin) {
-                Navigator.of(sheetContext).maybePop();
-                _showPinnedMessage(pin);
-              },
-              onUnpin: _unpinMessage,
-              onClose: () => Navigator.of(sheetContext).maybePop(),
-            ),
-          ),
-        );
-      },
+      builder: (sheetContext) => _PinnedListSheet(
+        pinsBuilder: _currentPins,
+        refresh: _pinsStore,
+        onOpen: (pin) {
+          Navigator.of(sheetContext).maybePop();
+          _showPinnedMessage(pin);
+        },
+        onUnpin: _unpinMessage,
+      ),
     );
   }
 
   void _openResourcesPanel() {
     if (!_supportsSessionResources) {
-      showAppSnackBar(
-        context,
-        'This provider does not expose session resources.',
-      );
+      showAppSnackBar(context, 'This session does not have a resources view.');
       return;
     }
     final width = MediaQuery.of(context).size.width;
@@ -1498,26 +1707,28 @@ class _SessionScreenState extends State<SessionScreen>
       isScrollControlled: true,
       useSafeArea: true,
       backgroundColor: Colors.transparent,
-      builder: (sheetContext) {
-        final size = MediaQuery.of(sheetContext).size;
-        return SizedBox(
-          height: size.height * 0.82,
-          child: SessionResourcesPanel(
-            host: widget.host,
-            session: session,
-            api: widget.api,
-            showDragHandle: true,
-            onClose: () => Navigator.of(sheetContext).maybePop(),
-            onOpenFile: (path) {
-              Navigator.of(sheetContext).maybePop();
-              WidgetsBinding.instance.addPostFrameCallback((_) {
-                if (!mounted || _disposed) return;
-                _openWorkspaceFile(path);
-              });
-            },
-          ),
-        );
-      },
+      builder: (sheetContext) => MeshBottomSheetScaffold(
+        icon: Icons.perm_media_rounded,
+        title: 'Session resources',
+        description:
+            'Review files, images, and links saved from this session in one place.',
+        maxWidth: 900,
+        maxHeightFactor: 0.84,
+        child: SessionResourcesPanel(
+          host: widget.host,
+          session: session,
+          api: widget.api,
+          showDragHandle: false,
+          onClose: () => Navigator.of(sheetContext).maybePop(),
+          onOpenFile: (path) {
+            Navigator.of(sheetContext).maybePop();
+            WidgetsBinding.instance.addPostFrameCallback((_) {
+              if (!mounted || _disposed) return;
+              _openWorkspaceFile(path);
+            });
+          },
+        ),
+      ),
     );
   }
 
@@ -1728,10 +1939,10 @@ class _SessionScreenState extends State<SessionScreen>
         : null;
     final nextDraftFileMentions = _supportsFileMentions
         ? _draftFileMentions
-            .where(
-              (item) => _composerController.text.contains(item.tokenText),
-            )
-            .toList(growable: false)
+              .where(
+                (item) => _composerController.text.contains(item.tokenText),
+              )
+              .toList(growable: false)
         : const <_ComposerFileMention>[];
     final fileQueryChanged =
         nextFileQuery?.start != _activeFileQuery?.start ||
@@ -1795,8 +2006,7 @@ class _SessionScreenState extends State<SessionScreen>
     final offset = sel.isValid ? sel.end : text.length;
     final needsSpace = offset > 0 && text[offset - 1] != ' ';
     final insert = needsSpace ? r' $' : r'$';
-    final newText =
-        text.substring(0, offset) + insert + text.substring(offset);
+    final newText = text.substring(0, offset) + insert + text.substring(offset);
     _composerController.value = TextEditingValue(
       text: newText,
       selection: TextSelection.collapsed(offset: offset + insert.length),
@@ -1812,8 +2022,7 @@ class _SessionScreenState extends State<SessionScreen>
     final offset = sel.isValid ? sel.end : text.length;
     final needsSpace = offset > 0 && text[offset - 1] != ' ';
     final insert = needsSpace ? ' @' : '@';
-    final newText =
-        text.substring(0, offset) + insert + text.substring(offset);
+    final newText = text.substring(0, offset) + insert + text.substring(offset);
     _composerController.value = TextEditingValue(
       text: newText,
       selection: TextSelection.collapsed(offset: offset + insert.length),
@@ -2131,11 +2340,16 @@ class _SessionScreenState extends State<SessionScreen>
       // we'll replay them after the snapshot setState so they aren't clobbered.
       final bufferedEvents = List<LiveEvent>.from(_pendingLiveEvents);
       _pendingLiveEvents.clear();
+      final snapshotActivities = _mergeIncomingActivities(
+        _activities,
+        log.activities,
+        mode: _ActivityMergeMode.snapshot,
+      );
       setState(() {
         _session = log.session;
         _messages = log.messages;
         _optimisticMessages = _reconcileOptimisticMessages(log.messages);
-        _activities = _sortActivities(log.activities);
+        _activities = snapshotActivities;
         _history = log.history;
         _messageLimit = resolvedMessageLimit;
         _activityLimit = resolvedActivityLimit;
@@ -2168,7 +2382,7 @@ class _SessionScreenState extends State<SessionScreen>
         for (final m in log.messages) {
           if (m.seq > highestSeq) highestSeq = m.seq;
         }
-        for (final a in log.activities) {
+        for (final a in snapshotActivities) {
           if (a.seq > highestSeq) highestSeq = a.seq;
         }
         if (restoredPlanSeq != null && restoredPlanSeq > highestSeq) {
@@ -2405,13 +2619,11 @@ class _SessionScreenState extends State<SessionScreen>
             });
         }
         if (delta.activities.isNotEmpty) {
-          final byId = <String, SessionActivity>{
-            for (final a in _activities) a.id: a,
-          };
-          for (final a in delta.activities) {
-            byId[a.id] = a;
-          }
-          mergedActivities = _sortActivities(byId.values.toList());
+          mergedActivities = _mergeIncomingActivities(
+            _activities,
+            delta.activities,
+            mode: _ActivityMergeMode.incremental,
+          );
         }
         _messages = mergedMessages;
         _activities = mergedActivities;
@@ -2715,7 +2927,8 @@ class _SessionScreenState extends State<SessionScreen>
             final hasThinkingBlocks = message.content.any(
               (b) => b is ThinkingBlock,
             );
-            final liveThinking = committedLive != null &&
+            final liveThinking =
+                committedLive != null &&
                 committedLive.reasoning.trim().isNotEmpty;
             if (!hasThinkingBlocks && liveThinking) {
               final reasoning = committedLive.reasoning.trimRight();
@@ -2905,10 +3118,9 @@ class _SessionScreenState extends State<SessionScreen>
       event: event,
       createdAt: createdAt ?? DateTime.now(),
       seq: seqOverride ?? event.seq ?? _nextTimelineSeq(),
-      keyId:
-          replaceSemanticKey == null
-              ? '${kind.name}:${event.seq ?? DateTime.now().microsecondsSinceEpoch}'
-              : '${kind.name}:$replaceSemanticKey',
+      keyId: replaceSemanticKey == null
+          ? '${kind.name}:${event.seq ?? DateTime.now().microsecondsSinceEpoch}'
+          : '${kind.name}:$replaceSemanticKey',
       semanticKey: replaceSemanticKey,
     );
     final existingIndex = replaceSemanticKey == null
@@ -2918,8 +3130,9 @@ class _SessionScreenState extends State<SessionScreen>
           );
     if (existingIndex == -1) {
       final next = [..._timelineLiveEvents, record];
-      _timelineLiveEvents =
-          next.length > 16 ? next.sublist(next.length - 16) : next;
+      _timelineLiveEvents = next.length > 16
+          ? next.sublist(next.length - 16)
+          : next;
       return;
     }
     final updated = [..._timelineLiveEvents];
@@ -3121,7 +3334,7 @@ class _SessionScreenState extends State<SessionScreen>
     if (!_supportsImageInput) {
       showAppSnackBar(
         context,
-        'This provider does not support image attachments.',
+        'This session does not accept image attachments.',
       );
       return;
     }
@@ -3289,7 +3502,7 @@ class _SessionScreenState extends State<SessionScreen>
       if (showEmptyFeedback) {
         showAppSnackBar(
           context,
-          'This provider does not support image attachments.',
+          'This session does not accept image attachments.',
         );
       }
       return false;
@@ -3679,13 +3892,12 @@ class _SessionScreenState extends State<SessionScreen>
 
   void _insertFileMention(FsSearchResult file) {
     final active =
-        _activeFileQuery ??
-        _extractActiveFileQuery(_composerController.value);
+        _activeFileQuery ?? _extractActiveFileQuery(_composerController.value);
     if (active == null) {
       return;
     }
 
-    final tokenText = file.isDirectory ? '@${file.path}/' : '@${file.path}';
+    final tokenText = _fileMentionToken(file);
     final value = _composerController.value;
     final text = value.text;
     final replaced = text.replaceRange(active.start, active.end, '$tokenText ');
@@ -3698,9 +3910,7 @@ class _SessionScreenState extends State<SessionScreen>
 
     final nextMentions = List<_ComposerFileMention>.from(_draftFileMentions);
     if (!nextMentions.any((item) => item.file.path == file.path)) {
-      nextMentions.add(
-        _ComposerFileMention(file: file, tokenText: tokenText),
-      );
+      nextMentions.add(_ComposerFileMention(file: file, tokenText: tokenText));
     }
 
     HapticFeedback.selectionClick();
@@ -4092,7 +4302,10 @@ class _SessionScreenState extends State<SessionScreen>
     final draftFileMentions = List<_ComposerFileMention>.from(
       _draftFileMentions.where((item) => text.contains(item.tokenText)),
     );
-    if ((text.isEmpty && draftAttachments.isEmpty && draftFileMentions.isEmpty) || _sending) {
+    if ((text.isEmpty &&
+            draftAttachments.isEmpty &&
+            draftFileMentions.isEmpty) ||
+        _sending) {
       return;
     }
 
@@ -4312,35 +4525,77 @@ class _SessionScreenState extends State<SessionScreen>
     _failedSendRetryExpiresAt = null;
   }
 
+  Future<bool> _showSessionConfirmDialog({
+    required IconData icon,
+    required String title,
+    required String body,
+    required String confirmLabel,
+    bool danger = false,
+  }) async {
+    return showMeshConfirmDialog(
+      context,
+      icon: icon,
+      title: title,
+      description: body,
+      confirmLabel: confirmLabel,
+      danger: danger,
+      maxWidth: 420,
+    );
+  }
+
+  Future<String?> _promptSessionName(String current) async {
+    final controller = TextEditingController(text: current)
+      ..selection = TextSelection(baseOffset: 0, extentOffset: current.length);
+    final nextName = await showDialog<String>(
+      context: context,
+      builder: (dialogContext) {
+        return MeshDialogScaffold(
+          icon: Icons.edit_outlined,
+          title: 'Rename session',
+          description: 'Choose the name shown in Sidemesh.',
+          maxWidth: 460,
+          showCloseButton: true,
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.of(dialogContext).pop(controller.text),
+              child: const Text('Save name'),
+            ),
+          ],
+          child: TextField(
+            controller: controller,
+            autofocus: true,
+            decoration: const InputDecoration(labelText: 'Session name'),
+            textInputAction: TextInputAction.done,
+            onSubmitted: (value) => Navigator.of(dialogContext).pop(value),
+          ),
+        );
+      },
+    );
+    controller.dispose();
+    return nextName;
+  }
+
   Future<void> _stopSession() async {
     if (!_supportsSessionInterrupt) {
-      showAppSnackBar(context, 'This provider does not support interruption.');
+      showAppSnackBar(
+        context,
+        'Stopping the agent is not available for this session yet.',
+      );
       return;
     }
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (dialogContext) => AlertDialog(
-        title: const Text('Interrupt agent?'),
-        content: const Text(
-          'The current task will stop. Any tools mid-run may not finish cleanly.',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(dialogContext).pop(false),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            style: FilledButton.styleFrom(
-              backgroundColor: context.colors.danger,
-              foregroundColor: Colors.white,
-            ),
-            onPressed: () => Navigator.of(dialogContext).pop(true),
-            child: const Text('Interrupt'),
-          ),
-        ],
-      ),
+    final confirmed = await _showSessionConfirmDialog(
+      icon: Icons.stop_circle_outlined,
+      title: 'Stop the agent?',
+      body:
+          'The current task will stop. Any tools that are still running may not finish cleanly.',
+      confirmLabel: 'Stop agent',
+      danger: true,
     );
-    if (confirmed != true) return;
+    if (!confirmed) return;
     if (!mounted) return;
     try {
       await widget.api.stopSession(widget.host, widget.session.id);
@@ -4357,7 +4612,7 @@ class _SessionScreenState extends State<SessionScreen>
       _syncSessionLiveActivity();
       showAppSnackBar(
         context,
-        'Agent interrupted.',
+        'Agent stopped.',
         duration: const Duration(seconds: 2),
       );
     } catch (error) {
@@ -4366,40 +4621,31 @@ class _SessionScreenState extends State<SessionScreen>
       }
       showAppSnackBar(
         context,
-        'Failed to interrupt agent: ${friendlyError(error)}',
+        'Failed to stop the agent: ${friendlyError(error)}',
       );
     }
   }
 
   Future<void> _compactSession() async {
     if (!_supportsSessionCompact) {
-      showAppSnackBar(context, 'This provider does not support compaction.');
+      showAppSnackBar(
+        context,
+        'Context compaction is not available for this session.',
+      );
       return;
     }
     if (_running) {
       showAppSnackBar(context, 'Wait for the current turn to finish first.');
       return;
     }
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (dialogContext) => AlertDialog(
-        title: const Text('Compact session?'),
-        content: const Text(
-          'The provider will summarize older context so future turns can use fewer tokens. Recent messages remain visible in Sidemesh.',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(dialogContext).pop(false),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.of(dialogContext).pop(true),
-            child: const Text('Compact'),
-          ),
-        ],
-      ),
+    final confirmed = await _showSessionConfirmDialog(
+      icon: Icons.compress_rounded,
+      title: 'Compact this session?',
+      body:
+          'Older context will be summarized so future replies can use fewer tokens. Recent messages stay visible in Sidemesh.',
+      confirmLabel: 'Start compaction',
     );
-    if (confirmed != true || !mounted) {
+    if (!confirmed || !mounted) {
       return;
     }
     try {
@@ -4426,36 +4672,11 @@ class _SessionScreenState extends State<SessionScreen>
 
   Future<void> _renameSession() async {
     if (!_supportsSessionRename) {
-      showAppSnackBar(context, 'This provider does not support renaming.');
+      showAppSnackBar(context, 'Renaming is not available for this session.');
       return;
     }
     final current = (_session ?? widget.session).title;
-    final controller = TextEditingController(text: current)
-      ..selection = TextSelection(baseOffset: 0, extentOffset: current.length);
-    final newName = await showDialog<String>(
-      context: context,
-      builder: (dialogContext) => AlertDialog(
-        title: const Text('Rename session'),
-        content: TextField(
-          controller: controller,
-          autofocus: true,
-          decoration: const InputDecoration(labelText: 'Session name'),
-          textInputAction: TextInputAction.done,
-          onSubmitted: (value) => Navigator.of(dialogContext).pop(value),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(dialogContext).pop(),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.of(dialogContext).pop(controller.text),
-            child: const Text('Save'),
-          ),
-        ],
-      ),
-    );
-    controller.dispose();
+    final newName = await _promptSessionName(current);
     final trimmed = newName?.trim();
     if (trimmed == null || trimmed.isEmpty || trimmed == current) {
       return;
@@ -4482,29 +4703,17 @@ class _SessionScreenState extends State<SessionScreen>
 
   Future<void> _archiveSession() async {
     if (!_supportsSessionArchive) {
-      showAppSnackBar(context, 'This provider does not support archiving.');
+      showAppSnackBar(context, 'Archiving is not available for this session.');
       return;
     }
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (dialogContext) => AlertDialog(
-        title: const Text('Archive session?'),
-        content: const Text(
-          'Archived sessions are hidden from Recent. You can unarchive them from the host.',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(dialogContext).pop(false),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.of(dialogContext).pop(true),
-            child: const Text('Archive'),
-          ),
-        ],
-      ),
+    final confirmed = await _showSessionConfirmDialog(
+      icon: Icons.archive_outlined,
+      title: 'Archive this session?',
+      body:
+          'Archived sessions disappear from Recent. You can still restore them later from the host.',
+      confirmLabel: 'Archive session',
     );
-    if (confirmed != true) {
+    if (!confirmed) {
       return;
     }
     try {
@@ -4582,8 +4791,8 @@ class _SessionScreenState extends State<SessionScreen>
   Future<void> _showPinnedMessage(PinnedSessionMessage pin) async {
     await showModalBottomSheet<void>(
       context: context,
-      backgroundColor: context.colors.surface,
-      showDragHandle: true,
+      backgroundColor: Colors.transparent,
+      showDragHandle: false,
       useSafeArea: true,
       isScrollControlled: true,
       builder: (sheetContext) => _PinnedMessageSheet(
@@ -4602,7 +4811,7 @@ class _SessionScreenState extends State<SessionScreen>
     if (action == null) {
       return;
     }
-    HapticFeedback.mediumImpact();   // immediate tactile confirmation
+    HapticFeedback.mediumImpact(); // immediate tactile confirmation
     try {
       await widget.api.respondToAction(
         widget.host,
@@ -4645,7 +4854,7 @@ class _SessionScreenState extends State<SessionScreen>
     bool forceRefresh = false,
   }) async {
     if (!_supportsGitStatus) {
-      showAppSnackBar(context, 'This provider does not expose git status.');
+      showAppSnackBar(context, 'Git status is not available for this session.');
       return;
     }
     if (forceRefresh || _gitStatus == null) {
@@ -4654,8 +4863,8 @@ class _SessionScreenState extends State<SessionScreen>
     if (!mounted) return;
     await showModalBottomSheet<void>(
       context: context,
-      backgroundColor: context.colors.surface,
-      showDragHandle: true,
+      backgroundColor: Colors.transparent,
+      showDragHandle: false,
       useSafeArea: true,
       builder: (sheetContext) => _GitDetailsSheet(
         session: session,
@@ -4676,14 +4885,17 @@ class _SessionScreenState extends State<SessionScreen>
 
   Future<void> _showGitDiffSheet(String kind) async {
     if (!_supportsGitDiffKind(kind)) {
-      showAppSnackBar(context, 'This provider does not expose this git diff.');
+      showAppSnackBar(
+        context,
+        'This Git diff is not available for this session.',
+      );
       return;
     }
     if (!mounted) return;
     await showModalBottomSheet<void>(
       context: context,
-      backgroundColor: context.colors.surface,
-      showDragHandle: true,
+      backgroundColor: Colors.transparent,
+      showDragHandle: false,
       useSafeArea: true,
       isScrollControlled: true,
       builder: (context) => _GitDiffSheet(
@@ -4701,78 +4913,575 @@ class _SessionScreenState extends State<SessionScreen>
     final gitLabel = _supportsGitStatus
         ? _gitHeaderLabel(session, _gitStatus)
         : null;
+    Widget sectionLabel(String title, String subtitle) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            title,
+            style: Theme.of(context).textTheme.labelLarge?.copyWith(
+              color: colors.textPrimary,
+              fontWeight: AppWeights.title,
+            ),
+          ),
+          const SizedBox(height: 3),
+          Text(
+            subtitle,
+            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+              color: colors.textSecondary,
+              height: 1.35,
+            ),
+          ),
+        ],
+      );
+    }
+
     await showModalBottomSheet<void>(
       context: context,
-      backgroundColor: colors.surface,
-      showDragHandle: true,
+      backgroundColor: Colors.transparent,
+      showDragHandle: false,
       useSafeArea: true,
       isScrollControlled: true,
-      builder: (context) => SafeArea(
-        child: ConstrainedBox(
-          constraints: BoxConstraints(
-            maxHeight: MediaQuery.of(context).size.height * 0.86,
-          ),
-          child: SingleChildScrollView(
-            padding: const EdgeInsets.fromLTRB(18, 4, 18, 24),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
+      builder: (context) => MeshBottomSheetScaffold(
+        icon: Icons.info_outline_rounded,
+        title: 'Session details',
+        description:
+            'See where this session is running and the live settings the agent is using.',
+        maxWidth: 760,
+        maxHeightFactor: 0.86,
+        child: SingleChildScrollView(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              MeshCard(
+                tone: MeshCardTone.muted,
+                padding: const EdgeInsets.all(14),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Expanded(
-                      child: Text(
-                        'Session details',
-                        style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                          fontWeight: FontWeight.w800,
-                        ),
+                    Text(
+                      session.title,
+                      style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                        fontWeight: AppWeights.title,
                       ),
                     ),
-                    IconButton(
-                      tooltip: 'Close',
-                      onPressed: () => Navigator.of(context).pop(),
-                      icon: const Icon(Icons.close_rounded),
+                    const SizedBox(height: 4),
+                    Text(
+                      'Running on ${widget.host.label}',
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color: colors.textSecondary,
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
+                      children: [
+                        MeshPill(
+                          label: _running ? 'running' : 'idle',
+                          icon: _running
+                              ? Icons.play_circle_outline_rounded
+                              : Icons.pause_circle_outline_rounded,
+                          tone: _running
+                              ? MeshPillTone.success
+                              : MeshPillTone.neutral,
+                        ),
+                        MeshPill(
+                          label: session.source,
+                          icon: Icons.route_rounded,
+                          tone: MeshPillTone.neutral,
+                        ),
+                        if (gitLabel != null)
+                          MeshPill(
+                            label: gitLabel,
+                            icon: Icons.account_tree_rounded,
+                            tone: MeshPillTone.info,
+                          ),
+                      ],
                     ),
                   ],
                 ),
-                const SizedBox(height: 8),
-                MeshCard(
-                  tone: MeshCardTone.muted,
-                  padding: const EdgeInsets.fromLTRB(14, 12, 14, 2),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      _DetailRow(label: 'Host', value: widget.host.label),
-                      _DetailRow(label: 'Working dir', value: session.cwd),
-                      _DetailRow(
-                        label: 'Status',
-                        value: _running ? 'Running' : 'Idle',
-                      ),
-                      _DetailRow(label: 'Source', value: session.source),
-                      if (gitLabel != null)
-                        _DetailRow(label: 'Git', value: gitLabel),
-                    ],
-                  ),
+              ),
+              const SizedBox(height: 14),
+              sectionLabel(
+                'Overview',
+                'Where this session is running and how it started.',
+              ),
+              const SizedBox(height: 8),
+              MeshCard(
+                tone: MeshCardTone.muted,
+                padding: const EdgeInsets.fromLTRB(14, 12, 14, 2),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    _DetailRow(label: 'Host', value: widget.host.label),
+                    _DetailRow(label: 'Folder', value: session.cwd),
+                    _DetailRow(
+                      label: 'Status',
+                      value: _running ? 'Running' : 'Idle',
+                    ),
+                    _DetailRow(label: 'Started from', value: session.source),
+                    if (gitLabel != null)
+                      _DetailRow(label: 'Git', value: gitLabel),
+                  ],
                 ),
-                if (gitLabel != null) ...[
-                  const SizedBox(height: 8),
-                  TextButton.icon(
-                    onPressed: () {
-                      Navigator.of(context).pop();
-                      unawaited(_showGitSheet(session));
-                    },
-                    icon: const Icon(Icons.account_tree_rounded, size: 18),
-                    label: const Text('Open Git details'),
-                  ),
-                ],
-                if (session.runtime != null) ...[
-                  const SizedBox(height: 14),
-                  _SessionRuntimeDetails(runtime: session.runtime!),
-                ],
+              ),
+              if (gitLabel != null) ...[
+                const SizedBox(height: 8),
+                OutlinedButton.icon(
+                  onPressed: () {
+                    Navigator.of(context).pop();
+                    unawaited(_showGitSheet(session));
+                  },
+                  icon: const Icon(Icons.account_tree_rounded, size: 18),
+                  label: const Text('View Git details'),
+                ),
               ],
-            ),
+              if (session.runtime != null) ...[
+                const SizedBox(height: 14),
+                sectionLabel(
+                  'Runtime now',
+                  'Live settings the agent is using for this session.',
+                ),
+                const SizedBox(height: 8),
+                _SessionRuntimeDetails(runtime: session.runtime!),
+              ],
+            ],
           ),
         ),
       ),
+    );
+  }
+
+  String? _cleanComposerLabel(String? value) {
+    final trimmed = value?.trim();
+    if (trimmed == null || trimmed.isEmpty) {
+      return null;
+    }
+    return trimmed;
+  }
+
+  String _compactComposerModelLabel(String value) {
+    final model = value.split('/').last.trim();
+    if (model.length <= 24) {
+      return model;
+    }
+    return '${model.substring(0, 21)}...';
+  }
+
+  SessionTurnConfig _composerTurnConfig(SessionSummary session) {
+    return _turnConfigStore.configFor(widget.host, session.id);
+  }
+
+  String _composerModelLabel(SessionSummary session) {
+    final turnConfig = _composerTurnConfig(session);
+    final override = _cleanComposerLabel(turnConfig.model);
+    if (override != null) {
+      return _compactComposerModelLabel(override);
+    }
+    final runtime = _cleanComposerLabel(session.runtime?.model);
+    if (runtime != null) {
+      return _compactComposerModelLabel(runtime);
+    }
+    final provider = agentProviderDisplayLabel(
+      session.provider,
+      nodeInfo: _nodeInfo,
+    );
+    return provider ?? 'Model';
+  }
+
+  String _composerModelDetail(SessionSummary session) {
+    final turnConfig = _composerTurnConfig(session);
+    if (_cleanComposerLabel(turnConfig.model) != null) {
+      return 'Next reply';
+    }
+    if (_cleanComposerLabel(session.runtime?.model) != null) {
+      return 'Current model';
+    }
+    if (agentProviderDisplayLabel(session.provider, nodeInfo: _nodeInfo) !=
+        null) {
+      return 'Agent default';
+    }
+    return 'Choose model';
+  }
+
+  bool _composerModelCustomized(SessionSummary session) {
+    return _cleanComposerLabel(_composerTurnConfig(session).model) != null;
+  }
+
+  String _composerThinkingLabel(SessionSummary session) {
+    final turnConfig = _composerTurnConfig(session);
+    final override = _cleanComposerLabel(turnConfig.reasoningEffort);
+    if (override != null) {
+      return _reasoningEffortLabel(override);
+    }
+    final runtime = _cleanComposerLabel(session.runtime?.reasoningEffort);
+    if (runtime != null) {
+      return _reasoningEffortLabel(runtime);
+    }
+    return 'Auto';
+  }
+
+  String _composerThinkingDetail(SessionSummary session) {
+    final turnConfig = _composerTurnConfig(session);
+    if (_cleanComposerLabel(turnConfig.reasoningEffort) != null) {
+      return 'Next reply';
+    }
+    if (_cleanComposerLabel(session.runtime?.reasoningEffort) != null) {
+      return 'Current thinking';
+    }
+    return 'Thinking';
+  }
+
+  bool _composerThinkingCustomized(SessionSummary session) {
+    return _cleanComposerLabel(
+          _composerTurnConfig(session).reasoningEffort,
+        ) !=
+        null;
+  }
+
+  String? _composerRuntimeModelProvider(SessionSummary session) {
+    final provider = _cleanComposerLabel(session.runtime?.modelProvider);
+    if (provider == null || provider == 'openai') {
+      return null;
+    }
+    return provider;
+  }
+
+  Future<ProviderCapabilities?> _loadComposerCapabilities(
+    SessionSummary session,
+  ) async {
+    NodeInfo? node = _nodeInfo;
+    if (node == null) {
+      try {
+        node = await widget.api.fetchNode(widget.host);
+        if (!mounted || _disposed) return null;
+        setState(() => _nodeInfo = node);
+      } catch (_) {
+        // Model loading below will show the user-facing error if the host is
+        // unavailable. Capability checks are best-effort here.
+      }
+    }
+    return node?.capabilitiesForProvider(session.provider);
+  }
+
+  Future<List<ModelCatalogEntry>?> _fetchComposerModels(
+    SessionSummary session,
+  ) async {
+    try {
+      final models = [
+        ...await widget.api.fetchModels(
+          widget.host,
+          cwd: session.cwd,
+          agentProvider: session.provider,
+          provider: _composerRuntimeModelProvider(session),
+        ),
+      ];
+      models.sort(_compareModelEntries);
+      return models;
+    } catch (error) {
+      if (!mounted || _disposed) return null;
+      showAppSnackBar(context, friendlyError(error));
+      return null;
+    }
+  }
+
+  Future<void> _showComposerModelPicker(SessionSummary session) async {
+    await _turnConfigStore.ensureLoaded();
+    if (!mounted || _disposed) return;
+
+    final capabilities = await _loadComposerCapabilities(session);
+    if (!mounted || _disposed) return;
+    if (capabilities != null &&
+        (!capabilities.supports('configuration', 'models') ||
+            !capabilities.supports('runtimeControls', 'model'))) {
+      showAppSnackBar(context, 'This agent does not offer model choices here.');
+      return;
+    }
+
+    final models = await _fetchComposerModels(session);
+    if (!mounted || _disposed) return;
+    if (models == null) return;
+    if (models.isEmpty) {
+      showAppSnackBar(
+        context,
+        'No models are available from this host right now.',
+      );
+      return;
+    }
+
+    final turnConfig = _composerTurnConfig(session);
+    final defaultModel = models.firstWhere(
+      (model) => model.isDefault,
+      orElse: () => models.first,
+    );
+    final currentModel =
+        _cleanComposerLabel(turnConfig.model) ??
+        _cleanComposerLabel(session.runtime?.model) ??
+        defaultModel.model;
+    final selected = await _showComposerModelPickerSurface(
+      models: models,
+      currentModel: currentModel,
+      providerName: _composerRuntimeModelProvider(session),
+    );
+    if (!mounted || _disposed || selected == null) return;
+
+    final nextConfig = _composerConfigForSelectedModel(
+      session: session,
+      current: turnConfig,
+      selected: selected,
+      capabilities: capabilities,
+    );
+    if (_sameTurnConfig(nextConfig, turnConfig)) {
+      showAppSnackBar(context, 'This model is already selected.');
+      return;
+    }
+
+    await _turnConfigStore.setConfig(widget.host, session.id, nextConfig);
+    if (!mounted || _disposed) return;
+    showAppSnackBar(context, 'Model will change on the next reply.');
+  }
+
+  Future<void> _showComposerThinkingPicker(SessionSummary session) async {
+    await _turnConfigStore.ensureLoaded();
+    if (!mounted || _disposed) return;
+
+    final capabilities = await _loadComposerCapabilities(session);
+    if (!mounted || _disposed) return;
+    if (capabilities != null &&
+        (!capabilities.supports('configuration', 'models') ||
+            !capabilities.supports('runtimeControls', 'model') ||
+            !capabilities.supports('runtimeControls', 'reasoningEffort'))) {
+      showAppSnackBar(
+        context,
+        'This agent does not offer thinking choices here.',
+      );
+      return;
+    }
+
+    final models = await _fetchComposerModels(session);
+    if (!mounted || _disposed) return;
+    if (models == null) return;
+    if (models.isEmpty) {
+      showAppSnackBar(
+        context,
+        'No models are available from this host right now.',
+      );
+      return;
+    }
+
+    final turnConfig = _composerTurnConfig(session);
+    final defaultModel = models.firstWhere(
+      (model) => model.isDefault,
+      orElse: () => models.first,
+    );
+    final currentModel =
+        _cleanComposerLabel(turnConfig.model) ??
+        _cleanComposerLabel(session.runtime?.model) ??
+        defaultModel.model;
+    final selectedModel = models.firstWhere(
+      (model) => model.model == currentModel,
+      orElse: () => defaultModel,
+    );
+    if (selectedModel.isAutoModel) {
+      showAppSnackBar(
+        context,
+        'This model manages thinking automatically.',
+      );
+      return;
+    }
+    final options = selectedModel.supportedReasoningEfforts;
+    if (options.isEmpty) {
+      showAppSnackBar(
+        context,
+        'This model does not expose adjustable thinking effort.',
+      );
+      return;
+    }
+
+    final supportedReasoning = options
+        .map((option) => option.reasoningEffort)
+        .toSet();
+    final rawCurrentReasoning =
+        _cleanComposerLabel(turnConfig.reasoningEffort) ??
+        _cleanComposerLabel(session.runtime?.reasoningEffort) ??
+        selectedModel.defaultReasoningEffort;
+    final currentReasoning = supportedReasoning.contains(rawCurrentReasoning)
+        ? rawCurrentReasoning
+        : selectedModel.defaultReasoningEffort;
+    final selected = await _showComposerThinkingPickerSurface(
+      options: options,
+      currentReasoning: currentReasoning,
+      defaultReasoning: selectedModel.defaultReasoningEffort,
+      modelLabel: selectedModel.displayName,
+    );
+    if (!mounted || _disposed || selected == null) return;
+
+    final runtimeModel = _cleanComposerLabel(session.runtime?.model);
+    final runtimeReasoning = _cleanComposerLabel(
+      session.runtime?.reasoningEffort,
+    );
+    final inheritsCurrentModel =
+        _cleanComposerLabel(turnConfig.model) == null ||
+        _cleanComposerLabel(turnConfig.model) == runtimeModel;
+    String? nextReasoning = selected;
+    if (inheritsCurrentModel &&
+        runtimeReasoning != null &&
+        selected == runtimeReasoning) {
+      nextReasoning = null;
+    } else if (inheritsCurrentModel &&
+        runtimeReasoning == null &&
+        selected == selectedModel.defaultReasoningEffort) {
+      nextReasoning = null;
+    }
+    final nextConfig = turnConfig.copyWith(reasoningEffort: nextReasoning);
+    if (_sameTurnConfig(nextConfig, turnConfig)) {
+      showAppSnackBar(context, 'This thinking level is already selected.');
+      return;
+    }
+
+    await _turnConfigStore.setConfig(widget.host, session.id, nextConfig);
+    if (!mounted || _disposed) return;
+    showAppSnackBar(context, 'Thinking level will change on the next reply.');
+  }
+
+  Future<ModelCatalogEntry?> _showComposerModelPickerSurface({
+    required List<ModelCatalogEntry> models,
+    required String currentModel,
+    required String? providerName,
+  }) {
+    final picker = _ModelPickerSheet(
+      models: models,
+      currentModel: currentModel,
+      providerName: providerName,
+    );
+    if (widget.desktopMode) {
+      return showDialog<ModelCatalogEntry>(
+        context: context,
+        barrierColor: Colors.black.withValues(alpha: 0.35),
+        builder: (dialogContext) => Dialog(
+          backgroundColor: Colors.transparent,
+          insetPadding: const EdgeInsets.symmetric(
+            horizontal: 48,
+            vertical: 48,
+          ),
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 760, maxHeight: 640),
+            child: picker,
+          ),
+        ),
+      );
+    }
+    return showModalBottomSheet<ModelCatalogEntry>(
+      context: context,
+      backgroundColor: Colors.transparent,
+      showDragHandle: false,
+      useSafeArea: true,
+      isScrollControlled: true,
+      builder: (sheetContext) => picker,
+    );
+  }
+
+  Future<String?> _showComposerThinkingPickerSurface({
+    required List<ModelReasoningEffortOption> options,
+    required String currentReasoning,
+    required String defaultReasoning,
+    required String modelLabel,
+  }) {
+    final picker = _ReasoningPickerSheet(
+      options: options,
+      currentReasoning: currentReasoning,
+      defaultReasoning: defaultReasoning,
+      modelLabel: modelLabel,
+    );
+    if (widget.desktopMode) {
+      return showDialog<String>(
+        context: context,
+        barrierColor: Colors.black.withValues(alpha: 0.35),
+        builder: (dialogContext) => Dialog(
+          backgroundColor: Colors.transparent,
+          insetPadding: const EdgeInsets.symmetric(
+            horizontal: 48,
+            vertical: 48,
+          ),
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 520, maxHeight: 520),
+            child: picker,
+          ),
+        ),
+      );
+    }
+    return showModalBottomSheet<String>(
+      context: context,
+      backgroundColor: Colors.transparent,
+      showDragHandle: false,
+      useSafeArea: true,
+      isScrollControlled: true,
+      builder: (sheetContext) => picker,
+    );
+  }
+
+  SessionTurnConfig _composerConfigForSelectedModel({
+    required SessionSummary session,
+    required SessionTurnConfig current,
+    required ModelCatalogEntry selected,
+    required ProviderCapabilities? capabilities,
+  }) {
+    final supportsReasoning =
+        capabilities?.supports('runtimeControls', 'reasoningEffort') ?? true;
+    final supportsFastMode =
+        capabilities?.supports('runtimeControls', 'fastMode') ?? true;
+    final runtimeModel = _cleanComposerLabel(session.runtime?.model);
+    final runtimeReasoning = _cleanComposerLabel(
+      session.runtime?.reasoningEffort,
+    );
+    final runtimeFast = session.runtime?.serviceTier == 'fast';
+    final supportedReasoning = selected.supportedReasoningEfforts
+        .map((option) => option.reasoningEffort)
+        .toSet();
+
+    final inheritsDefaultModel = runtimeModel == null && selected.isDefault;
+    final nextModel = runtimeModel == selected.model || inheritsDefaultModel
+        ? null
+        : selected.model;
+    var nextReasoning = _cleanComposerLabel(current.reasoningEffort);
+    final effectiveReasoning = nextReasoning ?? runtimeReasoning;
+    if (!supportsReasoning || selected.isAutoModel) {
+      nextReasoning = null;
+    } else if (effectiveReasoning != null &&
+        supportedReasoning.contains(effectiveReasoning)) {
+      nextReasoning = effectiveReasoning;
+    } else {
+      nextReasoning = selected.defaultReasoningEffort;
+    }
+
+    var nextFast = current.fastMode;
+    if (!supportsFastMode) {
+      nextFast = null;
+    } else if (!selected.supportsFastMode &&
+        (current.fastMode ?? runtimeFast)) {
+      nextFast = false;
+    }
+
+    if (nextModel == null &&
+        runtimeReasoning != null &&
+        nextReasoning == runtimeReasoning) {
+      nextReasoning = null;
+    }
+    if (nextModel == null &&
+        runtimeReasoning == null &&
+        current.reasoningEffort == null) {
+      nextReasoning = null;
+    }
+    if (nextModel == null && nextFast != null && nextFast == runtimeFast) {
+      nextFast = null;
+    }
+
+    return SessionTurnConfig(
+      model: nextModel,
+      mode: current.mode,
+      reasoningEffort: nextReasoning,
+      fastMode: nextFast,
     );
   }
 
@@ -4786,6 +5495,7 @@ class _SessionScreenState extends State<SessionScreen>
       api: widget.api,
       host: widget.host,
       session: session,
+      useBottomSheetChrome: !isDesktop,
       runtimeModel: runtime?.model,
       runtimeModelProvider: runtime?.modelProvider,
       runtimeMode: runtime?.mode,
@@ -4802,17 +5512,27 @@ class _SessionScreenState extends State<SessionScreen>
         context: context,
         barrierColor: Colors.black.withValues(alpha: 0.35),
         builder: (dialogContext) => Dialog(
-          backgroundColor: context.colors.surface,
+          backgroundColor: Colors.transparent,
           insetPadding: const EdgeInsets.symmetric(
             horizontal: 48,
             vertical: 48,
           ),
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(16),
-          ),
           child: ConstrainedBox(
             constraints: const BoxConstraints(maxWidth: 520, maxHeight: 640),
-            child: sheet,
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                color: dialogContext.colors.surfaceElevated,
+                borderRadius: AppShapes.dialog,
+                border: Border.all(color: dialogContext.colors.border),
+                boxShadow: AppShadows.dialog(
+                  dialogContext.colors.textPrimary,
+                ),
+              ),
+              child: ClipRRect(
+                borderRadius: AppShapes.dialog,
+                child: sheet,
+              ),
+            ),
           ),
         ),
       );
@@ -4820,8 +5540,8 @@ class _SessionScreenState extends State<SessionScreen>
     }
     await showModalBottomSheet<void>(
       context: context,
-      backgroundColor: context.colors.surface,
-      showDragHandle: true,
+      backgroundColor: Colors.transparent,
+      showDragHandle: false,
       useSafeArea: true,
       isScrollControlled: true,
       builder: (sheetContext) => sheet,
@@ -4895,9 +5615,7 @@ class _SessionScreenState extends State<SessionScreen>
     return collectBrowserPreviewCandidates(_activities);
   }
 
-  Future<void> _openBrowserPreviewLauncher({
-    bool openInWindow = false,
-  }) async {
+  Future<void> _openBrowserPreviewLauncher({bool openInWindow = false}) async {
     if (!_supportsBrowserPreview) {
       showAppSnackBar(context, 'This host does not expose browser previews.');
       return;
@@ -4915,9 +5633,8 @@ class _SessionScreenState extends State<SessionScreen>
       isScrollControlled: true,
       useSafeArea: true,
       backgroundColor: Colors.transparent,
-      builder: (sheetContext) => _PreviewTargetPickerSheet(
-        suggestions: suggestions,
-      ),
+      builder: (sheetContext) =>
+          _PreviewTargetPickerSheet(suggestions: suggestions),
     );
     if (!mounted || selected == null) {
       return;
@@ -4926,8 +5643,7 @@ class _SessionScreenState extends State<SessionScreen>
   }
 
   Future<void> _openBrowserPreviewTarget(
-    BrowserPreviewTargetCandidate candidate,
-    {
+    BrowserPreviewTargetCandidate candidate, {
     bool openInWindow = false,
   }) async {
     if (!_supportsBrowserPreview) {
@@ -4980,10 +5696,7 @@ class _SessionScreenState extends State<SessionScreen>
 
   Future<void> _openConnections() async {
     if (!_supportsConnections) {
-      showAppSnackBar(
-        context,
-        'This host does not expose browser previews.',
-      );
+      showAppSnackBar(context, 'This host does not expose browser previews.');
       return;
     }
     final session = _session ?? widget.session;
@@ -5075,9 +5788,7 @@ class _SessionScreenState extends State<SessionScreen>
     }
   }
 
-  Future<void> _openBrowserPreviewWindow(
-    HostBrowserPreviewInfo preview,
-  ) async {
+  Future<void> _openBrowserPreviewWindow(HostBrowserPreviewInfo preview) async {
     _detachCurrentBrowserPreviewSurface(preview);
     final opened = await SidemeshBrowserPreviewWindowManager.instance
         .openOrFocusBrowserPreviewWindow(host: widget.host, preview: preview);
@@ -5279,9 +5990,7 @@ class _SessionScreenState extends State<SessionScreen>
         reasoning: delta,
       );
     }
-    return current.copyWith(
-      reasoning: '${current.reasoning}$delta',
-    );
+    return current.copyWith(reasoning: '${current.reasoning}$delta');
   }
 
   int _nextTimelineSeq() {
@@ -5348,26 +6057,117 @@ class _SessionScreenState extends State<SessionScreen>
   }
 
   void _upsertActivity(SessionActivity activity) {
-    final existingIndex = _activities.indexWhere(
-      (item) => item.id == activity.id,
+    _activities = _mergeIncomingActivities(
+      _activities,
+      [activity],
+      mode: _ActivityMergeMode.incremental,
     );
-    if (existingIndex == -1) {
-      _activities = _sortActivities([..._activities, activity]);
-      return;
-    }
-    final updated = [..._activities];
-    updated[existingIndex] = activity;
-    _activities = _sortActivities(updated);
   }
 
   List<SessionActivity> _sortActivities(List<SessionActivity> activities) {
     final sorted = [...activities];
     sorted.sort((left, right) {
-      final bySeq = left.seq.compareTo(right.seq);
-      if (bySeq != 0) return bySeq;
-      return left.createdAt.compareTo(right.createdAt);
+      final byCreatedAt = left.createdAt.compareTo(right.createdAt);
+      if (byCreatedAt != 0) return byCreatedAt;
+      return left.seq.compareTo(right.seq);
     });
     return sorted;
+  }
+
+  List<SessionActivity> _mergeIncomingActivities(
+    List<SessionActivity> current,
+    Iterable<SessionActivity> incoming, {
+    required _ActivityMergeMode mode,
+  }) {
+    final currentById = <String, SessionActivity>{
+      for (final activity in current) activity.id: activity,
+    };
+    final byId = mode == _ActivityMergeMode.incremental
+        ? <String, SessionActivity>{...currentById}
+        : <String, SessionActivity>{};
+
+    for (final activity in incoming) {
+      byId[activity.id] = _chooseActivityMergeWinner(
+        existing: currentById[activity.id],
+        incoming: activity,
+      );
+    }
+
+    if (mode == _ActivityMergeMode.snapshot) {
+      for (final activity in current) {
+        if (!_isCommandLikeActivity(activity)) {
+          continue;
+        }
+        final snapshotActivity = byId[activity.id];
+        if (snapshotActivity != null &&
+            _hasReadableCommandActivity(snapshotActivity)) {
+          continue;
+        }
+        byId[activity.id] = activity;
+      }
+    }
+
+    return _sortActivities(byId.values.toList());
+  }
+
+  SessionActivity _chooseActivityMergeWinner({
+    required SessionActivity? existing,
+    required SessionActivity incoming,
+  }) {
+    if (existing != null &&
+        _hasReadableCommandActivity(existing) &&
+        !_hasReadableCommandActivity(incoming)) {
+      return existing;
+    }
+    return incoming;
+  }
+
+  bool _isCommandLikeActivity(SessionActivity activity) {
+    if (activity.isCommand) {
+      return true;
+    }
+    if (!activity.isTool) {
+      return false;
+    }
+    if (activity.toolCategory == 'command') {
+      return true;
+    }
+    for (final target in activity.toolSemanticTargets) {
+      if (target.type == 'command' &&
+          ((target.command ?? target.value) ?? '').trim().isNotEmpty) {
+        return true;
+      }
+    }
+    return _toolArgsContainCommand(activity.toolArgs);
+  }
+
+  bool _hasReadableCommandActivity(SessionActivity activity) {
+    if (!_isCommandLikeActivity(activity)) {
+      return false;
+    }
+    if ((activity.command ?? '').trim().isNotEmpty) {
+      return true;
+    }
+    for (final target in activity.toolSemanticTargets) {
+      if (target.type == 'command' &&
+          ((target.command ?? target.value) ?? '').trim().isNotEmpty) {
+        return true;
+      }
+    }
+    return _toolArgsContainCommand(activity.toolArgs);
+  }
+
+  bool _toolArgsContainCommand(Object? value) {
+    if (value is! Map) {
+      return false;
+    }
+    for (final key in const ['command', 'cmd', 'fullCommandText']) {
+      final raw = value[key];
+      if (raw is String && raw.trim().isNotEmpty) {
+        return true;
+      }
+    }
+    return value.values.any(_toolArgsContainCommand);
   }
 
   List<_TimelineEntry> _buildTimelineEntries() {
@@ -5384,18 +6184,19 @@ class _SessionScreenState extends State<SessionScreen>
 
     final messages = _messages.where((m) => m.isRenderable);
     final optimistic = _optimisticMessages.where((m) => m.isRenderable);
+    final visibleActivities = _groupFileChangeActivities(_activities);
     final entries =
         <_TimelineEntry>[
           ...messages.map(_TimelineEntry.message),
           ...optimistic.map(_TimelineEntry.message),
-          ..._activities.map(_TimelineEntry.activity),
+          ...visibleActivities.map(_TimelineEntry.activity),
           ..._timelineLiveEvents.map(_TimelineEntry.runtimeEvent),
           if (liveAssistant != null)
             _TimelineEntry.liveAssistant(liveAssistant),
         ]..sort((left, right) {
-          final bySeq = left.seq.compareTo(right.seq);
-          if (bySeq != 0) return bySeq;
-          return left.createdAt.compareTo(right.createdAt);
+          final byCreatedAt = left.createdAt.compareTo(right.createdAt);
+          if (byCreatedAt != 0) return byCreatedAt;
+          return left.seq.compareTo(right.seq);
         });
 
     _entriesMessagesRef = _messages;
@@ -5411,6 +6212,109 @@ class _SessionScreenState extends State<SessionScreen>
       _timelineRevision.value++;
     });
     return entries;
+  }
+
+  List<SessionActivity> _groupFileChangeActivities(
+    List<SessionActivity> activities,
+  ) {
+    final grouped = <SessionActivity>[];
+    var index = 0;
+    while (index < activities.length) {
+      final current = activities[index];
+      final key = _fileChangeGroupKey(current);
+      if (key == null) {
+        grouped.add(current);
+        index += 1;
+        continue;
+      }
+
+      final bucket = <SessionActivity>[current];
+      var nextIndex = index + 1;
+      while (nextIndex < activities.length &&
+          _fileChangeGroupKey(activities[nextIndex]) == key) {
+        bucket.add(activities[nextIndex]);
+        nextIndex += 1;
+      }
+      grouped.add(_aggregateFileChangeActivities(bucket));
+      index = nextIndex;
+    }
+    return grouped;
+  }
+
+  String? _fileChangeGroupKey(SessionActivity activity) {
+    if (!activity.isFileChange) return null;
+    final turnId = (activity.turnId ?? '').trim();
+    if (turnId.isEmpty) return null;
+    return turnId;
+  }
+
+  SessionActivity _aggregateFileChangeActivities(
+    List<SessionActivity> activities,
+  ) {
+    if (activities.length == 1) return activities.first;
+    final first = activities.first;
+    final changes = _aggregateFileChangeChanges(activities);
+    return SessionActivity(
+      id:
+          'file-change-group:${first.turnId ?? first.id}:${activities.length}:${activities.last.id}',
+      type: first.type,
+      createdAt: first.createdAt,
+      seq: first.seq,
+      status: _aggregateFileChangeStatus(activities),
+      turnId: first.turnId,
+      command: first.command,
+      cwd: first.cwd,
+      output: first.output,
+      exitCode: first.exitCode,
+      durationMs: first.durationMs,
+      source: first.source,
+      processId: first.processId,
+      commandActions: first.commandActions,
+      terminalStatus: first.terminalStatus,
+      terminalInput: first.terminalInput,
+      toolName: first.toolName,
+      toolTitle: first.toolTitle,
+      toolArgs: first.toolArgs,
+      toolResult: first.toolResult,
+      toolError: first.toolError,
+      toolSemantic: first.toolSemantic,
+      changes: changes,
+      diff: first.diff,
+      query: first.query,
+      queries: first.queries,
+      targetUrl: first.targetUrl,
+      pattern: first.pattern,
+      revisedPrompt: first.revisedPrompt,
+      savedPath: first.savedPath,
+    );
+  }
+
+  List<SessionActivityChange> _aggregateFileChangeChanges(
+    List<SessionActivity> activities,
+  ) {
+    final byPath = <String, SessionActivityChange>{};
+    for (final activity in activities) {
+      for (final change in activity.changes) {
+        final key = change.path.trim();
+        if (key.isEmpty) continue;
+        byPath[key] = change;
+      }
+    }
+    return byPath.values.toList(growable: false);
+  }
+
+  String _aggregateFileChangeStatus(List<SessionActivity> activities) {
+    const terminal = {'completed', 'failed', 'declined'};
+    if (activities.any((activity) => !terminal.contains(activity.status))) {
+      return 'running';
+    }
+    if (activities.any((activity) => activity.status == 'failed')) {
+      return 'failed';
+    }
+    if (activities.any((activity) => activity.status == 'declined')) {
+      return 'declined';
+    }
+    return 'completed';
   }
 
   List<SearchRecord> _buildSearchRecords() {
@@ -5519,10 +6423,11 @@ class _SessionScreenState extends State<SessionScreen>
         final name = (activity.toolName ?? '').trim();
         return name.isEmpty ? 'Tool execution' : name;
       case 'file_change':
-        if (activity.changes.length == 1) {
+        final fileCount = _fileChangeFileCount(activity.changes);
+        if (fileCount == 1 && activity.changes.isNotEmpty) {
           return activity.changes.first.path;
         }
-        return 'Edited ${activity.changes.length} files';
+        return 'Edited $fileCount files';
       case 'turn_diff':
         return 'Turn diff';
       case 'web_search':
@@ -5624,6 +6529,9 @@ class _SessionScreenState extends State<SessionScreen>
       case 'reload':
         _reloadSnapshot();
         break;
+      case 'controls':
+        _showSessionPolicySheet(session);
+        break;
       case 'new':
         _startSessionFromCurrent();
         break;
@@ -5692,17 +6600,21 @@ class _SessionScreenState extends State<SessionScreen>
     required bool portsOpen,
     required bool searchOpen,
     required bool resourcesOpen,
+    bool includeStop = true,
+    bool includeNew = true,
+    bool includeControls = false,
+    bool controlsCustomized = false,
   }) {
     return [
-      // When the agent is running, surface the interrupt action at the top so
+      // When the agent is running, surface the stop action at the top so
       // it's immediately reachable without scrolling the sheet.
-      if (_running && _supportsSessionInterrupt)
+      if (includeStop && _running && _supportsSessionInterrupt)
         const _SessionActionGroup(
           label: 'LIVE',
           actions: [
             _SessionActionSpec(
               value: 'stop',
-              label: 'Interrupt agent',
+              label: 'Stop agent',
               detail: 'Stop the current task immediately.',
               icon: Icons.stop_circle_rounded,
               tone: _SessionActionTone.danger,
@@ -5812,18 +6724,32 @@ class _SessionScreenState extends State<SessionScreen>
       _SessionActionGroup(
         label: 'Session',
         actions: [
-          const _SessionActionSpec(
-            value: 'new',
-            label: 'New session',
-            detail: 'Start beside this working directory.',
-            icon: Icons.add_circle_outline_rounded,
-          ),
+          if (includeNew)
+            const _SessionActionSpec(
+              value: 'new',
+              label: 'New session',
+              detail: 'Start beside this working directory.',
+              icon: Icons.add_circle_outline_rounded,
+            ),
           const _SessionActionSpec(
             value: 'reload',
             label: 'Reload',
             detail: 'Refresh this transcript from the host.',
             icon: Icons.refresh_rounded,
           ),
+          if (includeControls)
+            _SessionActionSpec(
+              value: 'controls',
+              label: controlsCustomized
+                  ? 'Session controls changed'
+                  : 'Session controls',
+              detail: 'Model, thinking, permissions, and access.',
+              icon: Icons.tune_rounded,
+              tone: controlsCustomized
+                  ? _SessionActionTone.accent
+                  : _SessionActionTone.neutral,
+              active: controlsCustomized,
+            ),
           _SessionActionSpec(
             value: 'favorite',
             label: favorite ? 'Remove favorite' : 'Add favorite',
@@ -5846,7 +6772,7 @@ class _SessionScreenState extends State<SessionScreen>
             const _SessionActionSpec(
               value: 'compact',
               label: 'Compact context',
-              detail: 'Ask the provider to compress this conversation.',
+              detail: 'Summarize older context to keep the session lighter.',
               icon: Icons.compress_rounded,
             ),
           if (widget.topPadding != null &&
@@ -5859,15 +6785,17 @@ class _SessionScreenState extends State<SessionScreen>
             ),
         ],
       ),
-      if (_supportsProviderRestart || _supportsSessionRename || _supportsSessionArchive)
+      if (_supportsProviderRestart ||
+          _supportsSessionRename ||
+          _supportsSessionArchive)
         _SessionActionGroup(
           label: 'Manage',
           actions: [
             if (_supportsProviderRestart)
               const _SessionActionSpec(
                 value: 'restart_provider',
-                label: 'Restart provider',
-                detail: 'Restart the agent process on this host.',
+                label: 'Restart agent',
+                detail: 'Restart the active agent on this host.',
                 icon: Icons.restart_alt_rounded,
                 tone: _SessionActionTone.warning,
               ),
@@ -5900,31 +6828,107 @@ class _SessionScreenState extends State<SessionScreen>
     required bool portsOpen,
     required bool searchOpen,
     required bool resourcesOpen,
+    BuildContext? anchorContext,
+    bool includeStop = true,
+    bool includeNew = true,
+    bool includeControls = false,
+    bool controlsCustomized = false,
   }) async {
-    final selected = await showModalBottomSheet<String>(
-      context: context,
-      backgroundColor: Colors.transparent,
-      barrierColor: Colors.black.withValues(alpha: 0.28),
-      showDragHandle: false,
-      useSafeArea: true,
-      isScrollControlled: true,
-      builder: (context) => _SessionActionSheet(
-        session: session,
-        groups: _sessionActionGroups(
-          favorite: favorite,
-          gitAvailable: gitAvailable,
-          gitDirty: gitDirty,
-          terminalOpen: terminalOpen,
-          portsOpen: portsOpen,
-          searchOpen: searchOpen,
-          resourcesOpen: resourcesOpen,
-        ),
-      ),
+    final groups = _sessionActionGroups(
+      favorite: favorite,
+      gitAvailable: gitAvailable,
+      gitDirty: gitDirty,
+      terminalOpen: terminalOpen,
+      portsOpen: portsOpen,
+      searchOpen: searchOpen,
+      resourcesOpen: resourcesOpen,
+      includeStop: includeStop,
+      includeNew: includeNew,
+      includeControls: includeControls,
+      controlsCustomized: controlsCustomized,
     );
+    final String? selected;
+    if (widget.desktopMode) {
+      final anchorRect = _desktopPopoverAnchorRect(anchorContext);
+      selected = await showDialog<String>(
+        context: context,
+        barrierColor: Colors.black.withValues(alpha: 0.32),
+        useSafeArea: false,
+        builder: (dialogContext) {
+          final size = MediaQuery.sizeOf(dialogContext);
+          final padding = MediaQuery.paddingOf(dialogContext);
+          final availableHeight = math.max(
+            240.0,
+            size.height - padding.top - 24,
+          );
+          final maxHeight = math.min(660.0, availableHeight);
+          final anchor = anchorRect;
+          final topLimit = math.max(
+            padding.top + 12.0,
+            size.height - maxHeight - 12,
+          );
+          final top = anchor == null
+              ? padding.top + 12
+              : math.min(anchor.bottom + 8, topLimit);
+          final right = anchor == null
+              ? 16.0
+              : math.max(12.0, size.width - anchor.right);
+          return Stack(
+            children: [
+              Positioned(
+                top: top,
+                right: right,
+                child: ConstrainedBox(
+                  constraints: BoxConstraints(
+                    maxWidth: 520,
+                    maxHeight: maxHeight,
+                  ),
+                  child: _SessionActionSheet(
+                    session: session,
+                    groups: groups,
+                    desktop: true,
+                  ),
+                ),
+              ),
+            ],
+          );
+        },
+      );
+    } else {
+      selected = await showModalBottomSheet<String>(
+        context: context,
+        backgroundColor: Colors.transparent,
+        barrierColor: Colors.black.withValues(alpha: 0.28),
+        showDragHandle: false,
+        useSafeArea: true,
+        isScrollControlled: true,
+        builder: (context) => _SessionActionSheet(
+          session: session,
+          groups: groups,
+        ),
+      );
+    }
     if (!mounted || selected == null) {
       return;
     }
     _handleSessionAction(selected, session);
+  }
+
+  Rect? _desktopPopoverAnchorRect(BuildContext? anchorContext) {
+    final anchorObject = anchorContext?.findRenderObject();
+    final overlay = Overlay.maybeOf(context);
+    final overlayObject = overlay?.context.findRenderObject();
+    if (anchorObject is! RenderBox ||
+        overlayObject is! RenderBox ||
+        !anchorObject.attached ||
+        !overlayObject.attached) {
+      return null;
+    }
+    final topLeft = anchorObject.localToGlobal(
+      Offset.zero,
+      ancestor: overlayObject,
+    );
+    return topLeft & anchorObject.size;
   }
 
   @override
@@ -5941,13 +6945,11 @@ class _SessionScreenState extends State<SessionScreen>
     final freshnessMode = _transcriptFreshnessMode;
     final showHistoryBanner =
         (_history?.isTruncated ?? false) && !_historyBannerDismissed;
-    final showStopPill =
-        isCompact && _running && _supportsSessionInterrupt;
-    final showWaitingState =
-        !_loading && timelineEntries.isEmpty && _running;
+    final showStopPill = isCompact && _running && _supportsSessionInterrupt;
+    final showWaitingState = !_loading && timelineEntries.isEmpty && _running;
     final bodyContent = Column(
       children: [
-        if (!isCompact)
+        if (!isCompact && !widget.desktopMode)
           ListenableBuilder(
             listenable: SessionLocalStore.instance,
             builder: (context, _) {
@@ -6028,7 +7030,12 @@ class _SessionScreenState extends State<SessionScreen>
                               if (showHistoryBanner &&
                                   index == visibleTimelineEntries.length) {
                                 return Padding(
-                                  padding: const EdgeInsets.fromLTRB(0, 10, 0, 6),
+                                  padding: const EdgeInsets.fromLTRB(
+                                    0,
+                                    10,
+                                    0,
+                                    6,
+                                  ),
                                   child: _HistoryTruncationCard(
                                     history: _history!,
                                     loading: _loadingOlderHistory,
@@ -6090,6 +7097,9 @@ class _SessionScreenState extends State<SessionScreen>
                                             _openTerminal(cwdOverride: cwd),
                                           )
                                         : null,
+                                    opensFilesInInspector:
+                                        widget.desktopMode &&
+                                        _inspectorController != null,
                                   ),
                                   _TimelineEntryKind.providerWarning =>
                                     _ProviderWarningRow(
@@ -6190,42 +7200,73 @@ class _SessionScreenState extends State<SessionScreen>
               queueUpdated: _latestQueueUpdate,
               autoRetryUpdated: _latestAutoRetryUpdate,
             ),
-          ),
+        ),
         _ComposerStatusStrip(thinking: _thinkingNotifier),
-        _Composer(
-          controller: _composerController,
-          focusNode: _composerFocusNode,
-          isFocused: _composerFocused,
-          attachments: _draftAttachments,
-          skills: _draftSkillMentions,
-          files: _draftFileMentions,
-          activeSkillQuery: _activeSkillQuery?.query,
-          skillSuggestions: _skillSuggestions,
-          loadingSkills: _loadingSkills,
-          skillError: _skillsError,
-          activeFileQuery: _activeFileQuery?.query,
-          fileSuggestions: _fileSuggestions,
-          loadingFileSearch: _loadingFileSearch,
-          fileError: _fileSearchError,
-          sending: _sending,
-          supportsImageInput: _supportsImageInput,
-          supportsSkillInput: _supportsSkillInput,
-          supportsFileMentions: _supportsFileMentions,
-          onPickImages: _pickComposerImages,
-          onPasteImage: () => _pasteComposerImage(),
-          onNativePaste: () => _pasteComposerImage(showEmptyFeedback: false),
-          onRemoveAttachment: _removeDraftAttachment,
-          onSelectSkill: _insertSkillMention,
-          onRemoveSkill: _removeDraftSkillMention,
-          onSelectFile: _insertFileMention,
-          onRemoveFile: _removeDraftFileMention,
-          onSend: _sendInput,
-          onDismiss: _dismissKeyboard,
-          onAddSkillTrigger:
-              _supportsSkillInput ? _addSkillTriggerToComposer : null,
-          onAddFileTrigger:
-              _supportsFileMentions ? _addFileTriggerToComposer : null,
-          submitOnEnter: widget.desktopMode,
+        ListenableBuilder(
+          listenable: _turnConfigStore,
+          builder: (context, _) {
+            final showModelPicker = _supportsComposerModelPicker;
+            final showThinkingPicker = _supportsComposerThinkingPicker;
+            return _Composer(
+              controller: _composerController,
+              focusNode: _composerFocusNode,
+              isFocused: _composerFocused,
+              attachments: _draftAttachments,
+              skills: _draftSkillMentions,
+              files: _draftFileMentions,
+              activeSkillQuery: _activeSkillQuery?.query,
+              skillSuggestions: _skillSuggestions,
+              loadingSkills: _loadingSkills,
+              skillError: _skillsError,
+              activeFileQuery: _activeFileQuery?.query,
+              fileSuggestions: _fileSuggestions,
+              loadingFileSearch: _loadingFileSearch,
+              fileError: _fileSearchError,
+              sending: _sending,
+              supportsImageInput: _supportsImageInput,
+              supportsSkillInput: _supportsSkillInput,
+              supportsFileMentions: _supportsFileMentions,
+              onPickImages: _pickComposerImages,
+              onNativePaste: () =>
+                  _pasteComposerImage(showEmptyFeedback: false),
+              onRemoveAttachment: _removeDraftAttachment,
+              onSelectSkill: _insertSkillMention,
+              onRemoveSkill: _removeDraftSkillMention,
+              onSelectFile: _insertFileMention,
+              onRemoveFile: _removeDraftFileMention,
+              onSend: _sendInput,
+              onDismiss: _dismissKeyboard,
+              onAddSkillTrigger: _supportsSkillInput
+                  ? _addSkillTriggerToComposer
+                  : null,
+              onAddFileTrigger: _supportsFileMentions
+                  ? _addFileTriggerToComposer
+                  : null,
+              modelLabel: showModelPicker ? _composerModelLabel(session) : null,
+              modelDetail: showModelPicker
+                  ? _composerModelDetail(session)
+                  : null,
+              modelCustomized: showModelPicker
+                  ? _composerModelCustomized(session)
+                  : false,
+              onModelTap: showModelPicker
+                  ? () => _showComposerModelPicker(session)
+                  : null,
+              thinkingLabel: showThinkingPicker
+                  ? _composerThinkingLabel(session)
+                  : null,
+              thinkingDetail: showThinkingPicker
+                  ? _composerThinkingDetail(session)
+                  : null,
+              thinkingCustomized: showThinkingPicker
+                  ? _composerThinkingCustomized(session)
+                  : false,
+              onThinkingTap: showThinkingPicker
+                  ? () => _showComposerThinkingPicker(session)
+                  : null,
+              submitOnEnter: widget.desktopMode,
+            );
+          },
         ),
       ],
     );
@@ -6240,7 +7281,10 @@ class _SessionScreenState extends State<SessionScreen>
       backgroundColor: colors.canvas,
       appBar: AppBar(
         backgroundColor: colors.canvas,
-        toolbarHeight: isCompact ? 52 : null,
+        elevation: 0,
+        scrolledUnderElevation: 0,
+        titleSpacing: widget.desktopMode ? 16 : null,
+        toolbarHeight: isCompact ? 52 : (widget.desktopMode ? 60 : null),
         bottom: isCompact
             ? PreferredSize(
                 preferredSize: const Size.fromHeight(30),
@@ -6258,44 +7302,54 @@ class _SessionScreenState extends State<SessionScreen>
                 ),
               )
             : null,
-        title: Row(
-          children: [
-            if (_running) ...[const LivePulse(), const SizedBox(width: 10)],
-            Expanded(
-              child: _supportsSessionRename && !isCompact
-                  ? GestureDetector(
-                      onTap: () => unawaited(_renameSession()),
-                      behavior: HitTestBehavior.opaque,
-                      child: Row(
-                        children: [
-                          Expanded(
-                            child: Text(
-                              session.title,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
+        title: widget.desktopMode
+            ? _DesktopSessionTitle(
+                session: session,
+                running: _running,
+                canRename: _supportsSessionRename,
+                onRename: () => unawaited(_renameSession()),
+              )
+            : Row(
+                children: [
+                  if (_running) ...[
+                    const LivePulse(),
+                    const SizedBox(width: 10),
+                  ],
+                  Expanded(
+                    child: _supportsSessionRename && !isCompact
+                        ? GestureDetector(
+                            onTap: () => unawaited(_renameSession()),
+                            behavior: HitTestBehavior.opaque,
+                            child: Row(
+                              children: [
+                                Expanded(
+                                  child: Text(
+                                    session.title,
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                ),
+                                const SizedBox(width: 4),
+                                Icon(
+                                  Icons.edit_rounded,
+                                  size: 13,
+                                  color: colors.textTertiary,
+                                ),
+                              ],
                             ),
+                          )
+                        : Text(
+                            session.title,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
                           ),
-                          const SizedBox(width: 4),
-                          Icon(
-                            Icons.edit_rounded,
-                            size: 13,
-                            color: colors.textTertiary,
-                          ),
-                        ],
-                      ),
-                    )
-                  : Text(
-                      session.title,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-            ),
-          ],
-        ),
+                  ),
+                ],
+              ),
         actions: [
           // Reserve a permanent slot for interrupt — this prevents all other
           // action buttons from jumping left/right when the agent starts/stops.
-          if (!isCompact && _supportsSessionInterrupt)
+          if (!isCompact && !widget.desktopMode && _supportsSessionInterrupt)
             Padding(
               padding: const EdgeInsets.only(right: 4),
               child: AnimatedOpacity(
@@ -6305,15 +7359,15 @@ class _SessionScreenState extends State<SessionScreen>
                   ignoring: !_running,
                   child: MeshIconButton(
                     icon: Icons.stop_circle_rounded,
-                    tooltip: 'Interrupt agent',
+                    tooltip: 'Stop agent',
                     color: colors.danger,
                     onTap: _stopSession,
-                    semanticLabel: 'Interrupt agent',
+                    semanticLabel: 'Stop agent',
                   ),
                 ),
               ),
             ),
-          if (!isCompact)
+          if (!isCompact && !widget.desktopMode)
             Padding(
               padding: const EdgeInsets.only(right: 6),
               child: MeshIconButton(
@@ -6323,7 +7377,7 @@ class _SessionScreenState extends State<SessionScreen>
                 onTap: _reloadSnapshot,
               ),
             ),
-          if (!isCompact)
+          if (!isCompact && !widget.desktopMode)
             Padding(
               padding: const EdgeInsets.only(right: 6),
               child: MeshIconButton(
@@ -6333,7 +7387,7 @@ class _SessionScreenState extends State<SessionScreen>
                 onTap: _startSessionFromCurrent,
               ),
             ),
-          if (!isCompact && _supportsTerminal)
+          if (!isCompact && !widget.desktopMode && _supportsTerminal)
             Padding(
               padding: const EdgeInsets.only(right: 6),
               child: MeshIconButton(
@@ -6347,7 +7401,7 @@ class _SessionScreenState extends State<SessionScreen>
                 onTap: () => unawaited(_openTerminal()),
               ),
             ),
-          if (!isCompact && _supportsConnections)
+          if (!isCompact && !widget.desktopMode && _supportsConnections)
             Padding(
               padding: const EdgeInsets.only(right: 6),
               child: MeshIconButton(
@@ -6362,6 +7416,7 @@ class _SessionScreenState extends State<SessionScreen>
               ),
             ),
           if (!isCompact &&
+              !widget.desktopMode &&
               _supportsGitStatus &&
               _gitHeaderLabel(session, _gitStatus) != null &&
               (_gitStatus?.dirty ?? false))
@@ -6374,7 +7429,7 @@ class _SessionScreenState extends State<SessionScreen>
                 onTap: () => _showGitSheet(session),
               ),
             ),
-          if (!isCompact)
+          if (!isCompact && !widget.desktopMode)
             Padding(
               padding: const EdgeInsets.only(right: 6),
               child: MeshIconButton(
@@ -6388,7 +7443,7 @@ class _SessionScreenState extends State<SessionScreen>
                 onTap: _toggleSearchPanel,
               ),
             ),
-          if (!isCompact && _supportsSessionResources)
+          if (!isCompact && !widget.desktopMode && _supportsSessionResources)
             Padding(
               padding: const EdgeInsets.only(right: 6),
               child: MeshIconButton(
@@ -6404,13 +7459,16 @@ class _SessionScreenState extends State<SessionScreen>
                 onTap: _openResourcesPanel,
               ),
             ),
-          if (!isCompact)
+          if (!isCompact && !widget.desktopMode)
             Padding(
               padding: const EdgeInsets.only(right: 10),
               child: ListenableBuilder(
                 listenable: Listenable.merge([_policyStore, _turnConfigStore]),
                 builder: (context, _) {
-                  final policy = _policyStore.policyFor(widget.host, session.id);
+                  final policy = _policyStore.policyFor(
+                    widget.host,
+                    session.id,
+                  );
                   final turnConfig = _turnConfigStore.configFor(
                     widget.host,
                     session.id,
@@ -6461,6 +7519,9 @@ class _SessionScreenState extends State<SessionScreen>
               // icon (dirty state). Keep it hidden entirely if there is no
               // git info to show.
               final showGitInMenu = gitAvailable && !gitDirty;
+              final menuGitAvailable = widget.desktopMode
+                  ? gitAvailable
+                  : showGitInMenu;
               if (isCompact) {
                 return Padding(
                   padding: const EdgeInsets.only(right: AppSpacing.sm),
@@ -6481,8 +7542,7 @@ class _SessionScreenState extends State<SessionScreen>
                             ? Icons.star_rounded
                             : Icons.star_outline_rounded,
                         tooltip: favorite ? 'Unpin session' : 'Pin session',
-                        color:
-                            favorite ? colors.warning : colors.textSecondary,
+                        color: favorite ? colors.warning : colors.textSecondary,
                         onTap: _toggleFavorite,
                       ),
                       const SizedBox(width: AppSpacing.xs),
@@ -6491,8 +7551,7 @@ class _SessionScreenState extends State<SessionScreen>
                         tooltip: _running
                             ? 'Session actions (agent running)'
                             : 'Session actions',
-                        color:
-                            _running ? colors.warning : colors.textPrimary,
+                        color: _running ? colors.warning : colors.textPrimary,
                         onTap: () => unawaited(
                           _showSessionActionsSheet(
                             session: session,
@@ -6510,161 +7569,57 @@ class _SessionScreenState extends State<SessionScreen>
                   ),
                 );
               }
-              return PopupMenuButton<String>(
-                tooltip: 'Session actions',
-                constraints: const BoxConstraints(minWidth: 280, maxWidth: 360),
-                icon: Icon(Icons.more_vert_rounded, color: colors.textPrimary),
-                onSelected: (value) => _handleSessionAction(value, session),
-                itemBuilder: (context) => [
-                  if (_supportsSessionResources)
-                    const PopupMenuItem<String>(
-                      value: 'resources',
-                      child: Row(
-                        children: [
-                          Icon(Icons.perm_media_rounded, size: 18),
-                          SizedBox(width: 10),
-                          Text('Resources'),
-                        ],
-                      ),
-                    ),
-                  PopupMenuItem<String>(
-                    value: 'favorite',
-                    child: Row(
-                      children: [
-                        Icon(
-                          favorite
-                              ? Icons.star_rounded
-                              : Icons.star_outline_rounded,
-                          size: 18,
-                          color: favorite ? colors.warning : null,
+              if (widget.desktopMode) {
+                return Builder(
+                  builder: (buttonContext) => Padding(
+                    padding: const EdgeInsets.only(right: 10),
+                    child: _DesktopSessionCommandBar(
+                      running: _running,
+                      canStop: _supportsSessionInterrupt,
+                      onStop: _stopSession,
+                      onNewSession: _startSessionFromCurrent,
+                      onMore: () => unawaited(
+                        _showSessionActionsSheet(
+                          session: session,
+                          favorite: favorite,
+                          gitAvailable: menuGitAvailable,
+                          gitDirty: gitDirty,
+                          terminalOpen: terminalOpenInInspector,
+                          portsOpen: portsOpenInInspector,
+                          searchOpen: searchOpenInInspector,
+                          resourcesOpen: resourcesOpenInInspector,
+                          anchorContext: buttonContext,
+                          includeStop: false,
+                          includeNew: false,
+                          includeControls: true,
+                          controlsCustomized: sessionControlsCustomized,
                         ),
-                        const SizedBox(width: 10),
-                        Text(favorite ? 'Remove favorite' : 'Add favorite'),
-                      ],
+                      ),
                     ),
                   ),
-                  const PopupMenuItem<String>(
-                    value: 'unread',
-                    child: Row(
-                      children: [
-                        Icon(Icons.flag_rounded, size: 18),
-                        SizedBox(width: 10),
-                        Expanded(
-                          child: Text(
-                            'Flag for follow-up',
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                        ),
-                      ],
+                );
+              }
+              return Padding(
+                padding: const EdgeInsets.only(right: 10),
+                child: MeshIconButton(
+                  icon: Icons.more_horiz_rounded,
+                  tooltip: _running
+                      ? 'Session actions (agent running)'
+                      : 'Session actions',
+                  color: _running ? colors.warning : colors.textSecondary,
+                  onTap: () => unawaited(
+                    _showSessionActionsSheet(
+                      session: session,
+                      favorite: favorite,
+                      gitAvailable: menuGitAvailable,
+                      gitDirty: gitDirty,
+                      terminalOpen: terminalOpenInInspector,
+                      portsOpen: portsOpenInInspector,
+                      searchOpen: searchOpenInInspector,
+                      resourcesOpen: resourcesOpenInInspector,
                     ),
                   ),
-                  if (showGitInMenu)
-                    const PopupMenuItem<String>(
-                      value: 'git',
-                      child: Row(
-                        children: [
-                          Icon(Icons.account_tree_rounded, size: 18),
-                          SizedBox(width: 10),
-                          Text('Git details'),
-                        ],
-                      ),
-                    ),
-                  if (_supportsSessionCompact)
-                    const PopupMenuItem<String>(
-                      value: 'compact',
-                      child: Row(
-                        children: [
-                          Icon(Icons.compress_rounded, size: 18),
-                          SizedBox(width: 10),
-                          Text('Compact context'),
-                        ],
-                      ),
-                    ),
-                  if (_supportsFilesystem)
-                    const PopupMenuItem<String>(
-                      value: 'browse',
-                      child: Row(
-                        children: [
-                          Icon(Icons.folder_rounded, size: 18),
-                          SizedBox(width: 10),
-                          Text('Browse files'),
-                        ],
-                      ),
-                    ),
-                  if (_supportsBrowserPreview)
-                    const PopupMenuItem<String>(
-                      value: 'preview',
-                      child: Row(
-                        children: [
-                          Icon(Icons.open_in_browser_rounded, size: 18),
-                          SizedBox(width: 10),
-                          Expanded(
-                            child: Text(
-                              'Open browser preview',
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  if (_supportsConnections)
-                    const PopupMenuItem<String>(
-                      value: 'connections',
-                      child: Row(
-                        children: [
-                          Icon(Icons.open_in_browser_rounded, size: 18),
-                          SizedBox(width: 10),
-                          Expanded(
-                            child: Text(
-                              'Manage browser previews',
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  if (widget.topPadding != null &&
-                      SidemeshSessionWindowManager.instance.isSupported)
-                    const PopupMenuItem<String>(
-                      value: 'popout',
-                      child: Row(
-                        children: [
-                          Icon(Icons.open_in_new_rounded, size: 18),
-                          SizedBox(width: 10),
-                          Expanded(
-                            child: Text(
-                              'Open in new window',
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  if (_supportsSessionRename || _supportsSessionArchive)
-                    const PopupMenuDivider(),
-                  if (_supportsSessionRename)
-                    const PopupMenuItem<String>(
-                      value: 'rename',
-                      child: Row(
-                        children: [
-                          Icon(Icons.drive_file_rename_outline, size: 18),
-                          SizedBox(width: 10),
-                          Text('Rename'),
-                        ],
-                      ),
-                    ),
-                  if (_supportsSessionArchive)
-                    const PopupMenuItem<String>(
-                      value: 'archive',
-                      child: Row(
-                        children: [
-                          Icon(Icons.archive_rounded, size: 18),
-                          SizedBox(width: 10),
-                          Text('Archive'),
-                        ],
-                      ),
-                    ),
-                ],
+                ),
               );
             },
           ),

@@ -48,13 +48,13 @@ void main() {
       await tester.pump();
 
       expect(find.text('Settings'), findsOneWidget);
-      expect(find.text('Appearance & display'), findsOneWidget);
+      expect(find.text('Appearance & device'), findsOneWidget);
       expect(find.text('Appearance'), findsOneWidget);
       expect(find.text('Display'), findsOneWidget);
       expect(find.text('Keep screen awake while agent runs'), findsOneWidget);
       expect(find.text('Notifications'), findsOneWidget);
       expect(find.text('New session defaults'), findsOneWidget);
-      expect(find.text('Data & storage'), findsOneWidget);
+      expect(find.text('Local data'), findsOneWidget);
       expect(find.text('About'), findsOneWidget);
     } finally {
       debugDefaultTargetPlatformOverride = null;
@@ -110,7 +110,7 @@ void main() {
 
       expect(find.byType(Dialog), findsOneWidget);
       expect(find.text('Settings'), findsOneWidget);
-      expect(find.text('Appearance & display'), findsOneWidget);
+      expect(find.text('Appearance & device'), findsOneWidget);
       expect(find.text('Replay onboarding'), findsNothing);
     } finally {
       debugDefaultTargetPlatformOverride = null;
@@ -119,7 +119,60 @@ void main() {
     }
   });
 
-  testWidgets('opens appearance sheet on narrow mobile width without overflow', (
+  testWidgets(
+    'opens appearance sheet on narrow mobile width without overflow',
+    (tester) async {
+      debugDefaultTargetPlatformOverride = TargetPlatform.android;
+      tester.view
+        ..devicePixelRatio = 1
+        ..physicalSize = const Size(390, 844);
+      try {
+        await CreateSessionDefaultsStore.instance.ensureLoaded();
+        final controller = await ThemeController.load();
+        final palette = ThemeVariant.codexAmber;
+
+        await tester.pumpWidget(
+          ThemeScope(
+            notifier: controller,
+            child: MaterialApp(
+              theme: buildLightTheme(
+                palette.light,
+                typography: controller.typography,
+              ),
+              darkTheme: buildDarkTheme(
+                palette.dark,
+                typography: controller.typography,
+              ),
+              home: Builder(
+                builder: (context) => Scaffold(
+                  body: Center(
+                    child: FilledButton(
+                      onPressed: () => showAppearanceSheet(context),
+                      child: const Text('Open appearance'),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        );
+
+        await tester.tap(find.text('Open appearance'));
+        await tester.pumpAndSettle();
+
+        expect(find.text('Appearance'), findsOneWidget);
+        expect(find.text('Changes the app look only.'), findsOneWidget);
+        expect(find.text('Color mode'), findsOneWidget);
+        expect(tester.takeException(), isNull);
+      } finally {
+        debugDefaultTargetPlatformOverride = null;
+        tester.view.resetPhysicalSize();
+        tester.view.resetDevicePixelRatio();
+      }
+    },
+  );
+
+  testWidgets('opens session defaults sheet with summary and clearer actions', (
     tester,
   ) async {
     debugDefaultTargetPlatformOverride = TargetPlatform.android;
@@ -143,24 +196,29 @@ void main() {
               palette.dark,
               typography: controller.typography,
             ),
-            home: Builder(
-              builder: (context) => Scaffold(
-                body: Center(
-                  child: FilledButton(
-                    onPressed: () => showAppearanceSheet(context),
-                    child: const Text('Open appearance'),
-                  ),
-                ),
-              ),
-            ),
+            home: const SettingsScreen(),
           ),
         ),
       );
-
-      await tester.tap(find.text('Open appearance'));
       await tester.pumpAndSettle();
 
-      expect(find.text('Appearance'), findsOneWidget);
+      await tester.scrollUntilVisible(
+        find.text('New session defaults'),
+        300,
+        scrollable: find.byType(Scrollable).first,
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.widgetWithText(FilledButton, 'Edit'));
+      await tester.pumpAndSettle();
+
+      expect(
+        find.text('Used every time you open New session.'),
+        findsOneWidget,
+      );
+      expect(find.text('Starting point'), findsOneWidget);
+      expect(find.text('Apply defaults'), findsOneWidget);
+      expect(find.text('Use recommended'), findsOneWidget);
       expect(tester.takeException(), isNull);
     } finally {
       debugDefaultTargetPlatformOverride = null;

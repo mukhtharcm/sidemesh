@@ -25,7 +25,7 @@ InspectorSurface buildInspectorWorkspaceBrowserSurface({
   return InspectorSurface(
     kind: InspectorSurfaceKind.fileBrowser,
     ownerKey: ownerKey,
-    title: baseName(root),
+    title: 'Files',
     icon: Icons.folder_open_rounded,
     bodyBuilder: (context) => WorkspaceBrowserPane(
       host: host,

@@ -5,7 +5,7 @@ part of 'session_screen.dart';
 // Three-zone layout:
 //   Zone 3 — Suggestion trays (skill / file, above the shelf, animated in/out)
 //   Zone 2 — Context shelf   (chips: images, skills, files – horizontal scroll)
-//   Zone 1 — The bar          (+ button | text pill | send button)
+//   Zone 1 — The bar          (text field | toolbar with context/model/send)
 // ─────────────────────────────────────────────────────────────────────────────
 
 class _Composer extends StatelessWidget {
@@ -29,7 +29,6 @@ class _Composer extends StatelessWidget {
     required this.supportsSkillInput,
     required this.supportsFileMentions,
     required this.onPickImages,
-    required this.onPasteImage,
     required this.onNativePaste,
     required this.onRemoveAttachment,
     required this.onSelectSkill,
@@ -40,6 +39,14 @@ class _Composer extends StatelessWidget {
     required this.onDismiss,
     this.onAddSkillTrigger,
     this.onAddFileTrigger,
+    this.modelLabel,
+    this.modelDetail,
+    this.modelCustomized = false,
+    this.onModelTap,
+    this.thinkingLabel,
+    this.thinkingDetail,
+    this.thinkingCustomized = false,
+    this.onThinkingTap,
     this.submitOnEnter = false,
   });
 
@@ -71,7 +78,6 @@ class _Composer extends StatelessWidget {
   final bool supportsFileMentions;
 
   final VoidCallback onPickImages;
-  final Future<bool> Function() onPasteImage;
   final Future<bool> Function() onNativePaste;
   final ValueChanged<String> onRemoveAttachment;
   final ValueChanged<SkillSummary> onSelectSkill;
@@ -86,6 +92,15 @@ class _Composer extends StatelessWidget {
 
   /// Inserts a `@` trigger into the text field and focuses it (mobile + button).
   final VoidCallback? onAddFileTrigger;
+
+  final String? modelLabel;
+  final String? modelDetail;
+  final bool modelCustomized;
+  final VoidCallback? onModelTap;
+  final String? thinkingLabel;
+  final String? thinkingDetail;
+  final bool thinkingCustomized;
+  final VoidCallback? onThinkingTap;
 
   final bool submitOnEnter;
 
@@ -106,12 +121,14 @@ class _Composer extends StatelessWidget {
       style: Theme.of(context).textTheme.bodyMedium,
       decoration: InputDecoration(
         hintText: submitOnEnter
-            ? 'Message this session — Enter to send, Shift+Enter for newline'
-            : 'Message this session',
+            ? 'Reply here. Press Enter to send, Shift+Enter for a new line'
+            : 'Reply here',
         hintStyle: TextStyle(color: colors.textTertiary),
         border: InputBorder.none,
         enabledBorder: InputBorder.none,
         focusedBorder: InputBorder.none,
+        filled: false,
+        fillColor: Colors.transparent,
         isDense: true,
         // Padding is handled by the animated pill container below.
         contentPadding: EdgeInsets.zero,
@@ -149,47 +166,58 @@ class _Composer extends StatelessWidget {
       );
     }
 
-    // ── Animated pill wrapper (focus-responsive border + padding) ───────────
-    final pill = AnimatedContainer(
-      duration: const Duration(milliseconds: 150),
-      curve: Curves.easeInOut,
-      decoration: BoxDecoration(
-        color: colors.composerBackground,
-        borderRadius: AppShapes.input,
-        border: Border.all(
-          color: isFocused
-              ? colors.accent.withValues(alpha: 0.65)
-              : colors.border,
-        ),
-      ),
-      // Subtle vertical expansion on focus signals "ready to type".
+    // ── Zone 1: bar row ─────────────────────────────────────────────────────
+    final bool showPlusButton =
+        !isDesktop &&
+        (supportsImageInput || supportsSkillInput || supportsFileMentions);
+    final bool showModelButton = modelLabel != null && onModelTap != null;
+    final bool showThinkingButton =
+        thinkingLabel != null && onThinkingTap != null;
+
+    final modelControlButton = showModelButton
+        ? _ComposerModelButton(
+            label: modelLabel!,
+            detail: modelDetail,
+            customized: modelCustomized,
+            icon: Icons.memory_rounded,
+            tooltipLabel: 'Choose model',
+            onPressed: onModelTap!,
+            compact: !isDesktop,
+          )
+        : null;
+    final thinkingControlButton = showThinkingButton
+        ? _ComposerModelButton(
+            label: thinkingLabel!,
+            detail: thinkingDetail,
+            customized: thinkingCustomized,
+            icon: Icons.psychology_alt_rounded,
+            tooltipLabel: 'Choose thinking level',
+            onPressed: onThinkingTap!,
+            compact: !isDesktop,
+          )
+        : null;
+    final controlButtons = <Widget>[
+      ?modelControlButton,
+      ?thinkingControlButton,
+    ];
+
+    final textArea = Padding(
       padding: EdgeInsets.symmetric(
-        horizontal: 14,
-        vertical: isFocused ? 13 : 9,
+        horizontal: isDesktop ? 4 : 6,
+        vertical: isFocused ? 10 : 8,
       ),
       child: field,
     );
 
-    // ── Zone 1: bar row ─────────────────────────────────────────────────────
-    final bool showPlusButton = !isDesktop &&
-        (supportsImageInput || supportsSkillInput || supportsFileMentions);
-
-    final barRow = Row(
-      crossAxisAlignment: CrossAxisAlignment.end,
+    final toolbarRow = Row(
+      crossAxisAlignment: CrossAxisAlignment.center,
       children: [
-        // Desktop keeps dedicated attach + paste buttons (only when the
-        // current provider supports image input).
+        // Paste remains available through native shortcuts/menu; the visible
+        // action here is only for adding new context.
         if (isDesktop && supportsImageInput) ...[
           _ComposerAttachButton(enabled: !sending, onPressed: onPickImages),
-          const SizedBox(width: 4),
-          _ComposerPasteButton(
-            enabled: !sending,
-            onPressed: () => unawaited(onPasteImage()),
-          ),
           const SizedBox(width: 6),
-        ]
-        // Mobile: single + button that opens a context sheet.
-        else if (showPlusButton) ...[
+        ] else if (showPlusButton) ...[
           _ComposerPlusButton(
             enabled: !sending,
             supportsImageInput: supportsImageInput,
@@ -201,16 +229,58 @@ class _Composer extends StatelessWidget {
           ),
           const SizedBox(width: 6),
         ],
-        Expanded(child: pill),
-        const SizedBox(width: 8),
+        Expanded(
+          child: controlButtons.isEmpty
+              ? const SizedBox.shrink()
+              : Wrap(
+                  alignment: WrapAlignment.end,
+                  crossAxisAlignment: WrapCrossAlignment.center,
+                  spacing: 6,
+                  runSpacing: 6,
+                  children: controlButtons,
+                ),
+        ),
+        SizedBox(width: controlButtons.isEmpty ? 0 : 8),
         _SendButton(
           sending: sending,
           controller: controller,
           hasAttachments: attachments.isNotEmpty,
           hasSkills: skills.isNotEmpty || files.isNotEmpty,
           onSend: onSend,
+          compact: isDesktop,
         ),
       ],
+    );
+
+    final barContent = Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        textArea,
+        SizedBox(height: isDesktop ? 6 : 8),
+        toolbarRow,
+      ],
+    );
+
+    final barRow = AnimatedContainer(
+      duration: const Duration(milliseconds: 150),
+      curve: Curves.easeOutCubic,
+      decoration: BoxDecoration(
+        color: colors.composerBackground,
+        borderRadius: BorderRadius.circular(isDesktop ? 10 : AppRadii.control),
+        border: Border.all(
+          color: isFocused
+              ? colors.accent.withValues(alpha: 0.42)
+              : colors.border.withValues(alpha: 0.82),
+        ),
+      ),
+      padding: EdgeInsets.fromLTRB(
+        isDesktop ? 10 : 9,
+        isDesktop ? 8 : 9,
+        isDesktop ? 10 : 9,
+        isDesktop ? 8 : 9,
+      ),
+      child: barContent,
     );
 
     final hasContext =
@@ -228,7 +298,6 @@ class _Composer extends StatelessWidget {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-
             // ── Zone 3a: Skill suggestion tray ─────────────────────────────
             // Lives *above* the context shelf so it overlays the conversation
             // list visually without being clipped by the pill.
@@ -324,6 +393,10 @@ class _ComposerContextShelf extends StatelessWidget {
   Widget build(BuildContext context) {
     final colors = context.colors;
 
+    final duplicateFileNames = _duplicateFileNameKeys(
+      files.map((item) => item.file),
+    );
+
     // Build chip list: images first, then skills, then file mentions.
     final chips = <Widget>[
       for (final a in attachments)
@@ -368,7 +441,13 @@ class _ComposerContextShelf extends StatelessWidget {
             size: 14,
             color: colors.textTertiary,
           ),
-          label: f.file.name,
+          label: _fileShelfLabel(
+            f.file,
+            showParent:
+                duplicateFileNames.contains(_fileNameKey(f.file)) &&
+                !isDesktop,
+          ),
+          sublabel: isDesktop ? _compactFileParentPath(f.file) : null,
           onRemove: () => onRemoveFile(f.file.path),
         ),
     ];
@@ -418,7 +497,7 @@ class _ComposerShelfChip extends StatelessWidget {
           icon,
           const SizedBox(width: 6),
           ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 120),
+            constraints: BoxConstraints(maxWidth: sublabel != null ? 170 : 150),
             child: sublabel != null
                 ? Column(
                     mainAxisSize: MainAxisSize.min,
@@ -428,10 +507,9 @@ class _ComposerShelfChip extends StatelessWidget {
                         label,
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
-                        style:
-                            Theme.of(context).textTheme.labelSmall?.copyWith(
-                              fontWeight: AppWeights.emphasis,
-                            ),
+                        style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                          fontWeight: AppWeights.emphasis,
+                        ),
                       ),
                       Text(
                         sublabel!,
@@ -501,7 +579,7 @@ class _ComposerPlusButton extends StatelessWidget {
       if (supportsImageInput)
         (Icons.add_photo_alternate_rounded, 'Attach image', onPickImages),
       if (supportsSkillInput && onAddSkillTrigger != null)
-        (Icons.auto_awesome_rounded, 'Add skill', onAddSkillTrigger!),
+        (Icons.auto_awesome_rounded, 'Insert skill', onAddSkillTrigger!),
       if (supportsFileMentions && onAddFileTrigger != null)
         (Icons.insert_drive_file_rounded, 'Mention file', onAddFileTrigger!),
     ];
@@ -516,40 +594,35 @@ class _ComposerPlusButton extends StatelessWidget {
 
     showModalBottomSheet<void>(
       context: context,
-      backgroundColor: context.colors.surface,
-      showDragHandle: true,
+      backgroundColor: Colors.transparent,
+      showDragHandle: false,
       useSafeArea: true,
       builder: (ctx) {
         final colors = ctx.colors;
-        return SafeArea(
-          top: false,
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  'Add to message',
-                  style: Theme.of(ctx).textTheme.titleMedium?.copyWith(
-                    fontWeight: AppWeights.title,
-                  ),
+        return MeshBottomSheetScaffold(
+          icon: Icons.add_rounded,
+          title: 'Add something',
+          description:
+              'Attach an image, insert a skill, or mention a file in this message.',
+          maxWidth: 560,
+          maxHeightFactor: 0.48,
+          child: ListView(
+            padding: EdgeInsets.zero,
+            shrinkWrap: true,
+            children: [
+              for (final option in options)
+                MeshListRow(
+                  framed: false,
+                  dense: true,
+                  radius: AppRadii.control,
+                  leading: Icon(option.$1, color: colors.accent),
+                  title: Text(option.$2),
+                  onTap: () {
+                    Navigator.of(ctx).pop();
+                    option.$3();
+                  },
                 ),
-                const SizedBox(height: 8),
-                for (final option in options)
-                  MeshListRow(
-                    framed: false,
-                    dense: true,
-                    radius: AppRadii.control,
-                    leading: Icon(option.$1, color: colors.accent),
-                    title: Text(option.$2),
-                    onTap: () {
-                      Navigator.of(ctx).pop();
-                      option.$3();
-                    },
-                  ),
-              ],
-            ),
+            ],
           ),
         );
       },
@@ -560,18 +633,30 @@ class _ComposerPlusButton extends StatelessWidget {
   Widget build(BuildContext context) {
     final colors = context.colors;
     return Tooltip(
-      message: 'Add to message',
+      message: 'Add',
       child: Material(
         color: Colors.transparent,
         child: InkWell(
-          borderRadius: BorderRadius.circular(8),
+          borderRadius: AppShapes.badge,
           onTap: enabled ? () => _handleTap(context) : null,
-          child: Padding(
-            padding: const EdgeInsets.all(9),
-            child: Icon(
-              Icons.add_rounded,
-              color: enabled ? colors.accent : colors.textTertiary,
-              size: 22,
+          child: SizedBox(
+            width: 44,
+            height: 44,
+            child: Center(
+              child: Container(
+                width: 38,
+                height: 38,
+                decoration: BoxDecoration(
+                  color: colors.surfaceMuted.withValues(alpha: 0.56),
+                  borderRadius: AppShapes.badge,
+                  border: Border.all(color: colors.border),
+                ),
+                child: Icon(
+                  Icons.add_rounded,
+                  color: enabled ? colors.textSecondary : colors.textTertiary,
+                  size: 20,
+                ),
+              ),
             ),
           ),
         ),
@@ -595,14 +680,15 @@ class _ComposerAttachButton extends StatelessWidget {
       child: Material(
         color: Colors.transparent,
         child: InkWell(
-          borderRadius: BorderRadius.circular(8),
+          borderRadius: AppShapes.badge,
           onTap: enabled ? onPressed : null,
-          child: Padding(
-            padding: const EdgeInsets.all(9),
+          child: SizedBox(
+            width: 34,
+            height: 34,
             child: Icon(
               Icons.add_photo_alternate_rounded,
               color: enabled ? colors.accent : colors.textTertiary,
-              size: 22,
+              size: 20,
             ),
           ),
         ),
@@ -611,31 +697,91 @@ class _ComposerAttachButton extends StatelessWidget {
   }
 }
 
-/// Desktop-only: clipboard paste button.
-/// Not shown on mobile — the system long-press menu and PasteTextIntent
-/// already handle clipboard paste there without needing a dedicated button.
-class _ComposerPasteButton extends StatelessWidget {
-  const _ComposerPasteButton({required this.enabled, required this.onPressed});
+class _ComposerModelButton extends StatelessWidget {
+  const _ComposerModelButton({
+    required this.label,
+    required this.detail,
+    required this.customized,
+    required this.icon,
+    required this.tooltipLabel,
+    required this.onPressed,
+    this.compact = false,
+  });
 
-  final bool enabled;
+  final String label;
+  final String? detail;
+  final bool customized;
+  final IconData icon;
+  final String tooltipLabel;
   final VoidCallback onPressed;
+  final bool compact;
 
   @override
   Widget build(BuildContext context) {
     final colors = context.colors;
+    final maxWidth = compact ? 136.0 : 154.0;
+    final minHeight = compact ? 38.0 : 34.0;
+    final hitPadding = compact ? 3.0 : 0.0;
     return Tooltip(
-      message: 'Paste image from clipboard',
+      message: detail == null ? tooltipLabel : '$tooltipLabel: $detail',
       child: Material(
         color: Colors.transparent,
         child: InkWell(
-          borderRadius: BorderRadius.circular(8),
-          onTap: enabled ? onPressed : null,
+          borderRadius: AppShapes.badge,
+          onTap: onPressed,
           child: Padding(
-            padding: const EdgeInsets.all(9),
-            child: Icon(
-              Icons.content_paste_rounded,
-              color: enabled ? colors.accent : colors.textTertiary,
-              size: 22,
+            padding: EdgeInsets.symmetric(vertical: hitPadding),
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 140),
+              curve: Curves.easeOutCubic,
+              constraints: BoxConstraints(
+                maxWidth: maxWidth,
+                minHeight: minHeight,
+              ),
+              padding: EdgeInsets.symmetric(
+                horizontal: compact ? 9 : 9,
+                vertical: compact ? 7 : 6,
+              ),
+              decoration: BoxDecoration(
+                color: customized
+                    ? colors.accentMuted
+                    : colors.surfaceMuted.withValues(alpha: 0.56),
+                borderRadius: AppShapes.badge,
+                border: Border.all(
+                  color: customized
+                      ? colors.accent.withValues(alpha: 0.38)
+                      : colors.border,
+                ),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(
+                    icon,
+                    size: compact ? 14 : 15,
+                    color: customized ? colors.accent : colors.textSecondary,
+                  ),
+                  const SizedBox(width: 6),
+                  Flexible(
+                    child: Text(
+                      label,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: monoStyle(
+                        color: colors.textPrimary,
+                        fontSize: compact ? 11 : 11.5,
+                        fontWeight: AppWeights.title,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 4),
+                  Icon(
+                    Icons.expand_more_rounded,
+                    size: 16,
+                    color: colors.textTertiary,
+                  ),
+                ],
+              ),
             ),
           ),
         ),
@@ -655,6 +801,7 @@ class _SendButton extends StatelessWidget {
     required this.hasAttachments,
     required this.hasSkills,
     required this.onSend,
+    this.compact = false,
   });
 
   final bool sending;
@@ -662,6 +809,7 @@ class _SendButton extends StatelessWidget {
   final bool hasAttachments;
   final bool hasSkills;
   final VoidCallback onSend;
+  final bool compact;
 
   @override
   Widget build(BuildContext context) {
@@ -675,41 +823,48 @@ class _SendButton extends StatelessWidget {
         final bgColor = sending
             ? colors.surfaceMuted
             : (canSend ? colors.accent : colors.surfaceMuted);
+        final activeForeground = readableActionForeground(colors, colors.accent);
+        final hitSize = compact ? 36.0 : 44.0;
+        final size = compact ? 36.0 : 38.0;
+        final radius = compact ? AppRadii.iconWell : AppRadii.action;
         return Material(
           color: Colors.transparent,
           child: InkWell(
-            customBorder: const CircleBorder(),
+            borderRadius: BorderRadius.circular(radius),
             onTap: canSend ? onSend : null,
-            child: Container(
-              width: 44,
-              height: 44,
-              decoration: BoxDecoration(
-                color: bgColor,
-                shape: BoxShape.circle,
-                boxShadow: showActive && canSend
-                    ? [
-                        BoxShadow(
-                          color: colors.accent.withValues(alpha: 0.3),
-                          blurRadius: 12,
-                          offset: const Offset(0, 4),
+            child: SizedBox(
+              width: hitSize,
+              height: hitSize,
+              child: Center(
+                child: Container(
+                  width: size,
+                  height: size,
+                  decoration: BoxDecoration(
+                    color: bgColor,
+                    borderRadius: BorderRadius.circular(radius),
+                    border: showActive
+                        ? null
+                        : Border.all(color: colors.border),
+                  ),
+                  alignment: Alignment.center,
+                  child: sending
+                      ? SizedBox(
+                          width: 18,
+                          height: 18,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                            color: colors.textSecondary,
+                          ),
+                        )
+                      : Icon(
+                          Icons.arrow_upward_rounded,
+                          size: compact ? 19 : 22,
+                          color: canSend
+                              ? activeForeground
+                              : colors.textTertiary,
                         ),
-                      ]
-                    : const [],
+                ),
               ),
-              alignment: Alignment.center,
-              child: sending
-                  ? SizedBox(
-                      width: 18,
-                      height: 18,
-                      child: CircularProgressIndicator(
-                        strokeWidth: 2,
-                        color: colors.textSecondary,
-                      ),
-                    )
-                  : Icon(
-                      Icons.arrow_upward_rounded,
-                      color: canSend ? colors.accentOn : colors.textTertiary,
-                    ),
             ),
           ),
         );
@@ -838,15 +993,11 @@ class _ComposerSkillSuggestionTrayState
         height: 28,
         decoration: BoxDecoration(
           color: colors.surfaceMuted,
-          borderRadius: BorderRadius.circular(10),
+          borderRadius: AppShapes.action,
           border: Border.all(color: colors.border),
         ),
         alignment: Alignment.center,
-        child: Icon(
-          Icons.auto_awesome_rounded,
-          size: 15,
-          color: colors.accent,
-        ),
+        child: Icon(Icons.auto_awesome_rounded, size: 15, color: colors.accent),
       ),
       title: Text(
         skill.displayName,
@@ -860,9 +1011,9 @@ class _ComposerSkillSuggestionTrayState
         skill.summaryDescription,
         maxLines: 2,
         overflow: TextOverflow.ellipsis,
-        style: Theme.of(context).textTheme.bodySmall?.copyWith(
-          color: colors.textSecondary,
-        ),
+        style: Theme.of(
+          context,
+        ).textTheme.bodySmall?.copyWith(color: colors.textSecondary),
       ),
       badges: [_SkillScopeBadge(skill: skill)],
       trailing: Text(
@@ -968,9 +1119,9 @@ class _ComposerFileSuggestionTrayState
             Expanded(
               child: Text(
                 widget.error!,
-                style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                  color: colors.danger,
-                ),
+                style: Theme.of(
+                  context,
+                ).textTheme.bodySmall?.copyWith(color: colors.danger),
               ),
             ),
           ],
@@ -992,15 +1143,16 @@ class _ComposerFileSuggestionTrayState
                 widget.query.trim().isEmpty
                     ? 'Type after "@" to search files.'
                     : 'No files match "@${widget.query}".',
-                style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                  color: colors.textSecondary,
-                ),
+                style: Theme.of(
+                  context,
+                ).textTheme.bodySmall?.copyWith(color: colors.textSecondary),
               ),
             ),
           ],
         ),
       );
     } else {
+      final duplicateNames = _duplicateFileNameKeys(widget.suggestions);
       final maxHeight = math.min(
         300.0,
         MediaQuery.sizeOf(context).height * 0.40,
@@ -1016,8 +1168,14 @@ class _ComposerFileSuggestionTrayState
             shrinkWrap: true,
             padding: EdgeInsets.zero,
             itemCount: widget.suggestions.length,
-            itemBuilder: (context, index) =>
-                _buildFileRow(context, widget.suggestions[index]),
+            itemBuilder: (context, index) {
+              final file = widget.suggestions[index];
+              return _buildFileRow(
+                context,
+                file,
+                ambiguousName: duplicateNames.contains(_fileNameKey(file)),
+              );
+            },
           ),
         ),
       );
@@ -1034,28 +1192,147 @@ class _ComposerFileSuggestionTrayState
     );
   }
 
-  Widget _buildFileRow(BuildContext context, FsSearchResult file) {
+  Widget _buildFileRow(
+    BuildContext context,
+    FsSearchResult file, {
+    required bool ambiguousName,
+  }) {
     final colors = context.colors;
     return MeshListRow(
       framed: false,
       dense: true,
       radius: AppRadii.control,
       onTap: () => widget.onSelectFile(file),
-      leading: Icon(
-        file.isDirectory
-            ? Icons.folder_rounded
-            : Icons.insert_drive_file_rounded,
-        size: 16,
-        color: colors.textTertiary,
+      leading: Container(
+        width: 28,
+        height: 28,
+        decoration: BoxDecoration(
+          color: colors.surfaceMuted,
+          borderRadius: AppShapes.action,
+          border: Border.all(color: colors.border),
+        ),
+        alignment: Alignment.center,
+        child: Icon(
+          file.isDirectory
+              ? Icons.folder_rounded
+              : Icons.insert_drive_file_rounded,
+          size: 15,
+          color: colors.textTertiary,
+        ),
       ),
       title: Text(
-        file.path,
-        style: TextStyle(color: colors.textPrimary, fontSize: 13),
+        _fileDisplayName(file),
+        style: Theme.of(
+          context,
+        ).textTheme.labelLarge?.copyWith(fontWeight: AppWeights.emphasis),
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+      ),
+      subtitle: Text(
+        _compactFileParentPath(file, maxSegments: ambiguousName ? 4 : 3),
+        style: monoStyle(color: colors.textTertiary, fontSize: 11),
         maxLines: 1,
         overflow: TextOverflow.ellipsis,
       ),
     );
   }
+}
+
+Set<String> _duplicateFileNameKeys(Iterable<FsSearchResult> files) {
+  final counts = <String, int>{};
+  for (final file in files) {
+    final key = _fileNameKey(file);
+    counts[key] = (counts[key] ?? 0) + 1;
+  }
+  return {
+    for (final entry in counts.entries)
+      if (entry.value > 1) entry.key,
+  };
+}
+
+String _fileNameKey(FsSearchResult file) =>
+    _fileDisplayName(file).toLowerCase();
+
+String _fileShelfLabel(FsSearchResult file, {required bool showParent}) {
+  final name = _fileDisplayName(file);
+  if (!showParent) {
+    return name;
+  }
+  return '$name · ${_compactFileParentPath(file, maxSegments: 2)}';
+}
+
+String _fileDisplayName(FsSearchResult file) {
+  final name = file.name.trim();
+  if (name.isNotEmpty) {
+    return name;
+  }
+  var path = file.path.trim();
+  while (path.endsWith('/') && path.length > 1) {
+    path = path.substring(0, path.length - 1);
+  }
+  if (path.isEmpty) {
+    return 'file';
+  }
+  final slash = path.lastIndexOf('/');
+  return slash < 0 ? path : path.substring(slash + 1);
+}
+
+String _compactFileParentPath(
+  FsSearchResult file, {
+  int maxSegments = 3,
+}) {
+  final parent = _fileParentPath(file.path);
+  if (parent.isEmpty) {
+    return 'workspace root';
+  }
+  return _compactPath(parent, maxSegments: maxSegments);
+}
+
+String _fileParentPath(String rawPath) {
+  var path = rawPath.trim();
+  while (path.endsWith('/') && path.length > 1) {
+    path = path.substring(0, path.length - 1);
+  }
+  final slash = path.lastIndexOf('/');
+  if (slash < 0) {
+    return '';
+  }
+  if (slash == 0) {
+    return '/';
+  }
+  return path.substring(0, slash);
+}
+
+String _compactPath(String rawPath, {int maxSegments = 3}) {
+  final path = rawPath.trim();
+  if (path.isEmpty || path == '/') {
+    return path;
+  }
+  final segments = path.split('/').where((part) => part.isNotEmpty).toList();
+  if (segments.isEmpty) {
+    return path;
+  }
+  final visible = segments.length > maxSegments
+      ? segments.sublist(segments.length - maxSegments)
+      : segments;
+  final prefix = segments.length > maxSegments
+      ? '.../'
+      : path.startsWith('/')
+      ? '/'
+      : '';
+  return '$prefix${visible.join('/')}';
+}
+
+String _fileMentionToken(FsSearchResult file) {
+  final path = file.path.trim();
+  if (!file.isDirectory) {
+    return '@$path';
+  }
+  var directoryPath = path;
+  while (directoryPath.endsWith('/') && directoryPath.length > 1) {
+    directoryPath = directoryPath.substring(0, directoryPath.length - 1);
+  }
+  return '@$directoryPath/';
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

@@ -19,7 +19,7 @@ InspectorSurface buildInspectorPinnedSurface({
   return InspectorSurface(
     kind: InspectorSurfaceKind.pinned,
     ownerKey: ownerKey,
-    title: 'Pinned',
+    title: 'Saved messages',
     icon: Icons.push_pin_rounded,
     bodyBuilder: (context) {
       Widget buildPanel() => PinnedListPanel(
@@ -56,8 +56,8 @@ class PinnedListPanel extends StatelessWidget {
     if (pins.isEmpty) {
       return const MeshEmptyState.compact(
         icon: Icons.push_pin_rounded,
-        title: 'No pinned messages',
-        body: 'Pin a message from its bubble to keep it within reach.',
+        title: 'Nothing saved yet',
+        body: 'Pin a message to keep it easy to find.',
       );
     }
     return ListView.separated(

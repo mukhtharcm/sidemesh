@@ -8,11 +8,7 @@ import '../theme/app_colors.dart';
 import '../theme/app_theme.dart';
 
 /// A code block that renders syntax-highlighted text with the Sidemesh
-/// terminal aesthetic.
-///
-/// - Dark theme: atom-one-dark syntax palette.
-/// - Light theme: GitHub light syntax palette.
-/// - Language is optional; when unknown we fall back to plaintext.
+/// app theme.
 class SyntaxCodeBlock extends StatefulWidget {
   const SyntaxCodeBlock({
     super.key,
@@ -49,9 +45,11 @@ class _SyntaxCodeBlockState extends State<SyntaxCodeBlock> {
   Widget build(BuildContext context) {
     final colors = context.colors;
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    final theme = isDark ? _tuneTheme(atomOneDarkTheme, colors)
-                         : _tuneTheme(githubTheme, colors);
+    final theme = isDark
+        ? _tuneTheme(atomOneDarkTheme, colors)
+        : _tuneTheme(githubTheme, colors);
     final lang = _normalizeLanguage(widget.language);
+    final languageLabel = _displayLanguageLabel(lang);
     final showHeader = widget.showLanguageBadge;
 
     return DecoratedBox(
@@ -68,7 +66,7 @@ class _SyntaxCodeBlockState extends State<SyntaxCodeBlock> {
               padding: const EdgeInsets.fromLTRB(14, 10, 8, 0),
               child: Row(
                 children: [
-                  if (lang != null)
+                  if (languageLabel != null)
                     Container(
                       padding: const EdgeInsets.symmetric(
                         horizontal: 8,
@@ -80,12 +78,11 @@ class _SyntaxCodeBlockState extends State<SyntaxCodeBlock> {
                         border: Border.all(color: colors.border),
                       ),
                       child: Text(
-                        lang,
-                        style: monoStyle(
+                        languageLabel,
+                        style: Theme.of(context).textTheme.labelSmall?.copyWith(
                           color: colors.textSecondary,
-                          fontSize: 10.5,
                           fontWeight: FontWeight.w700,
-                        ).copyWith(letterSpacing: 0.6),
+                        ),
                       ),
                     ),
                   const Spacer(),
@@ -156,11 +153,10 @@ class _CopyIconButton extends StatelessWidget {
               const SizedBox(width: 4),
               Text(
                 copied ? 'Copied' : 'Copy',
-                style: monoStyle(
+                style: Theme.of(context).textTheme.labelSmall?.copyWith(
                   color: copied ? colors.accent : colors.textSecondary,
-                  fontSize: 10.5,
                   fontWeight: FontWeight.w700,
-                ).copyWith(letterSpacing: 0.6),
+                ),
               ),
             ],
           ),
@@ -210,6 +206,24 @@ String? _normalizeLanguage(String? language) {
   };
 }
 
+String? _displayLanguageLabel(String? language) {
+  if (language == null || language.isEmpty) {
+    return null;
+  }
+  return switch (language) {
+    'javascript' => 'JavaScript',
+    'typescript' => 'TypeScript',
+    'json' => 'JSON',
+    'yaml' => 'YAML',
+    'xml' => 'XML',
+    'bash' => 'Shell',
+    'markdown' => 'Markdown',
+    'dockerfile' => 'Dockerfile',
+    'plaintext' => 'Plain text',
+    _ => language[0].toUpperCase() + language.substring(1),
+  };
+}
+
 /// Detect a language hint from a file path or a shell command.
 String? detectLanguage({String? path, String? command}) {
   if (path != null && path.isNotEmpty) {
@@ -251,9 +265,11 @@ List<TextSpan> _highlightSpans(
 
   void traverse(Node node) {
     if (node.value != null) {
-      currentSpans.add(node.className == null
-          ? TextSpan(text: node.value)
-          : TextSpan(text: node.value, style: theme[node.className!]));
+      currentSpans.add(
+        node.className == null
+            ? TextSpan(text: node.value)
+            : TextSpan(text: node.value, style: theme[node.className!]),
+      );
     } else if (node.children != null) {
       final List<TextSpan> tmp = [];
       currentSpans.add(TextSpan(children: tmp, style: theme[node.className!]));

@@ -4,7 +4,6 @@ import 'package:xterm/xterm.dart' as xterm;
 
 import '../terminal_key_models.dart';
 import '../theme/app_colors.dart';
-import '../theme/app_theme.dart';
 import '../theme/app_tokens.dart';
 import 'terminal_keybar_sheet.dart';
 
@@ -103,8 +102,7 @@ class _TerminalKeyBarState extends State<TerminalKeyBar> {
             }
             return const SizedBox.shrink();
           },
-          separatorBuilder: (_, _) =>
-              SizedBox(width: widget.compact ? 5 : 6),
+          separatorBuilder: (_, _) => SizedBox(width: widget.compact ? 5 : 6),
         ),
       ),
     );
@@ -161,6 +159,7 @@ class _KeyButton extends StatelessWidget {
         constraints: const BoxConstraints(minWidth: 40),
         padding: EdgeInsets.symmetric(horizontal: compact ? 10 : 14),
         decoration: BoxDecoration(
+          color: colors.surface,
           border: Border.all(
             color: highlighted ? colors.accent : colors.border,
           ),
@@ -169,7 +168,7 @@ class _KeyButton extends StatelessWidget {
         alignment: Alignment.center,
         child: Text(
           label,
-          style: monoStyle(
+          style: Theme.of(context).textTheme.labelLarge?.copyWith(
             color: colors.textPrimary,
             fontSize: compact ? 12 : 13,
             fontWeight: AppWeights.emphasis,
@@ -206,18 +205,16 @@ class _ModifierPill extends StatelessWidget {
           vertical: compact ? 5 : 6,
         ),
         decoration: BoxDecoration(
-          color: active ? colors.accent : null,
-          border: Border.all(
-            color: active ? colors.accent : colors.border,
-          ),
+          color: active ? colors.accentMuted : colors.surface,
+          border: Border.all(color: active ? colors.accent : colors.border),
           borderRadius: AppShapes.pill,
         ),
         alignment: Alignment.center,
         child: Text(
           label,
           style: Theme.of(context).textTheme.labelSmall?.copyWith(
-            color: active ? Colors.white : colors.textSecondary,
-            fontWeight: active ? AppWeights.emphasis : AppWeights.body,
+            color: active ? colors.accent : colors.textSecondary,
+            fontWeight: AppWeights.emphasis,
             fontSize: compact ? 11 : 12,
           ),
         ),
@@ -244,14 +241,29 @@ class _MoreButton extends StatelessWidget {
           vertical: compact ? 5 : 6,
         ),
         decoration: BoxDecoration(
+          color: colors.surface,
           border: Border.all(color: colors.border),
           borderRadius: AppShapes.pill,
         ),
         alignment: Alignment.center,
-        child: Icon(
-          Icons.more_horiz_rounded,
-          size: compact ? 16 : 18,
-          color: colors.textSecondary,
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              Icons.more_horiz_rounded,
+              size: compact ? 16 : 18,
+              color: colors.textSecondary,
+            ),
+            const SizedBox(width: 4),
+            Text(
+              'More',
+              style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                color: colors.textSecondary,
+                fontWeight: AppWeights.emphasis,
+                fontSize: compact ? 11 : 12,
+              ),
+            ),
+          ],
         ),
       ),
     );

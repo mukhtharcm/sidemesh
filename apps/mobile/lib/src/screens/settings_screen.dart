@@ -15,6 +15,7 @@ import '../session_send_outbox_store.dart';
 import '../theme/app_colors.dart';
 import '../theme/app_tokens.dart';
 import '../theme/theme_controller.dart';
+import '../widgets/app_dialogs.dart';
 import '../widgets/app_snackbar.dart';
 import '../widgets/appearance_sheet.dart';
 import '../widgets/launch_options_form.dart';
@@ -40,22 +41,19 @@ Future<void> openSettingsScreen(
           constraints: const BoxConstraints(maxWidth: 920, maxHeight: 860),
           child: DecoratedBox(
             decoration: BoxDecoration(
-              color: colors.surface,
-              borderRadius: BorderRadius.circular(26),
+              color: colors.surfaceElevated,
+              borderRadius: AppShapes.dialog,
               border: Border.all(color: colors.border),
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.black.withValues(alpha: 0.2),
-                  blurRadius: 40,
-                  offset: const Offset(0, 20),
-                ),
-              ],
+              boxShadow: AppShadows.dialog(colors.textPrimary),
             ),
-            child: SettingsScreen(
-              embedded: true,
-              onClose: () => Navigator.of(dialogContext).pop(),
-              onResetSidebarWidth: onResetSidebarWidth,
-              onResetInspectorWidth: onResetInspectorWidth,
+            child: ClipRRect(
+              borderRadius: AppShapes.dialog,
+              child: SettingsScreen(
+                embedded: true,
+                onClose: () => Navigator.of(dialogContext).pop(),
+                onResetSidebarWidth: onResetSidebarWidth,
+                onResetInspectorWidth: onResetInspectorWidth,
+              ),
             ),
           ),
         ),
@@ -187,26 +185,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
     required String successMessage,
   }) async {
     if (_busyAction != null) return;
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (dialogContext) {
-        final colors = dialogContext.colors;
-        return AlertDialog(
-          backgroundColor: colors.surface,
-          title: Text(title),
-          content: Text(body),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(dialogContext).pop(false),
-              child: const Text('Cancel'),
-            ),
-            FilledButton(
-              onPressed: () => Navigator.of(dialogContext).pop(true),
-              child: const Text('Clear'),
-            ),
-          ],
-        );
-      },
+    final confirmed = await showMeshConfirmDialog(
+      context,
+      icon: Icons.delete_sweep_rounded,
+      title: title,
+      description: body,
+      confirmLabel: 'Clear data',
+      danger: true,
     );
     if (confirmed != true || !mounted) return;
     setState(() => _busyAction = key);
@@ -222,28 +207,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 
   Future<void> _replayOnboarding() async {
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (dialogContext) {
-        final colors = dialogContext.colors;
-        return AlertDialog(
-          backgroundColor: colors.surface,
-          title: const Text('Replay onboarding?'),
-          content: const Text(
-            'This will show the first-run guide again. You can skip it at any time.',
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(dialogContext).pop(false),
-              child: const Text('Cancel'),
-            ),
-            FilledButton(
-              onPressed: () => Navigator.of(dialogContext).pop(true),
-              child: const Text('Replay'),
-            ),
-          ],
-        );
-      },
+    final confirmed = await showMeshConfirmDialog(
+      context,
+      icon: Icons.play_circle_outline_rounded,
+      title: 'Show the guide again?',
+      description:
+          'This opens the first-run guide again. You can close it whenever you want.',
+      confirmLabel: 'Show guide',
     );
     if (confirmed != true || !mounted) return;
     await OnboardingStore.instance.reset();
@@ -400,7 +370,15 @@ class _LaunchDefaultsSheetState extends State<_LaunchDefaultsSheet> {
                     height: 1.35,
                   ),
                 ),
+                const SizedBox(height: 16),
+                _LaunchDefaultsSummaryCard(draft: _draft),
                 const SizedBox(height: 18),
+                const _LaunchDefaultsSectionLabel(
+                  title: 'Starting point',
+                  subtitle:
+                      'These controls decide how every new session begins before you make one-off changes.',
+                ),
+                const SizedBox(height: 10),
                 LaunchOptionsForm(
                   capabilities: const LaunchOptionsCapabilities(
                     supportsApprovalPolicy: true,
@@ -438,7 +416,7 @@ class _LaunchDefaultsSheetState extends State<_LaunchDefaultsSheet> {
                       ),
                     ),
                     child: Text(
-                      'These defaults are permissive. New sessions will start closer to autopilot behavior.',
+                      'These defaults allow more freedom than usual. New sessions may ask less often or start with broader access.',
                       style: Theme.of(context).textTheme.bodySmall?.copyWith(
                         color: colors.textPrimary,
                         height: 1.35,
@@ -447,9 +425,10 @@ class _LaunchDefaultsSheetState extends State<_LaunchDefaultsSheet> {
                   ),
                 ],
                 const SizedBox(height: 18),
-                Row(
-                  children: [
-                    TextButton(
+                LayoutBuilder(
+                  builder: (context, constraints) {
+                    final compact = constraints.maxWidth < 480;
+                    final resetButton = TextButton(
                       onPressed: _saving
                           ? null
                           : () {
@@ -457,26 +436,147 @@ class _LaunchDefaultsSheetState extends State<_LaunchDefaultsSheet> {
                                 _draft = CreateSessionDefaults.factoryDefaults;
                               });
                             },
-                      child: const Text('Reset'),
-                    ),
-                    const Spacer(),
-                    OutlinedButton(
-                      onPressed: _saving
-                          ? null
-                          : () => Navigator.of(context).maybePop(),
-                      child: const Text('Cancel'),
-                    ),
-                    const SizedBox(width: 8),
-                    FilledButton(
+                      child: const Text('Use recommended'),
+                    );
+                    final applyButton = FilledButton(
                       onPressed: _saving ? null : () => unawaited(_save()),
-                      child: Text(_saving ? 'Saving...' : 'Save'),
-                    ),
-                  ],
+                      child: Text(_saving ? 'Applying...' : 'Apply defaults'),
+                    );
+                    if (compact) {
+                      return Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          applyButton,
+                          const SizedBox(height: 8),
+                          OutlinedButton(
+                            onPressed: _saving
+                                ? null
+                                : () => Navigator.of(context).maybePop(),
+                            child: const Text('Cancel'),
+                          ),
+                          const SizedBox(height: 4),
+                          Center(child: resetButton),
+                        ],
+                      );
+                    }
+                    return Row(
+                      children: [
+                        resetButton,
+                        const Spacer(),
+                        OutlinedButton(
+                          onPressed: _saving
+                              ? null
+                              : () => Navigator.of(context).maybePop(),
+                          child: const Text('Cancel'),
+                        ),
+                        const SizedBox(width: 8),
+                        applyButton,
+                      ],
+                    );
+                  },
                 ),
               ],
             ),
           ),
         ),
+      ),
+    );
+  }
+}
+
+class _LaunchDefaultsSectionLabel extends StatelessWidget {
+  const _LaunchDefaultsSectionLabel({
+    required this.title,
+    required this.subtitle,
+  });
+
+  final String title;
+  final String subtitle;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          title,
+          style: Theme.of(context).textTheme.labelLarge?.copyWith(
+            color: colors.textPrimary,
+            fontWeight: AppWeights.title,
+          ),
+        ),
+        const SizedBox(height: 3),
+        Text(
+          subtitle,
+          style: Theme.of(context).textTheme.bodySmall?.copyWith(
+            color: colors.textSecondary,
+            height: 1.35,
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _LaunchDefaultsSummaryCard extends StatelessWidget {
+  const _LaunchDefaultsSummaryCard({required this.draft});
+
+  final CreateSessionDefaults draft;
+
+  @override
+  Widget build(BuildContext context) {
+    return MeshSurface(
+      tone: MeshSurfaceTone.muted,
+      radius: AppRadii.control,
+      padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'Used every time you open New session.',
+            style: Theme.of(
+              context,
+            ).textTheme.labelLarge?.copyWith(fontWeight: AppWeights.title),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            'You can still adjust these choices for a specific machine or session later.',
+            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+              color: context.colors.textSecondary,
+              height: 1.35,
+            ),
+          ),
+          const SizedBox(height: 10),
+          Wrap(
+            spacing: AppSpacing.sm,
+            runSpacing: AppSpacing.sm,
+            children: [
+              MeshPill(
+                label: draft.approval.label,
+                icon: Icons.verified_user_rounded,
+              ),
+              MeshPill(
+                label: draft.sandbox.label,
+                icon: Icons.folder_special_rounded,
+              ),
+              MeshPill(
+                label: draft.fastMode ? 'fast mode on' : 'fast mode off',
+                icon: Icons.bolt_rounded,
+                tone: draft.fastMode
+                    ? MeshPillTone.accent
+                    : MeshPillTone.neutral,
+              ),
+              MeshPill(
+                label: draft.webSearch ? 'web search on' : 'web search off',
+                icon: Icons.public_rounded,
+                tone: draft.webSearch
+                    ? MeshPillTone.info
+                    : MeshPillTone.neutral,
+              ),
+            ],
+          ),
+        ],
       ),
     );
   }
@@ -551,8 +651,8 @@ class _SettingsContent extends StatelessWidget {
       children: [
         _SettingsSection(
           icon: Icons.palette_rounded,
-          title: 'Appearance & display',
-          subtitle: 'Theme, typography, and screen behavior.',
+          title: 'Appearance & device',
+          subtitle: 'Theme, text, and screen behavior.',
           children: [
             ListenableBuilder(
               listenable: themeController,
@@ -576,15 +676,14 @@ class _SettingsContent extends StatelessWidget {
                   icon: Icons.light_mode_rounded,
                   title: 'Display',
                   subtitle: enabled
-                      ? 'Screen stays awake while an agent is working.'
-                      : 'Screen can sleep normally.',
+                      ? 'This screen stays awake while an agent is working.'
+                      : 'This device can sleep normally.',
                   body:
-                      'Sidemesh keeps this device awake only while an agent session is active. The wake lock is released when the run ends, the app leaves the foreground, or this setting is turned off.',
+                      'Sidemesh only keeps this screen awake while an agent run is active. The wake lock ends when the run stops, the app leaves the foreground, or you turn this off.',
                   footer: _ToggleTile(
                     icon: Icons.screen_lock_portrait_rounded,
                     title: 'Keep screen awake while agent runs',
-                    subtitle:
-                        'Useful for long turns. May use more battery.',
+                    subtitle: 'Useful for long turns. May use more battery.',
                     value: enabled,
                     onChanged: (value) => unawaited(
                       screenAwakeStore.setKeepScreenAwakeWhileAgentRuns(value),
@@ -598,8 +697,8 @@ class _SettingsContent extends StatelessWidget {
         const SizedBox(height: AppSpacing.lg),
         _SettingsSection(
           icon: Icons.notifications_rounded,
-          title: 'Alerts & background',
-          subtitle: 'Approval alerts, polling, and live activities.',
+          title: 'Alerts',
+          subtitle: 'Notification permissions and background support.',
           children: [
             _SettingsCard(
               icon: Icons.notifications_rounded,
@@ -629,18 +728,18 @@ class _SettingsContent extends StatelessWidget {
                         : Icons.notifications_off_rounded,
                   ),
                   MeshPill(
-                    label: BackgroundSyncService.instance.supportsBackgroundFetch
-                        ? 'background polling'
-                        : 'no background polling',
-                    tone:
+                    label:
                         BackgroundSyncService.instance.supportsBackgroundFetch
+                        ? 'background sync'
+                        : 'foreground only',
+                    tone: BackgroundSyncService.instance.supportsBackgroundFetch
                         ? MeshPillTone.info
                         : MeshPillTone.neutral,
                     icon: Icons.sync_rounded,
                   ),
                   if (liveActivitiesSupported)
                     const MeshPill(
-                      label: 'live activity supported',
+                      label: 'live activity',
                       tone: MeshPillTone.info,
                       icon: Icons.view_agenda_rounded,
                     ),
@@ -675,7 +774,7 @@ class _SettingsContent extends StatelessWidget {
         _SettingsSection(
           icon: Icons.rocket_launch_rounded,
           title: 'Session defaults',
-          subtitle: 'Seed values for new sessions before host overrides.',
+          subtitle: 'Starting values before host-specific overrides.',
           children: [
             ListenableBuilder(
               listenable: defaultsStore,
@@ -722,8 +821,8 @@ class _SettingsContent extends StatelessWidget {
         const SizedBox(height: AppSpacing.lg),
         _SettingsSection(
           icon: Icons.warning_amber_rounded,
-          title: 'Data & storage',
-          subtitle: 'Permanent actions — cannot be undone.',
+          title: 'Local data',
+          subtitle: 'Clear information saved only on this device.',
           children: [
             _SettingsCard(
               icon: Icons.storage_rounded,
@@ -847,7 +946,7 @@ class _SettingsContent extends StatelessWidget {
                     ),
                     const SizedBox(height: 2),
                     Text(
-                      'Global app controls for appearance, display, defaults, storage, and notifications.',
+                      'Global app controls for appearance, alerts, defaults, and local data.',
                       style: Theme.of(context).textTheme.bodySmall?.copyWith(
                         color: colors.textSecondary,
                       ),
@@ -907,9 +1006,7 @@ class _SettingsSectionState extends State<_SettingsSection>
             decoration: BoxDecoration(
               color: colors.accentMuted,
               borderRadius: BorderRadius.circular(AppRadii.control),
-              border: Border.all(
-                color: colors.accent.withValues(alpha: 0.28),
-              ),
+              border: Border.all(color: colors.accent.withValues(alpha: 0.28)),
             ),
             alignment: Alignment.center,
             child: Icon(widget.icon, size: 17, color: colors.accent),
@@ -923,9 +1020,9 @@ class _SettingsSectionState extends State<_SettingsSection>
           ),
           subtitle: Text(
             widget.subtitle,
-            style: Theme.of(context).textTheme.bodySmall?.copyWith(
-              color: colors.textSecondary,
-            ),
+            style: Theme.of(
+              context,
+            ).textTheme.bodySmall?.copyWith(color: colors.textSecondary),
           ),
           trailing: AnimatedRotation(
             duration: const Duration(milliseconds: 180),
@@ -992,8 +1089,7 @@ class _AboutFooter extends StatelessWidget {
           ),
           const SizedBox(height: AppSpacing.xs),
           Text(
-            'Sidemesh on $platformLabel. Hosts, tokens, favorites, pins, '
-            'caches, and other local state stay inside this app install.',
+            'Sidemesh on $platformLabel. Hosts, tokens, favorites, caches, and other local state stay inside this app install.',
             style: Theme.of(context).textTheme.bodySmall?.copyWith(
               color: colors.textSecondary,
               height: 1.35,
@@ -1159,7 +1255,7 @@ class _ActionRow extends StatelessWidget {
         height: 32,
         decoration: BoxDecoration(
           color: iconBg,
-          borderRadius: BorderRadius.circular(10),
+          borderRadius: AppShapes.action,
           border: Border.all(color: iconBorder),
         ),
         alignment: Alignment.center,

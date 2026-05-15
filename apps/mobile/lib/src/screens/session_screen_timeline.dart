@@ -228,24 +228,19 @@ class _ReasoningBlockState extends State<_ReasoningBlock> {
   Widget build(BuildContext context) {
     final colors = context.colors;
     final title = widget.live
-        ? (_expanded ? 'Thinking' : 'Thinking...')
-        : 'Reasoning';
-    return Container(
-      width: double.infinity,
-      decoration: BoxDecoration(
-        color: colors.surfaceMuted,
-        borderRadius: AppShapes.input,
-        border: Border.all(color: colors.border),
-      ),
+        ? (_expanded ? 'Working' : 'Working...')
+        : 'Working notes';
+    return Material(
+      color: Colors.transparent,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         mainAxisSize: MainAxisSize.min,
         children: [
           InkWell(
             onTap: _toggle,
-            borderRadius: AppShapes.input,
+            borderRadius: AppShapes.action,
             child: Padding(
-              padding: const EdgeInsets.fromLTRB(10, 8, 10, 8),
+              padding: const EdgeInsets.fromLTRB(0, 6, 0, 6),
               child: Row(
                 children: [
                   if (widget.live)
@@ -266,7 +261,7 @@ class _ReasoningBlockState extends State<_ReasoningBlock> {
                       title,
                       overflow: TextOverflow.ellipsis,
                       style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                        color: colors.textPrimary,
+                        color: colors.textSecondary,
                         fontWeight: AppWeights.title,
                       ),
                     ),
@@ -285,7 +280,7 @@ class _ReasoningBlockState extends State<_ReasoningBlock> {
           ),
           if (_expanded)
             Padding(
-              padding: const EdgeInsets.fromLTRB(10, 0, 10, 10),
+              padding: const EdgeInsets.fromLTRB(22, 2, 0, 10),
               child: _ReasoningTextBody(
                 text: widget.reasoning.trimRight(),
                 textColor: colors.textPrimary,
@@ -376,159 +371,219 @@ class _ProviderWarningRow extends StatelessWidget {
       _ => colors.warning,
     };
     return Padding(
-      padding: const EdgeInsets.only(bottom: 4),
-      child: DecoratedBox(
-        decoration: BoxDecoration(
-          color: colors.surfaceMuted,
-          borderRadius: AppShapes.input,
-          border: Border.all(color: accent.withValues(alpha: 0.22)),
-        ),
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Icon(icon, size: 16, color: accent),
-              const SizedBox(width: 10),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
+      padding: const EdgeInsets.only(left: 4, right: 4, bottom: 8),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Padding(
+            padding: const EdgeInsets.only(top: 2),
+            child: Icon(icon, size: 16, color: accent),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 6,
+                  crossAxisAlignment: WrapCrossAlignment.center,
                   children: [
-                    Wrap(
-                      spacing: 8,
-                      runSpacing: 6,
-                      crossAxisAlignment: WrapCrossAlignment.center,
-                      children: [
-                        MeshPill(label: 'Provider warning', tone: tone, icon: icon),
-                        if ((event.source ?? '').isNotEmpty)
-                          MeshPill(
-                            label: event.source!,
-                            tone: MeshPillTone.neutral,
-                            mono: true,
-                          ),
-                        if ((event.code ?? '').isNotEmpty)
-                          MeshPill(
-                            label: event.code!,
-                            tone: MeshPillTone.neutral,
-                            mono: true,
-                          ),
-                      ],
-                    ),
-                    const SizedBox(height: 8),
-                    Text(
-                      event.message ?? '',
-                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                        color: colors.textPrimary,
-                        fontWeight: FontWeight.w600,
-                        height: 1.35,
+                    MeshPill(label: 'Agent notice', tone: tone, icon: icon),
+                    if ((event.source ?? '').isNotEmpty)
+                      MeshPill(
+                        label: event.source!,
+                        tone: MeshPillTone.neutral,
+                        mono: true,
                       ),
-                    ),
+                    if ((event.code ?? '').isNotEmpty)
+                      MeshPill(
+                        label: event.code!,
+                        tone: MeshPillTone.neutral,
+                        mono: true,
+                      ),
                   ],
                 ),
-              ),
-            ],
+                const SizedBox(height: 6),
+                Text(
+                  event.message ?? '',
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: colors.textPrimary,
+                    fontWeight: FontWeight.w600,
+                    height: 1.35,
+                  ),
+                ),
+              ],
+            ),
           ),
-        ),
+        ],
       ),
     );
   }
 }
 
-class _PlanUpdateCard extends StatelessWidget {
+class _PlanUpdateCard extends StatefulWidget {
   const _PlanUpdateCard({required this.event});
 
   final LiveEvent event;
 
   @override
+  State<_PlanUpdateCard> createState() => _PlanUpdateCardState();
+}
+
+class _PlanUpdateCardState extends State<_PlanUpdateCard> {
+  bool _expanded = false;
+
+  @override
   Widget build(BuildContext context) {
     final colors = context.colors;
+    final event = widget.event;
     final steps = event.plan ?? const <LiveEventPlanStep>[];
-    final completedCount = steps.where((step) => step.status == 'completed').length;
+    final completedCount = steps
+        .where((step) => step.status == 'completed')
+        .length;
+    final explanation = (event.explanation ?? '').trim();
     return Padding(
-      padding: const EdgeInsets.only(bottom: 4),
-      child: MeshCard(
-        padding: EdgeInsets.zero,
-        tone: MeshCardTone.muted,
-        borderColor: colors.accent.withValues(alpha: 0.45),
-        child: Theme(
-          data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
-          child: ExpansionTile(
-            key: PageStorageKey<String>(
-              'plan:${event.turnId ?? event.itemId ?? event.explanation ?? steps.length}',
-            ),
-            tilePadding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
-            childrenPadding: const EdgeInsets.fromLTRB(14, 0, 14, 14),
-            iconColor: colors.textSecondary,
-            collapsedIconColor: colors.textSecondary,
-            initiallyExpanded: false,
-            title: Row(
-              children: [
-                Icon(Icons.route_rounded, size: 18, color: colors.accent),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: Text(
-                    'Plan update',
-                    style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                      color: colors.textPrimary,
-                      fontWeight: AppWeights.title,
-                    ),
+      padding: const EdgeInsets.only(left: 4, right: 4, bottom: 10),
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 640),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Material(
+              color: Colors.transparent,
+              child: InkWell(
+                onTap: () => setState(() => _expanded = !_expanded),
+                borderRadius: AppShapes.input,
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 4,
+                    vertical: 7,
                   ),
-                ),
-                const SizedBox(width: 8),
-                MeshPill(
-                  label: '$completedCount/${steps.length} complete',
-                  tone: MeshPillTone.accent,
-                  mono: true,
-                ),
-              ],
-            ),
-            subtitle: (event.explanation ?? '').isEmpty
-                ? null
-                : Padding(
-                    padding: const EdgeInsets.only(top: 8),
-                    child: Text(
-                      event.explanation!,
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                        color: colors.textSecondary,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                  ),
-            children: [
-              for (var index = 0; index < steps.length; index += 1) ...[
-                if (index > 0) const SizedBox(height: 8),
-                Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Icon(
-                      _planStepIcon(steps[index].status),
-                      size: 18,
-                      color: _planStepColor(colors, steps[index].status),
-                    ),
-                    const SizedBox(width: 10),
-                    Expanded(
-                      child: Text(
-                        steps[index].step,
-                        style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                          color: colors.textPrimary,
-                          fontWeight: FontWeight.w600,
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.center,
+                    children: [
+                      Container(
+                        width: 30,
+                        height: 30,
+                        decoration: BoxDecoration(
+                          color: colors.surfaceMuted.withValues(alpha: 0.72),
+                          borderRadius: AppShapes.iconWell,
+                          border: Border.all(
+                            color: colors.border.withValues(alpha: 0.5),
+                          ),
+                        ),
+                        alignment: Alignment.center,
+                        child: Icon(
+                          Icons.route_rounded,
+                          size: 16,
+                          color: colors.textSecondary,
                         ),
                       ),
-                    ),
-                    const SizedBox(width: 8),
-                    MeshStatusBadge(
-                      label: _planStepLabel(steps[index].status),
-                      tone: _planStepTone(steps[index].status),
-                      icon: _planStepIcon(steps[index].status),
-                      compact: true,
-                    ),
-                  ],
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              'Plan update',
+                              style: Theme.of(context).textTheme.titleSmall
+                                  ?.copyWith(
+                                    color: colors.textPrimary,
+                                    fontWeight: AppWeights.emphasis,
+                                  ),
+                            ),
+                            if (explanation.isNotEmpty) ...[
+                              const SizedBox(height: 2),
+                              Text(
+                                explanation,
+                                maxLines: _expanded ? 3 : 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: Theme.of(context).textTheme.bodySmall
+                                    ?.copyWith(
+                                      color: colors.textSecondary,
+                                      fontWeight: AppWeights.body,
+                                    ),
+                              ),
+                            ],
+                          ],
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      MeshStatusBadge(
+                        label: '$completedCount/${steps.length}',
+                        tone: MeshStatusTone.neutral,
+                        icon: Icons.checklist_rounded,
+                        compact: true,
+                      ),
+                      const SizedBox(width: 4),
+                      Icon(
+                        _expanded
+                            ? Icons.keyboard_arrow_up_rounded
+                            : Icons.keyboard_arrow_down_rounded,
+                        size: 18,
+                        color: colors.textTertiary,
+                      ),
+                    ],
+                  ),
                 ),
-              ],
-            ],
-          ),
+              ),
+            ),
+            AnimatedSize(
+              duration: const Duration(milliseconds: 160),
+              curve: Curves.easeOutCubic,
+              alignment: Alignment.topLeft,
+              child: _expanded
+                  ? Padding(
+                      padding: const EdgeInsets.only(left: 44, top: 6),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          for (var index = 0;
+                              index < steps.length;
+                              index += 1) ...[
+                            if (index > 0) const SizedBox(height: 8),
+                            Row(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Icon(
+                                  _planStepIcon(steps[index].status),
+                                  size: 17,
+                                  color: _planStepColor(
+                                    colors,
+                                    steps[index].status,
+                                  ),
+                                ),
+                                const SizedBox(width: 10),
+                                Expanded(
+                                  child: Text(
+                                    steps[index].step,
+                                    style: Theme.of(context)
+                                        .textTheme
+                                        .bodyMedium
+                                        ?.copyWith(
+                                          color: colors.textPrimary,
+                                          fontWeight: FontWeight.w600,
+                                          height: 1.35,
+                                        ),
+                                  ),
+                                ),
+                                const SizedBox(width: 8),
+                                MeshStatusBadge(
+                                  label: _planStepLabel(steps[index].status),
+                                  tone: _planStepTone(steps[index].status),
+                                  icon: _planStepIcon(steps[index].status),
+                                  compact: true,
+                                ),
+                              ],
+                            ),
+                          ],
+                        ],
+                      ),
+                    )
+                  : const SizedBox.shrink(),
+            ),
+          ],
         ),
       ),
     );
@@ -922,6 +977,15 @@ MeshPillTone _pendingSendStateTone(PendingSendDisplayState state) {
   };
 }
 
+class _CommandTitleParts {
+  const _CommandTitleParts({required this.verb, required this.command});
+
+  final String verb;
+  final String command;
+
+  String get plainText => '$verb $command';
+}
+
 class _MessageBubble extends StatelessWidget {
   const _MessageBubble({
     required this.host,
@@ -958,33 +1022,79 @@ class _MessageBubble extends StatelessWidget {
       'assistant' => colors.assistantBubble,
       _ => colors.surfaceMuted,
     };
-    final textColor = isUser ? colors.userBubbleOn : colors.textPrimary;
+    final textColor = messageBodyColor(colors, userBubble: isUser);
+    final metaColor = messageMetaColor(colors, userBubble: isUser);
+    final assistantMetaColor = messageMetaColor(colors, userBubble: false);
+    final selectionForeground = readableTextOn(
+      colors,
+      background: bubbleColor,
+      preferred: textColor,
+    );
+    final bubbleSelectionTheme = TextSelectionThemeData(
+      cursorColor: selectionForeground,
+      selectionColor: selectionFillForBackground(
+        colors,
+        background: bubbleColor,
+        foreground: selectionForeground,
+      ),
+      selectionHandleColor: selectionForeground,
+    );
+    final bodyStyle = Theme.of(context).textTheme.bodyMedium?.copyWith(
+      color: textColor,
+      height: 1.45,
+    );
+    final linkStyle = messageLinkStyle(
+      colors,
+      userBubble: isUser,
+      baseStyle: bodyStyle,
+    );
+    final assistantLinkStyle = messageLinkStyle(
+      colors,
+      userBubble: false,
+      baseStyle: Theme.of(context).textTheme.bodyMedium?.copyWith(
+        color: colors.textPrimary,
+        height: 1.5,
+      ),
+    );
+    final messagePadding = isAssistant
+        ? const EdgeInsets.fromLTRB(16, 13, 16, 14)
+        : const EdgeInsets.fromLTRB(16, 12, 16, 14);
+    final bubbleBorderColor = isAssistant
+        ? live
+              ? colors.accent.withValues(alpha: 0.36)
+              : colors.assistantBubbleBorder
+        : live
+        ? colors.accent
+        : colors.accent.withValues(alpha: 0.28);
+    final phaseLabel = live
+        ? 'Writing'
+        : message.phase == 'commentary'
+        ? 'Progress'
+        : null;
 
     return Align(
       alignment: isUser ? Alignment.centerRight : Alignment.centerLeft,
       child: Padding(
-        padding: const EdgeInsets.only(bottom: 10),
+        padding: EdgeInsets.only(bottom: isAssistant ? 14 : 10),
         child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 560),
+          constraints: BoxConstraints(maxWidth: isAssistant ? 680 : 560),
           child: DecoratedBox(
             decoration: BoxDecoration(
               color: bubbleColor,
-              borderRadius: BorderRadius.circular(20),
+              borderRadius: BorderRadius.circular(isAssistant ? 16 : 20),
               border: Border.all(
-                color: live
-                    ? colors.accent
-                    : (isUser
-                          ? colors.userBubble
-                          : colors.assistantBubbleBorder),
+                color: bubbleBorderColor,
                 width: live ? 1.4 : 1,
               ),
             ),
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(16, 12, 16, 14),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  if (message.phase != null && isAssistant && hasAnswer)
+            child: TextSelectionTheme(
+              data: bubbleSelectionTheme,
+              child: Padding(
+                padding: messagePadding,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                  if (phaseLabel != null && hasAnswer)
                     Padding(
                       padding: const EdgeInsets.only(bottom: 6),
                       child: Row(
@@ -994,14 +1104,14 @@ class _MessageBubble extends StatelessWidget {
                             const SizedBox(width: 6),
                           ],
                           Text(
-                            message.phase == 'commentary'
-                                ? 'COMMENTARY'
-                                : 'ANSWER',
+                            phaseLabel,
                             style: Theme.of(context).textTheme.labelSmall
                                 ?.copyWith(
-                                  color: colors.textTertiary,
+                                  color: isAssistant
+                                      ? assistantMetaColor
+                                      : metaColor,
                                   fontWeight: AppWeights.title,
-                                  letterSpacing: 1.1,
+                                  letterSpacing: 0.2,
                                 ),
                           ),
                         ],
@@ -1023,16 +1133,14 @@ class _MessageBubble extends StatelessWidget {
                         _MarkdownMessageBody(
                           text: block.text,
                           textColor: textColor,
+                          linkStyle: assistantLinkStyle,
                           onOpenFile: onOpenFile,
                         )
                       else
                         _LinkifiedSelectableText(
                           text: block.text,
-                          style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                            color: textColor,
-                            height: 1.45,
-                          ),
-                          linkColor: colors.accent,
+                          style: bodyStyle,
+                          linkStyle: linkStyle,
                         ),
                   if (message.attachments.isNotEmpty) ...[
                     _MessageAttachmentsSection(
@@ -1048,16 +1156,14 @@ class _MessageBubble extends StatelessWidget {
                       _MarkdownMessageBody(
                         text: message.text,
                         textColor: textColor,
+                        linkStyle: assistantLinkStyle,
                         onOpenFile: onOpenFile,
                       )
                     else
                       _LinkifiedSelectableText(
                         text: message.text,
-                        style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                          color: textColor,
-                          height: 1.45,
-                        ),
-                        linkColor: colors.accent,
+                        style: bodyStyle,
+                        linkStyle: linkStyle,
                       ),
                   if (canPin || hasText)
                     Padding(
@@ -1074,8 +1180,8 @@ class _MessageBubble extends StatelessWidget {
                               style: Theme.of(context).textTheme.labelSmall
                                   ?.copyWith(
                                     color: isUser
-                                        ? textColor.withValues(alpha: 0.62)
-                                        : colors.textTertiary,
+                                        ? metaColor
+                                        : assistantMetaColor,
                                     fontSize: 10.5,
                                     fontFeatures: const [
                                       FontFeature.tabularFigures(),
@@ -1085,9 +1191,7 @@ class _MessageBubble extends StatelessWidget {
                             if (canPin)
                               _MessagePinButton(
                                 pinned: pinned,
-                                tone: isUser
-                                    ? textColor.withValues(alpha: 0.72)
-                                    : colors.textSecondary,
+                                tone: isUser ? metaColor : colors.textSecondary,
                                 accent: colors.warning,
                                 onTap: onTogglePin!,
                               ),
@@ -1101,7 +1205,8 @@ class _MessageBubble extends StatelessWidget {
                         ),
                       ),
                     ),
-                ],
+                  ],
+                ),
               ),
             ),
           ),
@@ -1576,11 +1681,13 @@ class _MarkdownMessageBody extends StatelessWidget {
   const _MarkdownMessageBody({
     required this.text,
     required this.textColor,
+    this.linkStyle,
     this.onOpenFile,
   });
 
   final String text;
   final Color textColor;
+  final TextStyle? linkStyle;
   final void Function(String path)? onOpenFile;
 
   @override
@@ -1588,6 +1695,7 @@ class _MarkdownMessageBody extends StatelessWidget {
     return MarkdownContent(
       text: text,
       textColor: textColor,
+      linkStyle: linkStyle,
       onOpenFile: onOpenFile,
     );
   }
@@ -1604,13 +1712,24 @@ class _ReasoningTextBody extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final colors = context.colors;
+    final style = Theme.of(context).textTheme.bodyMedium?.copyWith(
+      color: textColor,
+      height: 1.5,
+    );
     return _LinkifiedSelectableText(
       text: text,
-      style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-        color: textColor,
-        height: 1.5,
+      style: style,
+      linkStyle: linkTextStyleForBackground(
+        background: colors.assistantBubble,
+        preferred: colors.accent,
+        fallbacks: [
+          colors.info,
+          colors.textPrimary,
+          colors.textSecondary,
+        ],
+        baseStyle: style,
       ),
-      linkColor: context.colors.accent,
     );
   }
 }
@@ -1728,12 +1847,12 @@ class _LinkifiedSelectableText extends StatefulWidget {
   const _LinkifiedSelectableText({
     required this.text,
     required this.style,
-    required this.linkColor,
+    required this.linkStyle,
   });
 
   final String text;
   final TextStyle? style;
-  final Color linkColor;
+  final TextStyle? linkStyle;
 
   @override
   State<_LinkifiedSelectableText> createState() =>
@@ -1777,10 +1896,7 @@ class _LinkifiedSelectableTextState extends State<_LinkifiedSelectableText> {
       spans.add(
         TextSpan(
           text: raw,
-          style: TextStyle(
-            color: widget.linkColor,
-            decoration: TextDecoration.underline,
-          ),
+          style: widget.linkStyle,
           recognizer: recognizer,
         ),
       );
@@ -1822,6 +1938,7 @@ class _ActivityCard extends StatefulWidget {
     this.onBrowsePath,
     this.onOpenBrowserPreview,
     this.onOpenTerminal,
+    this.opensFilesInInspector = false,
   });
 
   final HostProfile host;
@@ -1833,6 +1950,7 @@ class _ActivityCard extends StatefulWidget {
   final void Function(String path)? onBrowsePath;
   final void Function(BrowserPreviewTargetCandidate target)? onOpenBrowserPreview;
   final void Function(String? cwd)? onOpenTerminal;
+  final bool opensFilesInInspector;
 
   @override
   State<_ActivityCard> createState() => _ActivityCardState();
@@ -1950,7 +2068,9 @@ class _ActivityCardState extends State<_ActivityCard> {
     if (browsePath != null && widget.onBrowsePath != null) {
       actions.add(
         _ActivityActionSpec(
-          label: 'Browse files',
+          label: widget.activity.isFileChange && widget.opensFilesInInspector
+              ? 'Open in inspector'
+              : 'Browse files',
           icon: Icons.folder_open_rounded,
           onTap: () => widget.onBrowsePath!(browsePath),
         ),
@@ -1978,20 +2098,169 @@ class _ActivityCardState extends State<_ActivityCard> {
     return actions;
   }
 
+  Widget? _activityStatusBadge(SessionActivity activity) {
+    if (activity.status == 'completed') {
+      return null;
+    }
+    final statusTone = switch (activity.status) {
+      'failed' => MeshStatusTone.danger,
+      'declined' => MeshStatusTone.neutral,
+      _ => MeshStatusTone.running,
+    };
+    final statusLabel = switch (activity.status) {
+      'failed' => 'failed',
+      'declined' => 'declined',
+      _ => 'running',
+    };
+    final statusIcon = switch (activity.status) {
+      'failed' => Icons.error_outline_rounded,
+      'declined' => Icons.block_rounded,
+      _ => Icons.bolt_rounded,
+    };
+    return MeshStatusBadge(
+      label: statusLabel,
+      tone: statusTone,
+      icon: statusIcon,
+      compact: true,
+    );
+  }
+
+  List<Widget> _activityDetailPills(SessionActivity activity) {
+    final pills = <Widget>[];
+    if (activity.isCommand) {
+      if (activity.exitCode != null && activity.exitCode != 0) {
+        pills.add(
+          MeshPill(
+            label: 'exit ${activity.exitCode}',
+            tone: MeshPillTone.danger,
+            mono: true,
+          ),
+        );
+      }
+      if (activity.durationMs != null &&
+          (activity.status == 'failed' || activity.durationMs! >= 10000)) {
+        pills.add(
+          MeshPill(label: _formatDuration(activity.durationMs!), mono: true),
+        );
+      }
+      if (activity.terminalStatus == 'input') {
+        pills.add(
+          const MeshPill(
+            label: 'stdin',
+            tone: MeshPillTone.info,
+            mono: true,
+          ),
+        );
+      }
+      if (activity.terminalStatus == 'waiting') {
+        pills.add(
+          const MeshPill(
+            label: 'interactive',
+            tone: MeshPillTone.warning,
+            mono: true,
+          ),
+        );
+      }
+    }
+    if (activity.isTool && activity.toolError == true) {
+      pills.add(
+        const MeshPill(
+          label: 'tool error',
+          tone: MeshPillTone.danger,
+          mono: true,
+        ),
+      );
+    }
+    return pills;
+  }
+
+  _CommandTitleParts? _activityCommandTitleParts(SessionActivity activity) {
+    final rawCommand = activity.isCommand
+        ? activity.command ?? ''
+        : activity.isTool && _toolIsCommandActivity(activity)
+        ? _toolCommandText(activity)
+        : '';
+    return _commandTitleParts(rawCommand, activity.status);
+  }
+
+  Widget _buildActivityTitle(
+    BuildContext context, {
+    required SessionActivity activity,
+    required String title,
+  }) {
+    final commandTitle = _activityCommandTitleParts(activity);
+    final child = commandTitle != null
+        ? Semantics(
+            key: ValueKey('cmd:${commandTitle.plainText}:$_cardCollapsed'),
+            label: commandTitle.plainText,
+            child: ExcludeSemantics(
+              child: _CommandTitleChip(
+                parts: commandTitle,
+                collapsed: _cardCollapsed,
+              ),
+            ),
+          )
+        : Text(
+            title,
+            key: ValueKey('title:$title:$_cardCollapsed'),
+            maxLines: _cardCollapsed ? 1 : 3,
+            overflow: TextOverflow.ellipsis,
+            style:
+                (activity.isTool
+                        ? monoStyle(
+                            color: context.colors.textPrimary,
+                            fontSize: 13,
+                          )
+                        : Theme.of(context).textTheme.titleSmall?.copyWith(
+                            fontWeight: AppWeights.emphasis,
+                          ))
+                    ?.copyWith(height: 1.35),
+          );
+    return AnimatedSwitcher(
+      duration: const Duration(milliseconds: 160),
+      switchInCurve: Curves.easeOutCubic,
+      switchOutCurve: Curves.easeOutCubic,
+      child: child,
+    );
+  }
+
+  Widget _activityDetailsPanel(BuildContext context, Widget child) {
+    final colors = context.colors;
+    return Padding(
+      padding: const EdgeInsets.only(top: 6),
+      child: Container(
+        width: double.infinity,
+        padding: const EdgeInsets.fromLTRB(10, 10, 10, 10),
+        decoration: BoxDecoration(
+          color: colors.surface.withValues(alpha: 0.58),
+          borderRadius: AppShapes.input,
+          border: Border.all(color: colors.border.withValues(alpha: 0.52)),
+        ),
+        child: child,
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final activity = widget.activity;
     final sessionCwd = widget.sessionCwd;
     final colors = context.colors;
+    final commandLikeActivity =
+        activity.isCommand ||
+        (activity.isTool && _toolIsCommandActivity(activity));
+    if (activity.isFileChange) {
+      return _buildFileChangeInlineActivity(context, activity);
+    }
+
     final title = switch (activity.type) {
-      'command' =>
-        (activity.command ?? '').trim().isEmpty ? 'Command' : activity.command!,
+      'command' => _commandActivityTitle(activity),
       'tool' => _toolActivityTitle(activity, sessionCwd),
       'file_change' =>
         activity.changes.length == 1
             ? _relativeSessionPath(activity.changes.first.path, sessionCwd)
             : 'Edited ${activity.changes.length} files',
-      'turn_diff' => 'Live turn diff',
+      'turn_diff' => _turnDiffActivityTitle(activity),
       'web_search' => _webSearchTitle(activity),
       'image_generation' => 'Generated image',
       'context_compaction' => 'Context compacted',
@@ -2002,7 +2271,7 @@ class _ActivityCardState extends State<_ActivityCard> {
       'command' => _relativeSessionPath(activity.cwd ?? sessionCwd, sessionCwd),
       'tool' => _toolActivitySubtitle(activity, sessionCwd),
       'file_change' => _activityFileSummary(activity.changes, sessionCwd),
-      'turn_diff' => 'Aggregated patch snapshot for this turn',
+      'turn_diff' => null,
       'web_search' => _webSearchSubtitle(activity),
       'image_generation' =>
         (activity.savedPath ?? '').isNotEmpty
@@ -2014,14 +2283,14 @@ class _ActivityCardState extends State<_ActivityCard> {
     };
 
     final activityLabel = switch (activity.type) {
-      'command' => 'COMMAND',
+      'command' => null,
       'tool' => _toolActivityLabel(activity),
-      'file_change' => 'FILE CHANGE',
-      'turn_diff' => 'TURN DIFF',
-      'web_search' => 'WEB SEARCH',
-      'image_generation' => 'IMAGE',
-      'context_compaction' => 'COMPACTION',
-      _ => 'ACTIVITY',
+      'file_change' => 'File edit',
+      'turn_diff' => null,
+      'web_search' => 'Web search',
+      'image_generation' => 'Image',
+      'context_compaction' => 'Context',
+      _ => 'Activity',
     };
 
     final activityIcon = switch (activity.type) {
@@ -2035,95 +2304,94 @@ class _ActivityCardState extends State<_ActivityCard> {
       _ => Icons.bolt_rounded,
     };
 
-    final statusTone = switch (activity.status) {
-      'completed' => MeshStatusTone.success,
-      'failed' => MeshStatusTone.danger,
-      'declined' => MeshStatusTone.neutral,
-      _ => MeshStatusTone.running,
-    };
-    final statusLabel = switch (activity.status) {
-      'completed' => 'done',
-      'failed' => 'failed',
-      'declined' => 'declined',
-      _ => 'running',
-    };
-    final statusIcon = switch (activity.status) {
-      'completed' => Icons.check_rounded,
-      'failed' => Icons.error_outline_rounded,
-      'declined' => Icons.block_rounded,
-      _ => Icons.bolt_rounded,
-    };
+    final statusBadge = _activityStatusBadge(activity);
     final contextActions = _buildContextActions();
+    final detailPills = _activityDetailPills(activity);
 
     return Align(
       alignment: Alignment.centerLeft,
       child: Padding(
-        padding: const EdgeInsets.only(bottom: 12),
+        padding: const EdgeInsets.only(bottom: 10),
         child: ConstrainedBox(
           constraints: const BoxConstraints(maxWidth: 640),
-          child: MeshCard(
-            tone: MeshCardTone.surface,
-            padding: const EdgeInsets.fromLTRB(14, 12, 14, 14),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                InkWell(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Material(
+                color: commandLikeActivity
+                    ? colors.surface.withValues(alpha: 0.76)
+                    : colors.surfaceMuted.withValues(alpha: 0.48),
+                shape: RoundedRectangleBorder(
+                  borderRadius: AppShapes.input,
+                  side: BorderSide(
+                    color: commandLikeActivity
+                        ? colors.codeBorder.withValues(alpha: 0.76)
+                        : colors.border.withValues(alpha: 0.62),
+                  ),
+                ),
+                clipBehavior: Clip.antiAlias,
+                child: InkWell(
                   onTap: () {
                     setState(() {
                       _cardCollapsed = !_cardCollapsed;
                       _userOverrode = true;
                     });
                   },
-                  borderRadius: BorderRadius.circular(10),
+                  borderRadius: AppShapes.input,
                   child: Padding(
-                    padding: const EdgeInsets.symmetric(vertical: 2),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 10,
+                      vertical: 8,
+                    ),
                     child: Row(
-                      crossAxisAlignment: CrossAxisAlignment.start,
+                      crossAxisAlignment: CrossAxisAlignment.center,
                       children: [
                         Container(
-                          width: 34,
-                          height: 34,
+                          width: 30,
+                          height: 30,
                           decoration: BoxDecoration(
-                            color: colors.accentMuted,
-                            borderRadius: BorderRadius.circular(10),
+                            color: commandLikeActivity
+                                ? colors.surfaceElevated
+                                : activity.isCommand || activity.isTool
+                                ? colors.surfaceMuted.withValues(alpha: 0.72)
+                                : colors.accentMuted.withValues(alpha: 0.68),
+                            borderRadius: AppShapes.iconWell,
+                            border: Border.all(
+                              color: colors.border.withValues(alpha: 0.5),
+                            ),
                           ),
                           alignment: Alignment.center,
                           child: Icon(
                             activityIcon,
-                            size: 18,
-                            color: colors.accent,
+                            size: 16,
+                            color: commandLikeActivity
+                                ? colors.codeForeground
+                                : activity.isCommand || activity.isTool
+                                ? colors.textPrimary
+                                : colors.accent,
                           ),
                         ),
-                        const SizedBox(width: 12),
+                        const SizedBox(width: 10),
                         Expanded(
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              Text(
-                                activityLabel,
-                                style: monoStyle(
-                                  color: colors.accent,
-                                  fontSize: 10.5,
-                                  fontWeight: AppWeights.title,
-                                ).copyWith(letterSpacing: 1.2),
-                              ),
-                              const SizedBox(height: 3),
-                              Text(
-                                title,
-                                maxLines: _cardCollapsed ? 1 : 3,
-                                overflow: TextOverflow.ellipsis,
-                                style:
-                                    (activity.isCommand || activity.isTool
-                                            ? monoStyle(
-                                                color: colors.textPrimary,
-                                                fontSize: 13,
-                                              )
-                                            : Theme.of(
-                                                context,
-                                              ).textTheme.titleSmall?.copyWith(
-                                                fontWeight: AppWeights.emphasis,
-                                              ))
-                                        ?.copyWith(height: 1.35),
+                              if (activityLabel != null) ...[
+                                Text(
+                                  activityLabel,
+                                  style: Theme.of(context).textTheme.labelSmall
+                                      ?.copyWith(
+                                        color: colors.textTertiary,
+                                        fontWeight: AppWeights.title,
+                                        letterSpacing: 0.2,
+                                      ),
+                                ),
+                                const SizedBox(height: 2),
+                              ],
+                              _buildActivityTitle(
+                                context,
+                                activity: activity,
+                                title: title,
                               ),
                               if (!_cardCollapsed &&
                                   subtitle != null &&
@@ -2131,6 +2399,8 @@ class _ActivityCardState extends State<_ActivityCard> {
                                 const SizedBox(height: 4),
                                 Text(
                                   subtitle,
+                                  maxLines: 2,
+                                  overflow: TextOverflow.ellipsis,
                                   style: Theme.of(context).textTheme.bodySmall
                                       ?.copyWith(color: colors.textSecondary),
                                 ),
@@ -2138,160 +2408,244 @@ class _ActivityCardState extends State<_ActivityCard> {
                             ],
                           ),
                         ),
-                        const SizedBox(width: 8),
-                        MeshStatusBadge(
-                          label: statusLabel,
-                          tone: statusTone,
-                          icon: statusIcon,
-                          compact: true,
-                        ),
+                        if (statusBadge != null) ...[
+                          const SizedBox(width: 8),
+                          statusBadge,
+                        ],
                         const SizedBox(width: 4),
                         Icon(
                           _cardCollapsed
-                              ? Icons.unfold_more_rounded
-                              : Icons.unfold_less_rounded,
-                          size: 16,
+                              ? Icons.keyboard_arrow_down_rounded
+                              : Icons.keyboard_arrow_up_rounded,
+                          size: 18,
                           color: colors.textTertiary,
                         ),
                       ],
                     ),
                   ),
                 ),
-                if (!_cardCollapsed) ...[
-                  const SizedBox(height: 12),
-                  Wrap(
-                    spacing: 6,
-                    runSpacing: 6,
-                    children: [
-                      if (activity.turnId != null)
-                        MeshPill(
-                          label: 'turn ${_shortId(activity.turnId!)}',
-                          mono: true,
-                        ),
-                      if (activity.isCommand && activity.exitCode != null)
-                        MeshPill(
-                          label: 'exit ${activity.exitCode}',
-                          tone: activity.exitCode == 0
-                              ? MeshPillTone.success
-                              : MeshPillTone.danger,
-                          mono: true,
-                        ),
-                      if (activity.isCommand && activity.durationMs != null)
-                        MeshPill(
-                          label: _formatDuration(activity.durationMs!),
-                          mono: true,
-                        ),
-                      if (activity.isCommand &&
-                          (activity.source ?? '').isNotEmpty)
-                        MeshPill(
-                          label: _commandSourceLabel(activity.source!),
-                          mono: true,
-                        ),
-                      if (activity.isCommand &&
-                          (activity.processId ?? '').isNotEmpty)
-                        MeshPill(
-                          label: 'pty ${activity.processId}',
-                          mono: true,
-                        ),
-                      if (activity.isCommand &&
-                          activity.terminalStatus == 'input')
-                        const MeshPill(
-                          label: 'stdin',
-                          tone: MeshPillTone.info,
-                          mono: true,
-                        ),
-                      if (activity.isCommand &&
-                          activity.terminalStatus == 'waiting')
-                        const MeshPill(
-                          label: 'interactive',
-                          tone: MeshPillTone.warning,
-                          mono: true,
-                        ),
-                      if (activity.isCommand)
-                        ...activity.commandActions.map(
-                          (action) => MeshPill(label: action.label, mono: true),
-                        ),
-                      if (activity.isTool &&
-                          (_toolSemanticPillLabel(activity) ?? '').isNotEmpty)
-                        MeshPill(
-                          label: _toolSemanticPillLabel(activity)!,
-                          tone: MeshPillTone.info,
-                          mono: true,
-                        ),
-                      if (activity.isTool &&
-                          (activity.toolName ?? '').trim().isNotEmpty)
-                        MeshPill(label: activity.toolName!.trim(), mono: true),
-                      if (activity.isTool &&
-                          (activity.toolMode ?? '').trim().isNotEmpty)
-                        MeshPill(
-                          label: activity.toolMode!.trim(),
-                          tone: MeshPillTone.info,
-                          mono: true,
-                        ),
-                      if (activity.isTool && activity.toolError == true)
-                        const MeshPill(
-                          label: 'tool error',
-                          tone: MeshPillTone.danger,
-                          mono: true,
-                        ),
-                      if (activity.isWebSearch)
-                        MeshPill(
-                          label: _webSearchKindLabel(activity),
-                          tone: MeshPillTone.info,
-                          mono: true,
-                        ),
-                      if (activity.isImageGeneration &&
-                          (activity.savedPath ?? '').isNotEmpty)
-                        const MeshPill(
-                          label: 'saved image',
-                          tone: MeshPillTone.info,
-                          mono: true,
-                        ),
-                      if (activity.isContextCompaction)
-                        const MeshPill(
-                          label: 'context',
-                          tone: MeshPillTone.info,
-                          mono: true,
-                        ),
-                    ],
-                  ),
-                  const SizedBox(height: 12),
-                  if (activity.isCommand)
-                    ..._buildCommandBody(context, activity)
-                  else if (activity.isTool)
-                    ..._buildToolBody(context, activity)
-                  else if (activity.isWebSearch) ...[
-                    _buildWebSearchBody(context, activity),
-                  ] else if (activity.isImageGeneration) ...[
-                    _buildImageGenerationBody(context, activity),
-                  ] else if (activity.isContextCompaction) ...[
-                    ..._buildContextCompactionBody(context, activity),
-                  ] else if (activity.isTurnDiff) ...[
-                    if ((activity.diff ?? '').isNotEmpty)
-                      _buildLazyDiff(
+              ),
+              AnimatedSize(
+                duration: const Duration(milliseconds: 160),
+                curve: Curves.easeOutCubic,
+                alignment: Alignment.topLeft,
+                child: _cardCollapsed
+                    ? const SizedBox.shrink()
+                    : _activityDetailsPanel(
                         context,
-                        label:
-                            'Show turn diff (${_diffLineCount(activity.diff!)} lines)',
-                        diff: activity.diff!,
-                      )
-                    else
-                      _waitingText(context, 'Waiting for turn diff.'),
-                  ] else if (activity.changes.isEmpty) ...[
-                    _waitingText(context, 'Waiting for patch details.'),
-                  ] else ...[
-                    _buildLazyFileChanges(
-                      context,
-                      changes: activity.changes,
-                      sessionCwd: sessionCwd,
+                        Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            if (detailPills.isNotEmpty) ...[
+                              Wrap(
+                                spacing: 6,
+                                runSpacing: 6,
+                                children: detailPills,
+                              ),
+                              const SizedBox(height: 12),
+                            ],
+                            if (activity.isCommand)
+                              ..._buildCommandBody(context, activity)
+                            else if (activity.isTool)
+                              ..._buildToolBody(context, activity)
+                            else if (activity.isWebSearch) ...[
+                              _buildWebSearchBody(context, activity),
+                            ] else if (activity.isImageGeneration) ...[
+                              _buildImageGenerationBody(context, activity),
+                            ] else if (activity.isContextCompaction) ...[
+                              ..._buildContextCompactionBody(context, activity),
+                            ] else if (activity.isTurnDiff) ...[
+                              if ((activity.diff ?? '').isNotEmpty)
+                                _buildLazyDiff(
+                                  context,
+                                  label:
+                                      'View patch (${_diffLineCount(activity.diff!)} lines)',
+                                  diff: activity.diff!,
+                                )
+                              else
+                                _waitingText(context, 'Tracking file changes.'),
+                            ] else if (activity.changes.isEmpty) ...[
+                              _waitingText(
+                                context,
+                                'Waiting for file changes.',
+                              ),
+                            ] else ...[
+                              _buildLazyFileChanges(
+                                context,
+                                changes: activity.changes,
+                                sessionCwd: sessionCwd,
+                              ),
+                            ],
+                            if (contextActions.isNotEmpty) ...[
+                              const SizedBox(height: 12),
+                              _ActivityActionRow(actions: contextActions),
+                            ],
+                          ],
+                        ),
+                      ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildFileChangeInlineActivity(
+    BuildContext context,
+    SessionActivity activity,
+  ) {
+    final colors = context.colors;
+    final changes = activity.changes;
+    final sessionCwd = widget.sessionCwd;
+    final title = _fileChangeActivityTitle(activity, running: _activityRunning);
+    final subtitle = _activityFileSummary(changes, sessionCwd);
+    final statusBadge = _activityStatusBadge(activity);
+    final contextActions = _buildContextActions();
+
+    return Align(
+      alignment: Alignment.centerLeft,
+      child: Padding(
+        padding: const EdgeInsets.only(bottom: 10),
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 640),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Material(
+                color: colors.surfaceMuted.withValues(alpha: 0.48),
+                shape: RoundedRectangleBorder(
+                  borderRadius: AppShapes.input,
+                  side: BorderSide(
+                    color: colors.border.withValues(alpha: 0.62),
+                  ),
+                ),
+                clipBehavior: Clip.antiAlias,
+                child: InkWell(
+                  onTap: () {
+                    setState(() {
+                      _cardCollapsed = !_cardCollapsed;
+                      _userOverrode = true;
+                    });
+                  },
+                  borderRadius: AppShapes.input,
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 10,
+                      vertical: 8,
                     ),
-                  ],
-                  if (contextActions.isNotEmpty) ...[
-                    const SizedBox(height: 12),
-                    _ActivityActionRow(actions: contextActions),
-                  ],
-                ],
-              ],
-            ),
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.center,
+                      children: [
+                        Container(
+                          width: 30,
+                          height: 30,
+                          decoration: BoxDecoration(
+                            color: colors.surfaceMuted.withValues(alpha: 0.72),
+                            borderRadius: AppShapes.iconWell,
+                            border: Border.all(
+                              color: colors.border.withValues(alpha: 0.5),
+                            ),
+                          ),
+                          alignment: Alignment.center,
+                          child: Icon(
+                            Icons.edit_note_rounded,
+                            size: 16,
+                            color: colors.textSecondary,
+                          ),
+                        ),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                title,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: Theme.of(context).textTheme.titleSmall
+                                    ?.copyWith(
+                                      color: colors.textPrimary,
+                                      fontWeight: AppWeights.emphasis,
+                                      height: 1.25,
+                                    ),
+                              ),
+                              if (subtitle.isNotEmpty) ...[
+                                const SizedBox(height: 2),
+                                Text(
+                                  subtitle,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style:
+                                      monoStyle(
+                                        color: colors.textSecondary,
+                                        fontSize: 12,
+                                        fontWeight: AppWeights.body,
+                                      ).copyWith(height: 1.3),
+                                ),
+                              ],
+                            ],
+                          ),
+                        ),
+                        if (statusBadge != null) ...[
+                          const SizedBox(width: 8),
+                          statusBadge,
+                        ],
+                        const SizedBox(width: 4),
+                        Icon(
+                          _cardCollapsed
+                              ? Icons.keyboard_arrow_down_rounded
+                              : Icons.keyboard_arrow_up_rounded,
+                          size: 18,
+                          color: colors.textTertiary,
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+              AnimatedSize(
+                duration: const Duration(milliseconds: 160),
+                curve: Curves.easeOutCubic,
+                alignment: Alignment.topLeft,
+                child: _cardCollapsed
+                    ? const SizedBox.shrink()
+                    : _activityDetailsPanel(
+                        context,
+                        Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            if (contextActions.isNotEmpty) ...[
+                              _ActivityActionRow(actions: contextActions),
+                              const SizedBox(height: 10),
+                            ],
+                            if (changes.isEmpty)
+                              _waitingText(context, 'Waiting for file changes.')
+                            else if (_diffExpanded)
+                              _buildLazyFileChanges(
+                                context,
+                                changes: changes,
+                                sessionCwd: sessionCwd,
+                              )
+                            else ...[
+                              for (final change in changes)
+                                _InlineFileChangeRow(
+                                  change: change,
+                                  sessionCwd: sessionCwd,
+                                  onOpen: _openWorkspaceFile,
+                                ),
+                              const SizedBox(height: 8),
+                              _buildLazyFileChanges(
+                                context,
+                                changes: changes,
+                                sessionCwd: sessionCwd,
+                              ),
+                            ],
+                          ],
+                        ),
+                      ),
+              ),
+            ],
           ),
         ),
       ),
@@ -2304,6 +2658,12 @@ class _ActivityCardState extends State<_ActivityCard> {
   ) {
     final colors = context.colors;
     final widgets = <Widget>[];
+    final command = _displayCommandText(activity.command ?? '');
+
+    if (_friendlyCommandTitleParts(command, activity.status) != null) {
+      widgets.add(_activityCodeBlock(context, 'Raw command', command, 'bash'));
+      widgets.add(const SizedBox(height: 12));
+    }
 
     if ((activity.terminalInput ?? '').isNotEmpty) {
       widgets.add(
@@ -2356,6 +2716,11 @@ class _ActivityCardState extends State<_ActivityCard> {
     final widgets = <Widget>[];
     widgets.addAll(_buildToolSemanticBlocks(context, activity));
     if (widgets.isNotEmpty) {
+      widgets.add(const SizedBox(height: 12));
+    }
+    final command = _displayCommandText(_toolCommandText(activity));
+    if (_friendlyCommandTitleParts(command, activity.status) != null) {
+      widgets.add(_activityCodeBlock(context, 'Raw command', command, 'bash'));
       widgets.add(const SizedBox(height: 12));
     }
     final output = (activity.output ?? '').trimRight();
@@ -2472,6 +2837,10 @@ class _ActivityCardState extends State<_ActivityCard> {
     bool linkify = false,
   }) {
     final colors = context.colors;
+    final bodyStyle = Theme.of(context).textTheme.bodySmall?.copyWith(
+      color: colors.textPrimary,
+      height: 1.4,
+    );
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
@@ -2495,18 +2864,21 @@ class _ActivityCardState extends State<_ActivityCard> {
           linkify
               ? _LinkifiedSelectableText(
                   text: text,
-                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                    color: colors.textPrimary,
-                    height: 1.4,
+                  style: bodyStyle,
+                  linkStyle: linkTextStyleForBackground(
+                    background: colors.surfaceMuted,
+                    preferred: colors.accent,
+                    fallbacks: [
+                      colors.info,
+                      colors.textPrimary,
+                      colors.textSecondary,
+                    ],
+                    baseStyle: bodyStyle,
                   ),
-                  linkColor: colors.accent,
                 )
               : SelectableText(
                   text,
-                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                    color: colors.textPrimary,
-                    height: 1.4,
-                  ),
+                  style: bodyStyle,
                 ),
         ],
       ),
@@ -2635,8 +3007,9 @@ class _ActivityCardState extends State<_ActivityCard> {
         query.isNotEmpty) {
       return 'Search web for "$query"';
     }
-    if (activity.toolCategory == 'command' && command.isNotEmpty) {
-      return command;
+    if (_toolIsCommandActivity(activity) && command.isNotEmpty) {
+      return _commandTitleParts(command, activity.status)?.plainText ??
+          _commandStatusTitle(activity.status, _displayCommandText(command));
     }
 
     final title = (activity.toolTitle ?? '').trim();
@@ -2671,34 +3044,40 @@ class _ActivityCardState extends State<_ActivityCard> {
     return name.isNotEmpty ? name : null;
   }
 
-  String _toolActivityLabel(SessionActivity activity) {
+  String? _toolActivityLabel(SessionActivity activity) {
     if (activity.toolAction == 'mode_change') {
-      return 'MODE';
+      return 'Mode';
+    }
+    if (_toolIsCommandActivity(activity)) {
+      return null;
     }
     return switch (activity.toolCategory) {
       'filesystem' => switch (activity.toolAction) {
-        'read' => 'FILE READ',
-        'write' => 'FILE EDIT',
-        'list' => 'FILE LIST',
-        'search' => 'FILE SEARCH',
-        _ => 'FILESYSTEM',
+        'read' => 'File read',
+        'write' => 'File edit',
+        'list' => 'File list',
+        'search' => 'File search',
+        _ => 'Filesystem',
       },
       'network' => switch (activity.toolAction) {
-        'fetch' => 'WEB FETCH',
-        'search' => 'WEB SEARCH',
-        _ => 'NETWORK',
+        'fetch' => 'Web fetch',
+        'search' => 'Web search',
+        _ => 'Network',
       },
-      'command' => 'COMMAND TOOL',
-      'session' => 'SESSION',
-      'memory' => 'MEMORY',
-      'task' => 'TASK',
-      _ => 'TOOL',
+      'command' => null,
+      'session' => 'Session',
+      'memory' => 'Memory',
+      'task' => 'Task',
+      _ => 'Tool',
     };
   }
 
   IconData _toolActivityIcon(SessionActivity activity) {
     if (activity.toolAction == 'mode_change') {
       return Icons.tune_rounded;
+    }
+    if (_toolIsCommandActivity(activity)) {
+      return Icons.terminal_rounded;
     }
     return switch (activity.toolCategory) {
       'filesystem' => switch (activity.toolAction) {
@@ -2716,27 +3095,6 @@ class _ActivityCardState extends State<_ActivityCard> {
       'memory' => Icons.psychology_alt_rounded,
       'task' => Icons.checklist_rounded,
       _ => Icons.extension_rounded,
-    };
-  }
-
-  String? _toolSemanticPillLabel(SessionActivity activity) {
-    if (activity.toolAction == 'mode_change') {
-      return 'mode change';
-    }
-    return switch (activity.toolCategory) {
-      'filesystem' => switch (activity.toolAction) {
-        'read' => 'file read',
-        'write' => 'file edit',
-        'list' => 'file list',
-        'search' => 'file search',
-        _ => 'filesystem',
-      },
-      'network' => activity.toolAction == 'search' ? 'web search' : 'web fetch',
-      'command' => 'command tool',
-      'session' => 'session',
-      'memory' => 'memory',
-      'task' => 'task',
-      _ => null,
     };
   }
 
@@ -2802,7 +3160,18 @@ class _ActivityCardState extends State<_ActivityCard> {
     return _relativeSessionPath(raw, sessionCwd);
   }
 
+  bool _toolIsCommandActivity(SessionActivity activity) {
+    return activity.toolCategory == 'command' ||
+        _toolCommandText(activity).isNotEmpty;
+  }
+
   String _toolCommandText(SessionActivity activity) {
+    for (final target in activity.toolSemanticTargets) {
+      final command = (target.command ?? '').trim();
+      if (target.type == 'command' && command.isNotEmpty) {
+        return command;
+      }
+    }
     final args = activity.toolArgs;
     if (args is Map<String, dynamic>) {
       final command =
@@ -2915,11 +3284,6 @@ class _ActivityCardState extends State<_ActivityCard> {
     );
   }
 
-  int _diffLineCount(String diff) {
-    if (diff.isEmpty) return 0;
-    return '\n'.allMatches(diff).length + 1;
-  }
-
   Widget _buildLazyDiff(
     BuildContext context, {
     required String label,
@@ -2934,7 +3298,7 @@ class _ActivityCardState extends State<_ActivityCard> {
           _DiffToggle(
             expanded: true,
             label: label,
-            expandedLabel: 'Hide diff',
+            expandedLabel: 'Hide patch',
             onToggle: () => setState(() => _diffExpanded = false),
           ),
         ],
@@ -2943,7 +3307,7 @@ class _ActivityCardState extends State<_ActivityCard> {
     return _DiffToggle(
       expanded: false,
       label: label,
-      expandedLabel: 'Hide diff',
+      expandedLabel: 'Hide patch',
       onToggle: () => setState(() => _diffExpanded = true),
     );
   }
@@ -2958,8 +3322,8 @@ class _ActivityCardState extends State<_ActivityCard> {
       (sum, c) => sum + _diffLineCount(c.diff),
     );
     final label = changes.length == 1
-        ? 'Show diff ($totalLines lines)'
-        : 'Show ${changes.length} file diffs ($totalLines lines)';
+        ? 'View diff ($totalLines lines)'
+        : 'View ${changes.length} file diffs ($totalLines lines)';
     if (_diffExpanded) {
       return Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -2987,6 +3351,64 @@ class _ActivityCardState extends State<_ActivityCard> {
       label: label,
       expandedLabel: 'Hide diffs',
       onToggle: () => setState(() => _diffExpanded = true),
+    );
+  }
+}
+
+class _CommandTitleChip extends StatelessWidget {
+  const _CommandTitleChip({
+    required this.parts,
+    required this.collapsed,
+  });
+
+  final _CommandTitleParts parts;
+  final bool collapsed;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    final verbStyle = Theme.of(context).textTheme.titleSmall?.copyWith(
+      color: colors.textPrimary,
+      fontWeight: AppWeights.emphasis,
+      height: 1.35,
+    );
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final maxCommandWidth = constraints.hasBoundedWidth
+            ? math.max(96.0, constraints.maxWidth - 34)
+            : 420.0;
+        return Wrap(
+          crossAxisAlignment: WrapCrossAlignment.center,
+          spacing: 4,
+          runSpacing: 4,
+          children: [
+            Text('${parts.verb} ', style: verbStyle),
+            ConstrainedBox(
+              constraints: BoxConstraints(maxWidth: maxCommandWidth),
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+                decoration: BoxDecoration(
+                  color: colors.surfaceElevated,
+                  borderRadius: BorderRadius.circular(AppRadii.badge),
+                  border: Border.all(
+                    color: colors.codeBorder.withValues(alpha: 0.92),
+                  ),
+                ),
+                child: Text(
+                  parts.command,
+                  maxLines: collapsed ? 1 : 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: monoStyle(
+                    color: colors.codeForeground,
+                    fontSize: 12.5,
+                    fontWeight: AppWeights.emphasis,
+                  ).copyWith(height: 1.25),
+                ),
+              ),
+            ),
+          ],
+        );
+      },
     );
   }
 }
@@ -3087,35 +3509,41 @@ class _DiffToggle extends StatelessWidget {
     final colors = context.colors;
     return Align(
       alignment: Alignment.centerLeft,
-      child: GestureDetector(
-        onTap: onToggle,
-        child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-          decoration: BoxDecoration(
-            color: colors.accentMuted,
-            borderRadius: BorderRadius.circular(8),
-            border: Border.all(color: colors.accent.withValues(alpha: 0.3)),
-          ),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(
-                expanded
-                    ? Icons.unfold_less_rounded
-                    : Icons.unfold_more_rounded,
-                size: 16,
-                color: colors.accent,
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          onTap: onToggle,
+          borderRadius: AppShapes.badge,
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 7),
+            decoration: BoxDecoration(
+              color: colors.surfaceElevated.withValues(alpha: 0.78),
+              borderRadius: AppShapes.badge,
+              border: Border.all(
+                color: colors.border.withValues(alpha: 0.72),
               ),
-              const SizedBox(width: 6),
-              Text(
-                expanded ? expandedLabel : label,
-                style: monoStyle(
-                  color: colors.accent,
-                  fontSize: 12,
-                  fontWeight: AppWeights.body,
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(
+                  expanded
+                      ? Icons.unfold_less_rounded
+                      : Icons.unfold_more_rounded,
+                  size: 15,
+                  color: colors.textSecondary,
                 ),
-              ),
-            ],
+                const SizedBox(width: 6),
+                Text(
+                  expanded ? expandedLabel : label,
+                  style: monoStyle(
+                    color: colors.textSecondary,
+                    fontSize: 12,
+                    fontWeight: AppWeights.emphasis,
+                  ),
+                ),
+              ],
+            ),
           ),
         ),
       ),
@@ -3248,6 +3676,78 @@ class _FileChangeBlock extends StatelessWidget {
   }
 }
 
+class _InlineFileChangeRow extends StatelessWidget {
+  const _InlineFileChangeRow({
+    required this.change,
+    required this.sessionCwd,
+    this.onOpen,
+  });
+
+  final SessionActivityChange change;
+  final String sessionCwd;
+  final void Function(String path)? onOpen;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    final tone = switch (change.kind) {
+      'added' || 'add' || 'create' => MeshPillTone.success,
+      'deleted' || 'delete' || 'remove' => MeshPillTone.danger,
+      'moved' || 'move' || 'rename' => MeshPillTone.info,
+      _ => MeshPillTone.neutral,
+    };
+    final isDeleted = switch (change.kind) {
+      'deleted' || 'delete' || 'remove' => true,
+      _ => false,
+    };
+    final canOpen = onOpen != null && !isDeleted;
+    final row = Padding(
+      padding: const EdgeInsets.symmetric(vertical: 4),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: [
+          Icon(
+            Icons.description_rounded,
+            size: 15,
+            color: colors.textTertiary,
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              _relativeSessionPath(change.path, sessionCwd),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style:
+                  monoStyle(
+                    color: canOpen ? colors.accent : colors.textPrimary,
+                    fontSize: 12.5,
+                    fontWeight: AppWeights.body,
+                  ).copyWith(
+                    decoration: canOpen ? TextDecoration.underline : null,
+                    decorationColor: canOpen ? colors.accent : null,
+                  ),
+            ),
+          ),
+          const SizedBox(width: 8),
+          MeshPill(label: change.kind, tone: tone, mono: true),
+        ],
+      ),
+    );
+
+    if (!canOpen) {
+      return row;
+    }
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: () => onOpen!(change.path),
+        borderRadius: AppShapes.badge,
+        child: row,
+      ),
+    );
+  }
+}
+
 class _DetailRow extends StatelessWidget {
   const _DetailRow({required this.label, required this.value});
 
@@ -3290,9 +3790,9 @@ class _SessionRuntimeDetails extends StatelessWidget {
       (label: 'Model', value: runtimeValue(runtime.model)),
       if ((runtime.modelProvider ?? '').isNotEmpty &&
           runtime.modelProvider != 'openai')
-        (label: 'Provider', value: runtime.modelProvider!),
+        (label: 'Service', value: runtime.modelProvider!),
       (label: 'Speed', value: runtimeServiceTierValue(runtime.serviceTier)),
-      (label: 'Reasoning', value: runtimeValue(runtime.reasoningEffort)),
+      (label: 'Thinking', value: runtimeValue(runtime.reasoningEffort)),
       (label: 'Approval', value: runtimeValue(runtime.approvalPolicy)),
       (label: 'Sandbox', value: runtimeValue(runtime.sandboxMode)),
       (label: 'Network', value: runtimeNetworkValue(runtime.networkAccess)),
@@ -3345,7 +3845,7 @@ class _SessionRuntimeDetails extends StatelessWidget {
               (label: 'Output', value: '${telemetry.lastUsage!.outputTokens}'),
             if (telemetry.lastUsage!.reasoningTokens != null)
               (
-                label: 'Reasoning',
+                label: 'Thinking',
                 value: '${telemetry.lastUsage!.reasoningTokens}',
               ),
             if (telemetry.lastUsage!.durationMs != null)
@@ -3614,18 +4114,469 @@ String _activityFileSummary(
   String sessionCwd,
 ) {
   if (changes.isEmpty) {
-    return 'Waiting for patch details.';
+    return 'Waiting for file changes.';
   }
 
-  final labels = changes
+  final uniqueChanges = _uniqueFileChangePaths(changes);
+  final labels = uniqueChanges
       .take(3)
       .map((change) => _relativeSessionPath(change.path, sessionCwd))
       .toList();
-  final remainder = changes.length - labels.length;
+  final remainder = uniqueChanges.length - labels.length;
   if (remainder > 0) {
     labels.add('+$remainder more');
   }
   return labels.join('  •  ');
+}
+
+String _commandActivityTitle(SessionActivity activity) {
+  return _commandTitleParts(activity.command ?? '', activity.status)
+          ?.plainText ??
+      _commandStatusTitle(activity.status, '');
+}
+
+_CommandTitleParts? _commandTitleParts(String rawCommand, String status) {
+  final command = _displayCommandText(rawCommand);
+  if (command.isEmpty) {
+    return null;
+  }
+  return _friendlyCommandTitleParts(command, status) ??
+      _CommandTitleParts(
+        verb: _commandStatusVerb(status),
+        command: command,
+      );
+}
+
+String _commandStatusVerb(String status) {
+  return switch (status) {
+    'failed' => 'failed',
+    'declined' => 'declined',
+    'in_progress' => 'running',
+    _ => 'ran',
+  };
+}
+
+String _commandStatusTitle(String status, String command) {
+  final verb = _commandStatusVerb(status);
+  final target = command.trim();
+  if (target.isEmpty) {
+    return switch (status) {
+      'failed' => 'command failed',
+      'declined' => 'command declined',
+      _ => '$verb command',
+    };
+  }
+  return '$verb $target';
+}
+
+_CommandTitleParts? _friendlyCommandTitleParts(String command, String status) {
+  final trimmed = command.trim();
+  if (trimmed.isEmpty) {
+    return null;
+  }
+  final words = _splitShellWords(trimmed);
+  if (words.isEmpty) {
+    return null;
+  }
+  final program = _commandProgramName(words.first);
+  return switch (program) {
+    'sed' => _friendlySedCommandTitle(words, status),
+    'rg' => _friendlySearchCommandTitle(words, status, filesFlag: '--files'),
+    'grep' => _friendlySearchCommandTitle(words, status),
+    'ls' => _friendlyListCommandTitle(words, status),
+    'cat' => _friendlyCatCommandTitle(words, status),
+    _ => null,
+  };
+}
+
+_CommandTitleParts? _friendlySedCommandTitle(
+  List<String> words,
+  String status,
+) {
+  String? script;
+  var pathStart = 1;
+  for (var index = 1; index < words.length; index += 1) {
+    final word = words[index];
+    if (_isShellControlWord(word)) {
+      break;
+    }
+    if (word == '-n') {
+      continue;
+    }
+    if (word == '-e' && index + 1 < words.length) {
+      script = words[index + 1];
+      pathStart = index + 2;
+      break;
+    }
+    if (word.startsWith('-')) {
+      continue;
+    }
+    script = word;
+    pathStart = index + 1;
+    break;
+  }
+  final match = script == null
+      ? null
+      : RegExp(r'^(\d+)(?:,(\d+))?p$').firstMatch(script);
+  if (match == null) {
+    return null;
+  }
+  final start = match.group(1)!;
+  final end = match.group(2);
+  final lineLabel = end == null || end == start
+      ? 'line $start'
+      : 'lines $start-$end';
+  final target = _firstCommandPath(words, pathStart);
+  final command = target == null
+      ? '"$lineLabel"'
+      : '"${_friendlyPathLabel(target)} $lineLabel"';
+  return _CommandTitleParts(
+    verb: _actionVerb(status, completed: 'viewed', progress: 'viewing'),
+    command: command,
+  );
+}
+
+_CommandTitleParts? _friendlySearchCommandTitle(
+  List<String> words,
+  String status, {
+  String? filesFlag,
+}) {
+  final targets = <String>[];
+  var sawFilesFlag = false;
+  String? query;
+
+  for (var index = 1; index < words.length; index += 1) {
+    final word = words[index];
+    if (_isShellControlWord(word)) {
+      break;
+    }
+    if (filesFlag != null && word == filesFlag) {
+      sawFilesFlag = true;
+      continue;
+    }
+    if (word == '-e' || word == '--regexp') {
+      if (index + 1 < words.length) {
+        query = words[index + 1];
+        index += 1;
+      }
+      continue;
+    }
+    if (word.startsWith('--regexp=')) {
+      query = word.substring('--regexp='.length);
+      continue;
+    }
+    if (_commandOptionTakesValue(word)) {
+      index += 1;
+      continue;
+    }
+    if (word.startsWith('-')) {
+      continue;
+    }
+    if (query == null) {
+      query = word;
+    } else {
+      targets.add(word);
+    }
+  }
+
+  if ((query == null || query.trim().isEmpty) && sawFilesFlag) {
+    final targetLabel = _friendlyTargetLabel(targets);
+    return _CommandTitleParts(
+      verb: _actionVerb(status, completed: 'listed', progress: 'listing'),
+      command: targetLabel.isEmpty ? 'files' : 'files in $targetLabel',
+    );
+  }
+  if (query == null || query.trim().isEmpty) {
+    return null;
+  }
+
+  final queryLabel = _friendlySnippet(query, 44);
+  final targetLabel = _friendlyTargetLabel(targets);
+  return _CommandTitleParts(
+    verb: _actionVerb(status, completed: 'searched', progress: 'searching'),
+    command: targetLabel.isEmpty
+        ? 'for "$queryLabel"'
+        : 'for "$queryLabel" in $targetLabel',
+  );
+}
+
+_CommandTitleParts? _friendlyListCommandTitle(
+  List<String> words,
+  String status,
+) {
+  final targets = _commandPathArgs(words, start: 1);
+  final targetLabel = _friendlyTargetLabel(targets);
+  return _CommandTitleParts(
+    verb: _actionVerb(status, completed: 'listed', progress: 'listing'),
+    command: targetLabel.isEmpty ? 'files' : 'files in $targetLabel',
+  );
+}
+
+_CommandTitleParts? _friendlyCatCommandTitle(
+  List<String> words,
+  String status,
+) {
+  final target = _firstCommandPath(words, 1);
+  if (target == null) {
+    return null;
+  }
+  return _CommandTitleParts(
+    verb: _actionVerb(status, completed: 'viewed', progress: 'viewing'),
+    command: '"${_friendlyPathLabel(target)}"',
+  );
+}
+
+String _actionVerb(
+  String status, {
+  required String completed,
+  required String progress,
+}) {
+  return switch (status) {
+    'failed' => 'failed $progress',
+    'declined' => 'declined $progress',
+    'in_progress' => progress,
+    _ => completed,
+  };
+}
+
+String _commandProgramName(String value) {
+  return value.replaceAll('\\', '/').split('/').last;
+}
+
+bool _isShellControlWord(String value) {
+  return value == '|' ||
+      value == '&&' ||
+      value == '||' ||
+      value == ';' ||
+      value == '>' ||
+      value == '>>' ||
+      value == '<' ||
+      value == '2>' ||
+      value == '2>&1';
+}
+
+bool _commandOptionTakesValue(String value) {
+  const options = {
+    '-A',
+    '-B',
+    '-C',
+    '-g',
+    '-m',
+    '-t',
+    '--after-context',
+    '--before-context',
+    '--context',
+    '--glob',
+    '--max-count',
+    '--type',
+  };
+  return options.contains(value);
+}
+
+String? _firstCommandPath(List<String> words, int start) {
+  final args = _commandPathArgs(words, start: start);
+  return args.isEmpty ? null : args.first;
+}
+
+List<String> _commandPathArgs(List<String> words, {required int start}) {
+  final args = <String>[];
+  for (var index = start; index < words.length; index += 1) {
+    final word = words[index];
+    if (_isShellControlWord(word)) {
+      break;
+    }
+    if (_commandOptionTakesValue(word)) {
+      index += 1;
+      continue;
+    }
+    if (word.startsWith('-')) {
+      continue;
+    }
+    args.add(word);
+  }
+  return args;
+}
+
+String _friendlyTargetLabel(List<String> targets) {
+  if (targets.isEmpty) {
+    return '';
+  }
+  final labels = targets
+      .take(2)
+      .map(_friendlyPathLabel)
+      .where((label) => label.isNotEmpty)
+      .toList();
+  final remainder = targets.length - labels.length;
+  if (remainder > 0) {
+    labels.add('+$remainder more');
+  }
+  return labels.join(', ');
+}
+
+String _friendlyPathLabel(String path) {
+  final trimmed = path.trim();
+  if (trimmed.isEmpty) {
+    return '';
+  }
+  if (trimmed == '.' || trimmed == '..') {
+    return trimmed;
+  }
+  final normalized = trimmed.replaceAll('\\', '/');
+  final withoutTrailingSlash = normalized.replaceFirst(RegExp(r'/+$'), '');
+  final parts = withoutTrailingSlash
+      .split('/')
+      .where((part) => part.isNotEmpty)
+      .toList(growable: false);
+  if (parts.isEmpty) {
+    return _friendlySnippet(trimmed, 36);
+  }
+  return _friendlySnippet(parts.last, 36);
+}
+
+String _friendlySnippet(String value, int maxLength) {
+  final singleLine = value.replaceAll(RegExp(r'\s+'), ' ').trim();
+  if (singleLine.length <= maxLength) {
+    return singleLine;
+  }
+  if (maxLength <= 3) {
+    return singleLine.substring(0, maxLength);
+  }
+  return '${singleLine.substring(0, maxLength - 3)}...';
+}
+
+String _displayCommandText(String raw) {
+  final trimmed = raw.trim();
+  if (trimmed.isEmpty) {
+    return '';
+  }
+  final words = _splitShellWords(trimmed);
+  if (words.length >= 3 &&
+      _isShellProgram(words.first) &&
+      _isShellCommandFlag(words[1])) {
+    final inner = words.sublist(2).join(' ').trim();
+    if (inner.isNotEmpty) {
+      return inner;
+    }
+  }
+  return trimmed;
+}
+
+bool _isShellProgram(String value) {
+  final name = value.replaceAll('\\', '/').split('/').last;
+  return name == 'bash' || name == 'sh' || name == 'zsh' || name == 'dash';
+}
+
+bool _isShellCommandFlag(String value) => value == '-lc' || value == '-c';
+
+List<String> _splitShellWords(String input) {
+  final words = <String>[];
+  final buffer = StringBuffer();
+  var inSingleQuote = false;
+  var inDoubleQuote = false;
+  var escaping = false;
+
+  void flush() {
+    if (buffer.length == 0) {
+      return;
+    }
+    words.add(buffer.toString());
+    buffer.clear();
+  }
+
+  for (var index = 0; index < input.length; index += 1) {
+    final char = input[index];
+    if (escaping) {
+      buffer.write(char);
+      escaping = false;
+      continue;
+    }
+    if (char == '\\' && !inSingleQuote) {
+      escaping = true;
+      continue;
+    }
+    if (inSingleQuote) {
+      if (char == "'") {
+        inSingleQuote = false;
+      } else {
+        buffer.write(char);
+      }
+      continue;
+    }
+    if (inDoubleQuote) {
+      if (char == '"') {
+        inDoubleQuote = false;
+      } else {
+        buffer.write(char);
+      }
+      continue;
+    }
+    if (char == "'") {
+      inSingleQuote = true;
+      continue;
+    }
+    if (char == '"') {
+      inDoubleQuote = true;
+      continue;
+    }
+    if (char.trim().isEmpty) {
+      flush();
+      continue;
+    }
+    buffer.write(char);
+  }
+
+  if (escaping) {
+    buffer.write('\\');
+  }
+  flush();
+  return words;
+}
+
+String _turnDiffActivityTitle(SessionActivity activity) {
+  final diff = (activity.diff ?? '').trim();
+  if (diff.isEmpty) {
+    return activity.status == 'completed'
+        ? 'no live diff captured'
+        : 'tracking live diff';
+  }
+  final lines = _diffLineCount(diff);
+  final noun = lines == 1 ? 'line' : 'lines';
+  return 'live diff · $lines $noun';
+}
+
+int _diffLineCount(String diff) {
+  if (diff.isEmpty) return 0;
+  return '\n'.allMatches(diff).length + 1;
+}
+
+String _fileChangeActivityTitle(
+  SessionActivity activity, {
+  required bool running,
+}) {
+  final count = _fileChangeFileCount(activity.changes);
+  if (count == 0) {
+    return running ? 'Editing files' : 'No file changes';
+  }
+  final noun = count == 1 ? 'file' : 'files';
+  return '${running ? 'Editing' : 'Edited'} $count $noun';
+}
+
+int _fileChangeFileCount(List<SessionActivityChange> changes) {
+  return _uniqueFileChangePaths(changes).length;
+}
+
+List<SessionActivityChange> _uniqueFileChangePaths(
+  List<SessionActivityChange> changes,
+) {
+  final seen = <String>{};
+  final unique = <SessionActivityChange>[];
+  for (final change in changes) {
+    final key = change.path.trim();
+    if (key.isEmpty || seen.contains(key)) continue;
+    seen.add(key);
+    unique.add(change);
+  }
+  return unique;
 }
 
 String _formatDuration(int durationMs) {
@@ -3634,23 +4585,6 @@ String _formatDuration(int durationMs) {
     return '${seconds.toStringAsFixed(seconds >= 10 ? 0 : 1)}s';
   }
   return '${durationMs}ms';
-}
-
-String _commandSourceLabel(String source) {
-  return switch (source) {
-    'agent' => 'agent',
-    'userShell' => 'shell',
-    'unifiedExecStartup' => 'exec start',
-    'unifiedExecInteraction' => 'exec input',
-    _ => source,
-  };
-}
-
-String _shortId(String value) {
-  if (value.length <= 8) {
-    return value;
-  }
-  return value.substring(value.length - 8);
 }
 
 bool _sameCalendarDay(DateTime a, DateTime b) {
@@ -3769,16 +4703,17 @@ class _SessionWaitingState extends StatelessWidget {
           ),
           const SizedBox(height: AppSpacing.xs),
           Text(
-            'Your prompt was sent. The agent is starting.',
+            'Your message was sent. The agent is starting.',
             style: Theme.of(context).textTheme.bodySmall?.copyWith(
               color: colors.textTertiary,
             ),
           ),
-          if (onStop != null) ...[            const SizedBox(height: AppSpacing.lg),
+          if (onStop != null) ...[
+            const SizedBox(height: AppSpacing.lg),
             OutlinedButton.icon(
               onPressed: onStop,
               icon: const Icon(Icons.stop_circle_rounded, size: 17),
-              label: const Text('Interrupt agent'),
+              label: const Text('Stop agent'),
               style: OutlinedButton.styleFrom(
                 foregroundColor: colors.danger,
                 side: BorderSide(

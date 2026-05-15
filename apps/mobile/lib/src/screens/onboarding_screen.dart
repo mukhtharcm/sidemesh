@@ -1,4 +1,3 @@
-import 'dart:async';
 import 'dart:math';
 
 import 'package:flutter/material.dart';
@@ -124,7 +123,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                 TextButton(
                     onPressed: _skipIntro,
                     child: Text(
-                      'Skip intro',
+                      'Go to setup',
                       style: Theme.of(context).textTheme.labelLarge?.copyWith(
                         color: colors.textSecondary,
                         fontWeight: FontWeight.w600,
@@ -209,7 +208,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                   else
                     FilledButton(
                       onPressed: _skip,
-                      child: const Text('Get started'),
+                      child: const Text('Finish later'),
                     ),
                 ],
               ),
@@ -281,7 +280,7 @@ class _WelcomePage extends StatelessWidget {
           ),
           const SizedBox(height: 40),
           Text(
-            'Keep your coding agents\nwithin reach.',
+            'Stay in control\naway from your desk.',
             textAlign: TextAlign.center,
             style: Theme.of(context).textTheme.headlineMedium?.copyWith(
               fontWeight: FontWeight.w800,
@@ -292,12 +291,35 @@ class _WelcomePage extends StatelessWidget {
           ),
           const SizedBox(height: 16),
           Text(
-            'Check sessions, review approvals, and get back to work when you are away from your desk.',
+            'Connect one machine, then check sessions, approvals, files, and terminals from your phone or desktop.',
             textAlign: TextAlign.center,
             style: Theme.of(context).textTheme.bodyLarge?.copyWith(
               color: colors.textSecondary,
               height: 1.4,
             ),
+          ),
+          const SizedBox(height: 24),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            alignment: WrapAlignment.center,
+            children: [
+              _FeatureChip(
+                icon: Icons.link_rounded,
+                label: 'Connect once',
+                colors: colors,
+              ),
+              _FeatureChip(
+                icon: Icons.rule_folder_rounded,
+                label: 'Review approvals',
+                colors: colors,
+              ),
+              _FeatureChip(
+                icon: Icons.playlist_play_rounded,
+                label: 'Pick up later',
+                colors: colors,
+              ),
+            ],
           ),
         ],
       ),
@@ -309,60 +331,21 @@ class _WelcomePage extends StatelessWidget {
 // Page 2: How it works
 // ---------------------------------------------------------------------------
 
-class _HowItWorksPage extends StatefulWidget {
+class _HowItWorksPage extends StatelessWidget {
   const _HowItWorksPage({required this.colors});
 
   final AppColors colors;
 
   @override
-  State<_HowItWorksPage> createState() => _HowItWorksPageState();
-}
-
-class _HowItWorksPageState extends State<_HowItWorksPage>
-    with SingleTickerProviderStateMixin {
-  late final AnimationController _anim;
-
-  @override
-  void initState() {
-    super.initState();
-    _anim = AnimationController(
-      vsync: this,
-      duration: const Duration(seconds: 3),
-    )..repeat();
-  }
-
-  @override
-  void dispose() {
-    _anim.dispose();
-    super.dispose();
-  }
-
-  @override
   Widget build(BuildContext context) {
-    final colors = widget.colors;
+    final colors = this.colors;
     return _OnboardingPageShell(
       horizontalPadding: 32,
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          SizedBox(
-            width: 220,
-            height: 160,
-            child: AnimatedBuilder(
-              animation: _anim,
-              builder: (context, child) {
-                return CustomPaint(
-                  painter: _MeshDiagramPainter(
-                    colors: colors,
-                    progress: _anim.value,
-                  ),
-                );
-              },
-            ),
-          ),
-          const SizedBox(height: 40),
           Text(
-            'How it works',
+            'Connect your first machine.',
             textAlign: TextAlign.center,
             style: Theme.of(context).textTheme.headlineSmall?.copyWith(
               fontWeight: FontWeight.w800,
@@ -370,26 +353,46 @@ class _HowItWorksPageState extends State<_HowItWorksPage>
               letterSpacing: -0.3,
             ),
           ),
+          const SizedBox(height: 12),
+          Text(
+            'Most people start with one machine. You can add more after the first pairing works.',
+            textAlign: TextAlign.center,
+            style: Theme.of(context).textTheme.bodyLarge?.copyWith(
+              color: colors.textSecondary,
+              height: 1.4,
+            ),
+          ),
           const SizedBox(height: 20),
           _StepItem(
             number: '1',
-            title: 'Run the daemon',
-            body: 'Install a small agent on your MacBook or server.',
+            title: 'Install Sidemesh',
+            body:
+                'Run the setup commands on the machine you want to manage.',
             colors: colors,
           ),
           const SizedBox(height: 16),
           _StepItem(
             number: '2',
-            title: 'Connect this app',
-            body: 'Scan the QR code or enter your host details.',
+            title: 'Pair this app',
+            body:
+                'Open the pairing code on that machine, then scan it here or add the machine manually.',
             colors: colors,
           ),
           const SizedBox(height: 16),
           _StepItem(
             number: '3',
-            title: 'Chat and control',
-            body: 'Start sessions, review changes, and approve actions.',
+            title: 'Jump back in',
+            body:
+                'Open a session, check approvals, or use the terminal when the agent needs you.',
             colors: colors,
+          ),
+          const SizedBox(height: 20),
+          Text(
+            'About a minute if you already have terminal access.',
+            textAlign: TextAlign.center,
+            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+              color: colors.textTertiary,
+            ),
           ),
         ],
       ),
@@ -463,77 +466,6 @@ class _StepItem extends StatelessWidget {
   }
 }
 
-class _MeshDiagramPainter extends CustomPainter {
-  _MeshDiagramPainter({required this.colors, required this.progress});
-
-  final AppColors colors;
-  final double progress;
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final paint = Paint()
-      ..strokeWidth = 1.5
-      ..style = PaintingStyle.stroke;
-
-    final nodePaint = Paint()
-      ..style = PaintingStyle.fill;
-
-    final nodes = [
-      Offset(size.width * 0.2, size.height * 0.35),
-      Offset(size.width * 0.8, size.height * 0.35),
-      Offset(size.width * 0.5, size.height * 0.75),
-    ];
-
-    // Draw edges with pulsing opacity
-    for (var i = 0; i < nodes.length; i++) {
-      for (var j = i + 1; j < nodes.length; j++) {
-        final t = (progress + i * 0.33) % 1.0;
-        final opacity = 0.15 + 0.25 * (t < 0.5 ? t * 2 : (1 - t) * 2);
-        paint.color = colors.accent.withValues(alpha: opacity);
-        canvas.drawLine(nodes[i], nodes[j], paint);
-      }
-    }
-
-    // Draw nodes
-    for (var i = 0; i < nodes.length; i++) {
-      final t = (progress + i * 0.33) % 1.0;
-      final radius = 8 + 3 * (t < 0.5 ? t * 2 : (1 - t) * 2);
-      nodePaint.color = colors.accent.withValues(alpha: 0.15);
-      canvas.drawCircle(nodes[i], radius + 6, nodePaint);
-      nodePaint.color = colors.accent;
-      canvas.drawCircle(nodes[i], radius, nodePaint);
-    }
-
-    // Labels
-    final labelStyle = TextStyle(
-      color: colors.textTertiary,
-      fontSize: 11,
-      fontWeight: FontWeight.w600,
-    );
-    final labels = ['Your machine', 'Daemon', 'Phone'];
-    for (var i = 0; i < nodes.length; i++) {
-      final tp = TextPainter(
-        text: TextSpan(text: labels[i], style: labelStyle),
-        textDirection: TextDirection.ltr,
-        textAlign: TextAlign.center,
-      );
-      tp.layout();
-      tp.paint(
-        canvas,
-        Offset(
-          nodes[i].dx - tp.width / 2,
-          nodes[i].dy + 20,
-        ),
-      );
-    }
-  }
-
-  @override
-  bool shouldRepaint(covariant _MeshDiagramPainter old) {
-    return old.progress != progress || old.colors != colors;
-  }
-}
-
 // ---------------------------------------------------------------------------
 // Page 3: What you can do
 // ---------------------------------------------------------------------------
@@ -551,7 +483,7 @@ class _ActionsPage extends StatelessWidget {
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
           Text(
-            'Review sessions and take action.',
+            'Know what needs you.',
             textAlign: TextAlign.center,
             style: Theme.of(context).textTheme.headlineSmall?.copyWith(
               fontWeight: FontWeight.w800,
@@ -561,111 +493,57 @@ class _ActionsPage extends StatelessWidget {
           ),
           const SizedBox(height: 8),
           Text(
-            'Stay on top of changes, approvals, files, and terminals from one place.',
+            'The goal is simple: see the next action quickly, then jump back into the right machine.',
             textAlign: TextAlign.center,
             style: Theme.of(context).textTheme.bodyLarge?.copyWith(
               color: colors.textSecondary,
+              height: 1.4,
             ),
           ),
           const SizedBox(height: 32),
-          // Fake session card
           MeshCard(
             tone: MeshCardTone.surface,
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Wrap(
-                  spacing: 8,
-                  runSpacing: 8,
-                  children: [
-                    MeshPill(
-                      label: 'codex',
-                      tone: MeshPillTone.accent,
-                      icon: Icons.memory_rounded,
-                    ),
-                    MeshPill(
-                      label: 'approval',
-                      tone: MeshPillTone.warning,
-                    ),
-                  ],
+                _ActionLine(
+                  icon: Icons.chat_bubble_outline_rounded,
+                  title: 'Sessions',
+                  body: 'See what each agent is doing and jump back in.',
+                  colors: colors,
                 ),
                 const SizedBox(height: 14),
-                Container(
-                  padding: const EdgeInsets.all(12),
-                  decoration: BoxDecoration(
-                    color: colors.codeBackground,
-                    borderRadius: BorderRadius.circular(12),
-                    border: Border.all(color: colors.codeBorder),
-                  ),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      _FakeDiffLine(
-                        prefix: '+',
-                        text: '  const retryDelayMs = 2500;',
-                        prefixColor: colors.diffAddGlyph,
-                        lineColor: colors.diffAddLine,
-                      ),
-                      _FakeDiffLine(
-                        prefix: '+',
-                        text: '  await reconnectHost(hostId);',
-                        prefixColor: colors.diffAddGlyph,
-                        lineColor: colors.diffAddLine,
-                      ),
-                      _FakeDiffLine(
-                        prefix: '-',
-                        text: '  await reconnectHost();',
-                        prefixColor: colors.diffDelGlyph,
-                        lineColor: colors.diffDelLine,
-                      ),
-                    ],
-                  ),
+                _ActionLine(
+                  icon: Icons.rule_folder_rounded,
+                  title: 'Approvals',
+                  body:
+                      'Approve or reject risky actions without reopening your laptop.',
+                  colors: colors,
                 ),
                 const SizedBox(height: 14),
-                Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    OutlinedButton(
-                      onPressed: null,
-                      child: const Text('Reject'),
-                    ),
-                    const SizedBox(height: 8),
-                    FilledButton(
-                      onPressed: null,
-                      child: const Text('Approve'),
-                    ),
-                  ],
+                _ActionLine(
+                  icon: Icons.folder_open_rounded,
+                  title: 'Files',
+                  body: 'Check changed files, logs, and saved outputs.',
+                  colors: colors,
+                ),
+                const SizedBox(height: 14),
+                _ActionLine(
+                  icon: Icons.terminal_rounded,
+                  title: 'Terminal',
+                  body: 'Open a terminal when the agent needs a hand.',
+                  colors: colors,
                 ),
               ],
             ),
           ),
-          const SizedBox(height: 24),
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            alignment: WrapAlignment.center,
-            children: [
-              _FeatureChip(
-                icon: Icons.chat_bubble_outline_rounded,
-                label: 'Chat',
-                colors: colors,
-              ),
-              _FeatureChip(
-                icon: Icons.code_rounded,
-                label: 'Diffs',
-                colors: colors,
-              ),
-              _FeatureChip(
-                icon: Icons.folder_open_rounded,
-                label: 'Files',
-                colors: colors,
-              ),
-              _FeatureChip(
-                icon: Icons.terminal_rounded,
-                label: 'Terminal',
-                colors: colors,
-              ),
-            ],
+          const SizedBox(height: 20),
+          Text(
+            'Best first step: connect a machine and open one test session.',
+            textAlign: TextAlign.center,
+            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+              color: colors.textTertiary,
+            ),
           ),
         ],
       ),
@@ -673,46 +551,58 @@ class _ActionsPage extends StatelessWidget {
   }
 }
 
-class _FakeDiffLine extends StatelessWidget {
-  const _FakeDiffLine({
-    required this.prefix,
-    required this.text,
-    required this.prefixColor,
-    required this.lineColor,
+class _ActionLine extends StatelessWidget {
+  const _ActionLine({
+    required this.icon,
+    required this.title,
+    required this.body,
+    required this.colors,
   });
 
-  final String prefix;
-  final String text;
-  final Color prefixColor;
-  final Color lineColor;
+  final IconData icon;
+  final String title;
+  final String body;
+  final AppColors colors;
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(vertical: 2, horizontal: 6),
-      decoration: BoxDecoration(
-        color: lineColor,
-        borderRadius: BorderRadius.circular(4),
-      ),
-      child: Row(
-        children: [
-          Text(
-            prefix,
-            style: monoStyle(color: prefixColor, fontSize: 11),
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Container(
+          width: 34,
+          height: 34,
+          decoration: BoxDecoration(
+            color: colors.accentMuted,
+            borderRadius: BorderRadius.circular(10),
           ),
-          const SizedBox(width: 6),
-          Expanded(
-            child: Text(
-              text,
-              style: monoStyle(
-                color: context.colors.codeForeground,
-                fontSize: 11,
+          alignment: Alignment.center,
+          child: Icon(icon, size: 18, color: colors.accent),
+        ),
+        const SizedBox(width: 12),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                title,
+                style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                  fontWeight: FontWeight.w700,
+                  color: colors.textPrimary,
+                ),
               ),
-              overflow: TextOverflow.ellipsis,
-            ),
+              const SizedBox(height: 2),
+              Text(
+                body,
+                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                  color: colors.textSecondary,
+                  height: 1.35,
+                ),
+              ),
+            ],
           ),
-        ],
-      ),
+        ),
+      ],
     );
   }
 }
@@ -797,7 +687,7 @@ class _ConnectPage extends StatelessWidget {
           ),
           const SizedBox(height: 32),
           Text(
-            'Set up your daemon',
+            'Add your first machine',
             textAlign: TextAlign.center,
             style: Theme.of(context).textTheme.headlineSmall?.copyWith(
               fontWeight: FontWeight.w800,
@@ -807,7 +697,7 @@ class _ConnectPage extends StatelessWidget {
           ),
           const SizedBox(height: 12),
           Text(
-            'Install the Sidemesh daemon on the machine you want to control. Then connect this app.',
+            'Run these commands on the machine you want to manage. Then scan the pairing code here.',
             textAlign: TextAlign.center,
             style: Theme.of(context).textTheme.bodyLarge?.copyWith(
               color: colors.textSecondary,
@@ -830,7 +720,7 @@ class _ConnectPage extends StatelessWidget {
                 ),
                 const SizedBox(height: 10),
                 _CommandLine(
-                  text: 'npm install -g github:mukhtharcm/sidemesh',
+                  text: 'npm install -g sidemesh',
                   colors: colors,
                 ),
                 const SizedBox(height: 6),
@@ -840,17 +730,12 @@ class _ConnectPage extends StatelessWidget {
                 ),
                 const SizedBox(height: 6),
                 _CommandLine(
-                  text: 'sidemesh start',
-                  colors: colors,
-                ),
-                const SizedBox(height: 6),
-                _CommandLine(
                   text: 'sidemesh pair',
                   colors: colors,
                 ),
                 const SizedBox(height: 12),
                 Text(
-                  'On macOS or Linux, install the background service if you want the app\'s Restart and Update buttons to bring the host back on their own.',
+                  'If the machine is already set up, you can scan the pairing code right away or add it manually.',
                   style: Theme.of(context).textTheme.bodySmall?.copyWith(
                     color: colors.textSecondary,
                     height: 1.4,
@@ -876,7 +761,7 @@ class _ConnectPage extends StatelessWidget {
             children: [
               TextButton(
                 onPressed: onManualEntry,
-                child: const Text('Enter manually'),
+                child: const Text('Add manually'),
               ),
               Text(
                 ' · ',
@@ -1012,7 +897,7 @@ class _ManualHostSheetState extends State<_ManualHostSheet> {
                   Row(
                     children: [
                       Text(
-                        'Add host manually',
+                        'Add a machine manually',
                         style: Theme.of(context)
                             .textTheme
                             .titleLarge
@@ -1029,8 +914,8 @@ class _ManualHostSheetState extends State<_ManualHostSheet> {
                   TextField(
                     controller: _labelController,
                     decoration: const InputDecoration(
-                      labelText: 'Label',
-                      hintText: 'My MacBook',
+                      labelText: 'Machine name',
+                      hintText: 'Work MacBook',
                     ),
                     textInputAction: TextInputAction.next,
                   ),
@@ -1038,7 +923,7 @@ class _ManualHostSheetState extends State<_ManualHostSheet> {
                   TextField(
                     controller: _baseUrlController,
                     decoration: const InputDecoration(
-                      labelText: 'Base URL',
+                      labelText: 'Machine address',
                       hintText: 'https://myhost.tailnet:3000',
                     ),
                     keyboardType: TextInputType.url,
@@ -1048,7 +933,7 @@ class _ManualHostSheetState extends State<_ManualHostSheet> {
                   TextField(
                     controller: _tokenController,
                     decoration: const InputDecoration(
-                      labelText: 'Shared token',
+                      labelText: 'Access token',
                       hintText: 'Paste from sidemesh setup',
                     ),
                     obscureText: true,
@@ -1068,7 +953,7 @@ class _ManualHostSheetState extends State<_ManualHostSheet> {
                   const SizedBox(height: 16),
                   FilledButton(
                     onPressed: _submit,
-                    child: const Text('Save host'),
+                    child: const Text('Add machine'),
                   ),
                 ],
               ),
@@ -1125,7 +1010,7 @@ class _PairingSuccessPage extends StatelessWidget {
           ),
           const SizedBox(height: 28),
           Text(
-            'Connected!',
+            'Machine added',
             textAlign: TextAlign.center,
             style: Theme.of(context).textTheme.headlineSmall?.copyWith(
               fontWeight: FontWeight.w800,
@@ -1146,6 +1031,14 @@ class _PairingSuccessPage extends StatelessWidget {
             payload.baseUrl,
             textAlign: TextAlign.center,
             style: monoStyle(color: colors.textSecondary, fontSize: 12),
+          ),
+          const SizedBox(height: 10),
+          Text(
+            'Ready to open sessions on this machine.',
+            textAlign: TextAlign.center,
+            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+              color: colors.textSecondary,
+            ),
           ),
         ],
       ),

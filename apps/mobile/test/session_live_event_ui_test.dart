@@ -581,7 +581,7 @@ void main() {
 
     expect(find.text('Approve file edit'), findsOneWidget);
 
-    await tester.tap(find.byTooltip('Reload session'));
+    await _tapDesktopReload(tester);
     await _pumpFrames(tester);
 
     expect(find.text('Approve file edit'), findsNothing);
@@ -616,8 +616,7 @@ void main() {
     await _pumpFrames(tester);
 
     api.fetchLogBlocker = snapshotReady.future;
-    await tester.tap(find.byTooltip('Reload session'));
-    await tester.pump();
+    await _tapDesktopReload(tester);
 
     api.emit({
       'type': 'action_opened',
@@ -714,6 +713,128 @@ void main() {
 
     expect(find.text('after.txt'), findsOneWidget);
     expect(find.text('before.txt'), findsNothing);
+  });
+
+  testWidgets('turn completion snapshot keeps locally seen command rows', (
+    tester,
+  ) async {
+    final session = _session('turn-complete-command-preserve');
+    final command = _commandActivity(
+      id: 'live-command',
+      seq: 1,
+      command: 'npm test',
+      cwd: '/repo',
+      output: 'ok',
+    );
+    final api = _RichEventFakeApi(
+      sessionSummary: session,
+      activities: [
+        _plainToolActivity(
+          id: 'live-command',
+          seq: 1,
+          toolName: 'run_command',
+        ),
+      ],
+    );
+    addTearDown(api.dispose);
+
+    await _pumpApp(
+      tester,
+      SessionScreen(
+        host: _host('turn-complete-command-preserve'),
+        session: session,
+        api: api,
+        desktopMode: true,
+      ),
+      size: const Size(1180, 900),
+    );
+    await _pumpFrames(tester);
+
+    api.emit({
+      'type': 'activity_updated',
+      'sessionId': session.id,
+      'seq': 1,
+      'activity': command.toJson(),
+    });
+    await _pumpFrames(tester);
+
+    expect(find.text('npm test'), findsOneWidget);
+
+    api.emit({
+      'type': 'turn_completed',
+      'sessionId': session.id,
+      'seq': 2,
+    });
+    await tester.pump(const Duration(milliseconds: 1300));
+    await _pumpFrames(tester);
+
+    expect(find.text('npm test'), findsOneWidget);
+  });
+
+  testWidgets('snapshot reload preserves locally seen command rows', (
+    tester,
+  ) async {
+    final host = _host('cached-command-preserve');
+    final session = _session('cached-command-preserve');
+    final cachedCommand = _commandActivity(
+      id: 'cached-command',
+      seq: 10,
+      command: 'npm test',
+      cwd: '/repo',
+      output: 'ok',
+    );
+    final freshFile = _fileChangeActivity(
+      id: 'fresh-file',
+      seq: 11,
+      path: '/repo/fresh-from-snapshot.txt',
+    );
+    final api = _RichEventFakeApi(
+      sessionSummary: session,
+      activities: [freshFile],
+      eventsDelta: SessionEventsDelta(
+        sessionId: session.id,
+        since: 10,
+        nextSeq: 10,
+        messages: const [],
+        activities: const [],
+        latestPlanUpdate: null,
+        pendingAction: null,
+        session: session,
+      ),
+    );
+    addTearDown(api.dispose);
+
+    await SessionLocalStore.instance.saveSessionLog(
+      host,
+      SessionLog(
+        session: session,
+        messages: const [],
+        activities: [cachedCommand],
+        pendingAction: null,
+        history: const SessionLogHistorySummary(
+          isTruncated: false,
+          totalMessages: 0,
+          returnedMessages: 0,
+          totalActivities: 1,
+          returnedActivities: 1,
+        ),
+      ),
+    );
+
+    await _pumpApp(
+      tester,
+      SessionScreen(
+        host: host,
+        session: session,
+        api: api,
+        desktopMode: true,
+      ),
+      size: const Size(1180, 900),
+    );
+    await _pumpFrames(tester);
+
+    expect(find.text('npm test'), findsOneWidget);
+    expect(find.text('fresh-from-snapshot.txt'), findsOneWidget);
   });
 
   testWidgets('delta replay refreshes cached history metadata without manual reload', (
@@ -1054,17 +1175,17 @@ void main() {
 
     expect(find.text('Step one.'), findsNothing);
     expect(find.text('Final answer.'), findsOneWidget);
-    expect(find.text('Reasoning'), findsOneWidget);
+    expect(find.text('Working notes'), findsOneWidget);
 
     final reasoningLabel = tester
         .widgetList<RichText>(find.byType(RichText))
-        .firstWhere((widget) => widget.text.toPlainText() == 'Reasoning');
+        .firstWhere((widget) => widget.text.toPlainText() == 'Working notes');
     expect(
       (reasoningLabel.text as TextSpan).style?.color,
-      ThemeVariant.codexAmber.light.textPrimary,
+      ThemeVariant.codexAmber.light.textSecondary,
     );
 
-    await tester.tap(find.text('Reasoning'));
+    await tester.tap(find.text('Working notes'));
     await _pumpFrames(tester);
 
     expect(find.text('Step one.'), findsOneWidget);
@@ -1104,10 +1225,10 @@ void main() {
       await _pumpFrames(tester);
 
       expect(find.text('Visible answer.'), findsOneWidget);
-      expect(find.text('Reasoning'), findsOneWidget);
+      expect(find.text('Working notes'), findsOneWidget);
       expect(find.textContaining('Troubleshooting'), findsNothing);
 
-      await tester.tap(find.text('Reasoning'));
+      await tester.tap(find.text('Working notes'));
       await _pumpFrames(tester);
 
       expect(find.textContaining('Troubleshooting'), findsOneWidget);
@@ -1137,7 +1258,7 @@ void main() {
           _commandActivity(
             id: 'cmd-preview',
             seq: 2,
-            command: 'npm run dev',
+            command: "/bin/bash -lc 'npm run dev'",
             cwd: '/repo/apps/web',
             output: 'Local: http://localhost:3000',
           ),
@@ -1162,6 +1283,13 @@ void main() {
       );
       await _pumpFrames(tester);
 
+      expect(find.text('Edited 1 file'), findsOneWidget);
+      expect(find.text('FILE CHANGE'), findsNothing);
+      expect(find.text('ran '), findsOneWidget);
+      expect(find.text('npm run dev'), findsOneWidget);
+      expect(find.textContaining('/bin/bash'), findsNothing);
+      expect(find.text('done'), findsNothing);
+
       await tester.tap(find.text('npm run dev'));
       await _pumpFrames(tester);
       await tester.tap(find.text('apps/web/src/main.dart'));
@@ -1173,6 +1301,279 @@ void main() {
       expect(find.text('Open file'), findsOneWidget);
     },
   );
+
+  testWidgets('session screen renders legacy command tool activities', (
+    tester,
+  ) async {
+    final session = _session('legacy-command-tool');
+    final api = _RichEventFakeApi(
+      sessionSummary: session,
+      activities: [
+        _legacyCommandToolActivity(
+          id: 'legacy-tool-command',
+          seq: 1,
+          command: 'npm test',
+        ),
+      ],
+    );
+    addTearDown(api.dispose);
+
+    await _pumpApp(
+      tester,
+      SessionScreen(
+        host: _host('legacy-command-tool'),
+        session: session,
+        api: api,
+        desktopMode: true,
+      ),
+      size: const Size(1180, 900),
+    );
+    await _pumpFrames(tester);
+
+    expect(find.text('ran '), findsOneWidget);
+    expect(find.text('npm test'), findsOneWidget);
+    expect(find.text('run_command'), findsNothing);
+    expect(find.text('Tool execution'), findsNothing);
+  });
+
+  testWidgets('session screen renders shell-wrapped command rows', (
+    tester,
+  ) async {
+    final session = _session('shell-command-row');
+    final api = _RichEventFakeApi(
+      sessionSummary: session,
+      activities: [
+        for (var i = 0; i < 24; i += 1)
+          _fileChangeActivity(
+            id: 'file-change-$i',
+            seq: i + 1,
+            path: '/repo/apps/mobile/lib/file_$i.dart',
+          ),
+        _commandActivity(
+          id: 'sed-command',
+          seq: 80,
+          command:
+              "/bin/bash -lc \"sed -n '1,80p' apps/mobile/lib/src/screens/session_screen.dart\"",
+          cwd: '/repo',
+          output: 'class SessionScreen extends StatefulWidget',
+        ),
+      ],
+    );
+    addTearDown(api.dispose);
+
+    await _pumpApp(
+      tester,
+      SessionScreen(
+        host: _host('shell-command-row'),
+        session: session,
+        api: api,
+        desktopMode: true,
+      ),
+      size: const Size(1180, 900),
+    );
+    await _pumpFrames(tester);
+
+    expect(find.text('viewed '), findsOneWidget);
+    expect(find.text('"session_screen.dart lines 1-80"'), findsOneWidget);
+    expect(
+      find.text(
+        "sed -n '1,80p' apps/mobile/lib/src/screens/session_screen.dart",
+      ),
+      findsNothing,
+    );
+    expect(find.textContaining('/bin/bash'), findsNothing);
+
+    await tester.tap(find.text('"session_screen.dart lines 1-80"'));
+    await _pumpFrames(tester);
+
+    expect(find.text('Raw command'), findsOneWidget);
+    expect(
+      find.text(
+        "sed -n '1,80p' apps/mobile/lib/src/screens/session_screen.dart",
+      ),
+      findsOneWidget,
+    );
+  });
+
+  testWidgets('session screen renders search commands as readable activity', (
+    tester,
+  ) async {
+    final session = _session('search-command-row');
+    final api = _RichEventFakeApi(
+      sessionSummary: session,
+      activities: [
+        _commandActivity(
+          id: 'rg-command',
+          seq: 1,
+          command:
+              "/bin/bash -lc 'rg -n \"parseCommandFunctionCall\" src/codex-history.ts'",
+          cwd: '/repo',
+          output: 'src/codex-history.ts:12:function parseCommandFunctionCall',
+        ),
+      ],
+    );
+    addTearDown(api.dispose);
+
+    await _pumpApp(
+      tester,
+      SessionScreen(
+        host: _host('search-command-row'),
+        session: session,
+        api: api,
+        desktopMode: true,
+      ),
+      size: const Size(1180, 900),
+    );
+    await _pumpFrames(tester);
+
+    expect(find.text('searched '), findsOneWidget);
+    expect(
+      find.text('for "parseCommandFunctionCall" in codex-history.ts'),
+      findsOneWidget,
+    );
+    expect(
+      find.text('rg -n "parseCommandFunctionCall" src/codex-history.ts'),
+      findsNothing,
+    );
+    expect(find.textContaining('/bin/bash'), findsNothing);
+  });
+
+  testWidgets('session screen orders command rows by timestamp before seq', (
+    tester,
+  ) async {
+    final session = _session('command-row-ordering');
+    final baseTime = DateTime(2026, 1, 1, 12);
+    final api = _RichEventFakeApi(
+      sessionSummary: session,
+      messages: [
+        _assistantMessage(
+          id: 'after-command',
+          text: 'After command',
+          content: const [TextBlock('After command')],
+          seq: 12,
+          createdAt: baseTime.add(const Duration(minutes: 2)),
+        ),
+      ],
+      activities: [
+        _commandActivity(
+          id: 'live-command-high-seq',
+          seq: 60000,
+          command: "/bin/bash -lc 'npm test'",
+          cwd: '/repo',
+          output: 'ok',
+          createdAt: baseTime.add(const Duration(minutes: 1)),
+        ),
+        _fileChangeActivity(
+          id: 'later-file-change',
+          seq: 13,
+          path: '/repo/apps/mobile/lib/later.dart',
+          createdAt: baseTime.add(const Duration(minutes: 3)),
+        ),
+      ],
+    );
+    addTearDown(api.dispose);
+
+    await _pumpApp(
+      tester,
+      SessionScreen(
+        host: _host('command-row-ordering'),
+        session: session,
+        api: api,
+        desktopMode: true,
+      ),
+      size: const Size(1180, 900),
+    );
+    await _pumpFrames(tester);
+
+    final commandY = tester.getTopLeft(find.text('npm test')).dy;
+    final messageY = tester.getTopLeft(find.text('After command')).dy;
+    final fileY = tester.getTopLeft(find.text('Edited 1 file')).dy;
+
+    expect(commandY, lessThan(messageY));
+    expect(messageY, lessThan(fileY));
+  });
+
+  testWidgets('session screen avoids internal turn diff copy', (tester) async {
+    final session = _session('turn-diff-copy');
+    final api = _RichEventFakeApi(
+      sessionSummary: session,
+      activities: [
+        _turnDiffActivity(
+          id: 'turn-diff-1',
+          seq: 1,
+          diff: '@@ -1 +1 @@\n-old\n+new',
+        ),
+      ],
+    );
+    addTearDown(api.dispose);
+
+    await _pumpApp(
+      tester,
+      SessionScreen(
+        host: _host('turn-diff-copy'),
+        session: session,
+        api: api,
+        desktopMode: true,
+      ),
+      size: const Size(1180, 900),
+    );
+    await _pumpFrames(tester);
+
+    expect(find.text('live diff · 3 lines'), findsOneWidget);
+    expect(find.text('View patch (3 lines)'), findsOneWidget);
+    expect(find.textContaining('turn diff'), findsNothing);
+  });
+
+  testWidgets('session screen groups adjacent file changes by turn', (
+    tester,
+  ) async {
+    final session = _session('grouped-file-changes');
+    final api = _RichEventFakeApi(
+      sessionSummary: session,
+      activities: [
+        _fileChangeActivity(
+          id: 'file-change-a',
+          seq: 1,
+          path: '/repo/apps/mobile/lib/a.dart',
+          turnId: 'turn-file-group',
+        ),
+        _fileChangeActivity(
+          id: 'file-change-b',
+          seq: 2,
+          path: '/repo/apps/mobile/lib/b.dart',
+          turnId: 'turn-file-group',
+        ),
+        _fileChangeActivity(
+          id: 'file-change-a-later',
+          seq: 3,
+          path: '/repo/apps/mobile/lib/a.dart',
+          turnId: 'turn-file-group',
+        ),
+      ],
+    );
+    addTearDown(api.dispose);
+
+    await _pumpApp(
+      tester,
+      SessionScreen(
+        host: _host('grouped-file-changes'),
+        session: session,
+        api: api,
+        desktopMode: true,
+      ),
+      size: const Size(1180, 900),
+    );
+    await _pumpFrames(tester);
+
+    expect(find.text('Edited 2 files'), findsOneWidget);
+    expect(find.text('FILE CHANGE'), findsNothing);
+
+    await tester.tap(find.text('Edited 2 files'));
+    await _pumpFrames(tester);
+
+    expect(find.text('apps/mobile/lib/a.dart'), findsOneWidget);
+    expect(find.text('apps/mobile/lib/b.dart'), findsOneWidget);
+  });
 
   testWidgets(
     'mobile running session shows stop pill and stops after confirmation',
@@ -1200,19 +1601,19 @@ void main() {
       });
       await _pumpFrames(tester);
 
-      expect(find.text('Interrupt agent'), findsWidgets);
+      expect(find.text('Stop agent'), findsWidgets);
 
-      await tester.tap(find.text('Interrupt agent').first);
+      await tester.tap(find.text('Stop agent').first);
       await _pumpFrames(tester);
 
-      expect(find.text('Interrupt agent?'), findsOneWidget);
+      expect(find.text('Stop the agent?'), findsOneWidget);
 
-      await tester.tap(find.widgetWithText(FilledButton, 'Interrupt'));
+      await tester.tap(find.widgetWithText(FilledButton, 'Stop agent'));
       await _pumpFrames(tester);
 
       expect(api.stopSessionCalls, 1);
-      expect(find.text('Interrupt agent'), findsNothing);
-      expect(find.text('Agent interrupted.'), findsOneWidget);
+      expect(find.text('Stop agent'), findsNothing);
+      expect(find.text('Agent stopped.'), findsOneWidget);
     },
   );
 }
@@ -1221,6 +1622,13 @@ Future<void> _pumpFrames(WidgetTester tester) async {
   await tester.pump();
   await tester.pump(const Duration(milliseconds: 50));
   await tester.pump(const Duration(milliseconds: 250));
+  await tester.pump();
+}
+
+Future<void> _tapDesktopReload(WidgetTester tester) async {
+  await tester.tap(find.byTooltip('Session actions'));
+  await _pumpFrames(tester);
+  await tester.tap(find.text('Reload'));
   await tester.pump();
 }
 
@@ -1280,8 +1688,10 @@ SessionMessage _assistantMessage({
   required String id,
   required String text,
   required List<ContentBlock> content,
+  int seq = 1,
+  DateTime? createdAt,
 }) {
-  final now = DateTime(2026, 1, 1, 12);
+  final now = createdAt ?? DateTime(2026, 1, 1, 12);
   return SessionMessage(
     id: id,
     role: 'assistant',
@@ -1289,7 +1699,7 @@ SessionMessage _assistantMessage({
     content: content,
     attachments: const [],
     createdAt: now,
-    seq: 1,
+    seq: seq,
     phase: 'final_answer',
   );
 }
@@ -1300,8 +1710,10 @@ SessionActivity _commandActivity({
   required String command,
   required String cwd,
   required String output,
+  DateTime? createdAt,
 }) {
-  final now = DateTime(2026, 1, 1, 12).add(Duration(minutes: seq));
+  final now =
+      createdAt ?? DateTime(2026, 1, 1, 12).add(Duration(minutes: seq));
   return SessionActivity(
     id: id,
     type: 'command',
@@ -1340,15 +1752,18 @@ SessionActivity _fileChangeActivity({
   required String id,
   required int seq,
   required String path,
+  String? turnId,
+  DateTime? createdAt,
 }) {
-  final now = DateTime(2026, 1, 1, 12).add(Duration(minutes: seq));
+  final now =
+      createdAt ?? DateTime(2026, 1, 1, 12).add(Duration(minutes: seq));
   return SessionActivity(
     id: id,
     type: 'file_change',
     createdAt: now,
     seq: seq,
     status: 'completed',
-    turnId: 'turn-$seq',
+    turnId: turnId ?? 'turn-$seq',
     command: null,
     cwd: '/repo',
     output: null,
@@ -1373,6 +1788,132 @@ SessionActivity _fileChangeActivity({
       ),
     ],
     diff: null,
+    query: null,
+    queries: const [],
+    targetUrl: null,
+    pattern: null,
+    revisedPrompt: null,
+    savedPath: null,
+  );
+}
+
+SessionActivity _legacyCommandToolActivity({
+  required String id,
+  required int seq,
+  required String command,
+}) {
+  final now = DateTime(2026, 1, 1, 12).add(Duration(minutes: seq));
+  return SessionActivity(
+    id: id,
+    type: 'tool',
+    createdAt: now,
+    seq: seq,
+    status: 'completed',
+    turnId: 'turn-$seq',
+    command: null,
+    cwd: null,
+    output: null,
+    exitCode: null,
+    durationMs: null,
+    source: null,
+    processId: null,
+    commandActions: const [],
+    terminalStatus: null,
+    terminalInput: null,
+    toolName: 'run_command',
+    toolTitle: null,
+    toolArgs: null,
+    toolResult: null,
+    toolError: null,
+    toolSemantic: SessionToolSemantic(
+      category: 'command',
+      action: 'invoke',
+      targets: [
+        SessionToolSemanticTarget(type: 'command', command: command),
+      ],
+    ),
+    changes: const [],
+    diff: null,
+    query: null,
+    queries: const [],
+    targetUrl: null,
+    pattern: null,
+    revisedPrompt: null,
+    savedPath: null,
+  );
+}
+
+SessionActivity _plainToolActivity({
+  required String id,
+  required int seq,
+  required String toolName,
+}) {
+  final now = DateTime(2026, 1, 1, 12).add(Duration(minutes: seq));
+  return SessionActivity(
+    id: id,
+    type: 'tool',
+    createdAt: now,
+    seq: seq,
+    status: 'completed',
+    turnId: 'turn-$seq',
+    command: null,
+    cwd: null,
+    output: null,
+    exitCode: null,
+    durationMs: null,
+    source: null,
+    processId: null,
+    commandActions: const [],
+    terminalStatus: null,
+    terminalInput: null,
+    toolName: toolName,
+    toolTitle: null,
+    toolArgs: null,
+    toolResult: null,
+    toolError: null,
+    toolSemantic: null,
+    changes: const [],
+    diff: null,
+    query: null,
+    queries: const [],
+    targetUrl: null,
+    pattern: null,
+    revisedPrompt: null,
+    savedPath: null,
+  );
+}
+
+SessionActivity _turnDiffActivity({
+  required String id,
+  required int seq,
+  required String diff,
+}) {
+  final now = DateTime(2026, 1, 1, 12).add(Duration(minutes: seq));
+  return SessionActivity(
+    id: id,
+    type: 'turn_diff',
+    createdAt: now,
+    seq: seq,
+    status: 'in_progress',
+    turnId: 'turn-$seq',
+    command: null,
+    cwd: null,
+    output: null,
+    exitCode: null,
+    durationMs: null,
+    source: null,
+    processId: null,
+    commandActions: const [],
+    terminalStatus: null,
+    terminalInput: null,
+    toolName: null,
+    toolTitle: null,
+    toolArgs: null,
+    toolResult: null,
+    toolError: null,
+    toolSemantic: null,
+    changes: const [],
+    diff: diff,
     query: null,
     queries: const [],
     targetUrl: null,

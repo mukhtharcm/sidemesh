@@ -60,9 +60,7 @@ class DiffView extends StatelessWidget {
                 return SingleChildScrollView(
                   scrollDirection: Axis.horizontal,
                   child: ConstrainedBox(
-                    constraints: BoxConstraints(
-                      minWidth: constraints.maxWidth,
-                    ),
+                    constraints: BoxConstraints(minWidth: constraints.maxWidth),
                     child: IntrinsicWidth(
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -88,10 +86,10 @@ class DiffView extends StatelessWidget {
                 ),
                 color: colors.surfaceMuted,
                 child: Text(
-                  '…${parsed.length - maxLines!} more lines',
-                  style: monoStyle(
+                  '${parsed.length - maxLines!} more lines',
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
                     color: colors.textSecondary,
-                    fontSize: 11.5,
+                    fontWeight: FontWeight.w600,
                   ),
                 ),
               ),
@@ -114,35 +112,35 @@ class _DiffRow extends StatelessWidget {
 
     final (lineBg, gutterBg, glyphColor, textColor) = switch (row.kind) {
       _DiffKind.add => (
-          colors.diffAddLine,
-          colors.diffAddGutter,
-          colors.diffAddGlyph,
-          colors.textPrimary,
-        ),
+        colors.diffAddLine,
+        colors.diffAddGutter,
+        colors.diffAddGlyph,
+        colors.textPrimary,
+      ),
       _DiffKind.del => (
-          colors.diffDelLine,
-          colors.diffDelGutter,
-          colors.diffDelGlyph,
-          colors.textPrimary,
-        ),
+        colors.diffDelLine,
+        colors.diffDelGutter,
+        colors.diffDelGlyph,
+        colors.textPrimary,
+      ),
       _DiffKind.context => (
-          colors.codeBackground,
-          colors.surfaceMuted,
-          colors.diffGutterText,
-          colors.textPrimary,
-        ),
+        colors.codeBackground,
+        colors.surfaceMuted,
+        colors.diffGutterText,
+        colors.textPrimary,
+      ),
       _DiffKind.hunk => (
-          colors.infoMuted,
-          colors.infoMuted,
-          colors.diffHunkLine,
-          colors.diffHunkLine,
-        ),
+        colors.infoMuted,
+        colors.infoMuted,
+        colors.diffHunkLine,
+        colors.diffHunkLine,
+      ),
       _DiffKind.meta => (
-          colors.surfaceMuted,
-          colors.surfaceMuted,
-          colors.diffMetaLine,
-          colors.diffMetaLine,
-        ),
+        colors.surfaceMuted,
+        colors.surfaceMuted,
+        colors.diffMetaLine,
+        colors.diffMetaLine,
+      ),
     };
 
     final glyph = switch (row.kind) {
@@ -328,7 +326,9 @@ List<_DiffLine> _parseDiff(String input) {
   return out;
 }
 
-final RegExp _hunkHeader = RegExp(r'@@\s+-(\d+)(?:,\d+)?\s+\+(\d+)(?:,\d+)?\s+@@');
+final RegExp _hunkHeader = RegExp(
+  r'@@\s+-(\d+)(?:,\d+)?\s+\+(\d+)(?:,\d+)?\s+@@',
+);
 
 /// Expands tab characters line-aware so column alignment matches a real
 /// monospace rendering. Tab stops sit at [tabWidth] intervals relative to

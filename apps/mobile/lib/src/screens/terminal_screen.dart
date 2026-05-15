@@ -51,13 +51,12 @@ class _TerminalScreenState extends State<TerminalScreen> {
           children: [
             Text(widget.title ?? 'Terminal'),
             Text(
-              widget.cwd,
+              _terminalLocationLabel(widget.host.label, widget.cwd),
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
-              style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                color: colors.textSecondary,
-                fontFamily: 'SpaceMono',
-              ),
+              style: Theme.of(
+                context,
+              ).textTheme.labelSmall?.copyWith(color: colors.textSecondary),
             ),
           ],
         ),
@@ -122,7 +121,7 @@ class _TerminalPaneState extends State<TerminalPane> {
       onOutput: _sendInput,
       onResize: _handleResize,
     );
-    _terminal.write('Opening Sidemesh terminal...\r\n');
+    _terminal.write('Starting terminal...\r\n');
     HostReconnectScheduler.instance.registerSlot(
       widget.host.id,
       _reconnectSlotId,
@@ -160,7 +159,7 @@ class _TerminalPaneState extends State<TerminalPane> {
     _channel = null;
     _terminalInfo = null;
     _lastSeq = -1;
-    _terminal.write('\r\nOpening Sidemesh terminal...\r\n');
+    _terminal.write('\r\nStarting terminal...\r\n');
     unawaited(_startTerminal(reuseExisting: widget.reuseExisting));
   }
 
@@ -209,7 +208,7 @@ class _TerminalPaneState extends State<TerminalPane> {
         _starting = false;
         _error = message;
       });
-      _terminal.write('\r\n[terminal error] $message\r\n');
+      _terminal.write('\r\nCould not start terminal: $message\r\n');
     }
   }
 
@@ -283,7 +282,7 @@ class _TerminalPaneState extends State<TerminalPane> {
     }
     setState(() {
       _connecting = false;
-      _error = 'Terminal disconnected. Reconnecting...';
+      _error = 'Connection lost. Reconnecting...';
     });
     HostReconnectScheduler.instance.markDisconnected(
       widget.host.id,
@@ -351,7 +350,7 @@ class _TerminalPaneState extends State<TerminalPane> {
             );
           }
         });
-        _terminal.write('\r\n[terminal exited]\r\n');
+        _terminal.write('\r\nTerminal stopped.\r\n');
         return;
       case 'replace':
         final seq = _intOrNull(frame['seq']);
@@ -366,9 +365,9 @@ class _TerminalPaneState extends State<TerminalPane> {
         }
         return;
       case 'error':
-        final message = frame['message']?.toString() ?? 'Terminal error';
+        final message = frame['message']?.toString() ?? 'Something went wrong';
         setState(() => _error = message);
-        _terminal.write('\r\n[terminal error] $message\r\n');
+        _terminal.write('\r\nSomething went wrong: $message\r\n');
         return;
     }
   }
@@ -412,7 +411,9 @@ class _TerminalPaneState extends State<TerminalPane> {
       _lastSeq = -1;
       _error = null;
     });
-    _terminal.write('\r\n[terminal restarted from another device]\r\n');
+    _terminal.write(
+      '\r\nThis terminal moved to another device. Reconnecting...\r\n',
+    );
     _connectLive();
   }
 
@@ -460,7 +461,7 @@ class _TerminalPaneState extends State<TerminalPane> {
       _lastSeq = -1;
       _error = null;
     });
-    _terminal.write('\r\nStarting a new Sidemesh terminal...\r\n');
+    _terminal.write('\r\nStarting a new terminal...\r\n');
     await _startTerminal(reuseExisting: false, replaceExisting: true);
   }
 
@@ -491,9 +492,9 @@ class _TerminalPaneState extends State<TerminalPane> {
                 borderRadius: BorderRadius.circular(widget.compact ? 12 : 16),
                 boxShadow: [
                   BoxShadow(
-                    color: Colors.black.withValues(alpha: 0.12),
-                    blurRadius: 18,
-                    offset: const Offset(0, 10),
+                    color: colors.canvas.withValues(alpha: 0.08),
+                    blurRadius: 14,
+                    offset: const Offset(0, 6),
                   ),
                 ],
               ),
@@ -514,10 +515,7 @@ class _TerminalPaneState extends State<TerminalPane> {
             ),
           ),
         ),
-        TerminalKeyBar(
-          compact: widget.compact,
-          onAction: _onKeyBarAction,
-        ),
+        TerminalKeyBar(compact: widget.compact, onAction: _onKeyBarAction),
       ],
     );
   }
@@ -573,7 +571,7 @@ xterm.TerminalTheme _terminalTheme(AppColors colors) {
 }
 
 Color _brightTerminalColor(Color color) =>
-    Color.lerp(color, Colors.white, 0.2)!;
+    Color.lerp(color, const Color(0xFFD8D8D8), 0.18)!;
 
 class _TerminalStatusStrip extends StatelessWidget {
   const _TerminalStatusStrip({
@@ -614,9 +612,9 @@ class _TerminalStatusStrip extends StatelessWidget {
             ? 'Connecting'
             : running
             ? limitedBackend
-                  ? 'Live terminal (limited fallback)'
-                  : 'Live terminal'
-            : 'Terminal stopped');
+                  ? 'Connected, limited controls'
+                  : 'Connected'
+            : 'Stopped');
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
       decoration: BoxDecoration(
@@ -672,7 +670,7 @@ class _TerminalStatusStrip extends StatelessWidget {
               child: Tooltip(
                 message: terminal!.cwd,
                 child: Text(
-                  '${terminal!.backend} ${terminal!.cols}x${terminal!.rows} · ${_basename(terminal!.cwd)}',
+                  _terminalSummaryLabel(terminal!),
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: Theme.of(context).textTheme.labelSmall?.copyWith(
@@ -694,7 +692,7 @@ class _TerminalStatusStrip extends StatelessWidget {
             const SizedBox(width: 8),
             MeshIconButton(
               icon: Icons.restart_alt_rounded,
-              tooltip: 'Start new terminal',
+              tooltip: 'Start a new terminal',
               color: colors.accent,
               onTap: onRestart,
             ),
@@ -709,9 +707,9 @@ class _TerminalStatusStrip extends StatelessWidget {
     if (last == null) return null;
     final elapsed = DateTime.now().difference(last);
     if (elapsed.inSeconds < 5) return null;
-    if (elapsed.inMinutes < 1) return 'last output ${elapsed.inSeconds}s ago';
-    if (elapsed.inHours < 1) return 'last output ${elapsed.inMinutes}m ago';
-    return 'last output ${elapsed.inHours}h ago';
+    if (elapsed.inMinutes < 1) return 'updated ${elapsed.inSeconds}s ago';
+    if (elapsed.inHours < 1) return 'updated ${elapsed.inMinutes}m ago';
+    return 'updated ${elapsed.inHours}h ago';
   }
 }
 
@@ -723,6 +721,24 @@ String _basename(String path) {
   return index >= 0
       ? withoutTrailingSlash.substring(index + 1)
       : withoutTrailingSlash;
+}
+
+String _terminalLocationLabel(String hostLabel, String cwd) {
+  final trimmed = cwd.trim();
+  if (trimmed.isEmpty) return hostLabel;
+  final folder = _basename(trimmed);
+  if (folder.isEmpty) return '$hostLabel · $trimmed';
+  return '$hostLabel · $folder';
+}
+
+String _terminalSummaryLabel(HostTerminalInfo terminal) {
+  final folder = _basename(terminal.cwd);
+  if (folder.isNotEmpty) return folder;
+  final trimmed = terminal.cwd.trim();
+  if (trimmed.isNotEmpty) return trimmed;
+  final title = terminal.title.trim();
+  if (title.isNotEmpty) return title;
+  return 'Shell';
 }
 
 int? _intOrNull(Object? value) {

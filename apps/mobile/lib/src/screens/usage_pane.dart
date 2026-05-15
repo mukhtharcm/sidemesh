@@ -100,8 +100,8 @@ class _UsagePaneState extends State<UsagePane> {
         padding: EdgeInsets.only(top: widget.topPadding),
         child: const MeshEmptyState(
           icon: Icons.speed_rounded,
-          title: 'No enabled hosts',
-          body: 'Enable a host before loading account usage and quota windows.',
+          title: 'No machines turned on',
+          body: 'Turn on a machine to see usage here.',
         ),
       );
     }
@@ -112,9 +112,7 @@ class _UsagePaneState extends State<UsagePane> {
         .where((account) => account.isUnsupported && !account.hasLimits)
         .toList();
     final other = accounts
-        .where(
-          (account) => !account.hasLimits && !account.isUnsupported,
-        )
+        .where((account) => !account.hasLimits && !account.isUnsupported)
         .toList();
 
     return Container(
@@ -131,6 +129,8 @@ class _UsagePaneState extends State<UsagePane> {
           ),
           children: [
             _UsageHeader(
+              hostCount: enabledHosts.length,
+              accountCount: accounts.length,
               loading: _store.loading,
               lastRefreshedAt: _store.lastRefreshedAt,
               onRefresh: () => unawaited(_store.refresh()),
@@ -146,15 +146,17 @@ class _UsagePaneState extends State<UsagePane> {
               const SizedBox(height: 36),
               const MeshEmptyState.compact(
                 icon: Icons.speed_rounded,
-                title: 'No usage observations yet',
-                body: 'Pull to refresh or check that your hosts are online and up to date.',
+                title: 'Nothing to show yet',
+                body:
+                    'Pull to refresh, or check that your machines are online.',
               ),
             ] else ...[
               if (limits.isNotEmpty) ...[
                 const SizedBox(height: 16),
                 _SectionLabel(
                   title: 'Limits',
-                  subtitle: 'Account, subscription, and credit windows.',
+                  subtitle:
+                      'The usage windows your machines can confirm right now.',
                 ),
                 const SizedBox(height: 10),
                 ...limits.map(
@@ -167,8 +169,9 @@ class _UsagePaneState extends State<UsagePane> {
               if (other.isNotEmpty) ...[
                 const SizedBox(height: 10),
                 _SectionLabel(
-                  title: 'Observed usage',
-                  subtitle: 'Local telemetry that is not an authoritative quota.',
+                  title: 'Recent usage',
+                  subtitle:
+                      'Helpful usage data that may not include full limits yet.',
                 ),
                 const SizedBox(height: 10),
                 ...other.map(
@@ -181,8 +184,8 @@ class _UsagePaneState extends State<UsagePane> {
               if (unsupported.isNotEmpty) ...[
                 const SizedBox(height: 10),
                 _SectionLabel(
-                  title: 'Unavailable',
-                  subtitle: 'Providers that do not expose usage through Sidemesh yet.',
+                  title: 'Not available',
+                  subtitle: 'These agents do not report usage to Sidemesh yet.',
                 ),
                 const SizedBox(height: 10),
                 ...unsupported.map(
@@ -215,11 +218,15 @@ class _UsagePaneState extends State<UsagePane> {
 
 class _UsageHeader extends StatelessWidget {
   const _UsageHeader({
+    required this.hostCount,
+    required this.accountCount,
     required this.loading,
     required this.lastRefreshedAt,
     required this.onRefresh,
   });
 
+  final int hostCount;
+  final int accountCount;
   final bool loading;
   final DateTime? lastRefreshedAt;
   final VoidCallback onRefresh;
@@ -243,8 +250,8 @@ class _UsageHeader extends StatelessWidget {
               const SizedBox(height: 4),
               Text(
                 lastRefreshedAt == null
-                    ? 'Quota windows reconciled across enabled hosts.'
-                    : 'Updated ${_relativeAge(lastRefreshedAt!)} ago.',
+                    ? 'Checking ${hostCount == 1 ? "1 machine" : "$hostCount machines"}.'
+                    : 'Updated ${_relativeAge(lastRefreshedAt!)} ago from ${hostCount == 1 ? "1 machine" : "$hostCount machines"}${accountCount > 0 ? " across $accountCount accounts" : ""}.',
                 style: TextStyle(color: colors.textSecondary),
               ),
             ],
@@ -252,7 +259,7 @@ class _UsageHeader extends StatelessWidget {
         ),
         MeshIconButton(
           icon: loading ? Icons.hourglass_top_rounded : Icons.refresh_rounded,
-          tooltip: 'Refresh usage',
+          tooltip: 'Refresh',
           onTap: onRefresh,
         ),
       ],
@@ -297,23 +304,15 @@ class _UsageAccountCard extends StatelessWidget {
     final tone = account.isError ? MeshCardTone.muted : MeshCardTone.surface;
     return MeshCard(
       tone: tone,
-      borderColor: account.isError ? colors.danger.withValues(alpha: 0.45) : null,
+      borderColor: account.isError
+          ? colors.danger.withValues(alpha: 0.45)
+          : null,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Container(
-                width: 38,
-                height: 38,
-                decoration: BoxDecoration(
-                  color: colors.accentMuted,
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: Icon(Icons.speed_rounded, color: colors.accent, size: 21),
-              ),
-              const SizedBox(width: 12),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -337,11 +336,10 @@ class _UsageAccountCard extends StatelessWidget {
                   ],
                 ),
               ),
-              const SizedBox(width: 8),
+              const SizedBox(width: 12),
               MeshPill(
                 label: account.provider.displayName,
-                tone: MeshPillTone.accent,
-                mono: true,
+                tone: MeshPillTone.neutral,
               ),
             ],
           ),
@@ -374,10 +372,10 @@ class _UsageAccountCard extends StatelessWidget {
     final parts = <String>[];
     final plan = account.planType;
     if (plan != null && plan.isNotEmpty) parts.add(plan);
-    parts.add('latest from ${account.latestHostLabel}');
-    parts.add(_relativeAge(account.latestObservedAt));
+    parts.add('from ${account.latestHostLabel}');
+    parts.add('seen ${_relativeAge(account.latestObservedAt)} ago');
     if (account.hostLabels.length > 1) {
-      parts.add('seen on ${account.hostLabels.length} hosts');
+      parts.add('matched on ${account.hostLabels.length} machines');
     }
     return parts.join(' · ');
   }
@@ -398,7 +396,7 @@ class _UsageWindowRow extends StatelessWidget {
         : (used / 100).clamp(0.0, 1.0).toDouble();
     final tone = _toneForPercent(used);
     final resetLabel = window.resetsAt == null
-        ? 'reset unavailable'
+        ? 'reset time unavailable'
         : 'resets in ${_relativeDuration(window.resetsAt!.difference(DateTime.now()))}';
     final duration = window.windowMinutes == null
         ? null
@@ -419,7 +417,7 @@ class _UsageWindowRow extends StatelessWidget {
               ),
             ),
             MeshPill(
-              label: used == null ? 'unknown' : '${used.round()}% used',
+              label: used == null ? 'Not reported' : '${used.round()}% used',
               tone: tone,
               mono: true,
             ),
@@ -432,12 +430,14 @@ class _UsageWindowRow extends StatelessWidget {
             value: progress,
             minHeight: 7,
             backgroundColor: colors.surfaceMuted,
-            valueColor: AlwaysStoppedAnimation<Color>(_colorForTone(colors, tone)),
+            valueColor: AlwaysStoppedAnimation<Color>(
+              _colorForTone(colors, tone),
+            ),
           ),
         ),
         const SizedBox(height: 6),
         Text(
-          [resetLabel, ?duration, 'from ${item.hostLabel}'].join(' · '),
+          [resetLabel, ?duration, 'reported by ${item.hostLabel}'].join(' · '),
           style: TextStyle(color: colors.textSecondary, fontSize: 12),
         ),
       ],
@@ -462,9 +462,15 @@ class _CreditsRow extends StatelessWidget {
       padding: const EdgeInsets.all(12),
       child: Row(
         children: [
-          Icon(Icons.account_balance_wallet_rounded, size: 17, color: colors.accent),
+          Icon(
+            Icons.account_balance_wallet_rounded,
+            size: 17,
+            color: colors.accent,
+          ),
           const SizedBox(width: 8),
-          Expanded(child: Text(label, style: TextStyle(color: colors.textPrimary))),
+          Expanded(
+            child: Text(label, style: TextStyle(color: colors.textPrimary)),
+          ),
         ],
       ),
     );
@@ -484,7 +490,11 @@ class _UnsupportedUsageCard extends StatelessWidget {
       padding: const EdgeInsets.all(14),
       child: Row(
         children: [
-          Icon(Icons.visibility_off_rounded, color: colors.textTertiary, size: 19),
+          Icon(
+            Icons.visibility_off_rounded,
+            color: colors.textTertiary,
+            size: 19,
+          ),
           const SizedBox(width: 10),
           Expanded(
             child: Text(
@@ -518,8 +528,8 @@ class _UsageFailureBanner extends StatelessWidget {
           Expanded(
             child: Text(
               failures.length == 1
-                  ? 'Could not load ${failures.first.host.label}: ${failures.first.message}'
-                  : 'Could not load usage from ${failures.length} hosts.',
+                  ? 'Could not load ${failures.first.host.label}. ${failures.first.message}'
+                  : 'Could not load usage from ${failures.length} machines.',
               style: TextStyle(color: colors.textSecondary, height: 1.35),
             ),
           ),

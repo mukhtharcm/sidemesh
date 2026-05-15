@@ -257,7 +257,7 @@ class _SessionResourcesPanelState extends State<SessionResourcesPanel> {
           ),
           MeshIconButton(
             icon: Icons.refresh_rounded,
-            tooltip: 'Refresh resources',
+            tooltip: 'Refresh',
             color: colors.textSecondary,
             onTap: _load,
           ),
@@ -300,7 +300,7 @@ class _SessionResourcesPanelState extends State<SessionResourcesPanel> {
     if (_error != null && _resources.isEmpty) {
       return _ResourcesEmptyState(
         icon: Icons.error_outline_rounded,
-        title: 'Could not load resources',
+        title: 'Could not load items',
         detail: _error.toString(),
         actionLabel: 'Retry',
         onAction: _load,
@@ -308,15 +308,14 @@ class _SessionResourcesPanelState extends State<SessionResourcesPanel> {
     }
     if (resources.isEmpty) {
       final detail = switch (_filter) {
-        _ResourceFilter.all => 'No links, images, or local artifacts yet.',
-        _ResourceFilter.media => 'No images in this session yet.',
-        _ResourceFilter.links => 'No links found in this session yet.',
-        _ResourceFilter.files =>
-          'No local file artifacts found in this session yet.',
+        _ResourceFilter.all => 'Nothing from this session has been saved yet.',
+        _ResourceFilter.media => 'No images yet.',
+        _ResourceFilter.links => 'No links yet.',
+        _ResourceFilter.files => 'No files yet.',
       };
       return _ResourcesEmptyState(
         icon: Icons.perm_media_rounded,
-        title: 'Nothing here yet',
+        title: 'Nothing saved yet',
         detail: detail,
       );
     }
@@ -924,20 +923,15 @@ IconData _resourceIcon(
 }
 
 String _sourceLabel(SessionResource resource) {
-  switch (resource.source) {
-    case 'message_attachment':
-      return 'MESSAGE';
-    case 'message_link':
-      return 'LINK';
-    case 'message_file':
-      return 'FILE REF';
-    case 'web_search':
-      return 'WEB SEARCH';
-    case 'image_generation':
-      return 'GENERATED';
-    default:
-      return resource.source.toUpperCase();
-  }
+  final label = switch (resource.source) {
+    'message_attachment' => 'attachment',
+    'message_link' => 'link',
+    'message_file' => 'file',
+    'web_search' => 'web',
+    'image_generation' => 'generated',
+    _ => resource.source.replaceAll('_', ' '),
+  };
+  return _titleCaseWords(label);
 }
 
 String _gallerySubtitle(SessionResource resource) {
@@ -980,6 +974,16 @@ String _formatTimestamp(DateTime time) {
   final month = local.month.toString().padLeft(2, '0');
   final day = local.day.toString().padLeft(2, '0');
   return '$month/$day $hh:$mm';
+}
+
+String _titleCaseWords(String value) {
+  final parts = value
+      .split(RegExp(r'\s+'))
+      .where((part) => part.isNotEmpty)
+      .toList(growable: false);
+  return parts
+      .map((part) => part[0].toUpperCase() + part.substring(1))
+      .join(' ');
 }
 
 String _basename(String path) {
