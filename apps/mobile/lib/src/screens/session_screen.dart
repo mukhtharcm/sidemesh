@@ -345,6 +345,19 @@ class _DesktopSessionStatusBadge extends StatelessWidget {
   }
 }
 
+class _DesktopSessionHeaderDivider extends StatelessWidget
+    implements PreferredSizeWidget {
+  const _DesktopSessionHeaderDivider();
+
+  @override
+  Size get preferredSize => const Size.fromHeight(1);
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(height: 1, color: context.colors.border);
+  }
+}
+
 class _SessionBrowserPreviewDock extends StatelessWidget {
   const _SessionBrowserPreviewDock({
     required this.host,
@@ -7277,6 +7290,28 @@ class _SessionScreenState extends State<SessionScreen>
     final resourcesOpenInInspector = _isResourcesInspectorOpen(inspectorScope);
     final terminalOpenInInspector = _isTerminalInspectorOpen(inspectorScope);
     final portsOpenInInspector = _isPortsInspectorOpen(inspectorScope);
+    final PreferredSizeWidget? appBarBottom;
+    if (widget.desktopMode) {
+      appBarBottom = const _DesktopSessionHeaderDivider();
+    } else if (isCompact) {
+      appBarBottom = PreferredSize(
+        preferredSize: const Size.fromHeight(30),
+        child: _SessionAppBarSubtitle(
+          host: widget.host,
+          session: session,
+          gitStatus: _gitStatus,
+          showGit: _supportsGitStatus,
+          running: _running,
+          pinnedCount: pinnedMessages.length,
+          pinnedActive: pinnedActive,
+          onPinnedTap: _openPinnedPanel,
+          onDetails: () => _showSessionDetailsSheet(session),
+          onGitDetails: () => _showGitSheet(session),
+        ),
+      );
+    } else {
+      appBarBottom = null;
+    }
     final scaffold = Scaffold(
       backgroundColor: colors.canvas,
       appBar: AppBar(
@@ -7285,23 +7320,7 @@ class _SessionScreenState extends State<SessionScreen>
         scrolledUnderElevation: 0,
         titleSpacing: widget.desktopMode ? 16 : null,
         toolbarHeight: isCompact ? 52 : (widget.desktopMode ? 60 : null),
-        bottom: isCompact
-            ? PreferredSize(
-                preferredSize: const Size.fromHeight(30),
-                child: _SessionAppBarSubtitle(
-                  host: widget.host,
-                  session: session,
-                  gitStatus: _gitStatus,
-                  showGit: _supportsGitStatus,
-                  running: _running,
-                  pinnedCount: pinnedMessages.length,
-                  pinnedActive: pinnedActive,
-                  onPinnedTap: _openPinnedPanel,
-                  onDetails: () => _showSessionDetailsSheet(session),
-                  onGitDetails: () => _showGitSheet(session),
-                ),
-              )
-            : null,
+        bottom: appBarBottom,
         title: widget.desktopMode
             ? _DesktopSessionTitle(
                 session: session,
