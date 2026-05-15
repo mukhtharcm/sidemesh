@@ -28,6 +28,7 @@ import '../theme/app_colors.dart';
 import '../theme/color_contrast.dart';
 import '../theme/app_theme.dart';
 import '../theme/app_tokens.dart';
+import '../widgets/app_sheets.dart';
 import '../widgets/app_snackbar.dart';
 import '../widgets/mesh_widgets.dart';
 import '../widgets/session_row_card.dart';
@@ -4094,6 +4095,7 @@ class _HostEditorSheetState extends State<HostEditorSheet> {
   bool _testing = false;
   String? _testResult;
   bool _testSuccess = false;
+  bool _tokenVisible = false;
 
   @override
   void initState() {
@@ -4199,84 +4201,27 @@ class _HostEditorSheetState extends State<HostEditorSheet> {
 
   @override
   Widget build(BuildContext context) {
-    final colors = context.colors;
-    final bottom = MediaQuery.of(context).viewInsets.bottom;
+    final bottom = MediaQuery.viewInsetsOf(context).bottom;
     final isEditing = widget.initialHost != null;
-    return Align(
-      alignment: Alignment.bottomCenter,
-      child: ConstrainedBox(
-        constraints: const BoxConstraints(maxWidth: 560),
-        child: Padding(
-          padding: EdgeInsets.fromLTRB(10, 8, 10, bottom + 10),
-          child: MeshCard(
-            tone: MeshCardTone.elevated,
-            padding: const EdgeInsets.all(14),
-            child: SafeArea(
-              top: false,
+    return Padding(
+      padding: EdgeInsets.only(bottom: bottom),
+      child: MeshBottomSheetScaffold(
+        icon: isEditing ? Icons.edit_note_rounded : Icons.add_link_rounded,
+        title: isEditing ? 'Edit host' : 'Add host',
+        description: isEditing
+            ? 'Update this machine connection.'
+            : 'Connect a laptop, desktop, or server.',
+        maxWidth: 560,
+        maxHeightFactor: 0.9,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Expanded(
               child: SingleChildScrollView(
+                padding: const EdgeInsets.only(bottom: 4),
                 child: Column(
-                  mainAxisSize: MainAxisSize.min,
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Row(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Container(
-                          width: 38,
-                          height: 38,
-                          decoration: BoxDecoration(
-                            color: colors.accentMuted,
-                            borderRadius: AppShapes.input,
-                            border: Border.all(
-                              color: colors.accent.withValues(alpha: 0.24),
-                            ),
-                          ),
-                          alignment: Alignment.center,
-                          child: Icon(
-                            isEditing
-                                ? Icons.edit_note_rounded
-                                : Icons.add_link_rounded,
-                            color: colors.accent,
-                            size: 20,
-                          ),
-                        ),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                isEditing ? 'Edit host' : 'Add host',
-                                style: Theme.of(context).textTheme.titleLarge
-                                    ?.copyWith(
-                                      fontWeight: AppWeights.title,
-                                      letterSpacing: -0.4,
-                                    ),
-                              ),
-                              const SizedBox(height: 3),
-                              Text(
-                                isEditing
-                                    ? 'Update this machine connection.'
-                                    : 'Connect a laptop, desktop, or server.',
-                                style: Theme.of(context).textTheme.bodySmall
-                                    ?.copyWith(
-                                      color: colors.textSecondary,
-                                      fontWeight: AppWeights.body,
-                                    ),
-                              ),
-                            ],
-                          ),
-                        ),
-                        const SizedBox(width: 8),
-                        MeshIconButton(
-                          icon: Icons.close_rounded,
-                          tooltip: 'Close',
-                          color: colors.textSecondary,
-                          onTap: () => Navigator.of(context).pop(),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 14),
                     if (canScanPairingQr) ...[
                       const _HostEditorSectionLabel(
                         title: 'Pairing',
@@ -4306,6 +4251,7 @@ class _HostEditorSheetState extends State<HostEditorSheet> {
                       child: TextField(
                         controller: _labelController,
                         textInputAction: TextInputAction.next,
+                        textCapitalization: TextCapitalization.words,
                         decoration: const InputDecoration(
                           border: InputBorder.none,
                           enabledBorder: InputBorder.none,
@@ -4328,7 +4274,11 @@ class _HostEditorSheetState extends State<HostEditorSheet> {
                       label: 'Address',
                       child: TextField(
                         controller: _baseUrlController,
+                        keyboardType: TextInputType.url,
                         textInputAction: TextInputAction.next,
+                        textCapitalization: TextCapitalization.none,
+                        autocorrect: false,
+                        enableSuggestions: false,
                         decoration: const InputDecoration(
                           border: InputBorder.none,
                           enabledBorder: InputBorder.none,
@@ -4347,8 +4297,12 @@ class _HostEditorSheetState extends State<HostEditorSheet> {
                       child: TextField(
                         controller: _tokenController,
                         textInputAction: TextInputAction.done,
+                        obscureText: !_tokenVisible,
+                        textCapitalization: TextCapitalization.none,
+                        autocorrect: false,
+                        enableSuggestions: false,
                         onSubmitted: (_) => _submit(),
-                        decoration: const InputDecoration(
+                        decoration: InputDecoration(
                           border: InputBorder.none,
                           enabledBorder: InputBorder.none,
                           focusedBorder: InputBorder.none,
@@ -4356,6 +4310,23 @@ class _HostEditorSheetState extends State<HostEditorSheet> {
                           isDense: true,
                           hintText: 'Paste the pairing token',
                           contentPadding: EdgeInsets.zero,
+                          suffixIconConstraints: const BoxConstraints.tightFor(
+                            width: 36,
+                            height: 32,
+                          ),
+                          suffixIcon: IconButton(
+                            tooltip: _tokenVisible ? 'Hide token' : 'Show token',
+                            padding: EdgeInsets.zero,
+                            icon: Icon(
+                              _tokenVisible
+                                  ? Icons.visibility_off_rounded
+                                  : Icons.visibility_rounded,
+                              size: 18,
+                            ),
+                            onPressed: () => setState(
+                              () => _tokenVisible = !_tokenVisible,
+                            ),
+                          ),
                         ),
                       ),
                     ),
@@ -4403,17 +4374,17 @@ class _HostEditorSheetState extends State<HostEditorSheet> {
                       const SizedBox(height: 12),
                       _HostEditorError(message: _error!),
                     ],
-                    const SizedBox(height: 16),
-                    _HostEditorFooter(
-                      isEditing: isEditing,
-                      onCancel: () => Navigator.of(context).pop(),
-                      onSubmit: _submit,
-                    ),
                   ],
                 ),
               ),
             ),
-          ),
+            const SizedBox(height: 12),
+            _HostEditorFooter(
+              isEditing: isEditing,
+              onCancel: () => Navigator.of(context).pop(),
+              onSubmit: _submit,
+            ),
+          ],
         ),
       ),
     );
@@ -4530,38 +4501,42 @@ class _HostEditorFieldFrame extends StatelessWidget {
       tone: MeshSurfaceTone.muted,
       radius: AppRadii.control,
       padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
-      child: Row(
-        children: [
-          Container(
-            width: 32,
-            height: 32,
-            decoration: BoxDecoration(
-              color: colors.surface,
-              borderRadius: BorderRadius.circular(11),
-              border: Border.all(color: colors.border),
+      child: Semantics(
+        label: label,
+        textField: true,
+        child: Row(
+          children: [
+            Container(
+              width: 32,
+              height: 32,
+              decoration: BoxDecoration(
+                color: colors.surface,
+                borderRadius: BorderRadius.circular(11),
+                border: Border.all(color: colors.border),
+              ),
+              alignment: Alignment.center,
+              child: Icon(icon, color: colors.accent, size: 17),
             ),
-            alignment: Alignment.center,
-            child: Icon(icon, color: colors.accent, size: 17),
-          ),
-          const SizedBox(width: 11),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  label,
-                  style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                    color: colors.textSecondary,
-                    fontWeight: AppWeights.title,
-                    letterSpacing: 0.4,
+            const SizedBox(width: 11),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    label,
+                    style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                      color: colors.textSecondary,
+                      fontWeight: AppWeights.title,
+                      letterSpacing: 0.4,
+                    ),
                   ),
-                ),
-                const SizedBox(height: 6),
-                child,
-              ],
+                  const SizedBox(height: 6),
+                  child,
+                ],
+              ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
