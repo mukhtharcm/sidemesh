@@ -1261,7 +1261,10 @@ class _DesktopRail extends StatelessWidget {
   Widget build(BuildContext context) {
     final colors = context.colors;
     return Container(
-      color: colors.canvas,
+      decoration: BoxDecoration(
+        color: colors.canvas,
+        border: Border(right: BorderSide(color: colors.borderStrong)),
+      ),
       child: Column(
         children: [
           SizedBox(height: titlebarInset + 12),
