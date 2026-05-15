@@ -704,7 +704,7 @@ class _ComposerModelButton extends StatelessWidget {
   Widget build(BuildContext context) {
     final colors = context.colors;
     final maxWidth = compact ? 136.0 : 154.0;
-    final minHeight = compact ? 32.0 : 34.0;
+    final minHeight = compact ? 40.0 : 34.0;
     return Tooltip(
       message: detail == null ? tooltipLabel : '$tooltipLabel: $detail',
       child: Material(
@@ -720,8 +720,8 @@ class _ComposerModelButton extends StatelessWidget {
               minHeight: minHeight,
             ),
             padding: EdgeInsets.symmetric(
-              horizontal: compact ? 8 : 9,
-              vertical: compact ? 6 : 6,
+              horizontal: compact ? 10 : 9,
+              vertical: compact ? 8 : 6,
             ),
             decoration: BoxDecoration(
               color: customized
