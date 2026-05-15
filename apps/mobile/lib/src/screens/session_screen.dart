@@ -6960,6 +6960,8 @@ class _SessionScreenState extends State<SessionScreen>
         (_history?.isTruncated ?? false) && !_historyBannerDismissed;
     final showStopPill = isCompact && _running && _supportsSessionInterrupt;
     final showWaitingState = !_loading && timelineEntries.isEmpty && _running;
+    final freshnessTopPadding =
+        widget.desktopMode && _pendingAction == null ? 10.0 : 0.0;
     final bodyContent = Column(
       children: [
         if (!isCompact && !widget.desktopMode)
@@ -6992,7 +6994,7 @@ class _SessionScreenState extends State<SessionScreen>
           ),
         if (freshnessMode != null)
           Padding(
-            padding: const EdgeInsets.fromLTRB(16, 0, 16, 10),
+            padding: EdgeInsets.fromLTRB(16, freshnessTopPadding, 16, 10),
             child: ListenableBuilder(
               listenable: RelativeTimeTicker.seconds,
               builder: (context, _) {
