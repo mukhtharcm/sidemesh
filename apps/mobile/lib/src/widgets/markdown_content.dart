@@ -12,11 +12,13 @@ class MarkdownContent extends StatelessWidget {
     super.key,
     required this.text,
     required this.textColor,
+    this.linkStyle,
     this.onOpenFile,
   });
 
   final String text;
   final Color textColor;
+  final TextStyle? linkStyle;
   final void Function(String path)? onOpenFile;
 
   @override
@@ -38,13 +40,17 @@ class MarkdownContent extends StatelessWidget {
         _openLink(context, href);
       },
       linkBuilder: (context, linkText, url, style) {
+        final effectiveLinkStyle = style.merge(linkStyle).copyWith(
+          color: linkStyle?.color ?? colors.accent,
+          decoration: linkStyle?.decoration ?? TextDecoration.underline,
+          decorationColor:
+              linkStyle?.decorationColor ?? linkStyle?.color ?? colors.accent,
+          decorationThickness: linkStyle?.decorationThickness ?? 1.2,
+        );
         return Text.rich(
           TextSpan(
             children: [linkText],
-            style: style.copyWith(
-              color: colors.accent,
-              decoration: TextDecoration.underline,
-            ),
+            style: effectiveLinkStyle,
           ),
         );
       },

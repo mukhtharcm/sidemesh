@@ -1023,6 +1023,25 @@ class _MessageBubble extends StatelessWidget {
       _ => colors.surfaceMuted,
     };
     final textColor = isUser ? colors.userBubbleOn : colors.textPrimary;
+    final metaColor = messageMetaColor(colors, userBubble: isUser);
+    final assistantMetaColor = messageMetaColor(colors, userBubble: false);
+    final bodyStyle = Theme.of(context).textTheme.bodyMedium?.copyWith(
+      color: textColor,
+      height: 1.45,
+    );
+    final linkStyle = messageLinkStyle(
+      colors,
+      userBubble: isUser,
+      baseStyle: bodyStyle,
+    );
+    final assistantLinkStyle = messageLinkStyle(
+      colors,
+      userBubble: false,
+      baseStyle: Theme.of(context).textTheme.bodyMedium?.copyWith(
+        color: colors.textPrimary,
+        height: 1.5,
+      ),
+    );
     final messagePadding = isAssistant
         ? const EdgeInsets.fromLTRB(16, 13, 16, 14)
         : const EdgeInsets.fromLTRB(16, 12, 16, 14);
@@ -1073,8 +1092,8 @@ class _MessageBubble extends StatelessWidget {
                             style: Theme.of(context).textTheme.labelSmall
                                 ?.copyWith(
                                   color: isAssistant
-                                      ? colors.textTertiary
-                                      : textColor.withValues(alpha: 0.68),
+                                      ? assistantMetaColor
+                                      : metaColor,
                                   fontWeight: AppWeights.title,
                                   letterSpacing: 0.2,
                                 ),
@@ -1098,16 +1117,14 @@ class _MessageBubble extends StatelessWidget {
                         _MarkdownMessageBody(
                           text: block.text,
                           textColor: textColor,
+                          linkStyle: assistantLinkStyle,
                           onOpenFile: onOpenFile,
                         )
                       else
                         _LinkifiedSelectableText(
                           text: block.text,
-                          style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                            color: textColor,
-                            height: 1.45,
-                          ),
-                          linkColor: colors.accent,
+                          style: bodyStyle,
+                          linkStyle: linkStyle,
                         ),
                   if (message.attachments.isNotEmpty) ...[
                     _MessageAttachmentsSection(
@@ -1123,16 +1140,14 @@ class _MessageBubble extends StatelessWidget {
                       _MarkdownMessageBody(
                         text: message.text,
                         textColor: textColor,
+                        linkStyle: assistantLinkStyle,
                         onOpenFile: onOpenFile,
                       )
                     else
                       _LinkifiedSelectableText(
                         text: message.text,
-                        style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                          color: textColor,
-                          height: 1.45,
-                        ),
-                        linkColor: colors.accent,
+                        style: bodyStyle,
+                        linkStyle: linkStyle,
                       ),
                   if (canPin || hasText)
                     Padding(
@@ -1149,8 +1164,8 @@ class _MessageBubble extends StatelessWidget {
                               style: Theme.of(context).textTheme.labelSmall
                                   ?.copyWith(
                                     color: isUser
-                                        ? textColor.withValues(alpha: 0.62)
-                                        : colors.textTertiary,
+                                        ? metaColor
+                                        : assistantMetaColor,
                                     fontSize: 10.5,
                                     fontFeatures: const [
                                       FontFeature.tabularFigures(),
@@ -1160,9 +1175,7 @@ class _MessageBubble extends StatelessWidget {
                             if (canPin)
                               _MessagePinButton(
                                 pinned: pinned,
-                                tone: isUser
-                                    ? textColor.withValues(alpha: 0.72)
-                                    : colors.textSecondary,
+                                tone: isUser ? metaColor : colors.textSecondary,
                                 accent: colors.warning,
                                 onTap: onTogglePin!,
                               ),
@@ -1651,11 +1664,13 @@ class _MarkdownMessageBody extends StatelessWidget {
   const _MarkdownMessageBody({
     required this.text,
     required this.textColor,
+    this.linkStyle,
     this.onOpenFile,
   });
 
   final String text;
   final Color textColor;
+  final TextStyle? linkStyle;
   final void Function(String path)? onOpenFile;
 
   @override
@@ -1663,6 +1678,7 @@ class _MarkdownMessageBody extends StatelessWidget {
     return MarkdownContent(
       text: text,
       textColor: textColor,
+      linkStyle: linkStyle,
       onOpenFile: onOpenFile,
     );
   }
@@ -1679,13 +1695,24 @@ class _ReasoningTextBody extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final colors = context.colors;
+    final style = Theme.of(context).textTheme.bodyMedium?.copyWith(
+      color: textColor,
+      height: 1.5,
+    );
     return _LinkifiedSelectableText(
       text: text,
-      style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-        color: textColor,
-        height: 1.5,
+      style: style,
+      linkStyle: linkTextStyleForBackground(
+        background: colors.assistantBubble,
+        preferred: colors.accent,
+        fallbacks: [
+          colors.info,
+          colors.textPrimary,
+          colors.textSecondary,
+        ],
+        baseStyle: style,
       ),
-      linkColor: context.colors.accent,
     );
   }
 }
@@ -1803,12 +1830,12 @@ class _LinkifiedSelectableText extends StatefulWidget {
   const _LinkifiedSelectableText({
     required this.text,
     required this.style,
-    required this.linkColor,
+    required this.linkStyle,
   });
 
   final String text;
   final TextStyle? style;
-  final Color linkColor;
+  final TextStyle? linkStyle;
 
   @override
   State<_LinkifiedSelectableText> createState() =>
@@ -1852,10 +1879,7 @@ class _LinkifiedSelectableTextState extends State<_LinkifiedSelectableText> {
       spans.add(
         TextSpan(
           text: raw,
-          style: TextStyle(
-            color: widget.linkColor,
-            decoration: TextDecoration.underline,
-          ),
+          style: widget.linkStyle,
           recognizer: recognizer,
         ),
       );
@@ -2796,6 +2820,10 @@ class _ActivityCardState extends State<_ActivityCard> {
     bool linkify = false,
   }) {
     final colors = context.colors;
+    final bodyStyle = Theme.of(context).textTheme.bodySmall?.copyWith(
+      color: colors.textPrimary,
+      height: 1.4,
+    );
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
@@ -2819,18 +2847,21 @@ class _ActivityCardState extends State<_ActivityCard> {
           linkify
               ? _LinkifiedSelectableText(
                   text: text,
-                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                    color: colors.textPrimary,
-                    height: 1.4,
+                  style: bodyStyle,
+                  linkStyle: linkTextStyleForBackground(
+                    background: colors.surfaceMuted,
+                    preferred: colors.accent,
+                    fallbacks: [
+                      colors.info,
+                      colors.textPrimary,
+                      colors.textSecondary,
+                    ],
+                    baseStyle: bodyStyle,
                   ),
-                  linkColor: colors.accent,
                 )
               : SelectableText(
                   text,
-                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                    color: colors.textPrimary,
-                    height: 1.4,
-                  ),
+                  style: bodyStyle,
                 ),
         ],
       ),

@@ -1246,6 +1246,16 @@ class _PinnedMessageSheet extends StatelessWidget {
     final textStyle = Theme.of(
       context,
     ).textTheme.bodyMedium?.copyWith(color: colors.textPrimary, height: 1.45);
+    final pinnedLinkStyle = linkTextStyleForBackground(
+      background: colors.surfaceMuted,
+      preferred: colors.accent,
+      fallbacks: [
+        colors.info,
+        colors.textPrimary,
+        colors.textSecondary,
+      ],
+      baseStyle: textStyle,
+    );
     return MeshBottomSheetScaffold(
       icon: Icons.push_pin_rounded,
       title: 'Pinned ${pin.roleLabel.toLowerCase()} message',
@@ -1313,12 +1323,13 @@ class _PinnedMessageSheet extends StatelessWidget {
                           ? _MarkdownMessageBody(
                               text: pin.text,
                               textColor: colors.textPrimary,
+                              linkStyle: pinnedLinkStyle,
                               onOpenFile: onOpenFile,
                             )
                           : _LinkifiedSelectableText(
                               text: pin.text,
                               style: textStyle,
-                              linkColor: colors.accent,
+                              linkStyle: pinnedLinkStyle,
                             ))
                     : Text(
                         pin.preview,
