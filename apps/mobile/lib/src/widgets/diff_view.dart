@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../theme/app_colors.dart';
 import '../theme/app_theme.dart';
+import '../theme/color_contrast.dart';
 
 /// Renders a unified-diff string with a Codex-TUI-inspired look:
 ///
@@ -44,7 +45,13 @@ class DiffView extends StatelessWidget {
       decoration: BoxDecoration(
         color: colors.codeBackground,
         borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: colors.codeBorder),
+        border: Border.all(
+          color: visibleBorderOn(
+            colors,
+            background: colors.codeBackground,
+            preferred: colors.codeBorder,
+          ),
+        ),
       ),
       child: ClipRRect(
         borderRadius: BorderRadius.circular(14),
@@ -114,34 +121,82 @@ class _DiffRow extends StatelessWidget {
       _DiffKind.add => (
         colors.diffAddLine,
         colors.diffAddGutter,
-        colors.diffAddGlyph,
-        colors.textPrimary,
+        visibleUiColorOn(
+          colors,
+          background: colors.diffAddGutter,
+          preferred: colors.diffAddGlyph,
+        ),
+        readableTextOn(
+          colors,
+          background: colors.diffAddLine,
+          preferred: colors.textPrimary,
+        ),
       ),
       _DiffKind.del => (
         colors.diffDelLine,
         colors.diffDelGutter,
-        colors.diffDelGlyph,
-        colors.textPrimary,
+        visibleUiColorOn(
+          colors,
+          background: colors.diffDelGutter,
+          preferred: colors.diffDelGlyph,
+        ),
+        readableTextOn(
+          colors,
+          background: colors.diffDelLine,
+          preferred: colors.textPrimary,
+        ),
       ),
       _DiffKind.context => (
         colors.codeBackground,
         colors.surfaceMuted,
-        colors.diffGutterText,
-        colors.textPrimary,
+        visibleUiColorOn(
+          colors,
+          background: colors.surfaceMuted,
+          preferred: colors.diffGutterText,
+        ),
+        readableTextOn(
+          colors,
+          background: colors.codeBackground,
+          preferred: colors.textPrimary,
+        ),
       ),
       _DiffKind.hunk => (
         colors.infoMuted,
         colors.infoMuted,
-        colors.diffHunkLine,
-        colors.diffHunkLine,
+        visibleUiColorOn(
+          colors,
+          background: colors.infoMuted,
+          preferred: colors.diffHunkLine,
+        ),
+        readableTextOn(
+          colors,
+          background: colors.infoMuted,
+          preferred: colors.diffHunkLine,
+          additionalFallbacks: <Color>[colors.info],
+        ),
       ),
       _DiffKind.meta => (
         colors.surfaceMuted,
         colors.surfaceMuted,
-        colors.diffMetaLine,
-        colors.diffMetaLine,
+        visibleUiColorOn(
+          colors,
+          background: colors.surfaceMuted,
+          preferred: colors.diffMetaLine,
+        ),
+        readableTextOn(
+          colors,
+          background: colors.surfaceMuted,
+          preferred: colors.diffMetaLine,
+          additionalFallbacks: <Color>[colors.textSecondary],
+        ),
       ),
     };
+    final gutterTextColor = readableTextOn(
+      colors,
+      background: gutterBg,
+      preferred: colors.diffGutterText,
+      additionalFallbacks: <Color>[colors.textSecondary],
+    );
 
     final glyph = switch (row.kind) {
       _DiffKind.add => '+',
@@ -153,7 +208,7 @@ class _DiffRow extends StatelessWidget {
 
     final textStyle = monoStyle(color: textColor, fontSize: 12.5, height: 1.5);
     final mutedMono = monoStyle(
-      color: colors.diffGutterText,
+      color: gutterTextColor,
       fontSize: 11.5,
       height: 1.5,
     );

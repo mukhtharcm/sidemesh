@@ -554,6 +554,7 @@ class _ShortcutsTab extends StatelessWidget {
     final colors = context.colors;
     final shortcuts = <({String keys, String label})>[
       (keys: '⌘F', label: 'Focus search'),
+      (keys: '⌘J', label: 'Focus composer'),
       (keys: '⌘R', label: 'Refresh'),
       (keys: '⌘W', label: 'Close active session'),
       (keys: '⌘1', label: 'Recent pane'),

@@ -110,6 +110,12 @@ class _Composer extends StatelessWidget {
     final isMacDesktop =
         submitOnEnter && defaultTargetPlatform == TargetPlatform.macOS;
     final isDesktop = submitOnEnter;
+    final hintColor = readableTextOn(
+      colors,
+      background: colors.composerBackground,
+      preferred: colors.textTertiary,
+      additionalFallbacks: <Color>[colors.textSecondary],
+    );
 
     // ── Zone 1: text field ──────────────────────────────────────────────────
     Widget field = TextField(
@@ -123,7 +129,7 @@ class _Composer extends StatelessWidget {
         hintText: submitOnEnter
             ? 'Reply here. Press Enter to send, Shift+Enter for a new line'
             : 'Reply here',
-        hintStyle: TextStyle(color: colors.textTertiary),
+        hintStyle: TextStyle(color: hintColor),
         border: InputBorder.none,
         enabledBorder: InputBorder.none,
         focusedBorder: InputBorder.none,
@@ -392,6 +398,16 @@ class _ComposerContextShelf extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colors = context.colors;
+    final shelfAccent = visibleUiColorOn(
+      colors,
+      background: colors.surfaceMuted,
+      preferred: colors.accent,
+    );
+    final shelfSecondary = visibleUiColorOn(
+      colors,
+      background: colors.surfaceMuted,
+      preferred: colors.textSecondary,
+    );
 
     final duplicateFileNames = _duplicateFileNameKeys(
       files.map((item) => item.file),
@@ -415,7 +431,7 @@ class _ComposerContextShelf extends StatelessWidget {
               : Icon(
                   Icons.image_rounded,
                   size: 14,
-                  color: colors.textSecondary,
+                  color: shelfSecondary,
                 ),
           label: a.name,
           // Show file size as sublabel only on desktop where space allows.
@@ -427,7 +443,7 @@ class _ComposerContextShelf extends StatelessWidget {
           icon: Icon(
             Icons.auto_awesome_rounded,
             size: 14,
-            color: colors.accent,
+            color: shelfAccent,
           ),
           label: s.tokenText,
           onRemove: () => onRemoveSkill(s.skill.path),
@@ -439,7 +455,7 @@ class _ComposerContextShelf extends StatelessWidget {
                 ? Icons.folder_rounded
                 : Icons.insert_drive_file_rounded,
             size: 14,
-            color: colors.textTertiary,
+            color: shelfSecondary,
           ),
           label: _fileShelfLabel(
             f.file,
@@ -484,11 +500,32 @@ class _ComposerShelfChip extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colors = context.colors;
+    final foreground = readableTextOn(
+      colors,
+      background: colors.surfaceMuted,
+      preferred: colors.textPrimary,
+    );
+    final secondary = readableTextOn(
+      colors,
+      background: colors.surfaceMuted,
+      preferred: colors.textTertiary,
+      additionalFallbacks: <Color>[colors.textSecondary],
+    );
+    final iconForeground = visibleUiColorOn(
+      colors,
+      background: colors.surfaceMuted,
+      preferred: colors.textSecondary,
+    );
+    final borderColor = visibleBorderOn(
+      colors,
+      background: colors.surfaceMuted,
+      preferred: colors.border,
+    );
     return Container(
       decoration: BoxDecoration(
         color: colors.surfaceMuted,
         borderRadius: AppShapes.pill,
-        border: Border.all(color: colors.border),
+        border: Border.all(color: borderColor),
       ),
       padding: const EdgeInsets.only(left: 8, right: 4, top: 4, bottom: 4),
       child: Row(
@@ -508,13 +545,14 @@ class _ComposerShelfChip extends StatelessWidget {
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                          color: foreground,
                           fontWeight: AppWeights.emphasis,
                         ),
                       ),
                       Text(
                         sublabel!,
                         style: monoStyle(
-                          color: colors.textTertiary,
+                          color: secondary,
                           fontSize: 10,
                         ),
                       ),
@@ -525,6 +563,7 @@ class _ComposerShelfChip extends StatelessWidget {
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                      color: foreground,
                       fontWeight: AppWeights.emphasis,
                     ),
                   ),
@@ -538,7 +577,7 @@ class _ComposerShelfChip extends StatelessWidget {
               child: Icon(
                 Icons.close_rounded,
                 size: 14,
-                color: colors.textSecondary,
+                color: iconForeground,
               ),
             ),
           ),
@@ -632,6 +671,20 @@ class _ComposerPlusButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colors = context.colors;
+    final background = Color.alphaBlend(
+      colors.surfaceMuted.withValues(alpha: 0.56),
+      colors.composerBackground,
+    );
+    final iconColor = visibleUiColorOn(
+      colors,
+      background: background,
+      preferred: colors.textSecondary,
+    );
+    final borderColor = visibleBorderOn(
+      colors,
+      background: background,
+      preferred: colors.border,
+    );
     return Tooltip(
       message: 'Add',
       child: Material(
@@ -649,11 +702,11 @@ class _ComposerPlusButton extends StatelessWidget {
                 decoration: BoxDecoration(
                   color: colors.surfaceMuted.withValues(alpha: 0.56),
                   borderRadius: AppShapes.badge,
-                  border: Border.all(color: colors.border),
+                  border: Border.all(color: borderColor),
                 ),
                 child: Icon(
                   Icons.add_rounded,
-                  color: enabled ? colors.textSecondary : colors.textTertiary,
+                  color: iconColor,
                   size: 20,
                 ),
               ),
@@ -675,6 +728,11 @@ class _ComposerAttachButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colors = context.colors;
+    final iconColor = visibleUiColorOn(
+      colors,
+      background: colors.composerBackground,
+      preferred: enabled ? colors.accent : colors.textSecondary,
+    );
     return Tooltip(
       message: 'Attach images',
       child: Material(
@@ -687,7 +745,7 @@ class _ComposerAttachButton extends StatelessWidget {
             height: 34,
             child: Icon(
               Icons.add_photo_alternate_rounded,
-              color: enabled ? colors.accent : colors.textTertiary,
+              color: iconColor,
               size: 20,
             ),
           ),
@@ -722,6 +780,38 @@ class _ComposerModelButton extends StatelessWidget {
     final maxWidth = compact ? 136.0 : 154.0;
     final minHeight = compact ? 38.0 : 34.0;
     final hitPadding = compact ? 3.0 : 0.0;
+    final background = customized
+        ? colors.accentMuted
+        : Color.alphaBlend(
+            colors.surfaceMuted.withValues(alpha: 0.56),
+            colors.composerBackground,
+          );
+    final iconColor = visibleUiColorOn(
+      colors,
+      background: background,
+      preferred: customized ? colors.accent : colors.textSecondary,
+    );
+    final labelColor = readableTextOn(
+      colors,
+      background: background,
+      preferred: colors.textPrimary,
+    );
+    final chevronColor = visibleUiColorOn(
+      colors,
+      background: background,
+      preferred: colors.textSecondary,
+    );
+    final borderColor = customized
+        ? visibleBorderOn(
+            colors,
+            background: background,
+            preferred: colors.accent,
+          )
+        : visibleBorderOn(
+            colors,
+            background: background,
+            preferred: colors.border,
+          );
     return Tooltip(
       message: detail == null ? tooltipLabel : '$tooltipLabel: $detail',
       child: Material(
@@ -747,11 +837,7 @@ class _ComposerModelButton extends StatelessWidget {
                     ? colors.accentMuted
                     : colors.surfaceMuted.withValues(alpha: 0.56),
                 borderRadius: AppShapes.badge,
-                border: Border.all(
-                  color: customized
-                      ? colors.accent.withValues(alpha: 0.38)
-                      : colors.border,
-                ),
+                border: Border.all(color: borderColor),
               ),
               child: Row(
                 mainAxisSize: MainAxisSize.min,
@@ -759,7 +845,7 @@ class _ComposerModelButton extends StatelessWidget {
                   Icon(
                     icon,
                     size: compact ? 14 : 15,
-                    color: customized ? colors.accent : colors.textSecondary,
+                    color: iconColor,
                   ),
                   const SizedBox(width: 6),
                   Flexible(
@@ -768,7 +854,7 @@ class _ComposerModelButton extends StatelessWidget {
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: monoStyle(
-                        color: colors.textPrimary,
+                        color: labelColor,
                         fontSize: compact ? 11 : 11.5,
                         fontWeight: AppWeights.title,
                       ),
@@ -778,7 +864,7 @@ class _ComposerModelButton extends StatelessWidget {
                   Icon(
                     Icons.expand_more_rounded,
                     size: 16,
-                    color: colors.textTertiary,
+                    color: chevronColor,
                   ),
                 ],
               ),
@@ -824,6 +910,16 @@ class _SendButton extends StatelessWidget {
             ? colors.surfaceMuted
             : (canSend ? colors.accent : colors.surfaceMuted);
         final activeForeground = readableActionForeground(colors, colors.accent);
+        final quietForeground = visibleUiColorOn(
+          colors,
+          background: colors.surfaceMuted,
+          preferred: colors.textSecondary,
+        );
+        final quietBorder = visibleBorderOn(
+          colors,
+          background: colors.surfaceMuted,
+          preferred: colors.border,
+        );
         final hitSize = compact ? 36.0 : 44.0;
         final size = compact ? 36.0 : 38.0;
         final radius = compact ? AppRadii.iconWell : AppRadii.action;
@@ -844,7 +940,7 @@ class _SendButton extends StatelessWidget {
                     borderRadius: BorderRadius.circular(radius),
                     border: showActive
                         ? null
-                        : Border.all(color: colors.border),
+                        : Border.all(color: quietBorder),
                   ),
                   alignment: Alignment.center,
                   child: sending
@@ -853,7 +949,7 @@ class _SendButton extends StatelessWidget {
                           height: 18,
                           child: CircularProgressIndicator(
                             strokeWidth: 2,
-                            color: colors.textSecondary,
+                            color: quietForeground,
                           ),
                         )
                       : Icon(
@@ -861,7 +957,7 @@ class _SendButton extends StatelessWidget {
                           size: compact ? 19 : 22,
                           color: canSend
                               ? activeForeground
-                              : colors.textTertiary,
+                              : quietForeground,
                         ),
                 ),
               ),

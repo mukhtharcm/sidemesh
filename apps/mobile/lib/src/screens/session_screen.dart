@@ -345,6 +345,19 @@ class _DesktopSessionStatusBadge extends StatelessWidget {
   }
 }
 
+class _DesktopSessionHeaderDivider extends StatelessWidget
+    implements PreferredSizeWidget {
+  const _DesktopSessionHeaderDivider();
+
+  @override
+  Size get preferredSize => const Size.fromHeight(1);
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(height: 1, color: context.colors.border);
+  }
+}
+
 class _SessionBrowserPreviewDock extends StatelessWidget {
   const _SessionBrowserPreviewDock({
     required this.host,
@@ -825,6 +838,7 @@ class _SessionScreenState extends State<SessionScreen>
   String? _failedSendRetryClientMessageId;
   String? _failedSendRetrySignature;
   DateTime? _failedSendRetryExpiresAt;
+  DateTime? _lastComposerBlurAt;
   WebSocketChannel? _channel;
   StreamSubscription? _subscription;
   Timer? _liveFlushTimer;
@@ -833,6 +847,7 @@ class _SessionScreenState extends State<SessionScreen>
   bool _disposed = false;
   bool _retryingPendingSend = false;
   final Set<String> _completedPendingSendIds = <String>{};
+  bool _initialDesktopComposerFocusQueued = false;
   bool _restoreComposerFocusOnResume = false;
   bool _keepSessionUnread = false;
   int? _lastEventSeq;
@@ -1064,10 +1079,12 @@ class _SessionScreenState extends State<SessionScreen>
       return;
     }
     if (loadedCache) {
+      _queueInitialDesktopComposerFocus();
       unawaited(_refreshSessionFreshness());
       return;
     }
     await _loadSnapshot();
+    _queueInitialDesktopComposerFocus();
   }
 
   Future<void> _loadNodeInfo() async {
@@ -1993,6 +2010,9 @@ class _SessionScreenState extends State<SessionScreen>
   /// Tracks composer focus changes → drives the animated pill border.
   void _handleComposerFocusChanged() {
     final focused = _composerFocusNode.hasFocus;
+    if (!focused) {
+      _lastComposerBlurAt = DateTime.now();
+    }
     if (focused != _composerFocused) {
       setState(() => _composerFocused = focused);
     }
@@ -2184,7 +2204,7 @@ class _SessionScreenState extends State<SessionScreen>
           final shouldRestoreFocus = _restoreComposerFocusOnResume;
           _restoreComposerFocusOnResume = false;
           if (shouldRestoreFocus) {
-            _queueComposerFocusRestore();
+            _queueComposerFocusRestore(onlyIfSafe: true);
           }
           break;
         case AppLifecycleState.detached:
@@ -2210,15 +2230,94 @@ class _SessionScreenState extends State<SessionScreen>
   bool get _isMacDesktop =>
       widget.desktopMode && defaultTargetPlatform == TargetPlatform.macOS;
 
-  void _queueComposerFocusRestore() {
+  void _queueInitialDesktopComposerFocus() {
+    if (_initialDesktopComposerFocusQueued ||
+        !widget.desktopMode ||
+        widget.initialComposerSeed != null) {
+      return;
+    }
+    _initialDesktopComposerFocusQueued = true;
+    _queueComposerFocusRestore(onlyIfSafe: true);
+  }
+
+  bool _shouldRestoreComposerFocusAfterDesktopOverlay() {
+    if (!widget.desktopMode) {
+      return false;
+    }
+    if (_composerFocusNode.hasFocus) {
+      return true;
+    }
+    final blurAt = _lastComposerBlurAt;
+    return blurAt != null &&
+        DateTime.now().difference(blurAt) < const Duration(milliseconds: 800);
+  }
+
+  void _restoreComposerFocusAfterDesktopOverlay(bool shouldRestore) {
+    if (!shouldRestore || !mounted || _disposed) {
+      return;
+    }
+    _queueComposerFocusRestore(onlyIfSafe: true);
+  }
+
+  Future<T?> _showDesktopOverlayWithComposerFocusRestore<T>(
+    Future<T?> Function() showOverlay,
+  ) async {
+    final shouldRestore = _shouldRestoreComposerFocusAfterDesktopOverlay();
+    try {
+      return await showOverlay();
+    } finally {
+      _restoreComposerFocusAfterDesktopOverlay(shouldRestore);
+    }
+  }
+
+  bool _canAutoFocusComposer({bool allowOtherInputs = false}) {
+    if (!widget.desktopMode || _pendingAction != null) {
+      return false;
+    }
+    final route = ModalRoute.of(context);
+    if (route != null && !route.isCurrent) {
+      return false;
+    }
+    final primaryFocus = FocusManager.instance.primaryFocus;
+    if (primaryFocus == null || primaryFocus == _composerFocusNode) {
+      return true;
+    }
+    if (!allowOtherInputs && primaryFocus == _searchFocusNode) {
+      return false;
+    }
+    final focusContext = primaryFocus.context;
+    if (focusContext == null) {
+      return true;
+    }
+    if (!allowOtherInputs &&
+        (focusContext.widget is EditableText ||
+            focusContext.findAncestorWidgetOfExactType<EditableText>() !=
+                null)) {
+      return false;
+    }
+    return true;
+  }
+
+  void _queueComposerFocusRestore({
+    bool onlyIfSafe = false,
+    bool allowOtherInputs = false,
+  }) {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       Future<void>.delayed(const Duration(milliseconds: 140), () {
         if (!mounted || _disposed) {
           return;
         }
+        if (onlyIfSafe &&
+            !_canAutoFocusComposer(allowOtherInputs: allowOtherInputs)) {
+          return;
+        }
         _composerFocusNode.requestFocus();
       });
     });
+  }
+
+  void _focusComposerFromShortcut() {
+    _queueComposerFocusRestore(onlyIfSafe: true, allowOtherInputs: true);
   }
 
   void _reloadSnapshot() {
@@ -4366,6 +4465,9 @@ class _SessionScreenState extends State<SessionScreen>
     _refreshThinkingState();
     _syncSessionLiveActivity();
     _scrollToBottomFast(force: true);
+    if (widget.desktopMode) {
+      _queueComposerFocusRestore(onlyIfSafe: true);
+    }
     try {
       await widget.api.sendInput(
         widget.host,
@@ -4467,8 +4569,8 @@ class _SessionScreenState extends State<SessionScreen>
       });
       _refreshThinkingState();
       _syncSessionLiveActivity();
-      if (_isMacDesktop) {
-        _queueComposerFocusRestore();
+      if (widget.desktopMode) {
+        _queueComposerFocusRestore(onlyIfSafe: true);
       }
     } finally {
       if (mounted) {
@@ -4532,7 +4634,7 @@ class _SessionScreenState extends State<SessionScreen>
     required String confirmLabel,
     bool danger = false,
   }) async {
-    return showMeshConfirmDialog(
+    Future<bool> showConfirm() => showMeshConfirmDialog(
       context,
       icon: icon,
       title: title,
@@ -4541,6 +4643,11 @@ class _SessionScreenState extends State<SessionScreen>
       danger: danger,
       maxWidth: 420,
     );
+    if (!widget.desktopMode) {
+      return showConfirm();
+    }
+    return await _showDesktopOverlayWithComposerFocusRestore(showConfirm) ??
+        false;
   }
 
   Future<String?> _promptSessionName(String current) async {
@@ -4861,7 +4968,7 @@ class _SessionScreenState extends State<SessionScreen>
       await _loadGitStatus();
     }
     if (!mounted) return;
-    await showModalBottomSheet<void>(
+    Future<void> showSheet() => showModalBottomSheet<void>(
       context: context,
       backgroundColor: Colors.transparent,
       showDragHandle: false,
@@ -4881,6 +4988,11 @@ class _SessionScreenState extends State<SessionScreen>
         },
       ),
     );
+    if (widget.desktopMode) {
+      await _showDesktopOverlayWithComposerFocusRestore(showSheet);
+      return;
+    }
+    await showSheet();
   }
 
   Future<void> _showGitDiffSheet(String kind) async {
@@ -4892,7 +5004,7 @@ class _SessionScreenState extends State<SessionScreen>
       return;
     }
     if (!mounted) return;
-    await showModalBottomSheet<void>(
+    Future<void> showSheet() => showModalBottomSheet<void>(
       context: context,
       backgroundColor: Colors.transparent,
       showDragHandle: false,
@@ -4906,6 +5018,11 @@ class _SessionScreenState extends State<SessionScreen>
         ),
       ),
     );
+    if (widget.desktopMode) {
+      await _showDesktopOverlayWithComposerFocusRestore(showSheet);
+      return;
+    }
+    await showSheet();
   }
 
   Future<void> _showSessionDetailsSheet(SessionSummary session) async {
@@ -4936,7 +5053,7 @@ class _SessionScreenState extends State<SessionScreen>
       );
     }
 
-    await showModalBottomSheet<void>(
+    Future<void> showSheet() => showModalBottomSheet<void>(
       context: context,
       backgroundColor: Colors.transparent,
       showDragHandle: false,
@@ -5051,6 +5168,11 @@ class _SessionScreenState extends State<SessionScreen>
         ),
       ),
     );
+    if (widget.desktopMode) {
+      await _showDesktopOverlayWithComposerFocusRestore(showSheet);
+      return;
+    }
+    await showSheet();
   }
 
   String? _cleanComposerLabel(String? value) {
@@ -5219,10 +5341,12 @@ class _SessionScreenState extends State<SessionScreen>
         _cleanComposerLabel(turnConfig.model) ??
         _cleanComposerLabel(session.runtime?.model) ??
         defaultModel.model;
-    final selected = await _showComposerModelPickerSurface(
-      models: models,
-      currentModel: currentModel,
-      providerName: _composerRuntimeModelProvider(session),
+    final selected = await _showDesktopOverlayWithComposerFocusRestore(
+      () => _showComposerModelPickerSurface(
+        models: models,
+        currentModel: currentModel,
+        providerName: _composerRuntimeModelProvider(session),
+      ),
     );
     if (!mounted || _disposed || selected == null) return;
 
@@ -5309,11 +5433,13 @@ class _SessionScreenState extends State<SessionScreen>
     final currentReasoning = supportedReasoning.contains(rawCurrentReasoning)
         ? rawCurrentReasoning
         : selectedModel.defaultReasoningEffort;
-    final selected = await _showComposerThinkingPickerSurface(
-      options: options,
-      currentReasoning: currentReasoning,
-      defaultReasoning: selectedModel.defaultReasoningEffort,
-      modelLabel: selectedModel.displayName,
+    final selected = await _showDesktopOverlayWithComposerFocusRestore(
+      () => _showComposerThinkingPickerSurface(
+        options: options,
+        currentReasoning: currentReasoning,
+        defaultReasoning: selectedModel.defaultReasoningEffort,
+        modelLabel: selectedModel.displayName,
+      ),
     );
     if (!mounted || _disposed || selected == null) return;
 
@@ -5508,29 +5634,31 @@ class _SessionScreenState extends State<SessionScreen>
       turnConfigStore: _turnConfigStore,
     );
     if (isDesktop) {
-      await showDialog<void>(
-        context: context,
-        barrierColor: Colors.black.withValues(alpha: 0.35),
-        builder: (dialogContext) => Dialog(
-          backgroundColor: Colors.transparent,
-          insetPadding: const EdgeInsets.symmetric(
-            horizontal: 48,
-            vertical: 48,
-          ),
-          child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 520, maxHeight: 640),
-            child: DecoratedBox(
-              decoration: BoxDecoration(
-                color: dialogContext.colors.surfaceElevated,
-                borderRadius: AppShapes.dialog,
-                border: Border.all(color: dialogContext.colors.border),
-                boxShadow: AppShadows.dialog(
-                  dialogContext.colors.textPrimary,
+      await _showDesktopOverlayWithComposerFocusRestore(
+        () => showDialog<void>(
+          context: context,
+          barrierColor: Colors.black.withValues(alpha: 0.35),
+          builder: (dialogContext) => Dialog(
+            backgroundColor: Colors.transparent,
+            insetPadding: const EdgeInsets.symmetric(
+              horizontal: 48,
+              vertical: 48,
+            ),
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 520, maxHeight: 640),
+              child: DecoratedBox(
+                decoration: BoxDecoration(
+                  color: dialogContext.colors.surfaceElevated,
+                  borderRadius: AppShapes.dialog,
+                  border: Border.all(color: dialogContext.colors.border),
+                  boxShadow: AppShadows.dialog(
+                    dialogContext.colors.textPrimary,
+                  ),
                 ),
-              ),
-              child: ClipRRect(
-                borderRadius: AppShapes.dialog,
-                child: sheet,
+                child: ClipRRect(
+                  borderRadius: AppShapes.dialog,
+                  child: sheet,
+                ),
               ),
             ),
           ),
@@ -6848,6 +6976,7 @@ class _SessionScreenState extends State<SessionScreen>
       controlsCustomized: controlsCustomized,
     );
     final String? selected;
+    final restoreComposerFocus = _shouldRestoreComposerFocusAfterDesktopOverlay();
     if (widget.desktopMode) {
       final anchorRect = _desktopPopoverAnchorRect(anchorContext);
       selected = await showDialog<String>(
@@ -6909,9 +7038,20 @@ class _SessionScreenState extends State<SessionScreen>
       );
     }
     if (!mounted || selected == null) {
+      _restoreComposerFocusAfterDesktopOverlay(restoreComposerFocus);
       return;
     }
     _handleSessionAction(selected, session);
+    if (_sessionActionReturnsToComposer(selected)) {
+      _restoreComposerFocusAfterDesktopOverlay(restoreComposerFocus);
+    }
+  }
+
+  bool _sessionActionReturnsToComposer(String value) {
+    return switch (value) {
+      'reload' || 'restart_provider' || 'favorite' || 'unread' => true,
+      _ => false,
+    };
   }
 
   Rect? _desktopPopoverAnchorRect(BuildContext? anchorContext) {
@@ -6947,6 +7087,8 @@ class _SessionScreenState extends State<SessionScreen>
         (_history?.isTruncated ?? false) && !_historyBannerDismissed;
     final showStopPill = isCompact && _running && _supportsSessionInterrupt;
     final showWaitingState = !_loading && timelineEntries.isEmpty && _running;
+    final freshnessTopPadding =
+        widget.desktopMode && _pendingAction == null ? 8.0 : 0.0;
     final bodyContent = Column(
       children: [
         if (!isCompact && !widget.desktopMode)
@@ -6979,7 +7121,7 @@ class _SessionScreenState extends State<SessionScreen>
           ),
         if (freshnessMode != null)
           Padding(
-            padding: const EdgeInsets.fromLTRB(16, 0, 16, 10),
+            padding: EdgeInsets.fromLTRB(16, freshnessTopPadding, 16, 10),
             child: ListenableBuilder(
               listenable: RelativeTimeTicker.seconds,
               builder: (context, _) {
@@ -7277,6 +7419,28 @@ class _SessionScreenState extends State<SessionScreen>
     final resourcesOpenInInspector = _isResourcesInspectorOpen(inspectorScope);
     final terminalOpenInInspector = _isTerminalInspectorOpen(inspectorScope);
     final portsOpenInInspector = _isPortsInspectorOpen(inspectorScope);
+    final PreferredSizeWidget? appBarBottom;
+    if (widget.desktopMode) {
+      appBarBottom = const _DesktopSessionHeaderDivider();
+    } else if (isCompact) {
+      appBarBottom = PreferredSize(
+        preferredSize: const Size.fromHeight(30),
+        child: _SessionAppBarSubtitle(
+          host: widget.host,
+          session: session,
+          gitStatus: _gitStatus,
+          showGit: _supportsGitStatus,
+          running: _running,
+          pinnedCount: pinnedMessages.length,
+          pinnedActive: pinnedActive,
+          onPinnedTap: _openPinnedPanel,
+          onDetails: () => _showSessionDetailsSheet(session),
+          onGitDetails: () => _showGitSheet(session),
+        ),
+      );
+    } else {
+      appBarBottom = null;
+    }
     final scaffold = Scaffold(
       backgroundColor: colors.canvas,
       appBar: AppBar(
@@ -7285,23 +7449,7 @@ class _SessionScreenState extends State<SessionScreen>
         scrolledUnderElevation: 0,
         titleSpacing: widget.desktopMode ? 16 : null,
         toolbarHeight: isCompact ? 52 : (widget.desktopMode ? 60 : null),
-        bottom: isCompact
-            ? PreferredSize(
-                preferredSize: const Size.fromHeight(30),
-                child: _SessionAppBarSubtitle(
-                  host: widget.host,
-                  session: session,
-                  gitStatus: _gitStatus,
-                  showGit: _supportsGitStatus,
-                  running: _running,
-                  pinnedCount: pinnedMessages.length,
-                  pinnedActive: pinnedActive,
-                  onPinnedTap: _openPinnedPanel,
-                  onDetails: () => _showSessionDetailsSheet(session),
-                  onGitDetails: () => _showGitSheet(session),
-                ),
-              )
-            : null,
+        bottom: appBarBottom,
         title: widget.desktopMode
             ? _DesktopSessionTitle(
                 session: session,
@@ -7634,12 +7782,22 @@ class _SessionScreenState extends State<SessionScreen>
               child: layoutBody,
             ),
     );
+    Widget sessionContent = scaffold;
+    if (widget.desktopMode) {
+      sessionContent = CallbackShortcuts(
+        bindings: <ShortcutActivator, VoidCallback>{
+          const SingleActivator(LogicalKeyboardKey.keyJ, meta: true):
+              _focusComposerFromShortcut,
+        },
+        child: sessionContent,
+      );
+    }
     if (widget.topPadding == null) {
-      return scaffold;
+      return sessionContent;
     }
     return Padding(
       padding: EdgeInsets.only(top: widget.topPadding!),
-      child: scaffold,
+      child: sessionContent,
     );
   }
 }
