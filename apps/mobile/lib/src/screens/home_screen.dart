@@ -1268,6 +1268,11 @@ class _NavIconWithBadge extends StatelessWidget {
   Widget build(BuildContext context) {
     final colors = context.colors;
     final iconColor = selected ? colors.accent : colors.textSecondary;
+    final badgeForeground = readableSemanticForeground(
+      colors,
+      background: colors.dangerMuted,
+      preferred: colors.danger,
+    );
     final label = badge > 99 ? '99+' : '$badge';
     return Stack(
       clipBehavior: Clip.none,
@@ -1282,15 +1287,15 @@ class _NavIconWithBadge extends StatelessWidget {
               constraints: const BoxConstraints(minWidth: 18, minHeight: 18),
               padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
               decoration: BoxDecoration(
-                color: colors.danger,
+                color: colors.dangerMuted,
                 borderRadius: AppShapes.iconWell,
-                border: Border.all(color: colors.canvas, width: 2),
+                border: Border.all(color: colors.danger, width: 1.5),
               ),
               alignment: Alignment.center,
               child: Text(
                 label,
                 style: monoStyle(
-                  color: Colors.white,
+                  color: badgeForeground,
                   fontSize: 10,
                   fontWeight: AppWeights.emphasis,
                 ).copyWith(height: 1.1),
@@ -3259,7 +3264,11 @@ class _InboxCard extends StatelessWidget {
                 _MobileInboxAction(
                   icon: Icons.check_rounded,
                   tooltip: 'Approve',
-                  foreground: Colors.white,
+                  foreground: visibleUiColorOn(
+                    colors,
+                    background: colors.success,
+                    preferred: colors.accentOn,
+                  ),
                   background: colors.success,
                   onTap: () =>
                       onRespond(PendingActionResponseDraft.approval('accept')),
@@ -4874,6 +4883,11 @@ class _MobileClientUpdateBanner extends StatelessWidget {
         notice.level == MobileClientCompatibilityLevel.required;
     final accent = requiresUpdate ? colors.danger : colors.info;
     final muted = requiresUpdate ? colors.dangerMuted : colors.infoMuted;
+    final actionForeground = readableSemanticForeground(
+      colors,
+      background: muted,
+      preferred: accent,
+    );
     final title = requiresUpdate
         ? 'Update this app to keep using some hosts'
         : 'A newer Sidemesh mobile build is recommended';
@@ -4951,8 +4965,9 @@ class _MobileClientUpdateBanner extends StatelessWidget {
                       FilledButton.icon(
                         onPressed: onReview,
                         style: FilledButton.styleFrom(
-                          backgroundColor: accent,
-                          foregroundColor: Colors.white,
+                          backgroundColor: muted,
+                          foregroundColor: actionForeground,
+                          side: BorderSide(color: accent),
                           visualDensity: VisualDensity.compact,
                         ),
                         icon: const Icon(Icons.visibility_rounded, size: 16),

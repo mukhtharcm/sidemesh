@@ -106,6 +106,84 @@ Color visibleUiColorOn(
   );
 }
 
+Color visibleBorderOn(
+  AppColors colors, {
+  required Color background,
+  required Color preferred,
+}) {
+  return readableColorForBackground(
+    background: background,
+    preferred: preferred,
+    fallbacks: <Color>[
+      colors.borderStrong,
+      colors.textSecondary,
+      colors.textPrimary,
+      _contrastInk,
+      _contrastPaper,
+    ],
+    minimumContrast: minimumUiContrast,
+  );
+}
+
+Color readableLinkOn(
+  AppColors colors, {
+  required Color background,
+  Color? preferred,
+}) {
+  return readableTextOn(
+    colors,
+    background: background,
+    preferred: preferred ?? colors.accent,
+    additionalFallbacks: <Color>[colors.info, colors.textPrimary],
+  );
+}
+
+Color readableTerminalColorOn(
+  AppColors colors, {
+  required Color preferred,
+}) {
+  final background = colors.codeBackground;
+  if (contrastRatio(preferred, background) >= minimumReadableTextContrast) {
+    return preferred;
+  }
+
+  final adjusted = _adjustColorLightnessForContrast(
+    background: background,
+    preferred: preferred,
+    minimumContrast: minimumReadableTextContrast,
+  );
+  if (adjusted != null) return adjusted;
+
+  return readableColorForBackground(
+    background: background,
+    preferred: preferred,
+    fallbacks: <Color>[colors.codeForeground, colors.textPrimary],
+    minimumContrast: minimumReadableTextContrast,
+  );
+}
+
+Color? _adjustColorLightnessForContrast({
+  required Color background,
+  required Color preferred,
+  required double minimumContrast,
+}) {
+  final hsl = HSLColor.fromColor(preferred);
+  final backgroundIsDark = background.computeLuminance() < 0.45;
+  final targetLightness = backgroundIsDark ? 0.96 : 0.12;
+
+  for (var i = 1; i <= 40; i += 1) {
+    final t = i / 40;
+    final candidate = hsl
+        .withLightness(hsl.lightness + (targetLightness - hsl.lightness) * t)
+        .toColor();
+    if (contrastRatio(candidate, background) >= minimumContrast) {
+      return candidate;
+    }
+  }
+
+  return null;
+}
+
 Color selectionFillForBackground(
   AppColors colors, {
   required Color background,

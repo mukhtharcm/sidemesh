@@ -475,6 +475,7 @@ class _DesktopShellState extends State<DesktopShell> {
                     label: 'Switch between Sessions, Inbox, and Machines',
                   ),
                   (keys: '⌘F', label: 'Focus search'),
+                  (keys: '⌘J', label: 'Focus the composer'),
                   (keys: '⌘R', label: 'Refresh the current list'),
                   (keys: '⌘W', label: 'Close the current session'),
                 ],

@@ -10,6 +10,7 @@ import '../models.dart';
 import '../terminal_input_filter.dart';
 import '../terminal_key_models.dart';
 import '../theme/app_colors.dart';
+import '../theme/color_contrast.dart';
 import '../theme/app_tokens.dart';
 import '../widgets/app_snackbar.dart';
 import '../widgets/mesh_widgets.dart';
@@ -543,26 +544,33 @@ HostTerminalInfo _stoppedTerminal(HostTerminalInfo terminal) {
 }
 
 xterm.TerminalTheme _terminalTheme(AppColors colors) {
+  Color terminalColor(Color color) =>
+      readableTerminalColorOn(colors, preferred: color);
+
   return xterm.TerminalTheme(
-    cursor: colors.accent,
+    cursor: visibleUiColorOn(
+      colors,
+      background: colors.codeBackground,
+      preferred: colors.accent,
+    ),
     selection: colors.accentMuted.withValues(alpha: 0.7),
     foreground: colors.codeForeground,
     background: colors.codeBackground,
     black: colors.textTertiary,
-    red: colors.danger,
-    green: colors.success,
-    yellow: colors.warning,
-    blue: colors.accent,
-    magenta: colors.info,
-    cyan: colors.info,
+    red: terminalColor(colors.danger),
+    green: terminalColor(colors.success),
+    yellow: terminalColor(colors.warning),
+    blue: terminalColor(colors.accent),
+    magenta: terminalColor(colors.info),
+    cyan: terminalColor(colors.info),
     white: colors.codeForeground,
-    brightBlack: colors.textSecondary,
-    brightRed: _brightTerminalColor(colors.danger),
-    brightGreen: _brightTerminalColor(colors.success),
-    brightYellow: _brightTerminalColor(colors.warning),
-    brightBlue: _brightTerminalColor(colors.accent),
-    brightMagenta: _brightTerminalColor(colors.info),
-    brightCyan: _brightTerminalColor(colors.info),
+    brightBlack: terminalColor(colors.textSecondary),
+    brightRed: terminalColor(_brightTerminalColor(colors.danger)),
+    brightGreen: terminalColor(_brightTerminalColor(colors.success)),
+    brightYellow: terminalColor(_brightTerminalColor(colors.warning)),
+    brightBlue: terminalColor(_brightTerminalColor(colors.accent)),
+    brightMagenta: terminalColor(_brightTerminalColor(colors.info)),
+    brightCyan: terminalColor(_brightTerminalColor(colors.info)),
     brightWhite: colors.textPrimary,
     searchHitBackground: colors.warningMuted,
     searchHitBackgroundCurrent: colors.accentMuted,
