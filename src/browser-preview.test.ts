@@ -10,6 +10,7 @@ import {
   buildBrowserTargetUrlCandidates,
   browserPreviewReuseKey,
   isBrowserNavigationUrl,
+  normalizeBrowserPreviewTargetUrl,
 } from "./browser-preview.js";
 
 describe("browser preview", () => {
@@ -75,6 +76,48 @@ describe("browser preview", () => {
         "https://127.0.0.1:8443/",
         "https://[::1]:8443/",
       ],
+    );
+    assert.deepEqual(
+      buildBrowserTargetUrlCandidates("http", "tenant.localhost", 3000),
+      ["http://tenant.localhost:3000/"],
+    );
+  });
+
+  it("normalizes explicit browser URLs without losing localhost subdomains", () => {
+    assert.deepEqual(normalizeBrowserPreviewTargetUrl("http://0.0.0.0:3000/app"), {
+      targetHost: "127.0.0.1",
+      targetPort: 3000,
+      scheme: "http",
+      initialUrl: "http://127.0.0.1:3000/app",
+      defaultLabel: "127.0.0.1:3000",
+    });
+    assert.deepEqual(
+      normalizeBrowserPreviewTargetUrl("https://tenant.localhost:8443/docs"),
+      {
+        targetHost: "tenant.localhost",
+        targetPort: 8443,
+        scheme: "https",
+        initialUrl: "https://tenant.localhost:8443/docs",
+        defaultLabel: "tenant.localhost:8443",
+      },
+    );
+    assert.deepEqual(normalizeBrowserPreviewTargetUrl("https://example.com/app"), {
+      targetHost: "example.com",
+      targetPort: 443,
+      scheme: "https",
+      initialUrl: "https://example.com/app",
+      defaultLabel: "example.com",
+    });
+  });
+
+  it("rejects unsafe browser URL schemes before launching Chromium", () => {
+    assert.throws(
+      () => normalizeBrowserPreviewTargetUrl("file:///etc/passwd"),
+      /browser preview scheme must be http or https/,
+    );
+    assert.throws(
+      () => normalizeBrowserPreviewTargetUrl("javascript:alert\\(1\\)"),
+      /browser preview scheme must be http or https/,
     );
   });
 

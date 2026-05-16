@@ -5749,13 +5749,6 @@ class _SessionScreenState extends State<SessionScreen>
       return;
     }
     final suggestions = _browserPreviewCandidates;
-    if (suggestions.length == 1) {
-      await _openBrowserPreviewTarget(
-        suggestions.first,
-        openInWindow: openInWindow,
-      );
-      return;
-    }
     final selected = await showModalBottomSheet<BrowserPreviewTargetCandidate>(
       context: context,
       isScrollControlled: true,
@@ -5781,12 +5774,14 @@ class _SessionScreenState extends State<SessionScreen>
     final session = _session ?? widget.session;
     final viewport = MediaQuery.sizeOf(context);
     try {
+      final profileMode = browserPreviewProfileModeForTarget(candidate);
       final previews = await widget.api.fetchBrowserPreviews(widget.host);
       final existing = findReusableBrowserPreview(
         previews,
         candidate,
         sessionId: session.id,
         cwd: session.cwd,
+        profileMode: profileMode,
       );
       final preview =
           existing ??
@@ -5794,13 +5789,14 @@ class _SessionScreenState extends State<SessionScreen>
             widget.host,
             targetPort: candidate.port,
             targetHost: candidate.host,
+            targetUrl: candidate.targetUrl,
             scheme: candidate.scheme,
             label: candidate.sourceLabel,
             cwd: candidate.cwd ?? session.cwd,
             sessionId: session.id,
             width: viewport.width.round().clamp(320, 1200),
             height: viewport.height.round().clamp(480, 1400),
-            profileMode: 'sidemesh',
+            profileMode: profileMode,
           );
       if (!mounted) return;
       if (openInWindow) {
@@ -5810,7 +5806,7 @@ class _SessionScreenState extends State<SessionScreen>
         if (!mounted) return;
         showAppSnackBar(
           context,
-          'Opened preview for ${candidate.endpointLabel}.',
+          'Opened browser for ${candidate.endpointLabel}.',
         );
       }
     } catch (error) {
@@ -6786,13 +6782,13 @@ class _SessionScreenState extends State<SessionScreen>
         ],
       ),
       _SessionActionGroup(
-        label: 'Browser preview',
+        label: 'Browser',
         actions: [
           if (_supportsBrowserPreview)
             const _SessionActionSpec(
               value: 'preview',
-              label: 'Open browser preview',
-              detail: 'Open a streamed browser preview for a localhost app.',
+              label: 'Open browser',
+              detail: 'Open a local app or URL from this host.',
               icon: Icons.open_in_browser_rounded,
               tone: _SessionActionTone.accent,
             ),
@@ -6800,17 +6796,15 @@ class _SessionScreenState extends State<SessionScreen>
               SidemeshBrowserPreviewWindowManager.instance.isSupported)
             const _SessionActionSpec(
               value: 'preview_window',
-              label: 'Open preview in new window',
-              detail: 'Detach a browser preview into its own macOS window.',
+              label: 'Open browser in new window',
+              detail: 'Detach the browser into its own macOS window.',
               icon: Icons.open_in_new_rounded,
             ),
           if (_supportsConnections)
             _SessionActionSpec(
               value: 'connections',
-              label: portsOpen
-                  ? 'Browser previews are open'
-                  : 'Manage browser previews',
-              detail: 'Inspect active browser previews for this session.',
+              label: portsOpen ? 'Browsers are open' : 'Manage browsers',
+              detail: 'Inspect active browsers for this session.',
               icon: Icons.open_in_browser_rounded,
               tone: portsOpen
                   ? _SessionActionTone.accent
@@ -7555,8 +7549,8 @@ class _SessionScreenState extends State<SessionScreen>
               child: MeshIconButton(
                 icon: Icons.open_in_browser_rounded,
                 tooltip: portsOpenInInspector
-                    ? 'Browser previews are open'
-                    : 'Manage browser previews',
+                    ? 'Browsers are open'
+                    : 'Manage browsers',
                 color: portsOpenInInspector
                     ? colors.accent
                     : colors.textSecondary,

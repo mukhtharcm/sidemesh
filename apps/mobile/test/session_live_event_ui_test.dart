@@ -1416,7 +1416,7 @@ void main() {
       await tester.tap(find.text('apps/web/src/main.dart'));
       await _pumpFrames(tester);
 
-      expect(find.text('Preview :3000'), findsOneWidget);
+      expect(find.text('Browser localhost:3000'), findsOneWidget);
       expect(find.text('Open terminal'), findsOneWidget);
       expect(find.text('Browse files'), findsOneWidget);
       expect(find.text('Open file'), findsOneWidget);

@@ -58,41 +58,29 @@ class _PreviewTargetPickerSheet extends StatefulWidget {
 }
 
 class _PreviewTargetPickerSheetState extends State<_PreviewTargetPickerSheet> {
-  late final TextEditingController _portController;
-  String _scheme = 'http';
+  late final TextEditingController _urlController;
+  String? _inputError;
 
   @override
   void initState() {
     super.initState();
-    final initialPort = widget.suggestions.isNotEmpty
-        ? widget.suggestions.first.port.toString()
-        : '3000';
-    if (widget.suggestions.isNotEmpty) {
-      _scheme = widget.suggestions.first.scheme;
-    }
-    _portController = TextEditingController(text: initialPort);
+    _urlController = TextEditingController();
   }
 
   @override
   void dispose() {
-    _portController.dispose();
+    _urlController.dispose();
     super.dispose();
   }
 
   void _submitManual() {
-    final port = int.tryParse(_portController.text.trim());
-    if (port == null || port < 1 || port > 65535) {
-      showAppSnackBar(context, 'Enter a port between 1 and 65535.');
+    final parsed = parseBrowserPreviewTargetInput(_urlController.text);
+    final candidate = parsed.candidate;
+    if (candidate == null) {
+      setState(() => _inputError = parsed.error ?? 'Enter a valid URL.');
       return;
     }
-    Navigator.of(context).pop(
-      BrowserPreviewTargetCandidate(
-        host: '127.0.0.1',
-        port: port,
-        scheme: _scheme,
-        sourceLabel: 'Port $port',
-      ),
-    );
+    Navigator.of(context).pop(candidate);
   }
 
   @override
@@ -100,9 +88,8 @@ class _PreviewTargetPickerSheetState extends State<_PreviewTargetPickerSheet> {
     final bottomInset = MediaQuery.of(context).viewInsets.bottom;
     return MeshBottomSheetScaffold(
       icon: Icons.open_in_browser_rounded,
-      title: 'Open a preview',
-      description:
-          'Choose one of the web ports from this session, or enter one yourself.',
+      title: 'Open browser',
+      description: 'Enter a URL on this host, or use a detected local app.',
       maxWidth: 680,
       maxHeightFactor: 0.78,
       child: SingleChildScrollView(
@@ -110,9 +97,36 @@ class _PreviewTargetPickerSheetState extends State<_PreviewTargetPickerSheet> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
+            TextField(
+              controller: _urlController,
+              autofocus: true,
+              autocorrect: false,
+              enableSuggestions: false,
+              keyboardType: TextInputType.url,
+              textInputAction: TextInputAction.go,
+              onChanged: (_) {
+                if (_inputError != null) {
+                  setState(() => _inputError = null);
+                }
+              },
+              onSubmitted: (_) => _submitManual(),
+              decoration: InputDecoration(
+                labelText: 'URL',
+                hintText: 'localhost:3000 or https://example.com',
+                errorText: _inputError,
+              ),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              'Tip: localhost means the machine running this session. A plain port like 3000 works too.',
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                color: context.colors.textSecondary,
+              ),
+            ),
             if (widget.suggestions.isNotEmpty) ...[
+              const SizedBox(height: 20),
               Text(
-                'Detected ports',
+                'Detected apps',
                 style: Theme.of(context).textTheme.labelLarge?.copyWith(
                   color: context.colors.textSecondary,
                   letterSpacing: 0.4,
@@ -124,42 +138,7 @@ class _PreviewTargetPickerSheetState extends State<_PreviewTargetPickerSheet> {
                   suggestion: suggestion,
                   onTap: () => Navigator.of(context).pop(suggestion),
                 ),
-              const SizedBox(height: 18),
             ],
-            Text(
-              'Enter a port',
-              style: Theme.of(context).textTheme.labelLarge?.copyWith(
-                color: context.colors.textSecondary,
-                letterSpacing: 0.4,
-              ),
-            ),
-            const SizedBox(height: 8),
-            Row(
-              children: [
-                Expanded(
-                  child: TextField(
-                    controller: _portController,
-                    keyboardType: TextInputType.number,
-                    decoration: const InputDecoration(
-                      labelText: 'Port',
-                      hintText: '3000',
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 12),
-                SegmentedButton<String>(
-                  segments: const [
-                    ButtonSegment<String>(value: 'http', label: Text('HTTP')),
-                    ButtonSegment<String>(value: 'https', label: Text('HTTPS')),
-                  ],
-                  selected: <String>{_scheme},
-                  onSelectionChanged: (selection) {
-                    if (selection.isEmpty) return;
-                    setState(() => _scheme = selection.first);
-                  },
-                ),
-              ],
-            ),
             const SizedBox(height: 18),
             Row(
               children: [

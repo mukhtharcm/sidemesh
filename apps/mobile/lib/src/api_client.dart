@@ -397,8 +397,9 @@ class ApiClient {
 
   Future<HostBrowserPreviewInfo> createBrowserPreview(
     HostProfile host, {
-    required int targetPort,
+    int? targetPort,
     String targetHost = '127.0.0.1',
+    String? targetUrl,
     String scheme = 'http',
     String? label,
     String? cwd,
@@ -407,11 +408,16 @@ class ApiClient {
     int? height,
     String profileMode = 'temporary',
   }) async {
+    final normalizedTargetUrl = (targetUrl ?? '').trim();
+    if (targetPort == null && normalizedTargetUrl.isEmpty) {
+      throw ArgumentError('targetPort or targetUrl is required');
+    }
     final body = <String, dynamic>{
-      'targetPort': targetPort,
       'targetHost': targetHost,
       'scheme': scheme,
       'profileMode': profileMode,
+      'targetPort': ?targetPort,
+      if (normalizedTargetUrl.isNotEmpty) 'targetUrl': normalizedTargetUrl,
       if ((label ?? '').isNotEmpty) 'label': label,
       if ((cwd ?? '').isNotEmpty) 'cwd': cwd,
       if ((sessionId ?? '').isNotEmpty) 'sessionId': sessionId,

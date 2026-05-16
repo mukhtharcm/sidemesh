@@ -1959,6 +1959,7 @@ export async function startServer(
       const preview = await browserPreviewRegistry.create({
         targetPort: asInteger(request.body?.targetPort),
         targetHost: asString(request.body?.targetHost),
+        targetUrl: asString(request.body?.targetUrl),
         scheme: asString(request.body?.scheme),
         label: asString(request.body?.label),
         cwd: asString(request.body?.cwd),

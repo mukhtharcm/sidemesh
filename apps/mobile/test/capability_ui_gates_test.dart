@@ -59,8 +59,8 @@ void main() {
     await _pumpFrames(tester);
 
     expect(find.text('Browse files'), findsOneWidget);
-    expect(find.text('Open browser preview'), findsNothing);
-    expect(find.text('Manage browser previews'), findsNothing);
+    expect(find.text('Open browser'), findsNothing);
+    expect(find.text('Manage browsers'), findsNothing);
     expect(find.text('Rename'), findsNothing);
     expect(find.text('Archive'), findsNothing);
 
@@ -335,8 +335,8 @@ void main() {
       await tester.tap(find.byTooltip('Session actions'));
       await _pumpFrames(tester);
 
-      expect(find.text('Open browser preview'), findsOneWidget);
-      expect(find.text('Manage browser previews'), findsOneWidget);
+      expect(find.text('Open browser'), findsOneWidget);
+      expect(find.text('Manage browsers'), findsOneWidget);
     },
   );
 
@@ -372,8 +372,8 @@ void main() {
       await tester.tap(find.byTooltip('Session actions'));
       await _pumpFrames(tester);
 
-      expect(find.text('Open browser preview'), findsNothing);
-      expect(find.text('Manage browser previews'), findsNothing);
+      expect(find.text('Open browser'), findsNothing);
+      expect(find.text('Manage browsers'), findsNothing);
     },
   );
 

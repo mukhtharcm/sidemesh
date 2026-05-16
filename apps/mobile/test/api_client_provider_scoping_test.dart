@@ -148,4 +148,52 @@ void main() {
     expect(body.containsKey('sessionId?'), isFalse);
     expect(body.containsKey('limit?'), isFalse);
   });
+
+  test('ApiClient sends browser preview targetUrl when provided', () async {
+    late Map<String, dynamic> body;
+    final api = ApiClient(
+      client: MockClient((request) async {
+        expect(request.url.path, '/api/browser-previews');
+        body = jsonDecode(request.body) as Map<String, dynamic>;
+        return http.Response(
+          jsonEncode({
+            'id': 'preview-1',
+            'label': 'tenant.localhost:5173',
+            'url': 'http://tenant.localhost:5173/app',
+            'targetHost': 'tenant.localhost',
+            'targetPort': 5173,
+            'scheme': 'http',
+            'cwd': null,
+            'sessionId': 'session-1',
+            'profileMode': 'sidemesh',
+            'status': 'running',
+            'width': 390,
+            'height': 844,
+            'clients': 0,
+            'createdAt': 1,
+            'updatedAt': 1,
+            'lastClientAt': null,
+            'lastFrameAt': null,
+            'lastError': null,
+          }),
+          201,
+          headers: {'content-type': 'application/json'},
+        );
+      }),
+    );
+
+    await api.createBrowserPreview(
+      host,
+      targetPort: 5173,
+      targetHost: 'tenant.localhost',
+      targetUrl: ' http://tenant.localhost:5173/app ',
+      sessionId: 'session-1',
+      profileMode: 'sidemesh',
+    );
+
+    expect(body['targetHost'], 'tenant.localhost');
+    expect(body['targetPort'], 5173);
+    expect(body['targetUrl'], 'http://tenant.localhost:5173/app');
+    expect(body['sessionId'], 'session-1');
+  });
 }

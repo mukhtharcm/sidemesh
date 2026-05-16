@@ -16,6 +16,11 @@ void main() {
         output: 'Ready on http://127.0.0.1:4173',
       ),
       _activity(
+        seq: 4,
+        command: 'vite --host',
+        output: 'Tenant: http://demo.localhost:5173/dashboard',
+      ),
+      _activity(
         seq: 3,
         command: 'npm run dev',
         output: 'Server ready on 0.0.0.0:3000',
@@ -26,9 +31,14 @@ void main() {
 
     expect(
       candidates.map((item) => item.endpointLabel).toList(),
-      ['localhost:3000', 'localhost:4173'],
+      ['demo.localhost:5173/dashboard', 'localhost:3000', 'localhost:4173'],
     );
     expect(candidates.first.scheme, 'http');
+    expect(candidates.first.host, 'demo.localhost');
+    expect(
+      candidates.first.targetUrl,
+      'http://demo.localhost:5173/dashboard',
+    );
   });
 
   test('browserPreviewCandidatesForActivity keeps https loopback URLs', () {
@@ -44,7 +54,37 @@ void main() {
     expect(candidates.first.host, '127.0.0.1');
     expect(candidates.first.port, 8443);
     expect(candidates.first.scheme, 'https');
-    expect(candidates.first.previewLabel, 'Preview :8443');
+    expect(candidates.first.previewLabel, 'Browser localhost:8443');
+  });
+
+  test('parseBrowserPreviewTargetInput accepts ports, subdomains, and web URLs', () {
+    final portOnly = parseBrowserPreviewTargetInput('3000').candidate!;
+    expect(portOnly.host, '127.0.0.1');
+    expect(portOnly.port, 3000);
+    expect(portOnly.targetUrl, 'http://127.0.0.1:3000/');
+
+    final subdomain = parseBrowserPreviewTargetInput(
+      'tenant.localhost:5173/app',
+    ).candidate!;
+    expect(subdomain.host, 'tenant.localhost');
+    expect(subdomain.port, 5173);
+    expect(subdomain.targetUrl, 'http://tenant.localhost:5173/app');
+
+    final external = parseBrowserPreviewTargetInput(
+      'https://example.com/docs',
+    ).candidate!;
+    expect(external.host, 'example.com');
+    expect(external.port, 443);
+    expect(external.targetUrl, 'https://example.com/docs');
+    expect(browserPreviewProfileModeForTarget(external), 'temporary');
+    expect(browserPreviewProfileModeForTarget(portOnly), 'sidemesh');
+  });
+
+  test('parseBrowserPreviewTargetInput rejects unsafe schemes', () {
+    final result = parseBrowserPreviewTargetInput('file:///tmp/app.html');
+
+    expect(result.candidate, isNull);
+    expect(result.error, 'Only HTTP and HTTPS URLs are supported.');
   });
 
   test('findReusableBrowserPreview matches preview by session cwd and profile', () {

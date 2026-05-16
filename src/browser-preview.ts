@@ -82,7 +82,8 @@ export interface BrowserPreviewRegistryOptions {
 
 export interface CreateBrowserPreviewRequest {
   targetHost?: string | null;
-  targetPort: number | null;
+  targetPort?: number | null;
+  targetUrl?: string | null;
   scheme?: string | null;
   label?: string | null;
   cwd?: string | null;
@@ -126,6 +127,7 @@ interface BrowserPreviewRecord {
   id: string;
   label: string;
   url: string;
+  initialUrl: string | null;
   targetHost: string;
   targetPort: number;
   scheme: BrowserPreviewScheme;
@@ -244,6 +246,14 @@ interface BrowserPreviewNetworkDetail {
   bodyBase64Encoded: boolean;
   bodyError: string | null;
   webSocketMessages: BrowserPreviewNetworkMessage[];
+}
+
+interface NormalizedBrowserPreviewTarget {
+  targetHost: string;
+  targetPort: number;
+  scheme: BrowserPreviewScheme;
+  initialUrl: string | null;
+  defaultLabel: string;
 }
 
 interface BrowserPreviewStorageEntry {
@@ -405,9 +415,7 @@ export class BrowserPreviewRegistry {
   ): Promise<BrowserPreviewInfo> {
     this.assertEnabled();
 
-    const targetHost = normalizeTargetHost(request.targetHost);
-    const targetPort = normalizePort(request.targetPort);
-    const scheme = normalizeScheme(request.scheme);
+    const target = normalizeCreateTarget(request);
     const width = normalizeViewportSize(
       request.width,
       DEFAULT_WIDTH,
@@ -422,9 +430,9 @@ export class BrowserPreviewRegistry {
     const sessionId = request.sessionId?.trim() || null;
     const profileMode = normalizeProfileMode(request.profileMode);
     let reusable = this.findReusablePreview({
-      targetHost,
-      targetPort,
-      scheme,
+      targetHost: target.targetHost,
+      targetPort: target.targetPort,
+      scheme: target.scheme,
       cwd,
       sessionId,
       profileMode,
@@ -442,26 +450,30 @@ export class BrowserPreviewRegistry {
       if (reusable.starting) {
         await reusable.starting;
       }
+      if (target.initialUrl && reusable.url !== target.initialUrl) {
+        await this.navigatePreviewToUrl(reusable, target.initialUrl);
+      }
       return this.info(reusable);
     }
 
     this.enforcePreviewLimit();
 
-    const url = buildBrowserTargetUrlCandidates(
-      scheme,
-      targetHost,
-      targetPort,
-    )[0];
+    const url =
+      target.initialUrl ??
+      buildBrowserTargetUrlCandidates(
+        target.scheme,
+        target.targetHost,
+        target.targetPort,
+      )[0];
     const now = Date.now();
     const preview: BrowserPreviewRecord = {
       id: randomUUID(),
-      label:
-        request.label?.trim() ||
-        `${scheme.toUpperCase()} ${targetHost}:${targetPort}`,
+      label: request.label?.trim() || target.defaultLabel,
       url,
-      targetHost,
-      targetPort,
-      scheme,
+      initialUrl: target.initialUrl,
+      targetHost: target.targetHost,
+      targetPort: target.targetPort,
+      scheme: target.scheme,
       cwd,
       sessionId,
       profileMode,
@@ -2895,11 +2907,13 @@ async function navigateToReachableTarget(
   sessionId: string,
   preview: BrowserPreviewRecord,
 ): Promise<string> {
-  const candidates = buildBrowserTargetUrlCandidates(
-    preview.scheme,
-    preview.targetHost,
-    preview.targetPort,
-  );
+  const candidates = preview.initialUrl
+    ? [preview.initialUrl]
+    : buildBrowserTargetUrlCandidates(
+        preview.scheme,
+        preview.targetHost,
+        preview.targetPort,
+      );
   const failures: string[] = [];
   for (const url of candidates) {
     try {
@@ -3482,23 +3496,123 @@ function inspectorPathFromValue(value: unknown): number[] | null {
   return path;
 }
 
-function normalizePort(value: number | null): number {
+function normalizePort(value: number | null | undefined): number {
   if (!Number.isInteger(value) || value == null || value < 1 || value > 65535) {
     throw new BrowserPreviewError("targetPort must be between 1 and 65535", 400);
   }
   return value;
 }
 
+function normalizeCreateTarget(
+  request: CreateBrowserPreviewRequest,
+): NormalizedBrowserPreviewTarget {
+  const rawTargetUrl = request.targetUrl?.trim();
+  if (rawTargetUrl) {
+    return normalizeBrowserPreviewTargetUrl(rawTargetUrl);
+  }
+  const targetHost = normalizeTargetHost(request.targetHost);
+  const targetPort = normalizePort(request.targetPort);
+  const scheme = normalizeScheme(request.scheme);
+  return {
+    targetHost,
+    targetPort,
+    scheme,
+    initialUrl: null,
+    defaultLabel: `${scheme.toUpperCase()} ${targetHost}:${targetPort}`,
+  };
+}
+
+export function normalizeBrowserPreviewTargetUrl(
+  value: string,
+): NormalizedBrowserPreviewTarget {
+  let parsed: URL;
+  try {
+    parsed = new URL(value);
+  } catch {
+    throw new BrowserPreviewError("browser preview targetUrl must be a URL", 400);
+  }
+  const scheme = normalizeScheme(parsed.protocol.replace(/:$/, ""));
+  const targetPort = normalizeUrlPort(parsed, scheme);
+  const targetHost = normalizeUrlTargetHost(parsed.hostname);
+  const initialUrl = normalizeInitialTargetUrl(parsed, targetHost);
+  return {
+    targetHost,
+    targetPort,
+    scheme,
+    initialUrl,
+    defaultLabel:
+      new URL(initialUrl).host ||
+      `${scheme.toUpperCase()} ${targetHost}:${targetPort}`,
+  };
+}
+
 function normalizeTargetHost(value: string | null | undefined): string {
   const rawTargetHost = value?.trim() || "127.0.0.1";
-  const targetHost = rawTargetHost === "[::1]" ? "::1" : rawTargetHost;
-  if (!["127.0.0.1", "::1", "localhost"].includes(targetHost)) {
+  const targetHost =
+    rawTargetHost === "[::1]" ? "::1" : rawTargetHost.toLowerCase();
+  if (
+    !["127.0.0.1", "::1", "localhost"].includes(targetHost) &&
+    !isLocalhostSubdomain(targetHost)
+  ) {
     throw new BrowserPreviewError(
       "browser previews can only open localhost targets",
       400,
     );
   }
   return targetHost;
+}
+
+function normalizeUrlTargetHost(hostname: string): string {
+  const hostnameWithoutBrackets = hostname
+    .trim()
+    .toLowerCase()
+    .replace(/^\[|\]$/g, "");
+  if (
+    hostnameWithoutBrackets === "0.0.0.0" ||
+    hostnameWithoutBrackets.startsWith("127.")
+  ) {
+    return "127.0.0.1";
+  }
+  if (hostnameWithoutBrackets === "localhost") {
+    return "127.0.0.1";
+  }
+  if (hostnameWithoutBrackets === "::1") {
+    return "::1";
+  }
+  if (isLocalhostSubdomain(hostnameWithoutBrackets)) {
+    return hostnameWithoutBrackets;
+  }
+  if (!hostnameWithoutBrackets) {
+    throw new BrowserPreviewError("browser preview targetUrl must include a host", 400);
+  }
+  return hostnameWithoutBrackets;
+}
+
+function normalizeUrlPort(parsed: URL, scheme: BrowserPreviewScheme): number {
+  if (!parsed.port) {
+    return scheme === "https" ? 443 : 80;
+  }
+  const targetPort = Number(parsed.port);
+  if (!Number.isInteger(targetPort) || targetPort < 1 || targetPort > 65535) {
+    throw new BrowserPreviewError("targetPort must be between 1 and 65535", 400);
+  }
+  return targetPort;
+}
+
+function normalizeInitialTargetUrl(parsed: URL, targetHost: string): string {
+  const url = new URL(parsed.href);
+  const rawHost = parsed.hostname
+    .trim()
+    .toLowerCase()
+    .replace(/^\[|\]$/g, "");
+  if (targetHost === "127.0.0.1" && rawHost !== "localhost") {
+    url.hostname = "127.0.0.1";
+  } else if (targetHost === "::1") {
+    url.hostname = "[::1]";
+  } else if (isLocalhostSubdomain(targetHost)) {
+    url.hostname = targetHost;
+  }
+  return url.href;
 }
 
 function normalizeScheme(value: string | null | undefined): BrowserPreviewScheme {
@@ -3522,6 +3636,12 @@ export function buildBrowserTargetUrlCandidates(
   targetHost: string,
   targetPort: number,
 ): string[] {
+  if (isLocalhostSubdomain(targetHost)) {
+    return [`${scheme}://${targetHost}:${targetPort}/`];
+  }
+  if (!["127.0.0.1", "localhost", "::1"].includes(targetHost)) {
+    return [`${scheme}://${formatUrlHost(targetHost)}:${targetPort}/`];
+  }
   return loopbackTargetCandidates(targetHost).map(
     (host) => `${scheme}://${formatUrlHost(host)}:${targetPort}/`,
   );
@@ -3559,6 +3679,10 @@ function loopbackTargetCandidates(targetHost: string): string[] {
     default:
       return ["127.0.0.1", "localhost", "::1"];
   }
+}
+
+function isLocalhostSubdomain(value: string): boolean {
+  return /^[a-z0-9-]+(?:\.[a-z0-9-]+)*\.localhost$/.test(value);
 }
 
 function formatUrlHost(host: string): string {
