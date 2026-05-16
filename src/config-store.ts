@@ -8,6 +8,7 @@ import { z } from "zod";
 import type {
   AgentProviderConfig,
   AgentProviderKind,
+  AcpxPermissionMode,
   FakeCapabilityProfile,
   NodeConfig,
   UpdateChannel,
@@ -51,6 +52,19 @@ const opencodeProviderConfigSchema = z.object({
   stateDir: z.string().trim().min(1).nullable(),
 });
 
+const acpxPermissionModeSchema = z.enum([
+  "approve-reads",
+  "deny-all",
+] satisfies readonly AcpxPermissionMode[]);
+
+const acpxProviderConfigSchema = z.object({
+  kind: z.literal("acpx"),
+  agent: z.string().trim().min(1),
+  command: z.string().trim().min(1).nullable(),
+  stateDir: z.string().trim().min(1).nullable(),
+  permissionMode: acpxPermissionModeSchema.default("approve-reads"),
+});
+
 const fakeProviderConfigSchema = z.object({
   kind: z.literal("fake"),
   latencyMs: z.number().int().min(0),
@@ -89,6 +103,7 @@ const persistedProviderConfigSchema = z.discriminatedUnion("kind", [
   piProviderConfigSchema,
   copilotProviderConfigSchema,
   opencodeProviderConfigSchema,
+  acpxProviderConfigSchema,
   fakeProviderConfigSchema,
 ]);
 
@@ -120,7 +135,7 @@ const persistedNodeConfigSchema = z.object({
   portForwarding: portForwardingConfigSchema.optional(),
   browserPreview: browserPreviewConfigSchema.optional(),
   defaultProviderKind: z
-    .enum(["codex", "pi", "copilot", "opencode", "fake"])
+    .enum(["codex", "pi", "copilot", "opencode", "acpx", "fake"])
     .optional(),
   providers: z.array(persistedProviderConfigSchema).default([]),
 });
@@ -262,6 +277,14 @@ export function normalizePersistedProviderConfig(
         kind: "opencode",
         bin: provider.bin,
         stateDir: provider.stateDir,
+      };
+    case "acpx":
+      return {
+        kind: "acpx",
+        agent: provider.agent,
+        command: provider.command,
+        stateDir: provider.stateDir,
+        permissionMode: provider.permissionMode,
       };
     case "pi":
       return {

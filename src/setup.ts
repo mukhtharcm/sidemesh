@@ -175,6 +175,9 @@ export async function runSetup(options: SetupOptions = {}): Promise<NodeConfig> 
           }),
         );
         break;
+      case "acpx":
+        resolvedProviders.push(await promptAcpxProvider(existing, stateDir));
+        break;
       case "fake":
         resolvedProviders.push(await promptFakeProvider(existing));
         break;
@@ -579,6 +582,89 @@ async function promptOpenCodeProvider(
     kind: "opencode",
     bin: bin.trim(),
     stateDir: opencodeStateDir.trim() || null,
+  };
+}
+
+async function promptAcpxProvider(
+  existing: Awaited<ReturnType<typeof readResolvedPersistedConfig>>["value"],
+  stateDir: string,
+): Promise<AgentProviderConfig> {
+  const current =
+    existing?.providers.find((provider) => provider.kind === "acpx") ?? null;
+  note(
+    "acpx bridges Sidemesh to ACP-compatible agents. Reads/searches may be auto-approved; writes and commands still go through Sidemesh approvals.",
+    "ACP via acpx",
+  );
+  const agentOptions = [
+    { value: "gemini", label: "Gemini CLI", hint: "gemini --acp" },
+    { value: "claude", label: "Claude Code", hint: "claude-agent-acp" },
+    { value: "qwen", label: "Qwen Code", hint: "qwen --acp" },
+    { value: "cursor", label: "Cursor Agent", hint: "cursor-agent acp" },
+    { value: "kimi", label: "Kimi", hint: "kimi acp" },
+    { value: "copilot", label: "GitHub Copilot", hint: "copilot --acp --stdio" },
+    { value: "opencode", label: "OpenCode", hint: "opencode-ai acp" },
+    { value: "custom", label: "Custom ACP command" },
+  ];
+  const currentAgent = current?.kind === "acpx" ? current.agent : "gemini";
+  const agent = await select<string>({
+    message: "ACP agent",
+    initialValue: agentOptions.some((option) => option.value === currentAgent)
+      ? currentAgent
+      : "custom",
+    options: agentOptions,
+  });
+  if (isCancel(agent)) {
+    throw new Error("Setup cancelled.");
+  }
+  let resolvedAgent = agent;
+  if (agent === "custom") {
+    resolvedAgent = await promptText({
+      message: "Custom agent id",
+      defaultValue: current?.kind === "acpx" ? current.agent : "custom",
+      validate: (value) =>
+        value.trim() ? undefined : "ACP agent id cannot be empty.",
+    });
+  }
+  const command = await promptText({
+    message: "ACP command override (leave blank for acpx built-in registry)",
+    defaultValue: current?.kind === "acpx" ? (current.command ?? "") : "",
+    fallbackToDefaultOnEmpty: false,
+  });
+  const acpxStateDir = await promptText({
+    message: "acpx state directory",
+    defaultValue:
+      current?.kind === "acpx"
+        ? (current.stateDir ?? nodePath.join(stateDir, "acpx-provider", resolvedAgent))
+        : nodePath.join(stateDir, "acpx-provider", resolvedAgent),
+    validate: (value) =>
+      value.trim() ? undefined : "acpx state directory cannot be empty.",
+  });
+  const permissionMode = await select<"approve-reads" | "deny-all">({
+    message: "acpx permission mode",
+    initialValue:
+      current?.kind === "acpx" ? current.permissionMode : "approve-reads",
+    options: [
+      {
+        value: "approve-reads",
+        label: "Approve reads/searches only",
+        hint: "Writes and commands ask Sidemesh for approval",
+      },
+      {
+        value: "deny-all",
+        label: "Deny all ACP permission requests",
+        hint: "Safest, but many agents will be limited",
+      },
+    ],
+  });
+  if (isCancel(permissionMode)) {
+    throw new Error("Setup cancelled.");
+  }
+  return {
+    kind: "acpx",
+    agent: resolvedAgent.trim(),
+    command: command.trim() || null,
+    stateDir: acpxStateDir.trim() || null,
+    permissionMode,
   };
 }
 

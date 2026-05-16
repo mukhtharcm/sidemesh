@@ -88,6 +88,10 @@ export function classifyProviderAutoDetectReadiness(
       return hasCheck(report, "agentDir", "ok") ? "ready" : "unavailable";
     case "opencode":
       return hasCheck(report, "binary", "ok") ? "detected" : "unavailable";
+    case "acpx":
+      // acpx can launch many agents, sometimes through npx/package-exec.
+      // Keep first-run autodetection conservative and let users opt in via setup.
+      return "unavailable";
     case "fake":
       return "unavailable";
     default:

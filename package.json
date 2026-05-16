@@ -39,7 +39,7 @@
     "scripts/prepare-package.mjs"
   ],
   "engines": {
-    "node": ">=22.5.0"
+    "node": ">=22.13.0"
   },
   "scripts": {
     "clean": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\"",
@@ -87,6 +87,7 @@
     "@hono/node-server": "^2.0.1",
     "@hono/zod-validator": "^0.7.6",
     "@mariozechner/pi-coding-agent": "^0.73.1",
+    "acpx": "^0.8.0",
     "commander": "^14.0.0",
     "hono": "^4.12.16",
     "ignore": "^7.0.5",

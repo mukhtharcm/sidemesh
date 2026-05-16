@@ -19,8 +19,9 @@ Sidemesh currently supports these provider adapters:
 | --- | --- | --- |
 | Codex | primary | default setup option |
 | Pi | supported | public setup option |
+| GitHub Copilot CLI | supported | public setup option |
+| ACP via acpx | supported | generic bridge for ACP-compatible agents |
 | OpenCode | dev | available through `sidemesh setup --dev` |
-| GitHub Copilot CLI | dev | available through `sidemesh setup --dev` |
 | Fake test provider | dev | deterministic contract-testing adapter |
 
 Run `sidemesh setup --dev` to expose the development-only providers in the setup
@@ -30,7 +31,7 @@ wizard.
 
 Requirements:
 
-- Node.js `>= 22.5.0`
+- Node.js `>= 22.13.0`
 - A user-managed Node install such as Homebrew, `nvm`, or Volta if you want
   `npm install -g` to work without `sudo`
 - Flutter, if you want to run the app locally
