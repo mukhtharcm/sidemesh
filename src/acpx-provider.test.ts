@@ -148,6 +148,38 @@ describe("AcpxAgentProvider", () => {
     assert.equal(log.activities[0]?.type, "tool");
   });
 
+  it("closes warm acpx handles without archiving sessions", async () => {
+    const store = new MemoryAcpSessionStore();
+    const runtime = new FakeAcpRuntime(store);
+    const provider = new AcpxAgentProvider(
+      {
+        agent: "gemini",
+        command: "gemini --acp",
+        stateDir: "/tmp/sidemesh-acpx-test",
+      },
+      {
+        runtime,
+        sessionStore: store,
+        agentRegistry: {
+          resolve: () => "gemini --acp",
+          list: () => ["gemini"],
+        },
+      },
+    );
+
+    const created = await provider.createSession({
+      cwd: "/workspace",
+      input: [],
+      overrides: DEFAULT_OVERRIDES,
+    });
+    assert.equal((await store.load(created.thread.id))?.closed, false);
+
+    await provider.close();
+
+    assert.equal(runtime.closeCalls, 1);
+    assert.equal((await store.load(created.thread.id))?.closed, false);
+  });
+
   it("bridges acpx permission requests to Sidemesh approvals", async () => {
     const store = new MemoryAcpSessionStore();
     await store.save(makeRecord({
@@ -210,7 +242,8 @@ class MemoryAcpSessionStore implements AcpSessionStore {
   private readonly records = new Map<string, AcpSessionRecord>();
 
   async load(sessionId: string): Promise<AcpSessionRecord | undefined> {
-    return this.records.get(sessionId);
+    const record = this.records.get(sessionId);
+    return record ? structuredClone(record) : undefined;
   }
 
   async save(record: AcpSessionRecord): Promise<void> {
@@ -223,6 +256,8 @@ class MemoryAcpSessionStore implements AcpSessionStore {
 }
 
 class FakeAcpRuntime implements AcpRuntime {
+  public closeCalls = 0;
+
   constructor(private readonly store: MemoryAcpSessionStore) {}
 
   async ensureSession(input: AcpRuntimeEnsureInput): Promise<AcpRuntimeHandle> {
@@ -279,7 +314,15 @@ class FakeAcpRuntime implements AcpRuntime {
 
   async cancel(): Promise<void> {}
 
-  async close(): Promise<void> {}
+  async close(input: { handle: AcpRuntimeHandle }): Promise<void> {
+    this.closeCalls++;
+    const sessionId = input.handle.acpxRecordId ?? input.handle.sessionKey;
+    const record = await this.store.load(sessionId);
+    if (!record) return;
+    record.closed = true;
+    record.closedAt = new Date().toISOString();
+    await this.store.save(record);
+  }
 
   private async appendTurn(sessionId: string, prompt: string): Promise<void> {
     const record = await this.store.load(sessionId);

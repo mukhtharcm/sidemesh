@@ -201,6 +201,7 @@ export class AcpxAgentProvider
   private readonly activeTurnsBySession = new Map<string, ActiveAcpxTurn>();
   private readonly activeTurnsByTurn = new Map<string, ActiveAcpxTurn>();
   private readonly loadedSessionIds = new Set<string>();
+  private readonly handlesBySessionId = new Map<string, AcpRuntimeHandle>();
   private readonly pendingApprovals = new Map<string, PendingAcpxApproval>();
   private readonly sessionIdsByBackendSessionId = new Map<string, string>();
 
@@ -255,6 +256,7 @@ export class AcpxAgentProvider
         await active.turn.closeStream({ reason: "provider close" }).catch(() => {});
       }),
     );
+    await this.releaseRuntimeHandles();
   }
 
   public async health(): Promise<boolean> {
@@ -350,6 +352,14 @@ export class AcpxAgentProvider
     record.lastUsedAt = record.closedAt;
     record.updated_at = record.closedAt;
     await this.store.save(record);
+    const handle = this.handlesBySessionId.get(threadId);
+    if (handle) {
+      await this.runtime.close({
+        handle,
+        reason: "Sidemesh archive",
+        discardPersistentState: false,
+      }).catch(() => {});
+    }
     return { archived: true };
   }
 
@@ -848,6 +858,31 @@ export class AcpxAgentProvider
     }
   }
 
+  private async releaseRuntimeHandles(): Promise<void> {
+    const entries = [...this.handlesBySessionId.entries()];
+    this.handlesBySessionId.clear();
+    await Promise.all(
+      entries.map(async ([sessionId, handle]) => {
+        const before = await this.store.load(sessionId).catch(() => undefined);
+        await this.runtime.close({
+          handle,
+          reason: "Sidemesh provider shutdown",
+          discardPersistentState: false,
+        }).catch(() => {});
+        if (before?.closed === true) {
+          return;
+        }
+        const after = await this.store.load(sessionId).catch(() => undefined);
+        if (!after) {
+          return;
+        }
+        after.closed = false;
+        after.closedAt = undefined;
+        await this.store.save(after).catch(() => {});
+      }),
+    );
+  }
+
   private async sessionIdForPermissionRequest(
     request: AcpPermissionRequest,
   ): Promise<string> {
@@ -911,6 +946,7 @@ export class AcpxAgentProvider
   }
 
   private rememberHandle(sessionId: string, handle: AcpRuntimeHandle): void {
+    this.handlesBySessionId.set(sessionId, handle);
     if (handle.backendSessionId) {
       this.sessionIdsByBackendSessionId.set(handle.backendSessionId, sessionId);
     }
