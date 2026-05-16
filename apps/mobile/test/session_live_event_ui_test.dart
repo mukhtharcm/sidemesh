@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:sidemesh_mobile/src/api_client.dart';
@@ -65,6 +66,87 @@ void main() {
     await _pumpFrames(tester);
 
     expect(_composerTextField(tester).focusNode?.hasFocus, isFalse);
+  });
+
+  testWidgets('desktop session does not steal focus from another text field', (
+    tester,
+  ) async {
+    final api = _RichEventFakeApi();
+    final externalFocus = FocusNode(debugLabel: 'external-search');
+    addTearDown(api.dispose);
+    addTearDown(externalFocus.dispose);
+
+    await _pumpApp(
+      tester,
+      Column(
+        children: [
+          TextField(focusNode: externalFocus),
+          Expanded(
+            child: SessionScreen(
+              host: _host('desktop-composer-external-focus'),
+              session: _session('desktop-composer-external-focus'),
+              api: api,
+              desktopMode: true,
+            ),
+          ),
+        ],
+      ),
+      size: const Size(1180, 900),
+    );
+    externalFocus.requestFocus();
+    await _pumpFrames(tester);
+
+    expect(externalFocus.hasFocus, isTrue);
+    expect(_composerTextField(tester).focusNode?.hasFocus, isFalse);
+  });
+
+  testWidgets('desktop session does not autofocus while approval is pending', (
+    tester,
+  ) async {
+    final session = _session('desktop-composer-pending-focus');
+    final api = _RichEventFakeApi(pendingAction: _pendingAction(session.id));
+    addTearDown(api.dispose);
+
+    await _pumpApp(
+      tester,
+      SessionScreen(
+        host: _host('desktop-composer-pending-focus'),
+        session: session,
+        api: api,
+        desktopMode: true,
+      ),
+      size: const Size(1180, 900),
+    );
+    await _pumpFrames(tester);
+
+    expect(find.text('Review command'), findsOneWidget);
+    expect(_composerTextField(tester).focusNode?.hasFocus, isFalse);
+  });
+
+  testWidgets('desktop send restores composer focus', (tester) async {
+    final api = _RichEventFakeApi();
+    addTearDown(api.dispose);
+
+    await _pumpApp(
+      tester,
+      SessionScreen(
+        host: _host('desktop-composer-send-focus'),
+        session: _session('desktop-composer-send-focus'),
+        api: api,
+        desktopMode: true,
+      ),
+      size: const Size(1180, 900),
+    );
+    await _pumpFrames(tester);
+
+    final composer = _composerTextFieldFinder();
+    await tester.enterText(composer, 'ship it');
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await _pumpFrames(tester);
+
+    expect(api.sendInputCalls, 1);
+    expect(api.lastInputText, 'ship it');
+    expect(_composerTextField(tester).focusNode?.hasFocus, isTrue);
   });
 
   testWidgets(
@@ -1665,13 +1747,17 @@ Future<void> _pumpFrames(WidgetTester tester) async {
 }
 
 TextField _composerTextField(WidgetTester tester) {
-  final finder = find.byWidgetPredicate(
+  final finder = _composerTextFieldFinder();
+  expect(finder, findsOneWidget);
+  return tester.widget<TextField>(finder);
+}
+
+Finder _composerTextFieldFinder() {
+  return find.byWidgetPredicate(
     (widget) =>
         widget is TextField &&
         widget.decoration?.hintText?.startsWith('Reply here') == true,
   );
-  expect(finder, findsOneWidget);
-  return tester.widget<TextField>(finder);
 }
 
 Future<void> _tapDesktopReload(WidgetTester tester) async {
@@ -1730,6 +1816,20 @@ SessionSummary _session(String id, {String status = 'idle'}) {
     status: status,
     runtime: null,
     gitInfo: null,
+  );
+}
+
+PendingAction _pendingAction(String sessionId) {
+  return PendingAction(
+    id: 'pending-$sessionId',
+    sessionId: sessionId,
+    kind: 'command',
+    title: 'Review command',
+    detail: 'The agent needs approval before continuing.',
+    requestedAt: DateTime(2026, 1, 1, 12),
+    canApprove: true,
+    canApproveForSession: true,
+    canDecline: true,
   );
 }
 
@@ -2047,6 +2147,7 @@ class _RichEventFakeApi extends ApiClient {
     this.nodeInfo,
     this.sessionSummary,
     this.sessionStatus,
+    this.pendingAction,
   });
 
   final _ControllableWebSocketChannel _channel =
@@ -2061,7 +2162,10 @@ class _RichEventFakeApi extends ApiClient {
   final NodeInfo? nodeInfo;
   final SessionSummary? sessionSummary;
   final SessionStatus? sessionStatus;
+  final PendingAction? pendingAction;
   int stopSessionCalls = 0;
+  int sendInputCalls = 0;
+  String? lastInputText;
 
   @override
   Future<NodeInfo> fetchNode(HostProfile host) async => nodeInfo ?? _nodeInfo();
@@ -2081,7 +2185,7 @@ class _RichEventFakeApi extends ApiClient {
       session: sessionSummary ?? _session(sessionId),
       messages: messages,
       activities: activities,
-      pendingAction: null,
+      pendingAction: pendingAction,
       history:
           sessionLogHistory ??
           SessionLogHistorySummary(
@@ -2138,6 +2242,25 @@ class _RichEventFakeApi extends ApiClient {
     bool forceReload = false,
     String? agentProvider,
   }) async => SkillCatalog(cwd: cwd, skills: const [], errors: const []);
+
+  @override
+  Future<void> sendInput(
+    HostProfile host, {
+    required String sessionId,
+    String text = '',
+    List<SessionInputItem>? input,
+    String? clientMessageId,
+    String? model,
+    String? mode,
+    String? reasoningEffort,
+    bool? fastMode,
+    String? approvalPolicy,
+    String? sandboxMode,
+    bool? networkAccess,
+  }) async {
+    sendInputCalls += 1;
+    lastInputText = text;
+  }
 
   @override
   Future<void> stopSession(HostProfile host, String sessionId) async {

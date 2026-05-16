@@ -838,6 +838,7 @@ class _SessionScreenState extends State<SessionScreen>
   String? _failedSendRetryClientMessageId;
   String? _failedSendRetrySignature;
   DateTime? _failedSendRetryExpiresAt;
+  DateTime? _lastComposerBlurAt;
   WebSocketChannel? _channel;
   StreamSubscription? _subscription;
   Timer? _liveFlushTimer;
@@ -2009,6 +2010,9 @@ class _SessionScreenState extends State<SessionScreen>
   /// Tracks composer focus changes → drives the animated pill border.
   void _handleComposerFocusChanged() {
     final focused = _composerFocusNode.hasFocus;
+    if (!focused) {
+      _lastComposerBlurAt = DateTime.now();
+    }
     if (focused != _composerFocused) {
       setState(() => _composerFocused = focused);
     }
@@ -2236,7 +2240,37 @@ class _SessionScreenState extends State<SessionScreen>
     _queueComposerFocusRestore(onlyIfSafe: true);
   }
 
-  bool _canAutoFocusComposer() {
+  bool _shouldRestoreComposerFocusAfterDesktopOverlay() {
+    if (!widget.desktopMode) {
+      return false;
+    }
+    if (_composerFocusNode.hasFocus) {
+      return true;
+    }
+    final blurAt = _lastComposerBlurAt;
+    return blurAt != null &&
+        DateTime.now().difference(blurAt) < const Duration(milliseconds: 800);
+  }
+
+  void _restoreComposerFocusAfterDesktopOverlay(bool shouldRestore) {
+    if (!shouldRestore || !mounted || _disposed) {
+      return;
+    }
+    _queueComposerFocusRestore(onlyIfSafe: true);
+  }
+
+  Future<T?> _showDesktopOverlayWithComposerFocusRestore<T>(
+    Future<T?> Function() showOverlay,
+  ) async {
+    final shouldRestore = _shouldRestoreComposerFocusAfterDesktopOverlay();
+    try {
+      return await showOverlay();
+    } finally {
+      _restoreComposerFocusAfterDesktopOverlay(shouldRestore);
+    }
+  }
+
+  bool _canAutoFocusComposer({bool allowOtherInputs = false}) {
     if (!widget.desktopMode || _pendingAction != null) {
       return false;
     }
@@ -2248,32 +2282,42 @@ class _SessionScreenState extends State<SessionScreen>
     if (primaryFocus == null || primaryFocus == _composerFocusNode) {
       return true;
     }
-    if (primaryFocus == _searchFocusNode) {
+    if (!allowOtherInputs && primaryFocus == _searchFocusNode) {
       return false;
     }
     final focusContext = primaryFocus.context;
     if (focusContext == null) {
       return true;
     }
-    if (focusContext.widget is EditableText ||
-        focusContext.findAncestorWidgetOfExactType<EditableText>() != null) {
+    if (!allowOtherInputs &&
+        (focusContext.widget is EditableText ||
+            focusContext.findAncestorWidgetOfExactType<EditableText>() !=
+                null)) {
       return false;
     }
     return true;
   }
 
-  void _queueComposerFocusRestore({bool onlyIfSafe = false}) {
+  void _queueComposerFocusRestore({
+    bool onlyIfSafe = false,
+    bool allowOtherInputs = false,
+  }) {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       Future<void>.delayed(const Duration(milliseconds: 140), () {
         if (!mounted || _disposed) {
           return;
         }
-        if (onlyIfSafe && !_canAutoFocusComposer()) {
+        if (onlyIfSafe &&
+            !_canAutoFocusComposer(allowOtherInputs: allowOtherInputs)) {
           return;
         }
         _composerFocusNode.requestFocus();
       });
     });
+  }
+
+  void _focusComposerFromShortcut() {
+    _queueComposerFocusRestore(onlyIfSafe: true, allowOtherInputs: true);
   }
 
   void _reloadSnapshot() {
@@ -4590,7 +4634,7 @@ class _SessionScreenState extends State<SessionScreen>
     required String confirmLabel,
     bool danger = false,
   }) async {
-    return showMeshConfirmDialog(
+    Future<bool> showConfirm() => showMeshConfirmDialog(
       context,
       icon: icon,
       title: title,
@@ -4599,6 +4643,11 @@ class _SessionScreenState extends State<SessionScreen>
       danger: danger,
       maxWidth: 420,
     );
+    if (!widget.desktopMode) {
+      return showConfirm();
+    }
+    return await _showDesktopOverlayWithComposerFocusRestore(showConfirm) ??
+        false;
   }
 
   Future<String?> _promptSessionName(String current) async {
@@ -4919,7 +4968,7 @@ class _SessionScreenState extends State<SessionScreen>
       await _loadGitStatus();
     }
     if (!mounted) return;
-    await showModalBottomSheet<void>(
+    Future<void> showSheet() => showModalBottomSheet<void>(
       context: context,
       backgroundColor: Colors.transparent,
       showDragHandle: false,
@@ -4939,6 +4988,11 @@ class _SessionScreenState extends State<SessionScreen>
         },
       ),
     );
+    if (widget.desktopMode) {
+      await _showDesktopOverlayWithComposerFocusRestore(showSheet);
+      return;
+    }
+    await showSheet();
   }
 
   Future<void> _showGitDiffSheet(String kind) async {
@@ -4950,7 +5004,7 @@ class _SessionScreenState extends State<SessionScreen>
       return;
     }
     if (!mounted) return;
-    await showModalBottomSheet<void>(
+    Future<void> showSheet() => showModalBottomSheet<void>(
       context: context,
       backgroundColor: Colors.transparent,
       showDragHandle: false,
@@ -4964,6 +5018,11 @@ class _SessionScreenState extends State<SessionScreen>
         ),
       ),
     );
+    if (widget.desktopMode) {
+      await _showDesktopOverlayWithComposerFocusRestore(showSheet);
+      return;
+    }
+    await showSheet();
   }
 
   Future<void> _showSessionDetailsSheet(SessionSummary session) async {
@@ -4994,7 +5053,7 @@ class _SessionScreenState extends State<SessionScreen>
       );
     }
 
-    await showModalBottomSheet<void>(
+    Future<void> showSheet() => showModalBottomSheet<void>(
       context: context,
       backgroundColor: Colors.transparent,
       showDragHandle: false,
@@ -5109,6 +5168,11 @@ class _SessionScreenState extends State<SessionScreen>
         ),
       ),
     );
+    if (widget.desktopMode) {
+      await _showDesktopOverlayWithComposerFocusRestore(showSheet);
+      return;
+    }
+    await showSheet();
   }
 
   String? _cleanComposerLabel(String? value) {
@@ -5277,10 +5341,12 @@ class _SessionScreenState extends State<SessionScreen>
         _cleanComposerLabel(turnConfig.model) ??
         _cleanComposerLabel(session.runtime?.model) ??
         defaultModel.model;
-    final selected = await _showComposerModelPickerSurface(
-      models: models,
-      currentModel: currentModel,
-      providerName: _composerRuntimeModelProvider(session),
+    final selected = await _showDesktopOverlayWithComposerFocusRestore(
+      () => _showComposerModelPickerSurface(
+        models: models,
+        currentModel: currentModel,
+        providerName: _composerRuntimeModelProvider(session),
+      ),
     );
     if (!mounted || _disposed || selected == null) return;
 
@@ -5367,11 +5433,13 @@ class _SessionScreenState extends State<SessionScreen>
     final currentReasoning = supportedReasoning.contains(rawCurrentReasoning)
         ? rawCurrentReasoning
         : selectedModel.defaultReasoningEffort;
-    final selected = await _showComposerThinkingPickerSurface(
-      options: options,
-      currentReasoning: currentReasoning,
-      defaultReasoning: selectedModel.defaultReasoningEffort,
-      modelLabel: selectedModel.displayName,
+    final selected = await _showDesktopOverlayWithComposerFocusRestore(
+      () => _showComposerThinkingPickerSurface(
+        options: options,
+        currentReasoning: currentReasoning,
+        defaultReasoning: selectedModel.defaultReasoningEffort,
+        modelLabel: selectedModel.displayName,
+      ),
     );
     if (!mounted || _disposed || selected == null) return;
 
@@ -5566,29 +5634,31 @@ class _SessionScreenState extends State<SessionScreen>
       turnConfigStore: _turnConfigStore,
     );
     if (isDesktop) {
-      await showDialog<void>(
-        context: context,
-        barrierColor: Colors.black.withValues(alpha: 0.35),
-        builder: (dialogContext) => Dialog(
-          backgroundColor: Colors.transparent,
-          insetPadding: const EdgeInsets.symmetric(
-            horizontal: 48,
-            vertical: 48,
-          ),
-          child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 520, maxHeight: 640),
-            child: DecoratedBox(
-              decoration: BoxDecoration(
-                color: dialogContext.colors.surfaceElevated,
-                borderRadius: AppShapes.dialog,
-                border: Border.all(color: dialogContext.colors.border),
-                boxShadow: AppShadows.dialog(
-                  dialogContext.colors.textPrimary,
+      await _showDesktopOverlayWithComposerFocusRestore(
+        () => showDialog<void>(
+          context: context,
+          barrierColor: Colors.black.withValues(alpha: 0.35),
+          builder: (dialogContext) => Dialog(
+            backgroundColor: Colors.transparent,
+            insetPadding: const EdgeInsets.symmetric(
+              horizontal: 48,
+              vertical: 48,
+            ),
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 520, maxHeight: 640),
+              child: DecoratedBox(
+                decoration: BoxDecoration(
+                  color: dialogContext.colors.surfaceElevated,
+                  borderRadius: AppShapes.dialog,
+                  border: Border.all(color: dialogContext.colors.border),
+                  boxShadow: AppShadows.dialog(
+                    dialogContext.colors.textPrimary,
+                  ),
                 ),
-              ),
-              child: ClipRRect(
-                borderRadius: AppShapes.dialog,
-                child: sheet,
+                child: ClipRRect(
+                  borderRadius: AppShapes.dialog,
+                  child: sheet,
+                ),
               ),
             ),
           ),
@@ -6906,6 +6976,7 @@ class _SessionScreenState extends State<SessionScreen>
       controlsCustomized: controlsCustomized,
     );
     final String? selected;
+    final restoreComposerFocus = _shouldRestoreComposerFocusAfterDesktopOverlay();
     if (widget.desktopMode) {
       final anchorRect = _desktopPopoverAnchorRect(anchorContext);
       selected = await showDialog<String>(
@@ -6967,9 +7038,20 @@ class _SessionScreenState extends State<SessionScreen>
       );
     }
     if (!mounted || selected == null) {
+      _restoreComposerFocusAfterDesktopOverlay(restoreComposerFocus);
       return;
     }
     _handleSessionAction(selected, session);
+    if (_sessionActionReturnsToComposer(selected)) {
+      _restoreComposerFocusAfterDesktopOverlay(restoreComposerFocus);
+    }
+  }
+
+  bool _sessionActionReturnsToComposer(String value) {
+    return switch (value) {
+      'reload' || 'restart_provider' || 'favorite' || 'unread' => true,
+      _ => false,
+    };
   }
 
   Rect? _desktopPopoverAnchorRect(BuildContext? anchorContext) {
@@ -7700,12 +7782,22 @@ class _SessionScreenState extends State<SessionScreen>
               child: layoutBody,
             ),
     );
+    Widget sessionContent = scaffold;
+    if (widget.desktopMode) {
+      sessionContent = CallbackShortcuts(
+        bindings: <ShortcutActivator, VoidCallback>{
+          const SingleActivator(LogicalKeyboardKey.keyJ, meta: true):
+              _focusComposerFromShortcut,
+        },
+        child: sessionContent,
+      );
+    }
     if (widget.topPadding == null) {
-      return scaffold;
+      return sessionContent;
     }
     return Padding(
       padding: EdgeInsets.only(top: widget.topPadding!),
-      child: scaffold,
+      child: sessionContent,
     );
   }
 }
