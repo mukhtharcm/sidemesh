@@ -1,13 +1,14 @@
 # Getting Started with Sidemesh
 
 Sidemesh is a fleet-first mobile control plane for agent sessions. It lets you
-drive multiple coding agents (Codex, Pi, Copilot) from a single mobile or
-desktop app, with the daemon running on your development machines.
+drive multiple coding agents (Codex, Pi, Copilot, ACP-compatible agents via
+acpx) from a single mobile or desktop app, with the daemon running on your
+development machines.
 
 ## What You Need
 
 - **Host machine** (where you code): macOS, Linux, or Windows with WSL
-  - Node.js 22.5+
+  - Node.js 22.13+
   - A user-managed Node install such as Homebrew, nvm, or Volta if you want
     `npm install -g` to work without sudo
   - For Pi provider: Pi must be installed separately
@@ -58,6 +59,7 @@ Use `sidemesh setup` when you want to customize providers, host features, or adv
 | **Codex** (default) | Install codex CLI: npm install -g @openai/codex |
 | **Pi** | Install Pi: npm install -g @mariozechner/pi-coding-agent, then pi /login |
 | **Copilot** | Install GitHub Copilot CLI and authenticate |
+| **ACP via acpx** | Install/authenticate the selected ACP agent (for example Gemini, Claude, Qwen, Cursor, or Kimi) |
 | **Fake** | No extra setup; for testing only (--dev flag) |
 
 ## Start the Daemon
@@ -221,4 +223,5 @@ Pi has no authenticated providers. Run pi /login for your model provider
 
 - Read the provider adapter contract to understand how capabilities map to UI features
 - See Pi provider getting started for Pi-specific setup and capabilities
+- See ACP via acpx provider getting started for ACP-compatible agent setup
 - Check release-playbook.md for cutting preview builds

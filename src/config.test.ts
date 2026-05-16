@@ -241,6 +241,46 @@ describe("loadConfig", () => {
     assert.equal(config.provider.stateDir, "/tmp/opencode-state-old");
   });
 
+  it("loads acpx provider config from env and persisted values", async () => {
+    await writeFile(
+      configPath,
+      JSON.stringify({
+        version: 1,
+        token: "file-token",
+        defaultProviderKind: "acpx",
+        providers: [
+          {
+            kind: "acpx",
+            agent: "gemini",
+            command: null,
+            stateDir: "/tmp/acpx-state-old",
+            permissionMode: "approve-reads",
+          },
+        ],
+      }),
+    );
+
+    const config = await loadConfig({
+      configPath,
+      env: {
+        SIDEMESH_PROVIDER: "acpx",
+        SIDEMESH_ACPX_AGENT: "claude",
+        SIDEMESH_ACPX_COMMAND: "claude-agent-acp",
+        SIDEMESH_ACPX_PERMISSION_MODE: "deny-all",
+      },
+    });
+
+    assert.equal(config.defaultProviderKind, "acpx");
+    assert.equal(config.provider.kind, "acpx");
+    if (config.provider.kind !== "acpx") {
+      throw new Error("expected acpx provider");
+    }
+    assert.equal(config.provider.agent, "claude");
+    assert.equal(config.provider.command, "claude-agent-acp");
+    assert.equal(config.provider.stateDir, "/tmp/acpx-state-old");
+    assert.equal(config.provider.permissionMode, "deny-all");
+  });
+
   it("loads terminal settings from persisted config and env overrides", async () => {
     await writeFile(
       configPath,

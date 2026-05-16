@@ -1,4 +1,9 @@
 import {
+  ACPX_PROVIDER_CAPABILITIES,
+  AcpxAgentProvider,
+  acpxProviderDefaultAgent,
+} from "./acpx-provider.js";
+import {
   CODEX_PROVIDER_CAPABILITIES,
   CodexAgentProvider,
 } from "./codex-provider.js";
@@ -26,6 +31,8 @@ import type {
   AgentProviderConfig,
   AgentProviderConfigSummary,
   AgentProviderKind,
+  AcpxPermissionMode,
+  AcpxProviderConfig,
   CodexProviderConfig,
   CopilotProviderConfig,
   FakeCapabilityProfile,
@@ -70,6 +77,7 @@ const PI_DEFAULT_COMMAND = "sdk";
 const OPENCODE_DEFAULT_COMMAND = "opencode";
 const FAKE_DEFAULT_COMMAND = "builtin";
 const COPILOT_DEFAULT_COMMAND = "copilot";
+const ACPX_DEFAULT_AGENT = acpxProviderDefaultAgent();
 
 const CODEX_PROVIDER_DEFINITION: AgentProviderDefinition = {
   kind: "codex",
@@ -383,12 +391,90 @@ const OPENCODE_PROVIDER_DEFINITION: AgentProviderDefinition = {
   },
 };
 
+const ACPX_PROVIDER_DEFINITION: AgentProviderDefinition = {
+  kind: "acpx",
+  displayName: "ACP via acpx",
+  setupAudience: "public",
+  defaultCommand: ACPX_DEFAULT_AGENT,
+  capabilities: ACPX_PROVIDER_CAPABILITIES,
+  commandEnvironmentVariables: [
+    "SIDEMESH_ACPX_AGENT",
+    "SIDEMESH_ACPX_COMMAND",
+    "SIDEMESH_PROVIDER_COMMAND",
+    "SIDEMESH_ACPX_STATE_DIR",
+    "SIDEMESH_ACPX_PERMISSION_MODE",
+  ],
+  supportedApprovalPolicies: ["on-request", "never"],
+
+  create(config) {
+    const acpx = expectAcpxProviderConfig(config);
+    return new AcpxAgentProvider({
+      agent: acpx.agent,
+      command: acpx.command,
+      stateDir: acpx.stateDir,
+      permissionMode: acpx.permissionMode,
+    });
+  },
+
+  loadConfig(env) {
+    return {
+      kind: "acpx",
+      agent: env.SIDEMESH_ACPX_AGENT?.trim() || ACPX_DEFAULT_AGENT,
+      command:
+        env.SIDEMESH_ACPX_COMMAND?.trim() ||
+        env.SIDEMESH_PROVIDER_COMMAND?.trim() ||
+        null,
+      stateDir: env.SIDEMESH_ACPX_STATE_DIR?.trim() || null,
+      permissionMode: parseAcpxPermissionMode(
+        env.SIDEMESH_ACPX_PERMISSION_MODE,
+        "approve-reads",
+      ),
+    };
+  },
+
+  resolveConfig(env, base) {
+    const acpx = base?.kind === "acpx" ? base : null;
+    return {
+      kind: "acpx",
+      agent:
+        env.SIDEMESH_ACPX_AGENT?.trim() ||
+        acpx?.agent ||
+        ACPX_DEFAULT_AGENT,
+      command:
+        env.SIDEMESH_ACPX_COMMAND?.trim() ||
+        env.SIDEMESH_PROVIDER_COMMAND?.trim() ||
+        acpx?.command ||
+        null,
+      stateDir:
+        env.SIDEMESH_ACPX_STATE_DIR === undefined
+          ? acpx?.stateDir ?? null
+          : env.SIDEMESH_ACPX_STATE_DIR?.trim() || null,
+      permissionMode:
+        env.SIDEMESH_ACPX_PERMISSION_MODE === undefined
+          ? acpx?.permissionMode ?? "approve-reads"
+          : parseAcpxPermissionMode(
+              env.SIDEMESH_ACPX_PERMISSION_MODE,
+              "approve-reads",
+            ),
+    };
+  },
+
+  summarizeConfig(config) {
+    const acpx = expectAcpxProviderConfig(config);
+    return {
+      kind: acpx.kind,
+      command: acpx.command ?? acpx.agent,
+    };
+  },
+};
+
 const AGENT_PROVIDER_DEFINITIONS = [
   CODEX_PROVIDER_DEFINITION,
   PI_PROVIDER_DEFINITION,
   FAKE_PROVIDER_DEFINITION,
   OPENCODE_PROVIDER_DEFINITION,
   COPILOT_PROVIDER_DEFINITION,
+  ACPX_PROVIDER_DEFINITION,
 ] as const;
 
 export function listAgentProviderDefinitions(): readonly AgentProviderDefinition[] {
@@ -516,6 +602,15 @@ function expectOpenCodeProviderConfig(
   return config;
 }
 
+function expectAcpxProviderConfig(
+  config: AgentProviderConfig,
+): AcpxProviderConfig {
+  if (config.kind !== "acpx") {
+    throw new Error(`Expected acpx provider config, got "${config.kind}"`);
+  }
+  return config;
+}
+
 function parseInteger(value: string | undefined, fallback: number): number {
   if (!value) {
     return fallback;
@@ -529,6 +624,19 @@ function parseBoolean(value: string | undefined, fallback: boolean): boolean {
     return fallback;
   }
   return ["1", "true", "yes", "on"].includes(value.trim().toLowerCase());
+}
+
+function parseAcpxPermissionMode(
+  value: string | undefined,
+  fallback: AcpxPermissionMode,
+): AcpxPermissionMode {
+  const mode = value?.trim() || fallback;
+  if (mode === "approve-reads" || mode === "deny-all") {
+    return mode;
+  }
+  throw new Error(
+    `Unsupported SIDEMESH_ACPX_PERMISSION_MODE "${mode}". Supported modes: approve-reads, deny-all`,
+  );
 }
 
 const FAKE_CAPABILITY_PROFILES = [
