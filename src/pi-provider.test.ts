@@ -2628,6 +2628,244 @@ describe("PiAgentProvider", () => {
     assert.equal(log.messages.at(-1)?.text, "Steered.");
   });
 
+  it("acknowledges active Pi steer sends after the next coalesced state save", async () => {
+    const steerCalls: Array<{ text: string; images: unknown[] }> = [];
+    const fakeModel = {
+      id: "claude-sonnet-4-5",
+      name: "Claude Sonnet 4.5",
+      provider: "anthropic",
+      reasoning: true,
+      input: ["text"],
+    };
+    const sessionManager = SessionManager.inMemory("/repo");
+    const fakeSession = {
+      sessionId: "pi-steer-pending-1",
+      sessionFile: null,
+      sessionManager,
+      model: fakeModel,
+      thinkingLevel: "medium",
+      isStreaming: true,
+      messages: [],
+      subscribe() {
+        return () => {};
+      },
+      async prompt(_text: string) {
+        await new Promise<void>(() => {});
+      },
+      async steer(text: string, images?: unknown[]) {
+        steerCalls.push({ text, images: images ?? [] });
+      },
+      async abort() {},
+      async compact() {
+        return { ok: true };
+      },
+      setSessionName() {},
+      setThinkingLevel() {},
+      async setModel() {},
+      dispose() {},
+    };
+    const fakeServices = {
+      cwd: "/repo",
+      agentDir,
+      authStorage: {},
+      modelRegistry: {
+        getAll: () => [fakeModel],
+        getAvailable: () => [fakeModel],
+        getProviderDisplayName: () => "Anthropic",
+      },
+      settingsManager: {
+        getDefaultProvider: () => "anthropic",
+        getDefaultModel: () => "claude-sonnet-4-5",
+        getDefaultThinkingLevel: () => "medium",
+      },
+      resourceLoader: {
+        getSkills: () => ({ skills: [], diagnostics: [] }),
+      },
+      diagnostics: [],
+    };
+
+    const provider = new PiAgentProvider({
+      agentDir,
+      stateDir,
+      createServices: (async () =>
+        fakeServices) as unknown as typeof import("@mariozechner/pi-coding-agent").createAgentSessionServices,
+      createSessionFromServices: (async () => ({
+        session: fakeSession,
+        extensionsResult: { extensions: [], errors: [], runtime: {} as never },
+      })) as unknown as typeof import("@mariozechner/pi-coding-agent").createAgentSessionFromServices,
+    });
+    await provider.start();
+
+    const created = await provider.createSession({
+      cwd: "/repo",
+      input: [{ type: "text", text: "First", text_elements: [] }],
+      overrides: emptyOverrides(),
+    });
+    assert.ok(created.activeTurnId);
+
+    let saveStateCalls = 0;
+    const saveStateReleases: Array<() => void> = [];
+    const providerWithInternals = provider as unknown as {
+      saveState: () => Promise<void>;
+      persistEventually: () => void;
+    };
+    providerWithInternals.saveState = async () => {
+      saveStateCalls += 1;
+      await new Promise<void>((resolve) => {
+        saveStateReleases.push(resolve);
+      });
+    };
+    const waitForSaveStateCalls = async (count: number) => {
+      for (let attempt = 0; attempt < 20; attempt++) {
+        if (saveStateCalls >= count) {
+          return;
+        }
+        await delay(5);
+      }
+      assert.fail(`Timed out waiting for ${count} Pi state save calls.`);
+    };
+
+    for (let i = 0; i < 5; i++) {
+      providerWithInternals.persistEventually();
+    }
+    await waitForSaveStateCalls(1);
+
+    const submitPromise = provider.submitInput({
+      sessionId: created.thread.id,
+      input: [{ type: "text", text: "Steer me", text_elements: [] }],
+      activeTurnId: created.activeTurnId,
+      overrides: emptyOverrides(),
+    });
+    try {
+      await delay(0);
+      assert.equal(steerCalls.length, 1);
+      assert.equal(steerCalls[0]?.text, "Steer me");
+      assert.equal(saveStateCalls, 1);
+
+      saveStateReleases[0]?.();
+      await waitForSaveStateCalls(2);
+      const blockedUntilDurable = await Promise.race([
+        submitPromise.then(() => "resolved" as const),
+        delay(25).then(() => "waiting" as const),
+      ]);
+      assert.equal(blockedUntilDurable, "waiting");
+
+      saveStateReleases[1]?.();
+      const result = await Promise.race([
+        submitPromise,
+        delay(50).then(() => null),
+      ]);
+      assert.ok(result);
+      assert.equal(result.mode, "steer");
+      assert.equal(result.turnId, created.activeTurnId);
+      assert.equal(saveStateCalls, 2);
+    } finally {
+      for (const release of saveStateReleases) {
+        release();
+      }
+      providerWithInternals.saveState = async () => {
+        saveStateCalls += 1;
+      };
+      await provider.close().catch(() => undefined);
+      await delay(0);
+    }
+  });
+
+  it("drains and reports pending Pi state persistence failures on close", async () => {
+    const provider = new PiAgentProvider({ agentDir, stateDir });
+    const stderr: string[] = [];
+    provider.on("stderr", (line) => stderr.push(line));
+    const providerWithInternals = provider as unknown as {
+      saveState: () => Promise<void>;
+      persistEventually: () => void;
+    };
+    providerWithInternals.saveState = async () => {
+      throw new Error("disk full");
+    };
+
+    providerWithInternals.persistEventually();
+    await provider.close();
+    await delay(0);
+
+    assert.equal(stderr.length, 2);
+    assert.ok(stderr.includes("Pi provider state persistence failed: disk full"));
+    assert.ok(stderr.includes("Pi provider final state persistence failed: disk full"));
+  });
+
+  it("retries later Pi state generations after a coalesced save failure", async () => {
+    const provider = new PiAgentProvider({ agentDir, stateDir });
+    const stderr: string[] = [];
+    provider.on("stderr", (line) => stderr.push(line));
+    const providerWithInternals = provider as unknown as {
+      saveState: () => Promise<void>;
+      persistEventually: () => void;
+      persistSoon: () => Promise<void>;
+    };
+    let releaseFirstSave = () => {};
+    let saveStateCalls = 0;
+    providerWithInternals.saveState = async () => {
+      saveStateCalls += 1;
+      if (saveStateCalls === 1) {
+        await new Promise<void>((resolve) => {
+          releaseFirstSave = resolve;
+        });
+        throw new Error("transient write failure");
+      }
+    };
+
+    providerWithInternals.persistEventually();
+    for (let attempt = 0; attempt < 20; attempt++) {
+      if (saveStateCalls >= 1) {
+        break;
+      }
+      await delay(5);
+    }
+    assert.equal(saveStateCalls, 1);
+
+    const durableSave = providerWithInternals.persistSoon();
+    releaseFirstSave();
+    await durableSave;
+    await delay(0);
+
+    assert.equal(saveStateCalls, 2);
+    assert.deepEqual(stderr, [
+      "Pi provider state persistence failed: transient write failure",
+    ]);
+    await provider.close();
+  });
+
+  it("drains Pi state saves queued during close", async () => {
+    const provider = new PiAgentProvider({ agentDir, stateDir });
+    const stderr: string[] = [];
+    provider.on("stderr", (line) => stderr.push(line));
+    const providerWithInternals = provider as unknown as {
+      saveState: () => Promise<void>;
+      persistEventually: () => void;
+    };
+    let queuedDuringClose = false;
+    let saveStateCalls = 0;
+    providerWithInternals.saveState = async () => {
+      saveStateCalls += 1;
+      if (saveStateCalls === 1) {
+        throw new Error("initial write failure");
+      }
+      if (saveStateCalls === 2 && !queuedDuringClose) {
+        queuedDuringClose = true;
+        providerWithInternals.persistEventually();
+      }
+    };
+
+    providerWithInternals.persistEventually();
+    await delay(0);
+    await provider.close();
+    await delay(0);
+
+    assert.equal(saveStateCalls, 3);
+    assert.deepEqual(stderr, [
+      "Pi provider state persistence failed: initial write failure",
+    ]);
+  });
+
   it("interrupts an active Pi turn", async () => {
     const liveEvents: Array<{ type: string; [key: string]: unknown }> = [];
     const listeners = new Set<(event: unknown) => void>();
