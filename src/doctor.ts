@@ -6,10 +6,12 @@ import nodePath from "node:path";
 import { promisify } from "node:util";
 
 import { VERSION as PI_VERSION } from "@mariozechner/pi-coding-agent";
+import { createAgentRegistry } from "acpx/runtime";
 
 import { createCopilotSdkClient } from "./copilot-sdk-client.js";
 import type {
   AgentProviderConfig,
+  AcpxProviderConfig,
   CopilotProviderConfig,
   FakeProviderConfig,
   NodeConfig,
@@ -133,6 +135,8 @@ export async function inspectProviderConfig(
       return inspectCopilotProvider(provider, context);
     case "opencode":
       return inspectOpenCodeProvider(provider, context);
+    case "acpx":
+      return inspectAcpxProvider(provider, context);
   }
 }
 
@@ -524,6 +528,82 @@ async function inspectOpenCodeProvider(
     ...base,
     checks,
     auth: { status: "unknown", message: "OpenCode auth readiness is not inspected yet." },
+  };
+}
+
+async function inspectAcpxProvider(
+  provider: AcpxProviderConfig,
+  context: ResolvedDoctorRuntimeContext,
+): Promise<DoctorProviderReport> {
+  const registry = createAgentRegistry({
+    overrides: provider.command ? { [provider.agent]: provider.command } : undefined,
+  });
+  const commandLine = registry.resolve(provider.agent);
+  const commandHead = commandLine.split(/\s+/, 1)[0] ?? commandLine;
+  const resolvedCommandPath = commandHead
+    ? await resolveCommandPath(commandHead, context)
+    : null;
+  const stateDir = provider.stateDir || "~/.sidemesh/acpx-provider/<agent>";
+  const checks: DoctorCheck[] = [
+    {
+      severity: "ok",
+      label: "sdk",
+      detail: `Using embedded acpx runtime`,
+    },
+    {
+      severity: "ok",
+      label: "agent",
+      detail: `ACP agent: ${provider.agent} (${commandLine})`,
+    },
+    {
+      severity: provider.permissionMode === "approve-reads" ? "ok" : "warn",
+      label: "permissions",
+      detail:
+        provider.permissionMode === "approve-reads"
+          ? "Read/search ACP permissions auto-approve; writes and commands require Sidemesh approval."
+          : "All ACP permission requests are denied by default.",
+    },
+    {
+      severity: provider.stateDir ? "ok" : "warn",
+      label: "state",
+      detail: `ACP session state dir: ${stateDir}`,
+      remedy: provider.stateDir
+        ? undefined
+        : "Set SIDEMESH_ACPX_STATE_DIR or rerun setup if you want an explicit persisted acpx state path.",
+    },
+  ];
+  if (provider.command) {
+    checks.push({
+      severity: resolvedCommandPath ? "ok" : "warn",
+      label: "command",
+      detail: resolvedCommandPath
+        ? `Resolved ${commandHead} to ${resolvedCommandPath}`
+        : `Could not resolve command head: ${commandHead}`,
+      remedy: resolvedCommandPath
+        ? undefined
+        : "Install the configured ACP agent command or update SIDEMESH_ACPX_COMMAND.",
+    });
+  } else {
+    checks.push({
+      severity: "warn",
+      label: "command",
+      detail:
+        "Agent command is managed by acpx's built-in registry and is not probed during doctor.",
+      remedy:
+        "Run the agent's own login/install flow if the first acpx session fails to start.",
+    });
+  }
+  return {
+    kind: "acpx",
+    displayName: "ACP via acpx",
+    command: commandLine,
+    resolvedCommandPath,
+    version: "acpx runtime",
+    auth: {
+      status: "unknown",
+      message: "ACP agent authentication is provider-specific and is not inspected yet.",
+    },
+    checks,
   };
 }
 

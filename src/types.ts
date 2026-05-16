@@ -3,14 +3,16 @@ export type AgentProviderKind =
   | "pi"
   | "fake"
   | "copilot"
-  | "opencode";
+  | "opencode"
+  | "acpx";
 
 export type AgentProviderConfig =
   | CodexProviderConfig
   | PiProviderConfig
   | FakeProviderConfig
   | CopilotProviderConfig
-  | OpenCodeProviderConfig;
+  | OpenCodeProviderConfig
+  | AcpxProviderConfig;
 
 export interface CodexProviderConfig {
   kind: "codex";
@@ -43,6 +45,16 @@ export interface OpenCodeProviderConfig {
   kind: "opencode";
   bin: string;
   stateDir: string | null;
+}
+
+export type AcpxPermissionMode = "approve-reads" | "deny-all";
+
+export interface AcpxProviderConfig {
+  kind: "acpx";
+  agent: string;
+  command: string | null;
+  stateDir: string | null;
+  permissionMode: AcpxPermissionMode;
 }
 
 export type FakeCapabilityProfile =

@@ -2,7 +2,7 @@
 
 import { spawnSync } from "node:child_process";
 
-const MIN_VERSION = [22, 5, 0];
+const MIN_VERSION = [22, 13, 0];
 const MIN_VERSION_TEXT = MIN_VERSION.join(".");
 
 function parseVersion(raw) {

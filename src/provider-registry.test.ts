@@ -2,6 +2,10 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 
 import {
+  ACPX_PROVIDER_CAPABILITIES,
+  AcpxAgentProvider,
+} from "./acpx-provider.js";
+import {
   CODEX_PROVIDER_CAPABILITIES,
   CodexAgentProvider,
 } from "./codex-provider.js";
@@ -41,12 +45,14 @@ describe("provider registry", () => {
       "fake",
       "opencode",
       "copilot",
+      "acpx",
     ]);
     assert.equal(isAgentProviderKind("codex"), true);
     assert.equal(isAgentProviderKind("pi"), true);
     assert.equal(isAgentProviderKind("fake"), true);
     assert.equal(isAgentProviderKind("opencode"), true);
     assert.equal(isAgentProviderKind("copilot"), true);
+    assert.equal(isAgentProviderKind("acpx"), true);
   });
 
   it("exposes provider metadata without leaking factory functions", () => {
@@ -131,25 +137,40 @@ describe("provider registry", () => {
         capabilities: COPILOT_PROVIDER_CAPABILITIES,
         setupAudience: "public",
       },
+      {
+        kind: "acpx",
+        displayName: "ACP via acpx",
+        defaultCommand: "gemini",
+        commandEnvironmentVariables: [
+          "SIDEMESH_ACPX_AGENT",
+          "SIDEMESH_ACPX_COMMAND",
+          "SIDEMESH_PROVIDER_COMMAND",
+          "SIDEMESH_ACPX_STATE_DIR",
+          "SIDEMESH_ACPX_PERMISSION_MODE",
+        ],
+        supportedApprovalPolicies: ["on-request", "never"],
+        capabilities: ACPX_PROVIDER_CAPABILITIES,
+        setupAudience: "public",
+      },
     ]);
   });
 
   it("hides dev-only providers from the normal setup wizard", () => {
     assert.deepEqual(
       listSetupAgentProviderDefinitionSummaries().map((summary) => summary.kind),
-      ["codex", "pi", "copilot"],
+      ["codex", "pi", "copilot", "acpx"],
     );
     assert.deepEqual(
       listSetupAgentProviderDefinitionSummaries({
         includeKinds: ["fake"],
       }).map((summary) => summary.kind),
-      ["codex", "pi", "fake", "copilot"],
+      ["codex", "pi", "fake", "copilot", "acpx"],
     );
     assert.deepEqual(
       listSetupAgentProviderDefinitionSummaries({
         includeDev: true,
       }).map((summary) => summary.kind),
-      ["codex", "pi", "fake", "opencode", "copilot"],
+      ["codex", "pi", "fake", "opencode", "copilot", "acpx"],
     );
   });
 
@@ -348,5 +369,35 @@ describe("provider registry", () => {
     assert.equal(provider.capabilities.configuration.models, true);
     assert.equal(provider.capabilities.runtimeControls.model, true);
     assert.equal(provider.capabilities.runtimeControls.mode, true);
+  });
+
+  it("loads and constructs the acpx provider", () => {
+    const config = loadAgentProviderConfig("acpx", {
+      SIDEMESH_ACPX_AGENT: "claude",
+      SIDEMESH_ACPX_COMMAND: "claude-agent-acp",
+      SIDEMESH_ACPX_STATE_DIR: "/tmp/sidemesh-acpx",
+      SIDEMESH_ACPX_PERMISSION_MODE: "deny-all",
+    });
+
+    assert.deepEqual(config, {
+      kind: "acpx",
+      agent: "claude",
+      command: "claude-agent-acp",
+      stateDir: "/tmp/sidemesh-acpx",
+      permissionMode: "deny-all",
+    });
+    assert.deepEqual(summarizeAgentProviderConfig(config), {
+      kind: "acpx",
+      command: "claude-agent-acp",
+    });
+
+    const provider = createAgentProviderFromConfig(config);
+    assert.ok(provider instanceof AcpxAgentProvider);
+    assert.equal(provider.kind, "acpx");
+    assert.equal(provider.displayName, "ACP via acpx (claude)");
+    assert.equal(provider.capabilities.sessions.create, true);
+    assert.equal(provider.capabilities.sessions.eventReplay, false);
+    assert.equal(provider.capabilities.approvals.command, true);
+    assert.equal(provider.capabilities.runtimeControls.model, true);
   });
 });
