@@ -115,6 +115,12 @@ interface ActivePiTurn {
   status: string | null;
 }
 
+interface PiSaveWaiter {
+  generation: number;
+  resolve: () => void;
+  reject: (error: unknown) => void;
+}
+
 interface PiDraftAssistantMessage {
   id: string;
   turnId: string;
@@ -242,7 +248,11 @@ export class PiAgentProvider
   private readonly sessionSummariesByPath = new Map<string, PiSessionSummary>();
   private readonly sessionSummaryFingerprints = new Map<string, string>();
   private sessionSummaryRefresh: Promise<void> | null = null;
-  private saveChain: Promise<void> = Promise.resolve();
+  private saveGeneration = 0;
+  private attemptedSaveGeneration = 0;
+  private flushedSaveGeneration = 0;
+  private saveLoop: Promise<void> | null = null;
+  private readonly saveWaiters = new Set<PiSaveWaiter>();
 
   public constructor(options: PiAgentProviderOptions = {}) {
     super();
@@ -267,6 +277,24 @@ export class PiAgentProvider
     this.activeTurns.clear();
     for (const session of this.sessions.values()) {
       this.unloadSession(session);
+    }
+    while (this.saveLoop) {
+      await this.saveLoop;
+    }
+    if (this.flushedSaveGeneration < this.saveGeneration) {
+      try {
+        await this.persistSoon();
+      } catch (error) {
+        this.emit(
+          "stderr",
+          error instanceof Error
+            ? `Pi provider final state persistence failed: ${error.message}`
+            : "Pi provider final state persistence failed.",
+        );
+      }
+    }
+    while (this.saveLoop) {
+      await this.saveLoop;
     }
   }
 
@@ -1804,21 +1832,11 @@ export class PiAgentProvider
   }
 
   private async persistSoon(): Promise<void> {
-    const previous = this.saveChain;
-    const next = (async () => {
-      try {
-        await previous;
-      } catch {
-        // Keep the persistence queue moving after an earlier failure.
-      }
-      await this.saveState();
-    })();
-    this.saveChain = next;
-    await next;
+    return this.requestStateSave();
   }
 
   private persistEventually(): void {
-    void this.persistSoon().catch((error: unknown) => {
+    void this.requestStateSave().catch((error: unknown) => {
       this.emit(
         "stderr",
         error instanceof Error
@@ -1826,6 +1844,58 @@ export class PiAgentProvider
           : "Pi provider state persistence failed.",
       );
     });
+  }
+
+  private requestStateSave(): Promise<void> {
+    const generation = ++this.saveGeneration;
+    const promise = new Promise<void>((resolve, reject) => {
+      this.saveWaiters.add({ generation, resolve, reject });
+    });
+    this.ensureSaveLoop();
+    return promise;
+  }
+
+  private ensureSaveLoop(): void {
+    if (this.saveLoop) {
+      return;
+    }
+    this.saveLoop = Promise.resolve().then(() => this.runSaveLoop());
+    void this.saveLoop.finally(() => {
+      this.saveLoop = null;
+      if (this.attemptedSaveGeneration < this.saveGeneration) {
+        this.ensureSaveLoop();
+      }
+    });
+  }
+
+  private async runSaveLoop(): Promise<void> {
+    while (this.attemptedSaveGeneration < this.saveGeneration) {
+      const failedGeneration = this.attemptedSaveGeneration + 1;
+      const targetGeneration = this.saveGeneration;
+      try {
+        await this.saveState();
+        this.flushedSaveGeneration = targetGeneration;
+        this.attemptedSaveGeneration = targetGeneration;
+        this.settleSaveWaiters(targetGeneration);
+      } catch (error) {
+        this.attemptedSaveGeneration = failedGeneration;
+        this.settleSaveWaiters(failedGeneration, error);
+      }
+    }
+  }
+
+  private settleSaveWaiters(generation: number, error?: unknown): void {
+    for (const waiter of this.saveWaiters) {
+      if (waiter.generation > generation) {
+        continue;
+      }
+      this.saveWaiters.delete(waiter);
+      if (error !== undefined) {
+        waiter.reject(error);
+      } else {
+        waiter.resolve();
+      }
+    }
   }
 
   private async saveState(): Promise<void> {
