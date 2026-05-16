@@ -151,6 +151,55 @@ void main() {
     await tester.pump();
   });
 
+  testWidgets('desktop model picker returns focus to composer after closing', (
+    tester,
+  ) async {
+    final host = _host('desktop-model-picker-focus');
+    final session = _session('desktop-model-picker-focus', provider: 'fake');
+    final api = _CapabilityFakeApi(
+      _nodeForCapabilities(_fullCapabilities),
+      models: const [_fakeModel],
+    );
+    addTearDown(api.dispose);
+
+    await _pumpApp(
+      tester,
+      SessionScreen(
+        host: host,
+        session: session,
+        api: api,
+        desktopMode: true,
+      ),
+      size: const Size(1180, 900),
+    );
+    await _pumpFrames(tester);
+
+    expect(_composerTextField(tester).focusNode?.hasFocus, isTrue);
+
+    final modelTooltip = find.byWidgetPredicate(
+      (widget) =>
+          widget is Tooltip &&
+          widget.message?.startsWith('Choose model') == true,
+    );
+    final modelButton = find.descendant(
+      of: modelTooltip,
+      matching: find.byType(InkWell),
+    );
+    await tester.tap(modelButton);
+    await _pumpFrames(tester);
+
+    expect(find.text('Choose a model'), findsOneWidget);
+
+    await tester.tap(find.text('Fake Balanced'));
+    await _pumpFrames(tester);
+
+    expect(find.text('Choose a model'), findsNothing);
+    expect(_composerTextField(tester).focusNode?.hasFocus, isTrue);
+
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pump();
+  });
+
   testWidgets('mobile composer model chip opens the model picker only', (
     tester,
   ) async {
@@ -918,6 +967,16 @@ Future<void> _pumpFrames(WidgetTester tester) async {
   await tester.pump(const Duration(milliseconds: 50));
   await tester.pump(const Duration(milliseconds: 250));
   await tester.pump();
+}
+
+TextField _composerTextField(WidgetTester tester) {
+  final finder = find.byWidgetPredicate(
+    (widget) =>
+        widget is TextField &&
+        widget.decoration?.hintText?.startsWith('Reply here') == true,
+  );
+  expect(finder, findsOneWidget);
+  return tester.widget<TextField>(finder);
 }
 
 Future<void> _pumpApp(
