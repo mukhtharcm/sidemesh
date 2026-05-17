@@ -614,7 +614,7 @@ class _SidemeshHomeScreenState extends State<SidemeshHomeScreen>
               ),
             Expanded(
               child: _loading
-                  ? const MeshLoader()
+                  ? const _HomeBootstrapLoadingState()
                   : IndexedStack(
                       index: _tabIndex,
                       children: [
@@ -1307,6 +1307,202 @@ class _NavIconWithBadge extends StatelessWidget {
   }
 }
 
+class _HomeBootstrapLoadingState extends StatelessWidget {
+  const _HomeBootstrapLoadingState();
+
+  @override
+  Widget build(BuildContext context) {
+    return ListView(
+      physics: const AlwaysScrollableScrollPhysics(),
+      padding: const EdgeInsets.fromLTRB(16, 8, 16, 32),
+      children: const [
+        MeshCard(
+          tone: MeshCardTone.muted,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              MeshSectionHeadingSkeleton(
+                titleWidthFactor: 0.18,
+                subtitleWidthFactor: 0.38,
+              ),
+              SizedBox(height: 16),
+              Row(
+                children: [
+                  Expanded(child: _HomeMetricSkeleton()),
+                  SizedBox(width: 12),
+                  Expanded(child: _HomeMetricSkeleton()),
+                ],
+              ),
+            ],
+          ),
+        ),
+        SizedBox(height: 18),
+        MeshSectionHeadingSkeleton(
+          titleWidthFactor: 0.2,
+          subtitleWidthFactor: 0.46,
+        ),
+        SizedBox(height: 12),
+        MeshListRowSkeleton(
+          titleWidthFactor: 0.54,
+          subtitleWidthFactor: 0.78,
+          showMeta: true,
+          badgeCount: 2,
+        ),
+        SizedBox(height: 10),
+        MeshListRowSkeleton(
+          titleWidthFactor: 0.44,
+          subtitleWidthFactor: 0.68,
+          badgeCount: 1,
+        ),
+        SizedBox(height: 10),
+        MeshListRowSkeleton(
+          titleWidthFactor: 0.5,
+          subtitleWidthFactor: 0.72,
+          showMeta: true,
+        ),
+      ],
+    );
+  }
+}
+
+class _HomeMetricSkeleton extends StatelessWidget {
+  const _HomeMetricSkeleton();
+
+  @override
+  Widget build(BuildContext context) {
+    return MeshSurface(
+      tone: MeshSurfaceTone.surface,
+      radius: AppRadii.control,
+      padding: const EdgeInsets.all(12),
+      child: const Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          FractionallySizedBox(
+            widthFactor: 0.42,
+            alignment: Alignment.centerLeft,
+            child: MeshSkeleton(height: 10, radius: AppRadii.badge),
+          ),
+          SizedBox(height: 10),
+          FractionallySizedBox(
+            widthFactor: 0.58,
+            alignment: Alignment.centerLeft,
+            child: MeshSkeleton(height: 18, radius: AppRadii.badge),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _RecentPaneLoadingState extends StatelessWidget {
+  const _RecentPaneLoadingState({required this.dense, this.padding});
+
+  final bool dense;
+  final EdgeInsets? padding;
+
+  @override
+  Widget build(BuildContext context) {
+    final basePadding =
+        padding ??
+        (dense
+            ? const EdgeInsets.fromLTRB(6, 4, 6, 24)
+            : const EdgeInsets.fromLTRB(16, 8, 16, 32));
+    final spacing = dense ? 8.0 : 10.0;
+    return ListView(
+      physics: const AlwaysScrollableScrollPhysics(),
+      padding: basePadding,
+      children: [
+        const MeshSectionHeadingSkeleton(
+          titleWidthFactor: 0.2,
+          subtitleWidthFactor: 0.44,
+        ),
+        SizedBox(height: spacing + 2),
+        MeshListRowSkeleton(
+          dense: dense,
+          titleWidthFactor: 0.56,
+          subtitleWidthFactor: 0.78,
+          showMeta: true,
+          badgeCount: 2,
+        ),
+        SizedBox(height: spacing),
+        MeshListRowSkeleton(
+          dense: dense,
+          titleWidthFactor: 0.46,
+          subtitleWidthFactor: 0.7,
+          badgeCount: 1,
+        ),
+        SizedBox(height: spacing),
+        MeshListRowSkeleton(
+          dense: dense,
+          titleWidthFactor: 0.5,
+          subtitleWidthFactor: 0.74,
+          showMeta: true,
+        ),
+      ],
+    );
+  }
+}
+
+class _InboxPaneLoadingState extends StatelessWidget {
+  const _InboxPaneLoadingState({required this.dense});
+
+  final bool dense;
+
+  @override
+  Widget build(BuildContext context) {
+    final spacing = dense ? 8.0 : 12.0;
+    return ListView(
+      physics: const AlwaysScrollableScrollPhysics(),
+      padding: dense
+          ? const EdgeInsets.fromLTRB(8, 4, 8, 24)
+          : const EdgeInsets.fromLTRB(16, 8, 16, 32),
+      children: [
+        MeshCard(
+          tone: MeshCardTone.muted,
+          padding: dense
+              ? const EdgeInsets.fromLTRB(12, 12, 12, 12)
+              : const EdgeInsets.fromLTRB(14, 14, 14, 14),
+          child: const Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              MeshSectionHeadingSkeleton(
+                titleWidthFactor: 0.22,
+                subtitleWidthFactor: 0.52,
+              ),
+              SizedBox(height: 12),
+              FractionallySizedBox(
+                widthFactor: 0.68,
+                alignment: Alignment.centerLeft,
+                child: MeshSkeleton(height: 12, radius: AppRadii.badge),
+              ),
+            ],
+          ),
+        ),
+        SizedBox(height: spacing),
+        const MeshSectionHeadingSkeleton(
+          titleWidthFactor: 0.18,
+          subtitleWidthFactor: 0.4,
+        ),
+        SizedBox(height: spacing),
+        MeshListRowSkeleton(
+          dense: dense,
+          titleWidthFactor: 0.58,
+          subtitleWidthFactor: 0.74,
+          showMeta: true,
+          badgeCount: 1,
+        ),
+        SizedBox(height: spacing),
+        MeshListRowSkeleton(
+          dense: dense,
+          titleWidthFactor: 0.44,
+          subtitleWidthFactor: 0.62,
+          showMeta: true,
+        ),
+      ],
+    );
+  }
+}
+
 class RecentPane extends StatefulWidget {
   const RecentPane({
     super.key,
@@ -1743,7 +1939,10 @@ class _RecentPaneState extends State<RecentPane> {
             _store.failedHostLabels.isEmpty &&
             _store.pendingHostIds.isNotEmpty;
         if (stillLoadingInitial) {
-          return const MeshLoader();
+          return _RecentPaneLoadingState(
+            dense: widget.dense,
+            padding: widget.padding,
+          );
         }
         final sortedEntries = _sortEntries(_store.entries);
         final groups = _groupEntries(sortedEntries);
@@ -2449,7 +2648,7 @@ class _InboxPaneState extends State<InboxPane> {
 
     final stillLoadingInitial = !_store.hasLoadedOnce && _store.isLoading;
     if (stillLoadingInitial) {
-      return const MeshLoader();
+      return _InboxPaneLoadingState(dense: widget.dense);
     }
 
     final allEntries = _store.entries;

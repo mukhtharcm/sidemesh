@@ -585,6 +585,166 @@ class _MeshSkeletonState extends State<MeshSkeleton>
   }
 }
 
+/// Loading heading placeholder for section titles and short blurbs.
+class MeshSectionHeadingSkeleton extends StatelessWidget {
+  const MeshSectionHeadingSkeleton({
+    super.key,
+    this.titleWidthFactor = 0.26,
+    this.subtitleWidthFactor = 0.48,
+  });
+
+  final double titleWidthFactor;
+  final double subtitleWidthFactor;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        FractionallySizedBox(
+          widthFactor: titleWidthFactor,
+          alignment: Alignment.centerLeft,
+          child: const MeshSkeleton(height: 16, radius: AppRadii.badge),
+        ),
+        const SizedBox(height: 6),
+        FractionallySizedBox(
+          widthFactor: subtitleWidthFactor,
+          alignment: Alignment.centerLeft,
+          child: const MeshSkeleton(height: 12, radius: AppRadii.badge),
+        ),
+      ],
+    );
+  }
+}
+
+/// Loading row placeholder with the same proportions as [MeshListRow].
+class MeshListRowSkeleton extends StatelessWidget {
+  const MeshListRowSkeleton({
+    super.key,
+    this.showLeading = true,
+    this.showTrailing = true,
+    this.showSubtitle = true,
+    this.showMeta = false,
+    this.badgeCount = 0,
+    this.dense = false,
+    this.tone = MeshSurfaceTone.surface,
+    this.framed = true,
+    this.radius = AppRadii.surface,
+    this.titleWidthFactor = 0.46,
+    this.subtitleWidthFactor = 0.74,
+    this.metaWidthFactor = 0.34,
+  });
+
+  final bool showLeading;
+  final bool showTrailing;
+  final bool showSubtitle;
+  final bool showMeta;
+  final int badgeCount;
+  final bool dense;
+  final MeshSurfaceTone tone;
+  final bool framed;
+  final double radius;
+  final double titleWidthFactor;
+  final double subtitleWidthFactor;
+  final double metaWidthFactor;
+
+  @override
+  Widget build(BuildContext context) {
+    final rowPadding = dense
+        ? const EdgeInsets.fromLTRB(12, 10, 10, 10)
+        : const EdgeInsets.fromLTRB(14, 14, 12, 14);
+    final gap = dense ? AppSpacing.sm : AppSpacing.md;
+    final leadingSize = dense ? 34.0 : 40.0;
+
+    final row = Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        if (showLeading) ...[
+          MeshSkeleton(
+            width: leadingSize,
+            height: leadingSize,
+            radius: dense ? AppRadii.control : AppRadii.surface,
+          ),
+          SizedBox(width: gap),
+        ],
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Expanded(
+                    child: FractionallySizedBox(
+                      widthFactor: titleWidthFactor,
+                      alignment: Alignment.centerLeft,
+                      child: MeshSkeleton(
+                        height: dense ? 14 : 16,
+                        radius: AppRadii.badge,
+                      ),
+                    ),
+                  ),
+                  if (badgeCount > 0) ...[
+                    const SizedBox(width: AppSpacing.sm),
+                    Wrap(
+                      spacing: AppSpacing.xs,
+                      runSpacing: AppSpacing.xs,
+                      children: List<Widget>.generate(badgeCount, (index) {
+                        final width = index.isEven ? 48.0 : 40.0;
+                        return MeshSkeleton(
+                          width: width,
+                          height: 18,
+                          radius: 999,
+                        );
+                      }),
+                    ),
+                  ],
+                ],
+              ),
+              if (showSubtitle) ...[
+                SizedBox(height: dense ? 6 : 8),
+                FractionallySizedBox(
+                  widthFactor: subtitleWidthFactor,
+                  alignment: Alignment.centerLeft,
+                  child: const MeshSkeleton(height: 12, radius: AppRadii.badge),
+                ),
+              ],
+              if (showMeta) ...[
+                const SizedBox(height: 6),
+                FractionallySizedBox(
+                  widthFactor: metaWidthFactor,
+                  alignment: Alignment.centerLeft,
+                  child: const MeshSkeleton(height: 10, radius: AppRadii.badge),
+                ),
+              ],
+            ],
+          ),
+        ),
+        if (showTrailing) ...[
+          SizedBox(width: gap),
+          MeshSkeleton(
+            width: dense ? 34 : 42,
+            height: dense ? 12 : 14,
+            radius: AppRadii.badge,
+          ),
+        ],
+      ],
+    );
+
+    if (!framed) {
+      return Padding(padding: rowPadding, child: row);
+    }
+
+    return MeshSurface(
+      padding: rowPadding,
+      tone: tone,
+      radius: radius,
+      child: row,
+    );
+  }
+}
+
 /// Outlined card container used across the app. Replaces the Material [Card].
 class MeshCard extends StatelessWidget {
   const MeshCard({
