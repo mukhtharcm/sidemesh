@@ -745,6 +745,263 @@ class MeshListRowSkeleton extends StatelessWidget {
   }
 }
 
+/// Small inline badge for dense metadata tags inside selection and picker rows.
+class MeshInlineBadge extends StatelessWidget {
+  const MeshInlineBadge({super.key, required this.label});
+
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+      decoration: BoxDecoration(
+        color: colors.surface,
+        borderRadius: AppShapes.pill,
+        border: Border.all(color: colors.border),
+      ),
+      child: Text(
+        label,
+        style: Theme.of(context).textTheme.labelSmall?.copyWith(
+          color: colors.textSecondary,
+          letterSpacing: 0.4,
+        ),
+      ),
+    );
+  }
+}
+
+/// Shared selection card used for compact model/profile pickers.
+class MeshSelectionCard extends StatelessWidget {
+  const MeshSelectionCard({
+    super.key,
+    required this.title,
+    required this.value,
+    required this.subtitle,
+    required this.loading,
+    required this.badges,
+    required this.onTap,
+    this.icon,
+    this.error,
+    this.currentValue,
+    this.currentValueLabel = 'Current setting',
+    this.onRetry,
+    this.retryLabel = 'Retry loading',
+    this.compact = false,
+  });
+
+  final String title;
+  final String value;
+  final String subtitle;
+  final bool loading;
+  final List<String> badges;
+  final VoidCallback? onTap;
+  final IconData? icon;
+  final String? error;
+  final String? currentValue;
+  final String currentValueLabel;
+  final VoidCallback? onRetry;
+  final String retryLabel;
+  final bool compact;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    return MeshSurface(
+      onTap: loading ? null : onTap,
+      tone: MeshSurfaceTone.muted,
+      radius: AppRadii.control,
+      width: double.infinity,
+      padding: EdgeInsets.all(compact ? 10 : 12),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              if (icon != null) ...[
+                Icon(icon, size: 16, color: colors.textSecondary),
+                const SizedBox(width: 8),
+              ],
+              Expanded(
+                child: Text(
+                  title,
+                  style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                    fontWeight: AppWeights.emphasis,
+                  ),
+                ),
+              ),
+              if (loading)
+                const SizedBox(
+                  width: 18,
+                  height: 18,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                )
+              else
+                Icon(
+                  Icons.keyboard_arrow_down_rounded,
+                  color: colors.textSecondary,
+                ),
+            ],
+          ),
+          const SizedBox(height: 6),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            crossAxisAlignment: WrapCrossAlignment.center,
+            children: [
+              Text(
+                value,
+                style: Theme.of(
+                  context,
+                ).textTheme.bodyLarge?.copyWith(fontWeight: AppWeights.body),
+              ),
+              ...badges.map((badge) => MeshInlineBadge(label: badge)),
+            ],
+          ),
+          const SizedBox(height: 4),
+          Text(
+            subtitle,
+            maxLines: compact ? 2 : null,
+            overflow: compact ? TextOverflow.ellipsis : null,
+            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+              color: colors.textSecondary,
+              height: compact ? 1.25 : 1.35,
+            ),
+          ),
+          if ((currentValue ?? '').trim().isNotEmpty &&
+              currentValue!.trim() != value.trim()) ...[
+            const SizedBox(height: 8),
+            Text(
+              '$currentValueLabel: ${currentValue!.trim()}',
+              style: Theme.of(
+                context,
+              ).textTheme.bodySmall?.copyWith(color: colors.textSecondary),
+            ),
+          ],
+          if (error != null && onRetry != null) ...[
+            const SizedBox(height: 8),
+            TextButton.icon(
+              onPressed: onRetry,
+              icon: const Icon(Icons.refresh_rounded, size: 18),
+              label: Text(retryLabel),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+/// Skeleton companion for [MeshSelectionCard].
+class MeshSelectionCardSkeleton extends StatelessWidget {
+  const MeshSelectionCardSkeleton({
+    super.key,
+    this.showIcon = true,
+    this.compact = false,
+    this.badgeCount = 2,
+    this.showCurrentValue = false,
+  });
+
+  final bool showIcon;
+  final bool compact;
+  final int badgeCount;
+  final bool showCurrentValue;
+
+  @override
+  Widget build(BuildContext context) {
+    return MeshSurface(
+      tone: MeshSurfaceTone.muted,
+      radius: AppRadii.control,
+      width: double.infinity,
+      padding: EdgeInsets.all(compact ? 10 : 12),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              if (showIcon) ...[
+                const MeshSkeleton(width: 16, height: 16, radius: 6),
+                const SizedBox(width: 8),
+              ],
+              const Expanded(
+                child: FractionallySizedBox(
+                  widthFactor: 0.28,
+                  alignment: Alignment.centerLeft,
+                  child: MeshSkeleton(height: 14, radius: AppRadii.badge),
+                ),
+              ),
+              const SizedBox(width: 12),
+              const MeshSkeleton(width: 18, height: 18, radius: 999),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            crossAxisAlignment: WrapCrossAlignment.center,
+            children: [
+              const MeshSkeleton(
+                width: 112,
+                height: 16,
+                radius: AppRadii.badge,
+              ),
+              ...List<Widget>.generate(
+                badgeCount,
+                (index) => MeshSkeleton(
+                  width: index.isEven ? 48 : 42,
+                  height: 18,
+                  radius: 999,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          const MeshSkeleton(height: 12, radius: AppRadii.badge),
+          const SizedBox(height: 6),
+          FractionallySizedBox(
+            widthFactor: compact ? 0.72 : 0.58,
+            alignment: Alignment.centerLeft,
+            child: const MeshSkeleton(height: 12, radius: AppRadii.badge),
+          ),
+          if (showCurrentValue) ...[
+            const SizedBox(height: 8),
+            const FractionallySizedBox(
+              widthFactor: 0.46,
+              alignment: Alignment.centerLeft,
+              child: MeshSkeleton(height: 12, radius: AppRadii.badge),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+/// Skeleton chips row for loading option groups such as reasoning presets.
+class MeshChipSkeletonWrap extends StatelessWidget {
+  const MeshChipSkeletonWrap({super.key, this.widths = const [72, 92, 78]});
+
+  final List<double> widths;
+
+  @override
+  Widget build(BuildContext context) {
+    return Wrap(
+      spacing: 8,
+      runSpacing: 8,
+      children: widths
+          .map(
+            (width) => MeshSkeleton(
+              width: width,
+              height: 40,
+              radius: AppRadii.control,
+            ),
+          )
+          .toList(growable: false),
+    );
+  }
+}
+
 /// Outlined card container used across the app. Replaces the Material [Card].
 class MeshCard extends StatelessWidget {
   const MeshCard({
