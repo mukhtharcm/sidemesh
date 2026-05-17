@@ -1702,44 +1702,48 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
 
     if (_supportsProfiles) {
       extras.add(
-        _ModelSelectionCard(
-          title: 'Profile',
-          icon: Icons.badge_rounded,
-          value: _profileLabel,
-          subtitle: _profileDescription,
-          loading: _loadingProfiles,
-          error: _profilesError,
-          compact: true,
-          badges: _profileBadges(),
-          retryLabel: 'Retry loading profiles',
-          onTap: _chooseProfile,
-          onRetry: () => unawaited(_loadProfiles(force: true)),
-        ),
+        _loadingProfiles && _profiles.isEmpty
+            ? const MeshSelectionCardSkeleton(compact: true, badgeCount: 2)
+            : MeshSelectionCard(
+                title: 'Profile',
+                icon: Icons.badge_rounded,
+                value: _profileLabel,
+                subtitle: _profileDescription,
+                loading: _loadingProfiles,
+                error: _profilesError,
+                compact: true,
+                badges: _profileBadges(),
+                retryLabel: 'Retry loading profiles',
+                onTap: _chooseProfile,
+                onRetry: () => unawaited(_loadProfiles(force: true)),
+              ),
       );
     }
 
     if (_supportsModels && _supportsModelOverride) {
       extras.add(
-        _ModelSelectionCard(
-          title: 'Model',
-          icon: Icons.memory_rounded,
-          value: _modelLabel,
-          subtitle: _modelDescription,
-          loading: _loadingModels,
-          error: _modelsError,
-          compact: true,
-          badges: <String>[
-            if (_selectedModel != null) 'custom',
-            if (_selectedModel == null && _profileToSubmit != null)
-              'profile default',
-            if (_controlModel?.isAutoModel ?? false) 'auto',
-            if (_controlModel?.isDefault ?? false) 'default',
-            if (_profileToSubmit != null) 'from profile',
-            if (_controlModel?.supportsFastMode ?? false) 'fast',
-          ],
-          onTap: _chooseModel,
-          onRetry: () => unawaited(_loadModels()),
-        ),
+        _loadingModels && _models.isEmpty
+            ? const MeshSelectionCardSkeleton(compact: true, badgeCount: 3)
+            : MeshSelectionCard(
+                title: 'Model',
+                icon: Icons.memory_rounded,
+                value: _modelLabel,
+                subtitle: _modelDescription,
+                loading: _loadingModels,
+                error: _modelsError,
+                compact: true,
+                badges: <String>[
+                  if (_selectedModel != null) 'custom',
+                  if (_selectedModel == null && _profileToSubmit != null)
+                    'profile default',
+                  if (_controlModel?.isAutoModel ?? false) 'auto',
+                  if (_controlModel?.isDefault ?? false) 'default',
+                  if (_profileToSubmit != null) 'from profile',
+                  if (_controlModel?.supportsFastMode ?? false) 'fast',
+                ],
+                onTap: _chooseModel,
+                onRetry: () => unawaited(_loadModels()),
+              ),
       );
     }
 
@@ -1754,7 +1758,7 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
 
     if (_supportsReasoningEffort && _supportsModels && _supportsModelOverride) {
       if (_loadingModels && _models.isEmpty) {
-        extras.add(const LinearProgressIndicator(minHeight: 3));
+        extras.add(const MeshChipSkeletonWrap());
       } else if (_controlModelIsAuto) {
         extras.add(
           LaunchInfoLine(
@@ -2104,109 +2108,6 @@ class _CompactInfoLine extends StatelessWidget {
   }
 }
 
-class _ModelSelectionCard extends StatelessWidget {
-  const _ModelSelectionCard({
-    this.title = 'Model',
-    this.icon = Icons.memory_rounded,
-    required this.value,
-    required this.subtitle,
-    required this.loading,
-    required this.error,
-    required this.badges,
-    required this.onTap,
-    required this.onRetry,
-    this.retryLabel = 'Retry loading models',
-    this.compact = false,
-  });
-
-  final String title;
-  final IconData icon;
-  final String value;
-  final String subtitle;
-  final bool loading;
-  final String? error;
-  final List<String> badges;
-  final VoidCallback onTap;
-  final VoidCallback onRetry;
-  final String retryLabel;
-  final bool compact;
-
-  @override
-  Widget build(BuildContext context) {
-    final colors = context.colors;
-    return MeshSurface(
-      onTap: loading ? null : onTap,
-      tone: MeshSurfaceTone.muted,
-      radius: AppRadii.control,
-      width: double.infinity,
-      padding: EdgeInsets.all(compact ? 10 : 12),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Icon(icon, size: 16, color: colors.textSecondary),
-              const SizedBox(width: 8),
-              Expanded(
-                child: Text(
-                  title,
-                  style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                    fontWeight: AppWeights.emphasis,
-                  ),
-                ),
-              ),
-              if (loading)
-                const SizedBox(
-                  width: 18,
-                  height: 18,
-                  child: CircularProgressIndicator(strokeWidth: 2),
-                )
-              else
-                Icon(
-                  Icons.keyboard_arrow_down_rounded,
-                  color: colors.textSecondary,
-                ),
-            ],
-          ),
-          const SizedBox(height: 6),
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            crossAxisAlignment: WrapCrossAlignment.center,
-            children: [
-              Text(
-                value,
-                style: Theme.of(
-                  context,
-                ).textTheme.bodyLarge?.copyWith(fontWeight: AppWeights.body),
-              ),
-              ...badges.map((badge) => _InlineBadge(label: badge)),
-            ],
-          ),
-          const SizedBox(height: 4),
-          Text(
-            subtitle,
-            maxLines: compact ? 2 : null,
-            overflow: compact ? TextOverflow.ellipsis : null,
-            style: Theme.of(context).textTheme.bodySmall?.copyWith(
-              color: colors.textSecondary,
-              height: compact ? 1.25 : 1.35,
-            ),
-          ),
-          if (error != null) ...[
-            const SizedBox(height: 8),
-            TextButton.icon(
-              onPressed: onRetry,
-              icon: const Icon(Icons.refresh_rounded, size: 18),
-              label: Text(retryLabel),
-            ),
-          ],
-        ],
-      ),
-    );
-  }
-}
-
 class _ProfilePickerResult {
   const _ProfilePickerResult(this.profileName);
 
@@ -2485,7 +2386,8 @@ class _ProviderPickerTile extends StatelessWidget {
                     runSpacing: 7,
                     crossAxisAlignment: WrapCrossAlignment.center,
                     children: [
-                      for (final badge in _badges) _InlineBadge(label: badge),
+                      for (final badge in _badges)
+                        MeshInlineBadge(label: badge),
                     ],
                   ),
                 ],
@@ -2826,7 +2728,7 @@ class _ModelPickerTile extends StatelessWidget {
                   ),
                 ),
               ),
-              if (selected) const _InlineBadge(label: 'current'),
+              if (selected) const MeshInlineBadge(label: 'current'),
             ],
           ),
           if (model != null) ...[
@@ -2854,37 +2756,11 @@ class _ModelPickerTile extends StatelessWidget {
               spacing: 8,
               runSpacing: 8,
               children: badges
-                  .map((badge) => _InlineBadge(label: badge))
+                  .map((badge) => MeshInlineBadge(label: badge))
                   .toList(),
             ),
           ],
         ],
-      ),
-    );
-  }
-}
-
-class _InlineBadge extends StatelessWidget {
-  const _InlineBadge({required this.label});
-
-  final String label;
-
-  @override
-  Widget build(BuildContext context) {
-    final colors = context.colors;
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-      decoration: BoxDecoration(
-        color: colors.surface,
-        borderRadius: AppShapes.pill,
-        border: Border.all(color: colors.border),
-      ),
-      child: Text(
-        label,
-        style: Theme.of(context).textTheme.labelSmall?.copyWith(
-          color: colors.textSecondary,
-          letterSpacing: 0.4,
-        ),
       ),
     );
   }
