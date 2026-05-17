@@ -7135,7 +7135,7 @@ class _SessionScreenState extends State<SessionScreen>
           ),
         Expanded(
           child: (_loading && timelineEntries.isEmpty)
-              ? const MeshLoader()
+              ? const _SessionTimelineLoadingState()
               : Stack(
                   children: [
                     if (showWaitingState)
