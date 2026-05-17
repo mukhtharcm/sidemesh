@@ -11,10 +11,7 @@ import '../windowing.dart';
 import 'browser_preview_screen.dart';
 
 class BrowserPreviewWindowScreen extends StatefulWidget {
-  const BrowserPreviewWindowScreen({
-    super.key,
-    required this.arguments,
-  });
+  const BrowserPreviewWindowScreen({super.key, required this.arguments});
 
   final SidemeshWindowArguments arguments;
 
@@ -23,7 +20,8 @@ class BrowserPreviewWindowScreen extends StatefulWidget {
       _BrowserPreviewWindowScreenState();
 }
 
-class _BrowserPreviewWindowScreenState extends State<BrowserPreviewWindowScreen> {
+class _BrowserPreviewWindowScreenState
+    extends State<BrowserPreviewWindowScreen> {
   final HostStore _hostStore = HostStore();
   final ApiClient _api = ApiClient();
 
@@ -90,7 +88,10 @@ class _BrowserPreviewWindowScreenState extends State<BrowserPreviewWindowScreen>
   Widget build(BuildContext context) {
     final colors = context.colors;
     if (_loading) {
-      return Scaffold(backgroundColor: colors.canvas, body: const MeshLoader());
+      return Scaffold(
+        backgroundColor: colors.canvas,
+        body: _BrowserPreviewWindowLoadingState(preview: _preview),
+      );
     }
     final host = _host;
     if (host == null) {
@@ -114,6 +115,93 @@ class _BrowserPreviewWindowScreenState extends State<BrowserPreviewWindowScreen>
           preview: _preview,
           autoResizeViewport: true,
         ),
+      ),
+    );
+  }
+}
+
+class _BrowserPreviewWindowLoadingState extends StatelessWidget {
+  const _BrowserPreviewWindowLoadingState({required this.preview});
+
+  final HostBrowserPreviewInfo preview;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    return SafeArea(
+      bottom: false,
+      child: Column(
+        children: [
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+            decoration: BoxDecoration(
+              color: colors.surface,
+              border: Border(bottom: BorderSide(color: colors.border)),
+            ),
+            child: Row(
+              children: [
+                const MeshSkeleton(width: 28, height: 28, radius: 999),
+                const SizedBox(width: 8),
+                const MeshSkeleton(width: 28, height: 28, radius: 999),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: MeshSurface(
+                    tone: MeshSurfaceTone.muted,
+                    radius: 10,
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 10,
+                    ),
+                    child: Text(
+                      preview.url,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color: colors.textSecondary,
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                const MeshSkeleton(width: 28, height: 28, radius: 999),
+              ],
+            ),
+          ),
+          Expanded(
+            child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: MeshCard(
+                tone: MeshCardTone.muted,
+                padding: const EdgeInsets.all(18),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    MeshSectionHeadingSkeleton(
+                      titleWidthFactor: 0.2,
+                      subtitleWidthFactor: 0.34,
+                    ),
+                    const SizedBox(height: 16),
+                    const MeshSkeleton(height: 12),
+                    const SizedBox(height: 8),
+                    const FractionallySizedBox(
+                      widthFactor: 0.58,
+                      alignment: Alignment.centerLeft,
+                      child: MeshSkeleton(height: 12),
+                    ),
+                    const SizedBox(height: 16),
+                    const Expanded(
+                      child: MeshSkeleton(
+                        width: double.infinity,
+                        height: double.infinity,
+                        radius: 18,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }

@@ -847,9 +847,7 @@ class _DesktopShellState extends State<DesktopShell> {
   /// width. The rail stays fixed; the list pane and inspector give up space
   /// before the detail pane does.
   ({double rail, double sidebar, double detail, double inspector})
-  _computePaneWidths(
-    double total,
-  ) {
+  _computePaneWidths(double total) {
     // Resizer is 6pt (see _SidebarResizer). When inspector is open,
     // the inspector pane gets its own resize handle on its left edge.
     const double resizer = 6;
@@ -1108,8 +1106,7 @@ class _DesktopShellState extends State<DesktopShell> {
                                     },
                                     recentViewMode: _recentViewMode,
                                     recentFilters: _recentFilters,
-                                    onRecentViewModeChanged:
-                                        _setRecentViewMode,
+                                    onRecentViewModeChanged: _setRecentViewMode,
                                     onRecentRunningOnlyChanged:
                                         _setRecentRunningOnly,
                                     onRecentUnreadOnlyChanged:
@@ -1611,7 +1608,7 @@ class _Sidebar extends StatelessWidget {
             ),
             Expanded(
               child: loading
-                  ? const MeshLoader()
+                  ? _DesktopSidebarLoadingState(section: section)
                   : _SidebarPane(
                       key: ValueKey('pane-${section.name}-$refreshTick'),
                       section: section,
@@ -1642,11 +1639,58 @@ class _Sidebar extends StatelessWidget {
   }
 }
 
+class _DesktopSidebarLoadingState extends StatelessWidget {
+  const _DesktopSidebarLoadingState({required this.section});
+
+  final _SidebarSection section;
+
+  @override
+  Widget build(BuildContext context) {
+    final spacing = section == _SidebarSection.hosts ? 8.0 : 10.0;
+    return ListView(
+      physics: const AlwaysScrollableScrollPhysics(),
+      padding: const EdgeInsets.fromLTRB(16, 4, 16, 24),
+      children: [
+        if (section != _SidebarSection.hosts) ...[
+          MeshListRowSkeleton(
+            dense: true,
+            titleWidthFactor: 0.56,
+            subtitleWidthFactor: 0.76,
+            showMeta: true,
+            badgeCount: section == _SidebarSection.inbox ? 1 : 2,
+          ),
+          SizedBox(height: spacing),
+        ],
+        MeshListRowSkeleton(
+          dense: true,
+          titleWidthFactor: section == _SidebarSection.hosts ? 0.42 : 0.48,
+          subtitleWidthFactor: section == _SidebarSection.hosts ? 0.68 : 0.7,
+          showMeta: section != _SidebarSection.inbox,
+          badgeCount: section == _SidebarSection.recent ? 1 : 0,
+        ),
+        SizedBox(height: spacing),
+        MeshListRowSkeleton(
+          dense: true,
+          titleWidthFactor: section == _SidebarSection.inbox ? 0.52 : 0.44,
+          subtitleWidthFactor: section == _SidebarSection.hosts ? 0.62 : 0.66,
+          showMeta: section != _SidebarSection.inbox,
+          showTrailing: section != _SidebarSection.hosts,
+        ),
+        SizedBox(height: spacing),
+        MeshListRowSkeleton(
+          dense: true,
+          titleWidthFactor: 0.5,
+          subtitleWidthFactor: 0.72,
+          showMeta: true,
+          badgeCount: section == _SidebarSection.recent ? 1 : 0,
+        ),
+      ],
+    );
+  }
+}
+
 class _ListPaneHeader extends StatelessWidget {
-  const _ListPaneHeader({
-    required this.title,
-    required this.trailing,
-  });
+  const _ListPaneHeader({required this.title, required this.trailing});
 
   final String title;
   final Widget trailing;
@@ -1871,11 +1915,7 @@ class _RecentFilterToken extends StatelessWidget {
     if (onTap == null) return token;
     return Material(
       color: Colors.transparent,
-      child: InkWell(
-        borderRadius: AppShapes.badge,
-        onTap: onTap,
-        child: token,
-      ),
+      child: InkWell(borderRadius: AppShapes.badge, onTap: onTap, child: token),
     );
   }
 }

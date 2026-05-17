@@ -1539,21 +1539,7 @@ class _BrowserPreviewPaneState extends State<BrowserPreviewPane>
     }
     final bytes = _frameBytes;
     if (bytes == null) {
-      return Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          const CircularProgressIndicator(),
-          const SizedBox(height: 14),
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 24),
-            child: Text(
-              _status ?? 'Starting preview...',
-              textAlign: TextAlign.center,
-              style: TextStyle(color: colors.textSecondary),
-            ),
-          ),
-        ],
-      );
+      return _PreviewViewportLoadingState(status: _status);
     }
     return Image.memory(
       bytes,
@@ -1561,6 +1547,184 @@ class _BrowserPreviewPaneState extends State<BrowserPreviewPane>
       fit: BoxFit.contain,
       width: double.infinity,
       height: double.infinity,
+    );
+  }
+}
+
+class _PreviewViewportLoadingState extends StatelessWidget {
+  const _PreviewViewportLoadingState({this.status});
+
+  final String? status;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final compact = constraints.maxWidth < 520;
+        final horizontalPadding = compact ? 16.0 : 22.0;
+        return Padding(
+          padding: EdgeInsets.fromLTRB(
+            horizontalPadding,
+            compact ? 16 : 20,
+            horizontalPadding,
+            16,
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Wrap(
+                spacing: 10,
+                runSpacing: 10,
+                children: [
+                  SizedBox(
+                    width: compact ? constraints.maxWidth - 32 : 180,
+                    child: const MeshCard(
+                      tone: MeshCardTone.muted,
+                      padding: EdgeInsets.all(12),
+                      child: MeshSectionHeadingSkeleton(
+                        titleWidthFactor: 0.34,
+                        subtitleWidthFactor: 0.62,
+                      ),
+                    ),
+                  ),
+                  SizedBox(
+                    width: compact ? constraints.maxWidth - 32 : 156,
+                    child: const MeshCard(
+                      tone: MeshCardTone.muted,
+                      padding: EdgeInsets.all(12),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          FractionallySizedBox(
+                            widthFactor: 0.48,
+                            alignment: Alignment.centerLeft,
+                            child: MeshSkeleton(height: 10),
+                          ),
+                          SizedBox(height: 10),
+                          FractionallySizedBox(
+                            widthFactor: 0.72,
+                            alignment: Alignment.centerLeft,
+                            child: MeshSkeleton(height: 14),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 14),
+              Expanded(
+                child: MeshCard(
+                  tone: MeshCardTone.muted,
+                  padding: const EdgeInsets.all(14),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Row(
+                        children: [
+                          MeshSkeleton(width: 86, height: 12, radius: 999),
+                          SizedBox(width: 8),
+                          MeshSkeleton(width: 64, height: 12, radius: 999),
+                        ],
+                      ),
+                      const SizedBox(height: 14),
+                      Expanded(
+                        child: LayoutBuilder(
+                          builder: (context, viewport) {
+                            final wide = viewport.maxWidth >= 560;
+                            return Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                const MeshSkeleton(height: 12),
+                                const SizedBox(height: 8),
+                                const FractionallySizedBox(
+                                  widthFactor: 0.58,
+                                  alignment: Alignment.centerLeft,
+                                  child: MeshSkeleton(height: 12),
+                                ),
+                                const SizedBox(height: 18),
+                                if (wide)
+                                  Expanded(
+                                    child: Row(
+                                      children: const [
+                                        Expanded(
+                                          flex: 3,
+                                          child: MeshSkeleton(
+                                            width: double.infinity,
+                                            height: double.infinity,
+                                            radius: 18,
+                                          ),
+                                        ),
+                                        SizedBox(width: 14),
+                                        Expanded(
+                                          flex: 2,
+                                          child: Column(
+                                            children: [
+                                              Expanded(
+                                                child: MeshSkeleton(
+                                                  width: double.infinity,
+                                                  height: double.infinity,
+                                                  radius: 18,
+                                                ),
+                                              ),
+                                              SizedBox(height: 14),
+                                              Expanded(
+                                                child: MeshSkeleton(
+                                                  width: double.infinity,
+                                                  height: double.infinity,
+                                                  radius: 18,
+                                                ),
+                                              ),
+                                            ],
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  )
+                                else
+                                  const Expanded(
+                                    child: Column(
+                                      children: [
+                                        Expanded(
+                                          child: MeshSkeleton(
+                                            width: double.infinity,
+                                            height: double.infinity,
+                                            radius: 18,
+                                          ),
+                                        ),
+                                        SizedBox(height: 14),
+                                        Expanded(
+                                          child: MeshSkeleton(
+                                            width: double.infinity,
+                                            height: double.infinity,
+                                            radius: 18,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                              ],
+                            );
+                          },
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              if ((status ?? '').trim().isNotEmpty) ...[
+                const SizedBox(height: 12),
+                Text(
+                  status!,
+                  textAlign: TextAlign.center,
+                  style: TextStyle(color: colors.textSecondary),
+                ),
+              ],
+            ],
+          ),
+        );
+      },
     );
   }
 }
@@ -2343,7 +2507,7 @@ class _InspectorTab extends StatelessWidget {
   Widget build(BuildContext context) {
     final colors = context.colors;
     if (loading && snapshot == null) {
-      return const Center(child: CircularProgressIndicator());
+      return const _InspectorLoadingState();
     }
     if (snapshot == null) {
       return Center(
@@ -2748,7 +2912,7 @@ class _StorageTab extends StatelessWidget {
   Widget build(BuildContext context) {
     final colors = context.colors;
     if (loading && snapshot == null) {
-      return const Center(child: CircularProgressIndicator());
+      return const _StorageLoadingState();
     }
     if (snapshot == null) {
       return Center(
@@ -2998,6 +3162,246 @@ class _StorageTab extends StatelessWidget {
                 ),
         ),
       ],
+    );
+  }
+}
+
+class _InspectorLoadingState extends StatelessWidget {
+  const _InspectorLoadingState();
+
+  @override
+  Widget build(BuildContext context) {
+    return ListView(
+      key: const ValueKey('browserPreviewInspectorLoadingList'),
+      padding: const EdgeInsets.fromLTRB(12, 12, 12, 18),
+      children: const [
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: [
+            _DevToolsSummarySkeletonCard(),
+            _DevToolsSummarySkeletonCard(),
+            _DevToolsSummarySkeletonCard(),
+          ],
+        ),
+        SizedBox(height: 14),
+        _StorageSection(
+          title: 'Current selection',
+          child: _DevToolsCardSkeleton(lineCount: 3),
+        ),
+        _StorageSection(title: 'Page outline', child: _DevToolsTreeSkeleton()),
+        _StorageSection(
+          title: 'Attributes',
+          child: _DevToolsNameValueSkeleton(itemCount: 2),
+        ),
+        _StorageSection(
+          title: 'Styles',
+          child: _DevToolsNameValueSkeleton(itemCount: 3),
+        ),
+        _StorageSection(
+          title: 'Inline styles',
+          child: _DevToolsNameValueSkeleton(itemCount: 2),
+        ),
+      ],
+    );
+  }
+}
+
+class _StorageLoadingState extends StatelessWidget {
+  const _StorageLoadingState();
+
+  @override
+  Widget build(BuildContext context) {
+    return ListView(
+      key: const ValueKey('browserPreviewStorageLoadingList'),
+      padding: const EdgeInsets.fromLTRB(12, 12, 12, 18),
+      children: const [
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: [
+            _DevToolsSummarySkeletonCard(),
+            _DevToolsSummarySkeletonCard(),
+            _DevToolsSummarySkeletonCard(),
+            _DevToolsSummarySkeletonCard(),
+            _DevToolsSummarySkeletonCard(),
+            _DevToolsSummarySkeletonCard(),
+          ],
+        ),
+        SizedBox(height: 14),
+        _StorageSection(
+          title: 'Storage use',
+          child: _DevToolsCardSkeleton(lineCount: 3),
+        ),
+        _StorageSection(
+          title: 'Cookies',
+          child: _DevToolsNameValueSkeleton(itemCount: 3),
+        ),
+        _StorageSection(
+          title: 'Local storage',
+          child: _DevToolsNameValueSkeleton(itemCount: 2),
+        ),
+        _StorageSection(
+          title: 'Session storage',
+          child: _DevToolsNameValueSkeleton(itemCount: 2),
+        ),
+      ],
+    );
+  }
+}
+
+class _DevToolsSummarySkeletonCard extends StatelessWidget {
+  const _DevToolsSummarySkeletonCard();
+
+  @override
+  Widget build(BuildContext context) {
+    return const SizedBox(
+      width: 124,
+      child: MeshCard(
+        tone: MeshCardTone.muted,
+        padding: EdgeInsets.all(12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            FractionallySizedBox(
+              widthFactor: 0.56,
+              alignment: Alignment.centerLeft,
+              child: MeshSkeleton(height: 10),
+            ),
+            SizedBox(height: 10),
+            FractionallySizedBox(
+              widthFactor: 0.74,
+              alignment: Alignment.centerLeft,
+              child: MeshSkeleton(height: 14),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _DevToolsCardSkeleton extends StatelessWidget {
+  const _DevToolsCardSkeleton({required this.lineCount});
+
+  final int lineCount;
+
+  @override
+  Widget build(BuildContext context) {
+    return MeshCard(
+      padding: const EdgeInsets.all(12),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: List<Widget>.generate(lineCount * 2 - 1, (index) {
+          if (index.isOdd) {
+            return const SizedBox(height: 8);
+          }
+          final step = index ~/ 2;
+          final widthFactor = switch (step % 3) {
+            0 => 1.0,
+            1 => 0.76,
+            _ => 0.58,
+          };
+          return FractionallySizedBox(
+            widthFactor: widthFactor,
+            alignment: Alignment.centerLeft,
+            child: const MeshSkeleton(height: 12),
+          );
+        }),
+      ),
+    );
+  }
+}
+
+class _DevToolsNameValueSkeleton extends StatelessWidget {
+  const _DevToolsNameValueSkeleton({required this.itemCount});
+
+  final int itemCount;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      children: List<Widget>.generate(itemCount * 2 - 1, (index) {
+        if (index.isOdd) {
+          return const SizedBox(height: 10);
+        }
+        return const MeshCard(
+          tone: MeshCardTone.muted,
+          padding: EdgeInsets.all(12),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              FractionallySizedBox(
+                widthFactor: 0.32,
+                alignment: Alignment.centerLeft,
+                child: MeshSkeleton(height: 10),
+              ),
+              SizedBox(height: 8),
+              MeshSkeleton(height: 12),
+              SizedBox(height: 8),
+              FractionallySizedBox(
+                widthFactor: 0.68,
+                alignment: Alignment.centerLeft,
+                child: MeshSkeleton(height: 12),
+              ),
+            ],
+          ),
+        );
+      }),
+    );
+  }
+}
+
+class _DevToolsTreeSkeleton extends StatelessWidget {
+  const _DevToolsTreeSkeleton();
+
+  @override
+  Widget build(BuildContext context) {
+    return const Column(
+      children: [
+        _DevToolsTreeNodeSkeleton(depth: 0, titleWidthFactor: 0.44),
+        SizedBox(height: 8),
+        _DevToolsTreeNodeSkeleton(depth: 1, titleWidthFactor: 0.38),
+        SizedBox(height: 8),
+        _DevToolsTreeNodeSkeleton(depth: 1, titleWidthFactor: 0.52),
+      ],
+    );
+  }
+}
+
+class _DevToolsTreeNodeSkeleton extends StatelessWidget {
+  const _DevToolsTreeNodeSkeleton({
+    required this.depth,
+    required this.titleWidthFactor,
+  });
+
+  final int depth;
+  final double titleWidthFactor;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: EdgeInsets.only(left: depth * 14.0),
+      child: MeshCard(
+        tone: MeshCardTone.muted,
+        padding: const EdgeInsets.all(10),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            FractionallySizedBox(
+              widthFactor: titleWidthFactor,
+              alignment: Alignment.centerLeft,
+              child: const MeshSkeleton(height: 11),
+            ),
+            const SizedBox(height: 6),
+            const FractionallySizedBox(
+              widthFactor: 0.3,
+              alignment: Alignment.centerLeft,
+              child: MeshSkeleton(height: 10),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }
@@ -3692,6 +4096,69 @@ class _NetworkRow extends StatelessWidget {
   }
 }
 
+class _NetworkDetailLoadingState extends StatelessWidget {
+  const _NetworkDetailLoadingState();
+
+  @override
+  Widget build(BuildContext context) {
+    return ListView(
+      padding: EdgeInsets.zero,
+      children: const [
+        _NetworkSection(
+          title: 'Request headers',
+          child: _NetworkSectionSkeleton(lineCount: 4),
+        ),
+        _NetworkSection(
+          title: 'Request body',
+          child: _NetworkSectionSkeleton(lineCount: 3),
+        ),
+        _NetworkSection(
+          title: 'Response headers',
+          child: _NetworkSectionSkeleton(lineCount: 4),
+        ),
+        _NetworkSection(
+          title: 'Response body',
+          child: _NetworkSectionSkeleton(lineCount: 5),
+        ),
+      ],
+    );
+  }
+}
+
+class _NetworkSectionSkeleton extends StatelessWidget {
+  const _NetworkSectionSkeleton({required this.lineCount});
+
+  final int lineCount;
+
+  @override
+  Widget build(BuildContext context) {
+    return MeshCard(
+      tone: MeshCardTone.muted,
+      padding: const EdgeInsets.all(12),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: List<Widget>.generate(lineCount * 2 - 1, (index) {
+          if (index.isOdd) {
+            return const SizedBox(height: 8);
+          }
+          final step = index ~/ 2;
+          final widthFactor = switch (step % 4) {
+            0 => 1.0,
+            1 => 0.82,
+            2 => 0.68,
+            _ => 0.54,
+          };
+          return FractionallySizedBox(
+            widthFactor: widthFactor,
+            alignment: Alignment.centerLeft,
+            child: const MeshSkeleton(height: 11),
+          );
+        }),
+      ),
+    );
+  }
+}
+
 class _NetworkDetailSheet extends StatelessWidget {
   const _NetworkDetailSheet({
     required this.entry,
@@ -3769,7 +4236,7 @@ class _NetworkDetailSheet extends StatelessWidget {
               const SizedBox(height: 12),
               Expanded(
                 child: detail == null
-                    ? const Center(child: CircularProgressIndicator())
+                    ? const _NetworkDetailLoadingState()
                     : ListView(
                         padding: EdgeInsets.zero,
                         children: [
