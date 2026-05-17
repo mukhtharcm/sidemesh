@@ -3189,12 +3189,7 @@ class _DirectoryPickerSheetState extends State<_DirectoryPickerSheet> {
           const SizedBox(height: 12),
           Expanded(
             child: _loading
-                ? Center(
-                    child: CircularProgressIndicator(
-                      strokeWidth: 2,
-                      color: colors.accent,
-                    ),
-                  )
+                ? const _DirectoryBrowserLoadingState()
                 : _error != null
                 ? Center(
                     child: Padding(
@@ -3245,6 +3240,34 @@ class _DirectoryPickerSheetState extends State<_DirectoryPickerSheet> {
                   ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+class _DirectoryBrowserLoadingState extends StatelessWidget {
+  const _DirectoryBrowserLoadingState();
+
+  @override
+  Widget build(BuildContext context) {
+    return ListView.separated(
+      physics: const AlwaysScrollableScrollPhysics(),
+      padding: EdgeInsets.zero,
+      itemCount: 4,
+      separatorBuilder: (_, _) => const SizedBox(height: 8),
+      itemBuilder: (context, index) => MeshListRowSkeleton(
+        dense: true,
+        framed: false,
+        radius: AppRadii.control,
+        titleWidthFactor: switch (index) {
+          0 => 0.42,
+          1 => 0.56,
+          2 => 0.48,
+          _ => 0.38,
+        },
+        subtitleWidthFactor: 0.0,
+        showSubtitle: false,
+        showTrailing: true,
       ),
     );
   }

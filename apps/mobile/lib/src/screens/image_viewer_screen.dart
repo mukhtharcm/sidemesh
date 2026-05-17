@@ -520,7 +520,7 @@ class ImageViewerPaneState extends State<ImageViewerPane>
     Widget child;
     if (imageProvider == null) {
       child = _loadError == null
-          ? const Center(child: MeshLoader(size: 30))
+          ? const _ImageViewerLoadingState()
           : _ImageViewerErrorState(title: widget.source.title);
     } else {
       child = Image(
@@ -528,7 +528,7 @@ class ImageViewerPaneState extends State<ImageViewerPane>
         fit: BoxFit.contain,
         frameBuilder: (context, imageChild, frame, _) {
           if (frame != null) return imageChild;
-          return const Center(child: MeshLoader(size: 30));
+          return const _ImageViewerLoadingState();
         },
         errorBuilder: (context, error, stackTrace) =>
             _ImageViewerErrorState(title: widget.source.title),
@@ -608,6 +608,38 @@ class ImageViewerPaneState extends State<ImageViewerPane>
             decoration: BoxDecoration(color: colors.surfaceMuted),
             child: _buildInteractiveViewport(context),
           ),
+        ),
+      ),
+    );
+  }
+}
+
+class _ImageViewerLoadingState extends StatelessWidget {
+  const _ImageViewerLoadingState();
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.all(20),
+      child: MeshCard(
+        tone: MeshCardTone.muted,
+        padding: const EdgeInsets.all(18),
+        child: const Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            MeshSectionHeadingSkeleton(
+              titleWidthFactor: 0.22,
+              subtitleWidthFactor: 0.42,
+            ),
+            SizedBox(height: 16),
+            Expanded(
+              child: MeshSkeleton(
+                width: double.infinity,
+                height: double.infinity,
+                radius: 18,
+              ),
+            ),
+          ],
         ),
       ),
     );
@@ -1076,9 +1108,9 @@ class _ImageViewerHeaderText extends StatelessWidget {
             subtitleText,
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
-            style: Theme.of(context).textTheme.bodySmall?.copyWith(
-              color: colors.textTertiary,
-            ),
+            style: Theme.of(
+              context,
+            ).textTheme.bodySmall?.copyWith(color: colors.textTertiary),
           ),
         ],
       ],

@@ -126,7 +126,10 @@ class _SessionWindowScreenState extends State<SessionWindowScreen> {
   Widget build(BuildContext context) {
     final colors = context.colors;
     if (_loading) {
-      return Scaffold(backgroundColor: colors.canvas, body: const MeshLoader());
+      return Scaffold(
+        backgroundColor: colors.canvas,
+        body: _SessionWindowLoadingState(sessionTitle: _session.title),
+      );
     }
     if (_archived) {
       return Scaffold(
@@ -159,6 +162,98 @@ class _SessionWindowScreenState extends State<SessionWindowScreen> {
       onOpenSession: (session) => unawaited(_openSession(host, session)),
       desktopMode: true,
       screenAwakeSourceKey: _screenAwakeSourceKey,
+    );
+  }
+}
+
+class _SessionWindowLoadingState extends StatelessWidget {
+  const _SessionWindowLoadingState({required this.sessionTitle});
+
+  final String sessionTitle;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    return SafeArea(
+      bottom: false,
+      child: ListView(
+        physics: const NeverScrollableScrollPhysics(),
+        padding: const EdgeInsets.fromLTRB(18, 18, 18, 28),
+        children: [
+          Text(
+            sessionTitle,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: Theme.of(context).textTheme.titleLarge?.copyWith(
+              color: colors.textPrimary,
+              fontWeight: FontWeight.w800,
+            ),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            'Loading session activity',
+            style: Theme.of(
+              context,
+            ).textTheme.bodyMedium?.copyWith(color: colors.textSecondary),
+          ),
+          const SizedBox(height: 18),
+          const MeshCard(
+            tone: MeshCardTone.muted,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                MeshSectionHeadingSkeleton(
+                  titleWidthFactor: 0.22,
+                  subtitleWidthFactor: 0.46,
+                ),
+                SizedBox(height: 14),
+                _SessionWindowBubbleSkeleton(widthFactor: 0.78),
+                SizedBox(height: 10),
+                _SessionWindowBubbleSkeleton(widthFactor: 0.56, alignEnd: true),
+                SizedBox(height: 10),
+                _SessionWindowBubbleSkeleton(widthFactor: 0.7),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _SessionWindowBubbleSkeleton extends StatelessWidget {
+  const _SessionWindowBubbleSkeleton({
+    required this.widthFactor,
+    this.alignEnd = false,
+  });
+
+  final double widthFactor;
+  final bool alignEnd;
+
+  @override
+  Widget build(BuildContext context) {
+    return Align(
+      alignment: alignEnd ? Alignment.centerRight : Alignment.centerLeft,
+      child: FractionallySizedBox(
+        widthFactor: widthFactor,
+        child: const MeshCard(
+          padding: EdgeInsets.all(14),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              MeshSkeleton(height: 12),
+              SizedBox(height: 8),
+              MeshSkeleton(height: 12),
+              SizedBox(height: 8),
+              FractionallySizedBox(
+                widthFactor: 0.62,
+                alignment: Alignment.centerLeft,
+                child: MeshSkeleton(height: 12),
+              ),
+            ],
+          ),
+        ),
+      ),
     );
   }
 }

@@ -524,10 +524,7 @@ class _PortForwardPaneState extends State<PortForwardPane> {
             ),
             const SizedBox(height: 14),
             if (_loading)
-              const Padding(
-                padding: EdgeInsets.all(24),
-                child: Center(child: CircularProgressIndicator()),
-              )
+              const _BrowserPreviewListLoadingState()
             else if (_error != null)
               MeshEmptyState(
                 icon: Icons.warning_amber_rounded,
@@ -615,6 +612,71 @@ class _SectionHeading extends StatelessWidget {
                 ),
               ],
             ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _BrowserPreviewListLoadingState extends StatelessWidget {
+  const _BrowserPreviewListLoadingState();
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: const [
+        _SectionHeading(
+          icon: Icons.open_in_browser_rounded,
+          title: 'Running previews',
+          subtitle: 'Loading preview routes for this session',
+        ),
+        _BrowserPreviewCardSkeleton(),
+        SizedBox(height: 10),
+        _BrowserPreviewCardSkeleton(),
+      ],
+    );
+  }
+}
+
+class _BrowserPreviewCardSkeleton extends StatelessWidget {
+  const _BrowserPreviewCardSkeleton();
+
+  @override
+  Widget build(BuildContext context) {
+    return MeshCard(
+      padding: const EdgeInsets.all(14),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: const [
+          Row(
+            children: [
+              Expanded(
+                child: MeshSectionHeadingSkeleton(
+                  titleWidthFactor: 0.28,
+                  subtitleWidthFactor: 0.54,
+                ),
+              ),
+              SizedBox(width: 12),
+              MeshSkeleton(width: 78, height: 18, radius: 999),
+            ],
+          ),
+          SizedBox(height: 14),
+          MeshSkeleton(height: 12),
+          SizedBox(height: 8),
+          FractionallySizedBox(
+            widthFactor: 0.72,
+            alignment: Alignment.centerLeft,
+            child: MeshSkeleton(height: 12),
+          ),
+          SizedBox(height: 14),
+          Row(
+            children: [
+              MeshSkeleton(width: 90, height: 34, radius: 12),
+              SizedBox(width: 10),
+              MeshSkeleton(width: 110, height: 34, radius: 12),
+            ],
           ),
         ],
       ),

@@ -239,9 +239,9 @@ class _SessionResourcesPanelState extends State<SessionResourcesPanel> {
               children: [
                 Text(
                   '${_resources.length} items',
-                  style: Theme.of(
-                    context,
-                  ).textTheme.titleSmall?.copyWith(fontWeight: AppWeights.emphasis),
+                  style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                    fontWeight: AppWeights.emphasis,
+                  ),
                 ),
                 const SizedBox(height: 2),
                 Text(
@@ -295,7 +295,7 @@ class _SessionResourcesPanelState extends State<SessionResourcesPanel> {
   Widget _buildBody(BuildContext context) {
     final resources = _filteredResources();
     if (_loading && _resources.isEmpty) {
-      return const Center(child: MeshLoader());
+      return _ResourcesLoadingState(filter: _filter);
     }
     if (_error != null && _resources.isEmpty) {
       return _ResourcesEmptyState(
@@ -554,6 +554,92 @@ class _ResourceListCard extends StatelessWidget {
             ],
           ),
         ),
+      ),
+    );
+  }
+}
+
+class _ResourcesLoadingState extends StatelessWidget {
+  const _ResourcesLoadingState({required this.filter});
+
+  final _ResourceFilter filter;
+
+  @override
+  Widget build(BuildContext context) {
+    if (filter == _ResourceFilter.media) {
+      return GridView.count(
+        physics: const AlwaysScrollableScrollPhysics(),
+        padding: const EdgeInsets.fromLTRB(14, 4, 14, 18),
+        crossAxisCount: 2,
+        crossAxisSpacing: 10,
+        mainAxisSpacing: 10,
+        childAspectRatio: 0.92,
+        children: const [
+          _ResourceMediaTileSkeleton(),
+          _ResourceMediaTileSkeleton(),
+          _ResourceMediaTileSkeleton(),
+          _ResourceMediaTileSkeleton(),
+        ],
+      );
+    }
+
+    return ListView(
+      physics: const AlwaysScrollableScrollPhysics(),
+      padding: const EdgeInsets.fromLTRB(14, 4, 14, 18),
+      children: [
+        if (filter == _ResourceFilter.all) ...[
+          const SizedBox(height: 250, child: _ResourceMediaTileSkeleton()),
+          const SizedBox(height: 10),
+        ],
+        const MeshListRowSkeleton(
+          titleWidthFactor: 0.52,
+          subtitleWidthFactor: 0.76,
+          showMeta: true,
+        ),
+        const SizedBox(height: 10),
+        MeshListRowSkeleton(
+          titleWidthFactor: 0.44,
+          subtitleWidthFactor: 0.68,
+          showMeta: filter == _ResourceFilter.files,
+          showTrailing: filter != _ResourceFilter.links,
+        ),
+        const SizedBox(height: 10),
+        const MeshListRowSkeleton(
+          titleWidthFactor: 0.6,
+          subtitleWidthFactor: 0.72,
+          showMeta: true,
+        ),
+      ],
+    );
+  }
+}
+
+class _ResourceMediaTileSkeleton extends StatelessWidget {
+  const _ResourceMediaTileSkeleton();
+
+  @override
+  Widget build(BuildContext context) {
+    return MeshCard(
+      padding: const EdgeInsets.all(12),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: const [
+          Expanded(
+            child: MeshSkeleton(
+              width: double.infinity,
+              height: double.infinity,
+              radius: 16,
+            ),
+          ),
+          SizedBox(height: 12),
+          MeshSkeleton(height: 12),
+          SizedBox(height: 8),
+          FractionallySizedBox(
+            widthFactor: 0.66,
+            alignment: Alignment.centerLeft,
+            child: MeshSkeleton(height: 10),
+          ),
+        ],
       ),
     );
   }
@@ -829,9 +915,9 @@ class _MediaFallback extends StatelessWidget {
                   title,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
-                  style: Theme.of(
-                    context,
-                  ).textTheme.labelLarge?.copyWith(fontWeight: AppWeights.emphasis),
+                  style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                    fontWeight: AppWeights.emphasis,
+                  ),
                 ),
                 const SizedBox(height: 2),
                 Text(
@@ -878,9 +964,9 @@ class _ResourcesEmptyState extends StatelessWidget {
             Text(
               title,
               textAlign: TextAlign.center,
-              style: Theme.of(
-                context,
-              ).textTheme.titleMedium?.copyWith(fontWeight: AppWeights.emphasis),
+              style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                fontWeight: AppWeights.emphasis,
+              ),
             ),
             const SizedBox(height: 8),
             Text(
