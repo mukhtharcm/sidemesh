@@ -23,7 +23,21 @@ VERSION="${VERSION:-1.0.0}"
 BUILD_NUMBER="${BUILD_NUMBER:-1}"
 FLUTTER_BUILD_NAME="${FLUTTER_BUILD_NAME:-${VERSION%%-*}}"
 SIGNING_IDENTITY="${SIGNING_IDENTITY:-}"
+TEAM_ID="${TEAM_ID:-}"
 ENTITLEMENTS_PATH="${ENTITLEMENTS_PATH:-$MOBILE_DIR/macos/Runner/Release.entitlements}"
+ENABLE_DATA_PROTECTION_KEYCHAIN=false
+if [[ -n "$SIGNING_IDENTITY" && -n "$TEAM_ID" ]]; then
+  ENABLE_DATA_PROTECTION_KEYCHAIN=true
+fi
+SIGNING_ENTITLEMENTS_PATH="$ENTITLEMENTS_PATH"
+signing_entitlements_tmp=""
+
+cleanup() {
+  if [[ -n "$signing_entitlements_tmp" && -f "$signing_entitlements_tmp" ]]; then
+    rm -f "$signing_entitlements_tmp"
+  fi
+}
+trap cleanup EXIT
 
 BUILD_PRODUCTS_DIR="$MOBILE_DIR/build/macos/Build/Products/Release-$FLAVOR"
 BUILT_APP_PATH="$BUILD_PRODUCTS_DIR/$APP_NAME.app"
@@ -40,14 +54,22 @@ echo "Flavor: $FLAVOR"
 echo "Bundle version: $FLUTTER_BUILD_NAME"
 echo "Bundle: $BUNDLE_IDENTIFIER"
 echo "Signing: ${SIGNING_IDENTITY:-unsigned/ad-hoc}"
+echo "Data protection keychain: $ENABLE_DATA_PROTECTION_KEYCHAIN"
 
 cd "$MOBILE_DIR"
 flutter pub get
+dart_defines=()
+if [[ "$ENABLE_DATA_PROTECTION_KEYCHAIN" == "true" ]]; then
+  dart_defines+=(
+    --dart-define=SIDEMESH_MACOS_USE_DATA_PROTECTION_KEYCHAIN=true
+  )
+fi
 flutter build macos \
   --release \
   --flavor "$FLAVOR" \
   --build-name "$FLUTTER_BUILD_NAME" \
-  --build-number "$BUILD_NUMBER"
+  --build-number "$BUILD_NUMBER" \
+  "${dart_defines[@]}"
 
 if [[ ! -d "$BUILT_APP_PATH" ]]; then
   echo "Built app not found: $BUILT_APP_PATH" >&2
@@ -67,6 +89,15 @@ if [[ -n "$SIGNING_IDENTITY" ]]; then
     echo "Entitlements file not found: $ENTITLEMENTS_PATH" >&2
     exit 1
   fi
+  if [[ "$ENABLE_DATA_PROTECTION_KEYCHAIN" == "true" ]]; then
+    signing_entitlements_tmp="$(mktemp "${TMPDIR:-/tmp}/sidemesh-release-entitlements.XXXXXX.plist")"
+    cp "$ENTITLEMENTS_PATH" "$signing_entitlements_tmp"
+    /usr/libexec/PlistBuddy -c "Add :com.apple.application-identifier string $TEAM_ID.$BUNDLE_IDENTIFIER" "$signing_entitlements_tmp" 2>/dev/null \
+      || /usr/libexec/PlistBuddy -c "Set :com.apple.application-identifier $TEAM_ID.$BUNDLE_IDENTIFIER" "$signing_entitlements_tmp"
+    /usr/libexec/PlistBuddy -c "Add :com.apple.developer.team-identifier string $TEAM_ID" "$signing_entitlements_tmp" 2>/dev/null \
+      || /usr/libexec/PlistBuddy -c "Set :com.apple.developer.team-identifier $TEAM_ID" "$signing_entitlements_tmp"
+    SIGNING_ENTITLEMENTS_PATH="$signing_entitlements_tmp"
+  fi
 
   if [[ -d "$BUILT_APP_PATH/Contents/Frameworks" ]]; then
     while IFS= read -r -d '' item; do
@@ -79,7 +110,7 @@ if [[ -n "$SIGNING_IDENTITY" ]]; then
     --deep \
     --timestamp \
     --options runtime \
-    --entitlements "$ENTITLEMENTS_PATH" \
+    --entitlements "$SIGNING_ENTITLEMENTS_PATH" \
     --sign "$SIGNING_IDENTITY" \
     "$BUILT_APP_PATH"
 
