@@ -35,39 +35,16 @@ class _CachedTranscriptStrip extends StatelessWidget {
             ? 'Offline · showing last known session state'
             : 'Offline · $_lastConnectedText',
     };
-    return MeshSurface(
-      tone: MeshSurfaceTone.warning,
-      radius: AppRadii.control,
-      padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 6),
-      child: Row(
-        children: [
-          if (refreshing)
-            SizedBox(
-              width: 11,
-              height: 11,
-              child: CircularProgressIndicator(
-                strokeWidth: 1.35,
-                color: colors.warning,
-              ),
-            )
-          else
-            Icon(icon, size: 13, color: colors.warning),
-          const SizedBox(width: 8),
-          Expanded(
-            child: Text(
-              text,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: monoStyle(
-                color: colors.textSecondary,
-                fontSize: 10.5,
-                fontWeight: FontWeight.w600,
-              ),
-            ),
-          ),
-          if (mode == _TranscriptFreshnessMode.offline && onRetry != null) ...[
-            const SizedBox(width: 8),
-            GestureDetector(
+    return MeshStatusRail(
+      label: text,
+      icon: icon,
+      active: refreshing,
+      tone: MeshStatusRailTone.warning,
+      surfaceTone: MeshSurfaceTone.warning,
+      mono: true,
+      padding: const EdgeInsets.fromLTRB(11, 8, 11, 8),
+      trailing: mode == _TranscriptFreshnessMode.offline && onRetry != null
+          ? GestureDetector(
               onTap: onRetry,
               behavior: HitTestBehavior.opaque,
               child: Padding(
@@ -81,10 +58,8 @@ class _CachedTranscriptStrip extends StatelessWidget {
                   ),
                 ),
               ),
-            ),
-          ],
-        ],
-      ),
+            )
+          : null,
     );
   }
 

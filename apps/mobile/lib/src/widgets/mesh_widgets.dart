@@ -225,6 +225,209 @@ class MeshSurface extends StatelessWidget {
 
 enum MeshSurfaceTone { surface, elevated, muted, accent, warning, danger }
 
+class MeshStatusRail extends StatefulWidget {
+  const MeshStatusRail({
+    super.key,
+    required this.label,
+    this.icon,
+    this.progress,
+    this.active = false,
+    this.trailing,
+    this.tone = MeshStatusRailTone.accent,
+    this.surfaceTone = MeshSurfaceTone.muted,
+    this.mono = false,
+    this.padding = const EdgeInsets.fromLTRB(12, 10, 12, 10),
+    this.radius = AppRadii.control,
+  });
+
+  final String label;
+  final IconData? icon;
+  final double? progress;
+  final bool active;
+  final Widget? trailing;
+  final MeshStatusRailTone tone;
+  final MeshSurfaceTone surfaceTone;
+  final bool mono;
+  final EdgeInsetsGeometry padding;
+  final double radius;
+
+  @override
+  State<MeshStatusRail> createState() => _MeshStatusRailState();
+}
+
+class _MeshStatusRailState extends State<MeshStatusRail>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _controller = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 1200),
+  );
+
+  @override
+  void initState() {
+    super.initState();
+    _updateAnimation();
+  }
+
+  @override
+  void didUpdateWidget(covariant MeshStatusRail oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.active != widget.active ||
+        oldWidget.progress != widget.progress) {
+      _updateAnimation();
+    }
+  }
+
+  void _updateAnimation() {
+    final shouldAnimate = widget.active && widget.progress == null;
+    if (shouldAnimate) {
+      if (!_controller.isAnimating) {
+        _controller.repeat();
+      }
+      return;
+    }
+    if (_controller.isAnimating) {
+      _controller.stop();
+    }
+    _controller.value = 0;
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    final barColor = switch (widget.tone) {
+      MeshStatusRailTone.neutral => colors.textSecondary,
+      MeshStatusRailTone.accent => colors.accent,
+      MeshStatusRailTone.warning => colors.warning,
+      MeshStatusRailTone.info => colors.info,
+    };
+    final labelStyle = widget.mono
+        ? monoStyle(
+            color: colors.textSecondary,
+            fontSize: 10.5,
+            fontWeight: AppWeights.title,
+          ).copyWith(letterSpacing: 0.2)
+        : Theme.of(context).textTheme.bodySmall?.copyWith(
+            color: colors.textSecondary,
+            fontWeight: AppWeights.emphasis,
+          );
+
+    return MeshSurface(
+      tone: widget.surfaceTone,
+      radius: widget.radius,
+      padding: widget.padding,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              if (widget.icon != null) ...[
+                Icon(widget.icon, size: 14, color: barColor),
+                const SizedBox(width: 8),
+              ],
+              Expanded(
+                child: Text(
+                  widget.label,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: labelStyle,
+                ),
+              ),
+              if (widget.trailing != null) ...[
+                const SizedBox(width: 8),
+                widget.trailing!,
+              ],
+            ],
+          ),
+          const SizedBox(height: 8),
+          SizedBox(
+            height: 3,
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(999),
+              child: DecoratedBox(
+                decoration: BoxDecoration(
+                  color: barColor.withValues(alpha: 0.16),
+                ),
+                child: LayoutBuilder(
+                  builder: (context, constraints) {
+                    final progress = widget.progress;
+                    if (progress != null) {
+                      final clamped = progress.clamp(0.0, 1.0);
+                      if (clamped <= 0) {
+                        return const SizedBox.shrink();
+                      }
+                      return Align(
+                        alignment: Alignment.centerLeft,
+                        child: FractionallySizedBox(
+                          widthFactor: clamped,
+                          child: DecoratedBox(
+                            decoration: BoxDecoration(
+                              color: barColor,
+                              borderRadius: BorderRadius.circular(999),
+                            ),
+                          ),
+                        ),
+                      );
+                    }
+                    if (!widget.active) {
+                      return Align(
+                        alignment: Alignment.centerLeft,
+                        child: FractionallySizedBox(
+                          widthFactor: 0.22,
+                          child: DecoratedBox(
+                            decoration: BoxDecoration(
+                              color: barColor.withValues(alpha: 0.48),
+                              borderRadius: BorderRadius.circular(999),
+                            ),
+                          ),
+                        ),
+                      );
+                    }
+                    final segmentWidth = constraints.maxWidth < 96
+                        ? constraints.maxWidth * 0.32
+                        : 72.0;
+                    return AnimatedBuilder(
+                      animation: _controller,
+                      builder: (context, _) {
+                        final travel = constraints.maxWidth + segmentWidth;
+                        final left =
+                            (travel * _controller.value) - segmentWidth;
+                        return Stack(
+                          children: [
+                            Positioned(
+                              left: left,
+                              top: 0,
+                              bottom: 0,
+                              child: Container(
+                                width: segmentWidth,
+                                decoration: BoxDecoration(
+                                  color: barColor,
+                                  borderRadius: BorderRadius.circular(999),
+                                ),
+                              ),
+                            ),
+                          ],
+                        );
+                      },
+                    );
+                  },
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+enum MeshStatusRailTone { neutral, accent, warning, info }
+
 /// Standard list row shell for session, host, file, and settings rows.
 class MeshListRow extends StatelessWidget {
   const MeshListRow({

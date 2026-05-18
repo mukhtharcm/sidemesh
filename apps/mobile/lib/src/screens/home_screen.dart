@@ -2007,8 +2007,13 @@ class _RecentPaneState extends State<RecentPane> {
           children: [
             if (_searchLoading)
               const Padding(
-                padding: EdgeInsets.symmetric(vertical: 8),
-                child: Center(child: CircularProgressIndicator(strokeWidth: 2)),
+                padding: EdgeInsets.fromLTRB(16, 4, 16, 6),
+                child: MeshStatusRail(
+                  label: 'Updating results',
+                  icon: Icons.search_rounded,
+                  active: true,
+                  tone: MeshStatusRailTone.accent,
+                ),
               ),
             SizedBox(height: widget.dense ? 4 : 8),
             Expanded(
@@ -4979,35 +4984,18 @@ class _RecentProgressStrip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final colors = context.colors;
-    final theme = Theme.of(context);
     final loaded = (total - remaining).clamp(0, total);
+    final progress = total <= 0 ? 0.0 : loaded / total;
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 6, 16, 6),
-      child: Row(
-        children: [
-          SizedBox(
-            width: 12,
-            height: 12,
-            child: CircularProgressIndicator(
-              strokeWidth: 1.5,
-              color: colors.accent,
-            ),
-          ),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Text(
-              showingCached
-                  ? 'Refreshing sessions, $loaded of $total hosts ready'
-                  : 'Loading sessions, $loaded of $total hosts ready',
-              style: theme.textTheme.bodySmall?.copyWith(
-                color: colors.textSecondary,
-              ),
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-            ),
-          ),
-        ],
+      child: MeshStatusRail(
+        label: showingCached
+            ? 'Syncing sessions, $loaded of $total hosts ready'
+            : 'Loading sessions, $loaded of $total hosts ready',
+        icon: Icons.hub_rounded,
+        progress: progress,
+        active: true,
+        tone: MeshStatusRailTone.accent,
       ),
     );
   }
