@@ -824,26 +824,32 @@ class _SessionControlsSheetState extends State<SessionControlsSheet> {
               ),
             ),
             const SizedBox(height: 8),
-            _ModelSelectionCard(
-              title: 'Model',
-              value: _effectiveModelLabel,
-              subtitle: _effectiveModelDescription,
-              loading: _loadingModels,
-              error: _modelsError,
-              currentValue: _turnConfig.model != null
-                  ? widget.runtimeModel
-                  : null,
-              badges: <String>[
-                ?_runtimeModelProvider,
-                if (selectedModel?.isAutoModel ?? false) 'auto',
-                if (selectedModel?.isDefault ?? false) 'default',
-                if (_turnConfig.model != null) 'next turn',
-              ],
-              onTap: _chooseModel,
-              onRetry: () {
-                unawaited(_loadModels());
-              },
-            ),
+            _loadingModels && _models.isEmpty
+                ? const MeshSelectionCardSkeleton(
+                    showIcon: false,
+                    badgeCount: 3,
+                    showCurrentValue: true,
+                  )
+                : MeshSelectionCard(
+                    title: 'Model',
+                    value: _effectiveModelLabel,
+                    subtitle: _effectiveModelDescription,
+                    loading: _loadingModels,
+                    error: _modelsError,
+                    currentValue: _turnConfig.model != null
+                        ? widget.runtimeModel
+                        : null,
+                    badges: <String>[
+                      ?_runtimeModelProvider,
+                      if (selectedModel?.isAutoModel ?? false) 'auto',
+                      if (selectedModel?.isDefault ?? false) 'default',
+                      if (_turnConfig.model != null) 'next turn',
+                    ],
+                    onTap: _chooseModel,
+                    onRetry: () {
+                      unawaited(_loadModels());
+                    },
+                  ),
           ],
           if (showReasoningControls) ...[
             const SizedBox(height: 18),
@@ -856,7 +862,7 @@ class _SessionControlsSheetState extends State<SessionControlsSheet> {
             ),
             const SizedBox(height: 8),
             if (_loadingModels && _models.isEmpty)
-              const LinearProgressIndicator(minHeight: 3)
+              const MeshChipSkeletonWrap()
             else if (_selectedModelIsAuto)
               Container(
                 width: double.infinity,
@@ -1116,111 +1122,6 @@ class _SessionControlsSheetState extends State<SessionControlsSheet> {
   }
 }
 
-class _ModelSelectionCard extends StatelessWidget {
-  const _ModelSelectionCard({
-    required this.title,
-    required this.value,
-    required this.subtitle,
-    required this.loading,
-    required this.error,
-    required this.currentValue,
-    required this.badges,
-    required this.onTap,
-    required this.onRetry,
-  });
-
-  final String title;
-  final String value;
-  final String subtitle;
-  final bool loading;
-  final String? error;
-  final String? currentValue;
-  final List<String> badges;
-  final VoidCallback onTap;
-  final VoidCallback onRetry;
-
-  @override
-  Widget build(BuildContext context) {
-    final colors = context.colors;
-    return MeshSurface(
-      tone: MeshSurfaceTone.muted,
-      radius: AppRadii.control,
-      width: double.infinity,
-      onTap: loading ? null : onTap,
-      padding: const EdgeInsets.all(12),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Expanded(
-                child: Text(
-                  title,
-                  style: Theme.of(
-                    context,
-                  ).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w700),
-                ),
-              ),
-              if (loading)
-                const SizedBox(
-                  width: 18,
-                  height: 18,
-                  child: CircularProgressIndicator(strokeWidth: 2),
-                )
-              else
-                Icon(
-                  Icons.keyboard_arrow_down_rounded,
-                  color: colors.textSecondary,
-                ),
-            ],
-          ),
-          const SizedBox(height: 6),
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            crossAxisAlignment: WrapCrossAlignment.center,
-            children: [
-              Text(
-                value,
-                style: Theme.of(
-                  context,
-                ).textTheme.bodyLarge?.copyWith(fontWeight: FontWeight.w600),
-              ),
-              ...badges.map((badge) => _InlineBadge(label: badge)),
-            ],
-          ),
-          const SizedBox(height: 4),
-          Text(
-            subtitle,
-            style: Theme.of(context).textTheme.bodySmall?.copyWith(
-              color: colors.textSecondary,
-              height: 1.35,
-            ),
-          ),
-          if ((currentValue ?? '').trim().isNotEmpty &&
-              currentValue!.trim() != value.trim()) ...[
-            const SizedBox(height: 8),
-            Text(
-              'Current setting: ${currentValue!.trim()}',
-              style: Theme.of(
-                context,
-              ).textTheme.bodySmall?.copyWith(color: colors.textSecondary),
-            ),
-          ],
-          if (error != null) ...[
-            const SizedBox(height: 8),
-            TextButton.icon(
-              onPressed: onRetry,
-              icon: const Icon(Icons.refresh_rounded, size: 18),
-              label: const Text('Retry loading models'),
-            ),
-          ],
-        ],
-      ),
-    );
-  }
-}
-
 class _ReasoningChoiceChip extends StatelessWidget {
   const _ReasoningChoiceChip({
     required this.label,
@@ -1255,7 +1156,7 @@ class _ReasoningChoiceChip extends StatelessWidget {
           ),
           if (isDefault) ...[
             const SizedBox(width: 8),
-            _InlineBadge(label: defaultLabel),
+            MeshInlineBadge(label: defaultLabel),
           ],
         ],
       ),
@@ -1432,7 +1333,7 @@ class _ModelPickerSheetState extends State<_ModelPickerSheet> {
                                   ),
                                 ),
                                 if (isCurrent)
-                                  const _InlineBadge(label: 'current'),
+                                  const MeshInlineBadge(label: 'current'),
                               ],
                             ),
                             const SizedBox(height: 4),
@@ -1450,17 +1351,17 @@ class _ModelPickerSheetState extends State<_ModelPickerSheet> {
                               runSpacing: 8,
                               children: [
                                 if (widget.providerName != null)
-                                  _InlineBadge(label: widget.providerName!),
+                                  MeshInlineBadge(label: widget.providerName!),
                                 if (model.isAutoModel)
-                                  const _InlineBadge(label: 'auto'),
+                                  const MeshInlineBadge(label: 'auto'),
                                 if (model.isDefault)
-                                  const _InlineBadge(label: 'default'),
+                                  const MeshInlineBadge(label: 'default'),
                                 if (model.supportsFastMode)
-                                  const _InlineBadge(label: 'fast'),
+                                  const MeshInlineBadge(label: 'fast'),
                                 ...model.supportedReasoningEfforts
                                     .take(3)
                                     .map(
-                                      (option) => _InlineBadge(
+                                      (option) => MeshInlineBadge(
                                         label: _reasoningEffortLabel(
                                           option.reasoningEffort,
                                         ),
@@ -1520,8 +1421,7 @@ class _ReasoningPickerSheet extends StatelessWidget {
           final selected = option.reasoningEffort == currentReasoning;
           final isDefault = option.reasoningEffort == defaultReasoning;
           return MeshSurface(
-            onTap: () =>
-                Navigator.of(context).pop(option.reasoningEffort),
+            onTap: () => Navigator.of(context).pop(option.reasoningEffort),
             selected: selected,
             tone: MeshSurfaceTone.muted,
             radius: AppRadii.control,
@@ -1548,9 +1448,9 @@ class _ReasoningPickerSheet extends StatelessWidget {
                                   ?.copyWith(fontWeight: FontWeight.w700),
                             ),
                           ),
-                          if (selected) const _InlineBadge(label: 'current'),
+                          if (selected) const MeshInlineBadge(label: 'current'),
                           if (!selected && isDefault)
-                            const _InlineBadge(label: 'default'),
+                            const MeshInlineBadge(label: 'default'),
                         ],
                       ),
                       if (option.description.trim().isNotEmpty) ...[
@@ -1571,32 +1471,6 @@ class _ReasoningPickerSheet extends StatelessWidget {
             ),
           );
         },
-      ),
-    );
-  }
-}
-
-class _InlineBadge extends StatelessWidget {
-  const _InlineBadge({required this.label});
-
-  final String label;
-
-  @override
-  Widget build(BuildContext context) {
-    final colors = context.colors;
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-      decoration: BoxDecoration(
-        color: colors.surface,
-        borderRadius: BorderRadius.circular(999),
-        border: Border.all(color: colors.border),
-      ),
-      child: Text(
-        label,
-        style: Theme.of(context).textTheme.labelSmall?.copyWith(
-          color: colors.textSecondary,
-          letterSpacing: 0.4,
-        ),
       ),
     );
   }

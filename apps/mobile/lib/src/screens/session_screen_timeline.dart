@@ -4675,6 +4675,95 @@ class _DaySeparator extends StatelessWidget {
   }
 }
 
+class _SessionTimelineLoadingState extends StatelessWidget {
+  const _SessionTimelineLoadingState();
+
+  @override
+  Widget build(BuildContext context) {
+    return ListView(
+      physics: const AlwaysScrollableScrollPhysics(),
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
+      children: const [
+        Center(child: MeshSkeleton(width: 88, height: 20, radius: 999)),
+        SizedBox(height: 14),
+        _SessionBubbleSkeleton(
+          widthFactor: 0.78,
+          lineWidths: [1.0, 0.86, 0.48],
+        ),
+        SizedBox(height: 10),
+        _SessionBubbleSkeleton(
+          widthFactor: 0.62,
+          rightAligned: true,
+          lineWidths: [0.94, 0.72],
+        ),
+        SizedBox(height: 10),
+        _SessionBubbleSkeleton(
+          widthFactor: 0.82,
+          lineWidths: [1.0, 0.92, 0.68],
+        ),
+        SizedBox(height: 10),
+        _SessionBubbleSkeleton(
+          widthFactor: 0.54,
+          rightAligned: true,
+          lineWidths: [0.82, 0.54],
+        ),
+      ],
+    );
+  }
+}
+
+class _SessionBubbleSkeleton extends StatelessWidget {
+  const _SessionBubbleSkeleton({
+    required this.widthFactor,
+    required this.lineWidths,
+    this.rightAligned = false,
+  });
+
+  final double widthFactor;
+  final List<double> lineWidths;
+  final bool rightAligned;
+
+  @override
+  Widget build(BuildContext context) {
+    return Align(
+      alignment: rightAligned ? Alignment.centerRight : Alignment.centerLeft,
+      child: FractionallySizedBox(
+        widthFactor: widthFactor,
+        alignment: rightAligned ? Alignment.centerRight : Alignment.centerLeft,
+        child: MeshSurface(
+          tone: rightAligned
+              ? MeshSurfaceTone.accent
+              : MeshSurfaceTone.surface,
+          radius: AppRadii.surface,
+          padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const FractionallySizedBox(
+                widthFactor: 0.24,
+                alignment: Alignment.centerLeft,
+                child: MeshSkeleton(height: 10, radius: AppRadii.badge),
+              ),
+              const SizedBox(height: 10),
+              for (var index = 0; index < lineWidths.length; index += 1) ...[
+                FractionallySizedBox(
+                  widthFactor: lineWidths[index],
+                  alignment: Alignment.centerLeft,
+                  child: const MeshSkeleton(
+                    height: 12,
+                    radius: AppRadii.badge,
+                  ),
+                ),
+                if (index != lineWidths.length - 1) const SizedBox(height: 8),
+              ],
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 /// Shown when the session has loaded (no longer _loading) but has no
 /// messages yet — typically the first 0.5-5 s of a newly created session
 /// while the agent initialises.

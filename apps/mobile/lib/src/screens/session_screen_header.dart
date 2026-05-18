@@ -35,39 +35,16 @@ class _CachedTranscriptStrip extends StatelessWidget {
             ? 'Offline · showing last known session state'
             : 'Offline · $_lastConnectedText',
     };
-    return MeshSurface(
-      tone: MeshSurfaceTone.warning,
-      radius: AppRadii.control,
-      padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 6),
-      child: Row(
-        children: [
-          if (refreshing)
-            SizedBox(
-              width: 11,
-              height: 11,
-              child: CircularProgressIndicator(
-                strokeWidth: 1.35,
-                color: colors.warning,
-              ),
-            )
-          else
-            Icon(icon, size: 13, color: colors.warning),
-          const SizedBox(width: 8),
-          Expanded(
-            child: Text(
-              text,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: monoStyle(
-                color: colors.textSecondary,
-                fontSize: 10.5,
-                fontWeight: FontWeight.w600,
-              ),
-            ),
-          ),
-          if (mode == _TranscriptFreshnessMode.offline && onRetry != null) ...[
-            const SizedBox(width: 8),
-            GestureDetector(
+    return MeshStatusRail(
+      label: text,
+      icon: icon,
+      active: refreshing,
+      tone: MeshStatusRailTone.warning,
+      surfaceTone: MeshSurfaceTone.warning,
+      mono: true,
+      padding: const EdgeInsets.fromLTRB(11, 8, 11, 8),
+      trailing: mode == _TranscriptFreshnessMode.offline && onRetry != null
+          ? GestureDetector(
               onTap: onRetry,
               behavior: HitTestBehavior.opaque,
               child: Padding(
@@ -81,10 +58,8 @@ class _CachedTranscriptStrip extends StatelessWidget {
                   ),
                 ),
               ),
-            ),
-          ],
-        ],
-      ),
+            )
+          : null,
     );
   }
 
@@ -921,10 +896,7 @@ class _GitDetailsSheet extends StatelessWidget {
             ),
             const SizedBox(height: 12),
             if (loading && status == null)
-              const Padding(
-                padding: EdgeInsets.symmetric(vertical: 28),
-                child: Center(child: CircularProgressIndicator()),
-              )
+              const _GitDetailsLoadingState()
             else if (status != null && !status!.isRepo)
               MeshEmptyState(
                 icon: Icons.account_tree_rounded,
@@ -1063,6 +1035,96 @@ class _GitDetailsSheet extends StatelessWidget {
   }
 }
 
+class _GitDetailsLoadingState extends StatelessWidget {
+  const _GitDetailsLoadingState();
+
+  @override
+  Widget build(BuildContext context) {
+    return const Padding(
+      padding: EdgeInsets.symmetric(vertical: 6),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              MeshSkeleton(width: 84, height: 24, radius: 999),
+              MeshSkeleton(width: 72, height: 24, radius: 999),
+              MeshSkeleton(width: 96, height: 24, radius: 999),
+            ],
+          ),
+          SizedBox(height: 16),
+          MeshCard(
+            tone: MeshCardTone.muted,
+            padding: EdgeInsets.all(14),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                MeshSkeleton(height: 12),
+                SizedBox(height: 10),
+                FractionallySizedBox(
+                  widthFactor: 0.76,
+                  alignment: Alignment.centerLeft,
+                  child: MeshSkeleton(height: 12),
+                ),
+                SizedBox(height: 10),
+                FractionallySizedBox(
+                  widthFactor: 0.58,
+                  alignment: Alignment.centerLeft,
+                  child: MeshSkeleton(height: 12),
+                ),
+              ],
+            ),
+          ),
+          SizedBox(height: 14),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              MeshSkeleton(width: 122, height: 36, radius: 12),
+              MeshSkeleton(width: 118, height: 36, radius: 12),
+              MeshSkeleton(width: 116, height: 36, radius: 12),
+            ],
+          ),
+          SizedBox(height: 20),
+          MeshSectionHeadingSkeleton(
+            titleWidthFactor: 0.22,
+            subtitleWidthFactor: 0.4,
+          ),
+          SizedBox(height: 10),
+          MeshCard(
+            padding: EdgeInsets.zero,
+            child: Column(
+              children: [
+                _GitFileStatusRowSkeleton(),
+                _GitFileStatusRowSkeleton(),
+                _GitFileStatusRowSkeleton(),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _GitFileStatusRowSkeleton extends StatelessWidget {
+  const _GitFileStatusRowSkeleton();
+
+  @override
+  Widget build(BuildContext context) {
+    return const MeshListRowSkeleton(
+      dense: true,
+      framed: false,
+      showLeading: false,
+      showSubtitle: false,
+      showTrailing: false,
+      titleWidthFactor: 0.62,
+    );
+  }
+}
+
 class _GitFileStatusRow extends StatelessWidget {
   const _GitFileStatusRow({required this.file});
 
@@ -1136,7 +1198,7 @@ class _GitDiffSheet extends StatelessWidget {
           child: Builder(
             builder: (context) {
               if (snapshot.connectionState != ConnectionState.done) {
-                return const Center(child: CircularProgressIndicator());
+                return const _GitDiffLoadingState();
               }
               if (snapshot.hasError) {
                 return MeshEmptyState(
@@ -1186,6 +1248,72 @@ class _GitDiffSheet extends StatelessWidget {
           ),
         );
       },
+    );
+  }
+}
+
+class _GitDiffLoadingState extends StatelessWidget {
+  const _GitDiffLoadingState();
+
+  @override
+  Widget build(BuildContext context) {
+    return const SingleChildScrollView(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          MeshSectionHeadingSkeleton(
+            titleWidthFactor: 0.2,
+            subtitleWidthFactor: 0.36,
+          ),
+          SizedBox(height: 12),
+          MeshCard(
+            tone: MeshCardTone.muted,
+            padding: EdgeInsets.all(14),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                MeshSkeleton(height: 12),
+                SizedBox(height: 8),
+                FractionallySizedBox(
+                  widthFactor: 0.78,
+                  alignment: Alignment.centerLeft,
+                  child: MeshSkeleton(height: 12),
+                ),
+                SizedBox(height: 8),
+                FractionallySizedBox(
+                  widthFactor: 0.64,
+                  alignment: Alignment.centerLeft,
+                  child: MeshSkeleton(height: 12),
+                ),
+                SizedBox(height: 16),
+                MeshSkeleton(height: 10),
+                SizedBox(height: 6),
+                MeshSkeleton(height: 10),
+                SizedBox(height: 6),
+                FractionallySizedBox(
+                  widthFactor: 0.7,
+                  alignment: Alignment.centerLeft,
+                  child: MeshSkeleton(height: 10),
+                ),
+                SizedBox(height: 14),
+                MeshSkeleton(height: 10),
+                SizedBox(height: 6),
+                FractionallySizedBox(
+                  widthFactor: 0.82,
+                  alignment: Alignment.centerLeft,
+                  child: MeshSkeleton(height: 10),
+                ),
+                SizedBox(height: 6),
+                FractionallySizedBox(
+                  widthFactor: 0.58,
+                  alignment: Alignment.centerLeft,
+                  child: MeshSkeleton(height: 10),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
     );
   }
 }

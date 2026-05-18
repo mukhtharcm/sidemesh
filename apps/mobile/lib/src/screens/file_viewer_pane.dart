@@ -280,7 +280,7 @@ class FileViewerPaneState extends State<FileViewerPane> {
   @override
   Widget build(BuildContext context) {
     if (_loading && _file == null) {
-      return const Center(child: MeshLoader());
+      return _FileViewerLoadingState(dense: widget.dense);
     }
     if (_error != null && _file == null) {
       return Padding(
@@ -492,6 +492,80 @@ class FileViewerActions extends StatelessWidget {
           icon: const Icon(Icons.refresh_rounded, size: 18),
         ),
       ],
+    );
+  }
+}
+
+class _FileViewerLoadingState extends StatelessWidget {
+  const _FileViewerLoadingState({required this.dense});
+
+  final bool dense;
+
+  @override
+  Widget build(BuildContext context) {
+    final outerPadding = dense
+        ? const EdgeInsets.fromLTRB(10, 8, 10, 12)
+        : const EdgeInsets.fromLTRB(12, 10, 12, 24);
+    return SingleChildScrollView(
+      padding: outerPadding,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: const [
+          Row(
+            children: [
+              MeshSkeleton(width: 68, height: 20, radius: 999),
+              SizedBox(width: 8),
+              MeshSkeleton(width: 54, height: 20, radius: 999),
+            ],
+          ),
+          SizedBox(height: 12),
+          MeshCard(
+            tone: MeshCardTone.muted,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                FractionallySizedBox(
+                  widthFactor: 0.24,
+                  alignment: Alignment.centerLeft,
+                  child: MeshSkeleton(height: 14, radius: AppRadii.badge),
+                ),
+                SizedBox(height: 14),
+                MeshSkeleton(height: 14, radius: AppRadii.badge),
+                SizedBox(height: 8),
+                FractionallySizedBox(
+                  widthFactor: 0.92,
+                  alignment: Alignment.centerLeft,
+                  child: MeshSkeleton(height: 14, radius: AppRadii.badge),
+                ),
+                SizedBox(height: 8),
+                FractionallySizedBox(
+                  widthFactor: 0.78,
+                  alignment: Alignment.centerLeft,
+                  child: MeshSkeleton(height: 14, radius: AppRadii.badge),
+                ),
+                SizedBox(height: 8),
+                FractionallySizedBox(
+                  widthFactor: 0.86,
+                  alignment: Alignment.centerLeft,
+                  child: MeshSkeleton(height: 14, radius: AppRadii.badge),
+                ),
+                SizedBox(height: 8),
+                FractionallySizedBox(
+                  widthFactor: 0.58,
+                  alignment: Alignment.centerLeft,
+                  child: MeshSkeleton(height: 14, radius: AppRadii.badge),
+                ),
+                SizedBox(height: 8),
+                FractionallySizedBox(
+                  widthFactor: 0.72,
+                  alignment: Alignment.centerLeft,
+                  child: MeshSkeleton(height: 14, radius: AppRadii.badge),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
     );
   }
 }
