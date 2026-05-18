@@ -140,8 +140,8 @@ class _UsagePaneState extends State<UsagePane> {
               _UsageFailureBanner(failures: _store.failures),
             ],
             if (_store.loading && _store.snapshots.isEmpty) ...[
-              const SizedBox(height: 48),
-              const MeshLoader(),
+              SizedBox(height: widget.dense ? 18 : 24),
+              _UsagePaneLoadingState(dense: widget.dense),
             ] else if (accounts.isEmpty) ...[
               const SizedBox(height: 36),
               const MeshEmptyState.compact(
@@ -213,6 +213,116 @@ class _UsagePaneState extends State<UsagePane> {
       }
     }
     return true;
+  }
+}
+
+class _UsagePaneLoadingState extends StatelessWidget {
+  const _UsagePaneLoadingState({required this.dense});
+
+  final bool dense;
+
+  @override
+  Widget build(BuildContext context) {
+    final spacing = dense ? 8.0 : 10.0;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const MeshSectionHeadingSkeleton(
+          titleWidthFactor: 0.16,
+          subtitleWidthFactor: 0.36,
+        ),
+        SizedBox(height: spacing),
+        const _UsageAccountCardSkeleton(),
+        SizedBox(height: spacing),
+        const _UsageAccountCardSkeleton(),
+        SizedBox(height: spacing),
+        const _UsageAccountCardSkeleton(showWindows: false),
+      ],
+    );
+  }
+}
+
+class _UsageAccountCardSkeleton extends StatelessWidget {
+  const _UsageAccountCardSkeleton({this.showWindows = true});
+
+  final bool showWindows;
+
+  @override
+  Widget build(BuildContext context) {
+    return MeshCard(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    FractionallySizedBox(
+                      widthFactor: 0.34,
+                      alignment: Alignment.centerLeft,
+                      child: MeshSkeleton(height: 18, radius: AppRadii.badge),
+                    ),
+                    SizedBox(height: 6),
+                    FractionallySizedBox(
+                      widthFactor: 0.64,
+                      alignment: Alignment.centerLeft,
+                      child: MeshSkeleton(height: 12, radius: AppRadii.badge),
+                    ),
+                  ],
+                ),
+              ),
+              SizedBox(width: 12),
+              MeshSkeleton(width: 72, height: 20, radius: 999),
+            ],
+          ),
+          if (showWindows) ...[
+            const SizedBox(height: 14),
+            const _UsageWindowSkeleton(),
+            const SizedBox(height: 12),
+            const _UsageWindowSkeleton(shorter: true),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+class _UsageWindowSkeleton extends StatelessWidget {
+  const _UsageWindowSkeleton({this.shorter = false});
+
+  final bool shorter;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            Expanded(
+              child: FractionallySizedBox(
+                widthFactor: shorter ? 0.32 : 0.42,
+                alignment: Alignment.centerLeft,
+                child: const MeshSkeleton(height: 14, radius: AppRadii.badge),
+              ),
+            ),
+            const SizedBox(width: 12),
+            const MeshSkeleton(width: 74, height: 20, radius: 999),
+          ],
+        ),
+        const SizedBox(height: 8),
+        const MeshSkeleton(height: 7, radius: 999),
+        const SizedBox(height: 6),
+        FractionallySizedBox(
+          widthFactor: shorter ? 0.48 : 0.62,
+          alignment: Alignment.centerLeft,
+          child: const MeshSkeleton(height: 12, radius: AppRadii.badge),
+        ),
+      ],
+    );
   }
 }
 

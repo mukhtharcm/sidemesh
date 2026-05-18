@@ -370,7 +370,7 @@ class _HostDetailScreenState extends State<HostDetailScreen>
       future: _future,
       builder: (context, snapshot) {
         if (snapshot.connectionState != ConnectionState.done) {
-          return const MeshLoader();
+          return _HostDetailLoadingState(embedded: widget.embedded);
         }
         if (snapshot.hasError) {
           return MeshEmptyState(
@@ -554,6 +554,150 @@ class _EmbeddedHostHeader extends StatelessWidget {
               foregroundColor: readableActionForeground(colors, colors.accent),
               padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
             ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _HostDetailLoadingState extends StatelessWidget {
+  const _HostDetailLoadingState({required this.embedded});
+
+  final bool embedded;
+
+  @override
+  Widget build(BuildContext context) {
+    return ListView(
+      physics: const AlwaysScrollableScrollPhysics(),
+      padding: EdgeInsets.fromLTRB(16, 8, 16, embedded ? 32 : 120),
+      children: const [
+        MeshCard(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  MeshSkeleton(width: 34, height: 34, radius: 10),
+                  SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        FractionallySizedBox(
+                          widthFactor: 0.32,
+                          alignment: Alignment.centerLeft,
+                          child: MeshSkeleton(
+                            height: 16,
+                            radius: AppRadii.badge,
+                          ),
+                        ),
+                        SizedBox(height: 6),
+                        FractionallySizedBox(
+                          widthFactor: 0.44,
+                          alignment: Alignment.centerLeft,
+                          child: MeshSkeleton(
+                            height: 12,
+                            radius: AppRadii.badge,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+              SizedBox(height: 14),
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: [
+                  MeshSkeleton(width: 92, height: 20, radius: 999),
+                  MeshSkeleton(width: 74, height: 20, radius: 999),
+                  MeshSkeleton(width: 116, height: 20, radius: 999),
+                ],
+              ),
+            ],
+          ),
+        ),
+        SizedBox(height: AppSpacing.sm),
+        MeshCard(
+          tone: MeshCardTone.muted,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              MeshSectionHeadingSkeleton(
+                titleWidthFactor: 0.24,
+                subtitleWidthFactor: 0.52,
+              ),
+              SizedBox(height: 14),
+              Row(
+                children: [
+                  Expanded(child: _HostSummaryCardSkeleton()),
+                  SizedBox(width: 12),
+                  Expanded(child: _HostSummaryCardSkeleton()),
+                ],
+              ),
+            ],
+          ),
+        ),
+        SizedBox(height: AppSpacing.lg),
+        MeshSectionHeadingSkeleton(
+          titleWidthFactor: 0.22,
+          subtitleWidthFactor: 0.38,
+        ),
+        SizedBox(height: AppSpacing.sm),
+        MeshListRowSkeleton(
+          titleWidthFactor: 0.42,
+          subtitleWidthFactor: 0.62,
+          showTrailing: false,
+        ),
+        SizedBox(height: AppSpacing.sm),
+        MeshListRowSkeleton(
+          titleWidthFactor: 0.5,
+          subtitleWidthFactor: 0.72,
+          showMeta: true,
+          badgeCount: 1,
+        ),
+        SizedBox(height: AppSpacing.sm),
+        MeshListRowSkeleton(
+          titleWidthFactor: 0.46,
+          subtitleWidthFactor: 0.68,
+          showMeta: true,
+        ),
+      ],
+    );
+  }
+}
+
+class _HostSummaryCardSkeleton extends StatelessWidget {
+  const _HostSummaryCardSkeleton();
+
+  @override
+  Widget build(BuildContext context) {
+    return MeshSurface(
+      tone: MeshSurfaceTone.surface,
+      radius: AppRadii.control,
+      padding: const EdgeInsets.all(12),
+      child: const Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          FractionallySizedBox(
+            widthFactor: 0.34,
+            alignment: Alignment.centerLeft,
+            child: MeshSkeleton(height: 10, radius: AppRadii.badge),
+          ),
+          SizedBox(height: 10),
+          FractionallySizedBox(
+            widthFactor: 0.58,
+            alignment: Alignment.centerLeft,
+            child: MeshSkeleton(height: 18, radius: AppRadii.badge),
+          ),
+          SizedBox(height: 8),
+          FractionallySizedBox(
+            widthFactor: 0.44,
+            alignment: Alignment.centerLeft,
+            child: MeshSkeleton(height: 12, radius: AppRadii.badge),
           ),
         ],
       ),

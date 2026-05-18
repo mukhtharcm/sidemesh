@@ -1009,13 +1009,10 @@ class _ComposerSkillSuggestionTrayState
     Widget child;
     if (widget.loading) {
       child = const Padding(
-        padding: EdgeInsets.symmetric(vertical: 10),
-        child: Center(
-          child: SizedBox(
-            width: 16,
-            height: 16,
-            child: CircularProgressIndicator(strokeWidth: 1.8),
-          ),
+        padding: EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+        child: _ComposerSuggestionTrayLoadingState(
+          badgeCount: 1,
+          showTrailing: true,
         ),
       );
     } else if (widget.suggestions.isEmpty) {
@@ -1196,14 +1193,8 @@ class _ComposerFileSuggestionTrayState
     Widget child;
     if (widget.loading && widget.suggestions.isEmpty) {
       child = const Padding(
-        padding: EdgeInsets.symmetric(vertical: 10),
-        child: Center(
-          child: SizedBox(
-            width: 16,
-            height: 16,
-            child: CircularProgressIndicator(strokeWidth: 1.8),
-          ),
-        ),
+        padding: EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+        child: _ComposerSuggestionTrayLoadingState(showTrailing: false),
       );
     } else if (widget.error != null && widget.error!.trim().isNotEmpty) {
       child = Padding(
@@ -1330,6 +1321,50 @@ class _ComposerFileSuggestionTrayState
         maxLines: 1,
         overflow: TextOverflow.ellipsis,
       ),
+    );
+  }
+}
+
+class _ComposerSuggestionTrayLoadingState extends StatelessWidget {
+  const _ComposerSuggestionTrayLoadingState({
+    this.badgeCount = 0,
+    required this.showTrailing,
+  });
+
+  final int badgeCount;
+  final bool showTrailing;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      children: [
+        MeshListRowSkeleton(
+          dense: true,
+          framed: false,
+          titleWidthFactor: 0.46,
+          subtitleWidthFactor: 0.72,
+          badgeCount: badgeCount,
+          showTrailing: showTrailing,
+        ),
+        const SizedBox(height: 4),
+        MeshListRowSkeleton(
+          dense: true,
+          framed: false,
+          titleWidthFactor: 0.58,
+          subtitleWidthFactor: 0.64,
+          badgeCount: badgeCount,
+          showTrailing: showTrailing,
+        ),
+        const SizedBox(height: 4),
+        MeshListRowSkeleton(
+          dense: true,
+          framed: false,
+          titleWidthFactor: 0.4,
+          subtitleWidthFactor: 0.7,
+          badgeCount: badgeCount,
+          showTrailing: showTrailing,
+        ),
+      ],
     );
   }
 }
