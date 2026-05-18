@@ -2,7 +2,10 @@ import 'dart:async';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
+import '../app_update_settings_store.dart';
+import '../app_version_store.dart';
 import '../background_sync_service.dart';
 import '../create_session_defaults_store.dart';
 import '../image_blob_cache_store.dart';
@@ -89,6 +92,9 @@ class SettingsScreen extends StatefulWidget {
 }
 
 class _SettingsScreenState extends State<SettingsScreen> {
+  final AppUpdateSettingsStore _appUpdateStore =
+      AppUpdateSettingsStore.instance;
+  final AppVersionStore _appVersionStore = AppVersionStore.instance;
   final CreateSessionDefaultsStore _defaultsStore =
       CreateSessionDefaultsStore.instance;
   final ScreenAwakeSettingsStore _screenAwakeStore =
@@ -104,6 +110,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
   @override
   void initState() {
     super.initState();
+    unawaited(_appUpdateStore.ensureLoaded());
+    unawaited(_appVersionStore.ensureLoaded());
     unawaited(_defaultsStore.ensureLoaded());
     unawaited(_screenAwakeStore.ensureLoaded());
     unawaited(_refreshNotificationStatus());
@@ -233,6 +241,47 @@ class _SettingsScreenState extends State<SettingsScreen> {
     }
   }
 
+  Future<void> _checkForUpdatesNow() async {
+    try {
+      await _appUpdateStore.checkForUpdates();
+    } catch (error) {
+      if (!mounted) return;
+      showAppSnackBar(context, _appUpdateErrorMessage(error));
+    }
+  }
+
+  Future<void> _setAutomaticUpdateChecks(bool value) async {
+    try {
+      await _appUpdateStore.setAutomaticallyChecksForUpdates(value);
+    } catch (error) {
+      if (!mounted) return;
+      showAppSnackBar(context, _appUpdateErrorMessage(error));
+    }
+  }
+
+  Future<void> _setUpdateCheckInterval(
+    AppUpdateCheckIntervalOption option,
+  ) async {
+    try {
+      await _appUpdateStore.setUpdateCheckIntervalSeconds(option.seconds);
+    } catch (error) {
+      if (!mounted) return;
+      showAppSnackBar(context, _appUpdateErrorMessage(error));
+    }
+  }
+
+  String _appUpdateErrorMessage(Object error) {
+    if (error is PlatformException) {
+      if (error.code == 'unsupported') {
+        return 'This build does not include in-app updates.';
+      }
+      if (error.code == 'busy') {
+        return 'Another update check is already running.';
+      }
+    }
+    return 'Could not change app update settings.';
+  }
+
   String _platformLabel() {
     if (kIsWeb) return 'Web';
     return switch (defaultTargetPlatform) {
@@ -263,6 +312,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
     final content = _SettingsContent(
       embedded: widget.embedded,
       onClose: widget.onClose,
+      appUpdateStore: _appUpdateStore,
+      appVersionStore: _appVersionStore,
       themeController: themeController,
       defaultsStore: _defaultsStore,
       screenAwakeStore: _screenAwakeStore,
@@ -278,6 +329,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
       onRefreshNotifications: _refreshNotificationStatus,
       onRequestNotifications: _requestNotifications,
       onEditLaunchDefaults: _editLaunchDefaults,
+      onCheckForUpdatesNow: _checkForUpdatesNow,
+      onSetAutomaticUpdateChecks: _setAutomaticUpdateChecks,
+      onSetUpdateCheckInterval: _setUpdateCheckInterval,
       onRunStorageAction: _runStorageAction,
       onResetSidebarWidth: widget.onResetSidebarWidth,
       onResetInspectorWidth: widget.onResetInspectorWidth,
@@ -588,6 +642,8 @@ class _SettingsContent extends StatelessWidget {
   const _SettingsContent({
     required this.embedded,
     required this.onClose,
+    required this.appUpdateStore,
+    required this.appVersionStore,
     required this.themeController,
     required this.defaultsStore,
     required this.screenAwakeStore,
@@ -603,6 +659,9 @@ class _SettingsContent extends StatelessWidget {
     required this.onRefreshNotifications,
     required this.onRequestNotifications,
     required this.onEditLaunchDefaults,
+    required this.onCheckForUpdatesNow,
+    required this.onSetAutomaticUpdateChecks,
+    required this.onSetUpdateCheckInterval,
     required this.onRunStorageAction,
     required this.onResetSidebarWidth,
     required this.onResetInspectorWidth,
@@ -611,6 +670,8 @@ class _SettingsContent extends StatelessWidget {
 
   final bool embedded;
   final VoidCallback? onClose;
+  final AppUpdateSettingsStore appUpdateStore;
+  final AppVersionStore appVersionStore;
   final ThemeController themeController;
   final CreateSessionDefaultsStore defaultsStore;
   final ScreenAwakeSettingsStore screenAwakeStore;
@@ -626,6 +687,10 @@ class _SettingsContent extends StatelessWidget {
   final Future<void> Function() onRefreshNotifications;
   final Future<void> Function() onRequestNotifications;
   final Future<void> Function() onEditLaunchDefaults;
+  final Future<void> Function() onCheckForUpdatesNow;
+  final Future<void> Function(bool value) onSetAutomaticUpdateChecks;
+  final Future<void> Function(AppUpdateCheckIntervalOption option)
+  onSetUpdateCheckInterval;
   final Future<void> Function({
     required String key,
     required String title,
@@ -641,6 +706,8 @@ class _SettingsContent extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colors = context.colors;
+    final showAppUpdateSection =
+        !kIsWeb && defaultTargetPlatform == TargetPlatform.macOS;
     final list = ListView(
       padding: EdgeInsets.fromLTRB(
         embedded ? AppSpacing.xl : AppSpacing.lg,
@@ -771,6 +838,23 @@ class _SettingsContent extends StatelessWidget {
           ],
         ),
         const SizedBox(height: AppSpacing.lg),
+        if (showAppUpdateSection) ...[
+          _SettingsSection(
+            icon: Icons.system_update_rounded,
+            title: 'App updates',
+            subtitle: 'Sparkle checks and release cadence.',
+            children: [
+              _AppUpdateSettingsCard(
+                appUpdateStore: appUpdateStore,
+                appVersionStore: appVersionStore,
+                onCheckForUpdatesNow: onCheckForUpdatesNow,
+                onSetAutomaticUpdateChecks: onSetAutomaticUpdateChecks,
+                onSetUpdateCheckInterval: onSetUpdateCheckInterval,
+              ),
+            ],
+          ),
+          const SizedBox(height: AppSpacing.lg),
+        ],
         _SettingsSection(
           icon: Icons.rocket_launch_rounded,
           title: 'Session defaults',
@@ -1053,6 +1137,190 @@ class _SettingsSectionState extends State<_SettingsSection>
   }
 }
 
+class _AppUpdateSettingsCard extends StatelessWidget {
+  const _AppUpdateSettingsCard({
+    required this.appUpdateStore,
+    required this.appVersionStore,
+    required this.onCheckForUpdatesNow,
+    required this.onSetAutomaticUpdateChecks,
+    required this.onSetUpdateCheckInterval,
+  });
+
+  final AppUpdateSettingsStore appUpdateStore;
+  final AppVersionStore appVersionStore;
+  final Future<void> Function() onCheckForUpdatesNow;
+  final Future<void> Function(bool value) onSetAutomaticUpdateChecks;
+  final Future<void> Function(AppUpdateCheckIntervalOption option)
+  onSetUpdateCheckInterval;
+
+  @override
+  Widget build(BuildContext context) {
+    return ListenableBuilder(
+      listenable: Listenable.merge([appUpdateStore, appVersionStore]),
+      builder: (context, _) {
+        final colors = context.colors;
+        final settings = appUpdateStore.settings;
+        final versionInfo = appVersionStore.info;
+        final supported = settings.supported;
+        final loaded = settings.loaded;
+        final automaticChecks = settings.automaticallyChecksForUpdates;
+        final checkNowEnabled =
+            supported &&
+            loaded &&
+            settings.canCheckForUpdates &&
+            !appUpdateStore.checking &&
+            !appUpdateStore.saving;
+        final subtitle = !loaded
+            ? 'Loading macOS update settings...'
+            : supported
+            ? automaticChecks
+                  ? '${settings.intervalLabel} background checks are on.'
+                  : 'Automatic checks are off. Manual checks still work.'
+            : 'This build does not include the signed Sparkle feed.';
+        final versionLabel = versionInfo.loaded
+            ? versionInfo.displayVersion
+            : 'Version unavailable';
+        final cardBody = supported
+            ? 'You are on $versionLabel. Release builds can check for newer signed macOS downloads in the background.'
+            : 'You are on $versionLabel. Install the signed production macOS build if you want in-app update checks.';
+        final selectedInterval = settings.selectedIntervalOption;
+        return _SettingsCard(
+          icon: Icons.system_update_rounded,
+          title: 'Mac app updates',
+          subtitle: subtitle,
+          body: cardBody,
+          trailing: OutlinedButton(
+            onPressed: checkNowEnabled
+                ? () => unawaited(onCheckForUpdatesNow())
+                : null,
+            child: Text(appUpdateStore.checking ? 'Checking...' : 'Check now'),
+          ),
+          footer: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              _ToggleTile(
+                icon: Icons.schedule_rounded,
+                title: 'Check automatically',
+                subtitle:
+                    'Let Sidemesh ask Sparkle for new releases on a schedule. Manual checks stay available either way.',
+                value: automaticChecks && supported,
+                onChanged: loaded && supported && !appUpdateStore.saving
+                    ? (value) => unawaited(onSetAutomaticUpdateChecks(value))
+                    : null,
+              ),
+              const SizedBox(height: AppSpacing.md),
+              Text(
+                'How often',
+                style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                  fontWeight: AppWeights.emphasis,
+                ),
+              ),
+              const SizedBox(height: AppSpacing.sm),
+              Wrap(
+                spacing: AppSpacing.sm,
+                runSpacing: AppSpacing.sm,
+                children: [
+                  for (final option in AppUpdateCheckIntervalOption.values)
+                    _UpdateIntervalOptionButton(
+                      option: option,
+                      selected: selectedInterval?.seconds == option.seconds,
+                      enabled:
+                          loaded &&
+                          supported &&
+                          automaticChecks &&
+                          !appUpdateStore.saving,
+                      onTap: () => unawaited(onSetUpdateCheckInterval(option)),
+                    ),
+                ],
+              ),
+              if (!automaticChecks && supported) ...[
+                const SizedBox(height: AppSpacing.sm),
+                Text(
+                  'Automatic checks are off, so this cadence is currently paused.',
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: colors.textSecondary,
+                    height: 1.3,
+                  ),
+                ),
+              ],
+            ],
+          ),
+        );
+      },
+    );
+  }
+}
+
+class _UpdateIntervalOptionButton extends StatelessWidget {
+  const _UpdateIntervalOptionButton({
+    required this.option,
+    required this.selected,
+    required this.enabled,
+    required this.onTap,
+  });
+
+  final AppUpdateCheckIntervalOption option;
+  final bool selected;
+  final bool enabled;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    final background = selected ? colors.accentMuted : colors.surfaceMuted;
+    final borderColor = selected
+        ? colors.accent.withValues(alpha: 0.32)
+        : colors.border;
+    final titleColor = enabled
+        ? colors.textPrimary
+        : colors.textSecondary.withValues(alpha: 0.9);
+    final detailColor = enabled
+        ? colors.textSecondary
+        : colors.textSecondary.withValues(alpha: 0.72);
+    return Opacity(
+      opacity: enabled ? 1 : 0.58,
+      child: InkWell(
+        borderRadius: AppShapes.input,
+        onTap: enabled ? onTap : null,
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 160),
+          curve: Curves.easeOut,
+          width: 148,
+          padding: const EdgeInsets.symmetric(
+            horizontal: AppSpacing.md,
+            vertical: 10,
+          ),
+          decoration: BoxDecoration(
+            color: background,
+            borderRadius: AppShapes.input,
+            border: Border.all(color: borderColor),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                option.label,
+                style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                  fontWeight: AppWeights.emphasis,
+                  color: titleColor,
+                ),
+              ),
+              const SizedBox(height: 2),
+              Text(
+                option.detail,
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                  color: detailColor,
+                  height: 1.28,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 class _AboutFooter extends StatelessWidget {
   const _AboutFooter({
     required this.platformLabel,
@@ -1301,7 +1569,7 @@ class _ToggleTile extends StatelessWidget {
   final String title;
   final String subtitle;
   final bool value;
-  final ValueChanged<bool> onChanged;
+  final ValueChanged<bool>? onChanged;
 
   @override
   Widget build(BuildContext context) {
@@ -1319,7 +1587,11 @@ class _ToggleTile extends StatelessWidget {
             child: Icon(
               icon,
               size: 18,
-              color: value ? colors.accent : colors.textSecondary,
+              color: value
+                  ? colors.accent
+                  : onChanged != null
+                  ? colors.textSecondary
+                  : colors.textSecondary.withValues(alpha: 0.72),
             ),
           ),
           const SizedBox(width: 10),
@@ -1331,13 +1603,18 @@ class _ToggleTile extends StatelessWidget {
                   title,
                   style: Theme.of(context).textTheme.labelLarge?.copyWith(
                     fontWeight: AppWeights.emphasis,
+                    color: onChanged != null
+                        ? colors.textPrimary
+                        : colors.textSecondary,
                   ),
                 ),
                 const SizedBox(height: 2),
                 Text(
                   subtitle,
                   style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                    color: colors.textSecondary,
+                    color: onChanged != null
+                        ? colors.textSecondary
+                        : colors.textSecondary.withValues(alpha: 0.82),
                     height: 1.3,
                   ),
                 ),

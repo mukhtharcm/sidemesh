@@ -110,6 +110,9 @@ Production macOS app updates use Sparkle when the release build embeds
 `SIDEMESH_SPARKLE_PUBLIC_ED_KEY`. Sparkle checks the production appcast hosted
 on the dedicated GitHub Release tag `macos-appcast-prod`; daemon update checks
 remain separate and still happen through each connected Sidemesh host.
+The signed production app also exposes `Settings -> App updates`, where users
+can manually check for updates and choose whether Sparkle checks daily,
+weekly, or monthly.
 
 ## Local iOS Signing
 
