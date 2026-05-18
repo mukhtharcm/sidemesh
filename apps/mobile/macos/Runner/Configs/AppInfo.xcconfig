@@ -4,11 +4,20 @@
 // future. If not, the values below would default to using the project name when this becomes a
 // 'flutter create' template.
 
+// Optional local-only signing overrides for macOS developer builds.
+// Keep this file untracked; CI release packaging signs separately with
+// Developer ID after the Flutter build finishes.
+#include? "../../Flutter/Signing.local.xcconfig"
+
 // The application's name. By default this is also the title of the Flutter window.
 PRODUCT_NAME = Sidemesh
 
 // The application's bundle identifier
 PRODUCT_BUNDLE_IDENTIFIER = com.sidemesh.sidemeshMobile
+
+// Use the optional local signing config to resolve a stable Apple
+// development team for ad-hoc-free local builds.
+DEVELOPMENT_TEAM = $(SIDEMESH_DEVELOPMENT_TEAM)
 
 // The copyright displayed in application information
 PRODUCT_COPYRIGHT = Copyright © 2026 com.sidemesh. All rights reserved.
