@@ -100,6 +100,26 @@ void main() {
         AppUpdateCheckIntervalOption.weekly,
       );
     });
+
+    test('retries after an initial fetch failure', () async {
+      final service = _FakeAppUpdateSettingsService(
+        initial: const AppUpdateSettings(
+          supported: true,
+          loaded: true,
+          automaticallyChecksForUpdates: true,
+          updateCheckIntervalSeconds: 86400,
+          canCheckForUpdates: true,
+        ),
+        failFirstFetch: true,
+      );
+      final store = AppUpdateSettingsStore.forTesting(service: service);
+
+      await expectLater(store.ensureLoaded(), throwsA(isA<StateError>()));
+      await store.ensureLoaded();
+
+      expect(service.fetchCount, 2);
+      expect(store.settings.supported, isTrue);
+    });
   });
 }
 
@@ -107,11 +127,13 @@ class _FakeAppUpdateSettingsService implements AppUpdateSettingsService {
   _FakeAppUpdateSettingsService({
     required AppUpdateSettings initial,
     AppUpdateSettings? afterCheck,
+    this.failFirstFetch = false,
   }) : _current = initial,
        _afterCheck = afterCheck;
 
   AppUpdateSettings _current;
   final AppUpdateSettings? _afterCheck;
+  final bool failFirstFetch;
   int fetchCount = 0;
   int checkForUpdatesCount = 0;
   bool? lastAutomaticChecksValue;
@@ -128,6 +150,9 @@ class _FakeAppUpdateSettingsService implements AppUpdateSettingsService {
   @override
   Future<AppUpdateSettings> fetchSettings() async {
     fetchCount += 1;
+    if (failFirstFetch && fetchCount == 1) {
+      throw StateError('transient failure');
+    }
     return _current;
   }
 
