@@ -151,13 +151,32 @@ export function registerFsRoutes(app: Hono<HonoServerEnv>, opts: FsRoutesOptions
       resolveRoots,
     );
     const info = await stat(target);
+    const range = parseByteRangeHeader(c.req.header("range"), info.size);
     c.header("Content-Type", guessMime(target));
-    c.header("Content-Length", String(info.size));
+    c.header("Accept-Ranges", "bytes");
     c.header("Cache-Control", "private, max-age=60");
     c.header(
       "Content-Disposition",
       `inline; filename="${path.basename(target).replaceAll('"', "")}"`,
     );
+    if (range === "unsatisfiable") {
+      c.header("Content-Range", `bytes */${info.size}`);
+      return c.body(null, 416);
+    }
+    if (range) {
+      c.header("Content-Length", String(range.end - range.start + 1));
+      c.header("Content-Range", `bytes ${range.start}-${range.end}/${info.size}`);
+      return c.body(
+        Readable.toWeb(
+          createReadStream(target, {
+            start: range.start,
+            end: range.end,
+          }),
+        ) as ReadableStream,
+        206,
+      );
+    }
+    c.header("Content-Length", String(info.size));
     return c.body(
       Readable.toWeb(createReadStream(target)) as ReadableStream,
       200,
@@ -301,6 +320,58 @@ export function registerFsRoutes(app: Hono<HonoServerEnv>, opts: FsRoutesOptions
       response.json({ roots: await resolveRoots() });
     }),
   );
+}
+
+function parseByteRangeHeader(
+  rangeHeader: string | undefined,
+  totalSize: number,
+): { start: number; end: number } | "unsatisfiable" | null {
+  if (!rangeHeader) {
+    return null;
+  }
+  if (!rangeHeader.startsWith("bytes=")) {
+    return "unsatisfiable";
+  }
+  const requestedRanges = rangeHeader.slice("bytes=".length).split(",");
+  if (requestedRanges.length !== 1) {
+    return "unsatisfiable";
+  }
+  const [startTextRaw, endTextRaw] = requestedRanges[0]!.trim().split("-", 2);
+  const startText = startTextRaw?.trim() ?? "";
+  const endText = endTextRaw?.trim() ?? "";
+  if (!startText && !endText) {
+    return "unsatisfiable";
+  }
+  if (totalSize <= 0) {
+    return "unsatisfiable";
+  }
+  if (!startText) {
+    const suffixLength = Number(endText);
+    if (!Number.isInteger(suffixLength) || suffixLength <= 0) {
+      return "unsatisfiable";
+    }
+    const clampedLength = Math.min(suffixLength, totalSize);
+    return {
+      start: totalSize - clampedLength,
+      end: totalSize - 1,
+    };
+  }
+
+  const start = Number(startText);
+  if (!Number.isInteger(start) || start < 0 || start >= totalSize) {
+    return "unsatisfiable";
+  }
+  if (!endText) {
+    return { start, end: totalSize - 1 };
+  }
+  const end = Number(endText);
+  if (!Number.isInteger(end) || end < start) {
+    return "unsatisfiable";
+  }
+  return {
+    start,
+    end: Math.min(end, totalSize - 1),
+  };
 }
 
 async function resolveIncomingPath(
@@ -709,6 +780,22 @@ function guessMime(filePath: string): string {
       return "image/gif";
     case "webp":
       return "image/webp";
+    case "mp4":
+      return "video/mp4";
+    case "webm":
+      return "video/webm";
+    case "mov":
+      return "video/quicktime";
+    case "m4v":
+      return "video/x-m4v";
+    case "mkv":
+      return "video/x-matroska";
+    case "avi":
+      return "video/x-msvideo";
+    case "ogv":
+      return "video/ogg";
+    case "m3u8":
+      return "application/vnd.apple.mpegurl";
     case "pdf":
       return "application/pdf";
     case "zip":
