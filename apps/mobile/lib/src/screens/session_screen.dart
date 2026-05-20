@@ -206,7 +206,7 @@ class _DesktopSessionTitle extends StatelessWidget {
           AgentProviderBadge(providerKind: session.provider, compact: true),
           const SizedBox(width: 8),
         ],
-        _DesktopSessionStatusBadge(running: running),
+        if (running) _DesktopSessionStatusBadge(running: running),
       ],
     );
   }
@@ -217,14 +217,12 @@ class _DesktopSessionCommandBar extends StatelessWidget {
     required this.running,
     required this.canStop,
     required this.onStop,
-    required this.onNewSession,
     required this.onMore,
   });
 
   final bool running;
   final bool canStop;
   final VoidCallback onStop;
-  final VoidCallback onNewSession;
   final VoidCallback onMore;
 
   @override
@@ -243,12 +241,6 @@ class _DesktopSessionCommandBar extends StatelessWidget {
           ),
           const SizedBox(width: 6),
         ],
-        _DesktopHeaderTextButton(
-          icon: Icons.add_rounded,
-          label: 'New session',
-          onTap: onNewSession,
-        ),
-        const SizedBox(width: 6),
         MeshIconButton(
           icon: Icons.more_horiz_rounded,
           tooltip: running
@@ -258,53 +250,6 @@ class _DesktopSessionCommandBar extends StatelessWidget {
           onTap: onMore,
         ),
       ],
-    );
-  }
-}
-
-class _DesktopHeaderTextButton extends StatelessWidget {
-  const _DesktopHeaderTextButton({
-    required this.icon,
-    required this.label,
-    required this.onTap,
-  });
-
-  final IconData icon;
-  final String label;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    final colors = context.colors;
-    return Tooltip(
-      message: label,
-      child: Semantics(
-        button: true,
-        label: label,
-        child: MeshSurface(
-          onTap: onTap,
-          radius: AppRadii.control,
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 0),
-          child: SizedBox(
-            height: 44,
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Icon(icon, size: 17, color: colors.textSecondary),
-                const SizedBox(width: 7),
-                Text(
-                  label,
-                  style: Theme.of(context).textTheme.labelLarge?.copyWith(
-                    color: colors.textPrimary,
-                    fontWeight: AppWeights.title,
-                    letterSpacing: -0.1,
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
-      ),
     );
   }
 }
@@ -345,18 +290,6 @@ class _DesktopSessionStatusBadge extends StatelessWidget {
   }
 }
 
-class _DesktopSessionHeaderDivider extends StatelessWidget
-    implements PreferredSizeWidget {
-  const _DesktopSessionHeaderDivider();
-
-  @override
-  Size get preferredSize => const Size.fromHeight(1);
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(height: 1, color: context.colors.border);
-  }
-}
 
 class _SessionBrowserPreviewDock extends StatelessWidget {
   const _SessionBrowserPreviewDock({
@@ -1427,13 +1360,33 @@ class _SessionScreenState extends State<SessionScreen>
   /// Opens the inspector hub for this session.
   ///
   /// Each callback handles its own capability check and shows a snackbar when
-  /// the tool is not available on the current host, so the hub doesn't need
-  /// to know about capability flags at construction time.
+  /// Opens the default inspector surface for this session.
+  ///
+  /// On desktop, we skip the hub launcher and go straight to the workspace
+  /// file browser — it's the most immediately useful surface and avoids the
+  /// "click a menu to open a menu" anti-pattern. The hub is kept as fallback
+  /// when the filesystem capability is absent.
   void _openDefaultInspectorHub(
     InspectorController controller,
     String ownerKey,
   ) {
     final session = _session ?? widget.session;
+    // On desktop, prefer jumping straight into the file browser rather than
+    // showing the hub launcher. Fall back to the hub when the host doesn't
+    // expose the filesystem.
+    if (widget.desktopMode && _supportsFilesystem) {
+      controller.show(
+        buildInspectorWorkspaceBrowserSurface(
+          ownerKey: ownerKey,
+          host: widget.host,
+          api: widget.api,
+          root: _workspaceBrowserRootForPath(session.cwd, session.cwd),
+          agentProvider: session.provider,
+          sessionId: session.id,
+        ),
+      );
+      return;
+    }
     controller.show(
       buildInspectorSessionHubSurface(
         ownerKey: ownerKey,
@@ -6744,104 +6697,7 @@ class _SessionScreenState extends State<SessionScreen>
             ),
           ],
         ),
-      _SessionActionGroup(
-        label: 'Workspace',
-        actions: [
-          if (_supportsTerminal)
-            _SessionActionSpec(
-              value: 'terminal',
-              label: terminalOpen ? 'Terminal is open' : 'Open terminal',
-              detail: terminalOpen
-                  ? 'Jump back to the active terminal surface.'
-                  : 'Open a shell for this workspace.',
-              icon: Icons.terminal_rounded,
-              tone: terminalOpen
-                  ? _SessionActionTone.accent
-                  : _SessionActionTone.neutral,
-              active: terminalOpen,
-            ),
-          if (_supportsFilesystem)
-            const _SessionActionSpec(
-              value: 'browse',
-              label: 'Browse files',
-              detail: 'Open the workspace file browser.',
-              icon: Icons.folder_rounded,
-            ),
-          if (_supportsSessionResources)
-            _SessionActionSpec(
-              value: 'resources',
-              label: resourcesOpen ? 'Resources are open' : 'Open resources',
-              detail: 'View generated images and session assets.',
-              icon: Icons.perm_media_rounded,
-              tone: resourcesOpen
-                  ? _SessionActionTone.accent
-                  : _SessionActionTone.neutral,
-              active: resourcesOpen,
-            ),
-        ],
-      ),
-      _SessionActionGroup(
-        label: 'Browser',
-        actions: [
-          if (_supportsBrowserPreview)
-            const _SessionActionSpec(
-              value: 'preview',
-              label: 'Open browser',
-              detail: 'Open a local app or URL from this host.',
-              icon: Icons.open_in_browser_rounded,
-              tone: _SessionActionTone.accent,
-            ),
-          if (_supportsBrowserPreview &&
-              SidemeshBrowserPreviewWindowManager.instance.isSupported)
-            const _SessionActionSpec(
-              value: 'preview_window',
-              label: 'Open browser in new window',
-              detail: 'Detach the browser into its own macOS window.',
-              icon: Icons.open_in_new_rounded,
-            ),
-          if (_supportsConnections)
-            _SessionActionSpec(
-              value: 'connections',
-              label: portsOpen ? 'Browsers are open' : 'Manage browsers',
-              detail: 'Inspect active browsers for this session.',
-              icon: Icons.open_in_browser_rounded,
-              tone: portsOpen
-                  ? _SessionActionTone.accent
-                  : _SessionActionTone.neutral,
-              active: portsOpen,
-            ),
-        ],
-      ),
-      _SessionActionGroup(
-        label: 'Transcript',
-        actions: [
-          _SessionActionSpec(
-            value: 'search',
-            label: searchOpen ? 'Close search' : 'Search transcript',
-            detail: searchOpen
-                ? 'Hide the current search panel.'
-                : 'Find text in loaded messages.',
-            icon: searchOpen ? Icons.search_off_rounded : Icons.search_rounded,
-            tone: searchOpen
-                ? _SessionActionTone.accent
-                : _SessionActionTone.neutral,
-            active: searchOpen,
-          ),
-          if (gitAvailable)
-            _SessionActionSpec(
-              value: 'git',
-              label: 'Git details',
-              detail: gitDirty
-                  ? 'Working tree has changes.'
-                  : 'Branch, upstream, and diff shortcuts.',
-              icon: Icons.account_tree_rounded,
-              tone: gitDirty
-                  ? _SessionActionTone.warning
-                  : _SessionActionTone.neutral,
-              active: gitDirty,
-            ),
-        ],
-      ),
+      // ── Session management ──────────────────────────────────────────────
       _SessionActionGroup(
         label: 'Session',
         actions: [
@@ -6852,12 +6708,6 @@ class _SessionScreenState extends State<SessionScreen>
               detail: 'Start beside this working directory.',
               icon: Icons.add_circle_outline_rounded,
             ),
-          const _SessionActionSpec(
-            value: 'reload',
-            label: 'Reload',
-            detail: 'Refresh this transcript from the host.',
-            icon: Icons.refresh_rounded,
-          ),
           if (includeControls)
             _SessionActionSpec(
               value: 'controls',
@@ -6896,6 +6746,12 @@ class _SessionScreenState extends State<SessionScreen>
               detail: 'Summarize older context to keep the session lighter.',
               icon: Icons.compress_rounded,
             ),
+          const _SessionActionSpec(
+            value: 'reload',
+            label: 'Reload',
+            detail: 'Refresh this transcript from the host.',
+            icon: Icons.refresh_rounded,
+          ),
           if (widget.topPadding != null &&
               SidemeshSessionWindowManager.instance.isSupported)
             const _SessionActionSpec(
@@ -6937,6 +6793,95 @@ class _SessionScreenState extends State<SessionScreen>
               ),
           ],
         ),
+      // ── Tools — all workspace and session tool launchers ───────────────────
+      _SessionActionGroup(
+        label: 'Tools',
+        actions: [
+          if (_supportsTerminal)
+            _SessionActionSpec(
+              value: 'terminal',
+              label: terminalOpen ? 'Terminal is open' : 'Open terminal',
+              detail: terminalOpen
+                  ? 'Jump back to the active terminal surface.'
+                  : 'Open a shell for this workspace.',
+              icon: Icons.terminal_rounded,
+              tone: terminalOpen
+                  ? _SessionActionTone.accent
+                  : _SessionActionTone.neutral,
+              active: terminalOpen,
+            ),
+          if (_supportsFilesystem)
+            const _SessionActionSpec(
+              value: 'browse',
+              label: 'Browse files',
+              detail: 'Open the workspace file browser.',
+              icon: Icons.folder_rounded,
+            ),
+          if (_supportsBrowserPreview)
+            const _SessionActionSpec(
+              value: 'preview',
+              label: 'Open browser',
+              detail: 'Open a local app or URL from this host.',
+              icon: Icons.open_in_browser_rounded,
+              tone: _SessionActionTone.accent,
+            ),
+          if (_supportsBrowserPreview &&
+              SidemeshBrowserPreviewWindowManager.instance.isSupported)
+            const _SessionActionSpec(
+              value: 'preview_window',
+              label: 'Open browser in new window',
+              detail: 'Detach the browser into its own macOS window.',
+              icon: Icons.open_in_new_rounded,
+            ),
+          if (_supportsConnections)
+            _SessionActionSpec(
+              value: 'connections',
+              label: portsOpen ? 'Browsers are open' : 'Manage browsers',
+              detail: 'Inspect active browsers for this session.',
+              icon: Icons.open_in_browser_rounded,
+              tone: portsOpen
+                  ? _SessionActionTone.accent
+                  : _SessionActionTone.neutral,
+              active: portsOpen,
+            ),
+          if (_supportsSessionResources)
+            _SessionActionSpec(
+              value: 'resources',
+              label: resourcesOpen ? 'Resources are open' : 'Open resources',
+              detail: 'View generated images and session assets.',
+              icon: Icons.perm_media_rounded,
+              tone: resourcesOpen
+                  ? _SessionActionTone.accent
+                  : _SessionActionTone.neutral,
+              active: resourcesOpen,
+            ),
+          _SessionActionSpec(
+            value: 'search',
+            label: searchOpen ? 'Close search' : 'Search transcript',
+            detail: searchOpen
+                ? 'Hide the current search panel.'
+                : 'Find text in loaded messages.',
+            icon: searchOpen ? Icons.search_off_rounded : Icons.search_rounded,
+            tone: searchOpen
+                ? _SessionActionTone.accent
+                : _SessionActionTone.neutral,
+            active: searchOpen,
+          ),
+          if (gitAvailable)
+            _SessionActionSpec(
+              value: 'git',
+              label: 'Git details',
+              detail: gitDirty
+                  ? 'Working tree has changes.'
+                  : 'Branch, upstream, and diff shortcuts.',
+              icon: Icons.account_tree_rounded,
+              tone: gitDirty
+                  ? _SessionActionTone.warning
+                  : _SessionActionTone.neutral,
+              active: gitDirty,
+            ),
+        ],
+      ),
     ];
   }
 
@@ -7414,7 +7359,18 @@ class _SessionScreenState extends State<SessionScreen>
     final portsOpenInInspector = _isPortsInspectorOpen(inspectorScope);
     final PreferredSizeWidget? appBarBottom;
     if (widget.desktopMode) {
-      appBarBottom = const _DesktopSessionHeaderDivider();
+      appBarBottom = _DesktopSessionInfoStrip(
+        host: widget.host,
+        session: session,
+        gitStatus: _gitStatus,
+        showGit: _supportsGitStatus,
+        running: _running,
+        pinnedCount: pinnedMessages.length,
+        pinnedActive: pinnedActive,
+        onPinnedTap: _openPinnedPanel,
+        onGitDetails: () => _showGitSheet(session),
+        onDetails: () => _showSessionDetailsSheet(session),
+      );
     } else if (isCompact) {
       appBarBottom = PreferredSize(
         preferredSize: const Size.fromHeight(30),
@@ -7488,8 +7444,9 @@ class _SessionScreenState extends State<SessionScreen>
                 ],
               ),
         actions: [
-          // Reserve a permanent slot for interrupt — this prevents all other
-          // action buttons from jumping left/right when the agent starts/stops.
+          // Non-compact mobile toolbar: Stop (when running) + Tune + overflow.
+          // All tool launchers (terminal, browser, search, resources, git,
+          // reload, new session) live in the overflow sheet only.
           if (!isCompact && !widget.desktopMode && _supportsSessionInterrupt)
             Padding(
               padding: const EdgeInsets.only(right: 4),
@@ -7506,98 +7463,6 @@ class _SessionScreenState extends State<SessionScreen>
                     semanticLabel: 'Stop agent',
                   ),
                 ),
-              ),
-            ),
-          if (!isCompact && !widget.desktopMode)
-            Padding(
-              padding: const EdgeInsets.only(right: 6),
-              child: MeshIconButton(
-                icon: Icons.refresh_rounded,
-                tooltip: 'Reload session',
-                color: colors.textSecondary,
-                onTap: _reloadSnapshot,
-              ),
-            ),
-          if (!isCompact && !widget.desktopMode)
-            Padding(
-              padding: const EdgeInsets.only(right: 6),
-              child: MeshIconButton(
-                icon: Icons.add_circle_outline_rounded,
-                tooltip: 'New session',
-                color: colors.textSecondary,
-                onTap: _startSessionFromCurrent,
-              ),
-            ),
-          if (!isCompact && !widget.desktopMode && _supportsTerminal)
-            Padding(
-              padding: const EdgeInsets.only(right: 6),
-              child: MeshIconButton(
-                icon: Icons.terminal_rounded,
-                tooltip: terminalOpenInInspector
-                    ? 'Terminal is open'
-                    : 'Open terminal',
-                color: terminalOpenInInspector
-                    ? colors.accent
-                    : colors.textSecondary,
-                onTap: () => unawaited(_openTerminal()),
-              ),
-            ),
-          if (!isCompact && !widget.desktopMode && _supportsConnections)
-            Padding(
-              padding: const EdgeInsets.only(right: 6),
-              child: MeshIconButton(
-                icon: Icons.open_in_browser_rounded,
-                tooltip: portsOpenInInspector
-                    ? 'Browsers are open'
-                    : 'Manage browsers',
-                color: portsOpenInInspector
-                    ? colors.accent
-                    : colors.textSecondary,
-                onTap: () => unawaited(_openConnections()),
-              ),
-            ),
-          if (!isCompact &&
-              !widget.desktopMode &&
-              _supportsGitStatus &&
-              _gitHeaderLabel(session, _gitStatus) != null &&
-              (_gitStatus?.dirty ?? false))
-            Padding(
-              padding: const EdgeInsets.only(right: 10),
-              child: MeshIconButton(
-                icon: Icons.account_tree_rounded,
-                tooltip: 'Git details',
-                color: colors.warning,
-                onTap: () => _showGitSheet(session),
-              ),
-            ),
-          if (!isCompact && !widget.desktopMode)
-            Padding(
-              padding: const EdgeInsets.only(right: 6),
-              child: MeshIconButton(
-                icon: searchOpenInInspector
-                    ? Icons.search_off_rounded
-                    : Icons.search_rounded,
-                tooltip: searchOpenInInspector ? 'Close search' : 'Search',
-                color: searchOpenInInspector
-                    ? colors.accent
-                    : colors.textSecondary,
-                onTap: _toggleSearchPanel,
-              ),
-            ),
-          if (!isCompact && !widget.desktopMode && _supportsSessionResources)
-            Padding(
-              padding: const EdgeInsets.only(right: 6),
-              child: MeshIconButton(
-                icon: resourcesOpenInInspector
-                    ? Icons.perm_media_rounded
-                    : Icons.perm_media_rounded,
-                tooltip: resourcesOpenInInspector
-                    ? 'Close resources'
-                    : 'Open resources',
-                color: resourcesOpenInInspector
-                    ? colors.accent
-                    : colors.textSecondary,
-                onTap: _openResourcesPanel,
               ),
             ),
           if (!isCompact && !widget.desktopMode)
@@ -7623,7 +7488,7 @@ class _SessionScreenState extends State<SessionScreen>
                   final customised =
                       !policy.isEmpty || !turnConfig.isEmpty || runtimeLoosened;
                   return MeshIconButton(
-                    icon: customised ? Icons.tune_rounded : Icons.tune_rounded,
+                    icon: Icons.tune_rounded,
                     tooltip: 'Session controls',
                     color: customised ? colors.accent : colors.textSecondary,
                     onTap: () => _showSessionPolicySheet(session),
@@ -7718,7 +7583,6 @@ class _SessionScreenState extends State<SessionScreen>
                       running: _running,
                       canStop: _supportsSessionInterrupt,
                       onStop: _stopSession,
-                      onNewSession: _startSessionFromCurrent,
                       onMore: () => unawaited(
                         _showSessionActionsSheet(
                           session: session,

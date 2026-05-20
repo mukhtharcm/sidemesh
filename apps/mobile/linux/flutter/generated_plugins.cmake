@@ -6,6 +6,8 @@ list(APPEND FLUTTER_PLUGIN_LIST
   desktop_multi_window
   flutter_secure_storage_linux
   irondash_engine_context
+  media_kit_libs_linux
+  media_kit_video
   super_native_extensions
   url_launcher_linux
 )
