@@ -1,4 +1,5 @@
 import { execFile } from "node:child_process";
+import { resolve } from "node:path";
 import { promisify } from "node:util";
 
 import type {
@@ -11,6 +12,19 @@ import type {
 const execFileAsync = promisify(execFile);
 const GIT_TIMEOUT_MS = 5_000;
 const STATUS_MAX_BUFFER = 768 * 1024;
+
+/**
+ * `git rev-parse --git-common-dir` returns ".git" (relative) when called from
+ * the main worktree, and an absolute path when called from a linked worktree.
+ * Normalise both forms to an absolute path so callers get a stable identifier.
+ */
+function resolveGitCommonDir(repoRoot: string, raw: string): string {
+  if (!raw) return resolve(repoRoot, ".git");
+  // Absolute path — already good (linked worktree case).
+  if (raw.startsWith("/")) return raw;
+  // Relative path (e.g. ".git") — resolve against the repo root.
+  return resolve(repoRoot, raw);
+}
 export const GIT_DIFF_MAX_CHARS = 240_000;
 const DIFF_MAX_BUFFER = 2 * 1024 * 1024;
 const MAX_STATUS_FILES = 200;
@@ -69,6 +83,7 @@ export async function readGitStatus(
     isRepo: false,
     cwd,
     repoRoot: null,
+    gitCommonDir: null,
     branch: persisted?.branch ?? null,
     sha: persisted?.sha ?? null,
     shortSha: shortSha(persisted?.sha ?? null),
@@ -98,13 +113,14 @@ export async function readGitStatus(
     return { ...fallback(), error: message };
   }
 
-  const [statusResult, branchResult, shaResult, originResult] = await Promise.allSettled([
+  const [statusResult, branchResult, shaResult, originResult, commonDirResult] = await Promise.allSettled([
     runGit(cwd, ["status", "--porcelain=v1", "--branch", "--untracked-files=all"], {
       maxBuffer: STATUS_MAX_BUFFER,
     }),
     runGit(cwd, ["branch", "--show-current"]),
     runGit(cwd, ["rev-parse", "HEAD"]),
     runGit(cwd, ["remote", "get-url", "origin"]),
+    runGit(cwd, ["rev-parse", "--git-common-dir"]),
   ]);
 
   const parsed = parsePorcelainStatus(
@@ -128,6 +144,10 @@ export async function readGitStatus(
     isRepo: true,
     cwd,
     repoRoot,
+    gitCommonDir:
+      commonDirResult.status === "fulfilled"
+        ? resolveGitCommonDir(repoRoot, commonDirResult.value.stdout.trim())
+        : null,
     branch,
     sha,
     shortSha: shortSha(sha),
