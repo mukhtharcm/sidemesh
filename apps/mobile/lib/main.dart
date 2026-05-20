@@ -6,6 +6,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:macos_window_utils/macos_window_utils.dart';
+import 'package:sqflite_common_ffi/sqflite_ffi.dart';
+import 'package:video_player_media_kit/video_player_media_kit.dart';
 
 import 'src/onboarding_store.dart';
 import 'src/screens/browser_preview_window_screen.dart';
@@ -29,6 +31,7 @@ bool get _isMacOSDesktop =>
 
 Future<void> main(List<String> args) async {
   WidgetsFlutterBinding.ensureInitialized();
+  _configureDesktopRuntimeBackends();
   final launchState = await resolveCurrentWindowLaunchState();
   if (_isMacOSDesktop) {
     // Our macOS build runs unsandboxed by design so keychain access works
@@ -56,6 +59,23 @@ Future<void> main(List<String> args) async {
     ),
   );
   unawaited(_startPostLaunchServices(launchState));
+}
+
+void _configureDesktopRuntimeBackends() {
+  if (kIsWeb) {
+    return;
+  }
+  if (Platform.isLinux || Platform.isWindows) {
+    // Desktop builds need the sqflite FFI backend instead of the mobile
+    // method-channel implementation.
+    sqfliteFfiInit();
+    databaseFactory = databaseFactoryFfi;
+  }
+  if (Platform.isLinux) {
+    // package:video_player does not ship a native Linux playback backend,
+    // so route it through media_kit there.
+    VideoPlayerMediaKit.ensureInitialized(linux: true);
+  }
 }
 
 Future<void> _startPostLaunchServices(
