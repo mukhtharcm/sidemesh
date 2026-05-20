@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -9,7 +10,9 @@ import 'package:sidemesh_mobile/src/db.dart';
 import 'package:sidemesh_mobile/src/fs_models.dart';
 import 'package:sidemesh_mobile/src/models.dart';
 import 'package:sidemesh_mobile/src/screens/create_session_sheet.dart';
+import 'package:sidemesh_mobile/src/screens/file_browser_screen.dart';
 import 'package:sidemesh_mobile/src/screens/host_detail_screen.dart';
+import 'package:sidemesh_mobile/src/screens/inspector/inspector_controller.dart';
 import 'package:sidemesh_mobile/src/screens/session_screen.dart';
 import 'package:sidemesh_mobile/src/session_local_store.dart';
 import 'package:sidemesh_mobile/src/session_policy_store.dart';
@@ -150,6 +153,49 @@ void main() {
     await tester.pumpWidget(const SizedBox.shrink());
     await tester.pump();
   });
+
+  testWidgets(
+    'desktop browse files opens the tree instead of forcing viewer mode',
+    (tester) async {
+      final controller = InspectorController();
+      final api = _WorkspaceBrowserCapabilityApi(
+        _nodeForCapabilities(_minimalCapabilities),
+        files: const <String, String>{
+          '/repo/README.md': '# Workspace',
+        },
+      );
+      addTearDown(controller.dispose);
+      addTearDown(api.dispose);
+
+      await _pumpApp(
+        tester,
+        _InspectorHarness(
+          controller: controller,
+          child: SessionScreen(
+            host: _host('desktop-browse-files'),
+            session: _session('desktop-browse-files-session'),
+            api: api,
+            desktopMode: true,
+          ),
+        ),
+        size: const Size(1180, 900),
+      );
+      await _pumpFrames(tester);
+
+      await tester.tap(find.byTooltip('Session actions'));
+      await _pumpFrames(tester);
+      await tester.tap(find.text('Browse files'));
+      await _pumpFrames(tester);
+
+      expect(controller.current?.kind, InspectorSurfaceKind.fileBrowser);
+      expect(find.byType(FileBrowserTree), findsOneWidget);
+      expect(find.text('README.md'), findsOneWidget);
+      expect(find.byIcon(Icons.arrow_back_rounded), findsNothing);
+
+      await tester.pumpWidget(const SizedBox.shrink());
+      await tester.pump();
+    },
+  );
 
   testWidgets('desktop model picker returns focus to composer after closing', (
     tester,
@@ -1002,6 +1048,39 @@ Future<void> _pumpApp(
   );
 }
 
+class _InspectorHarness extends StatelessWidget {
+  const _InspectorHarness({required this.controller, required this.child});
+
+  final InspectorController controller;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    return InspectorScope(
+      controller: controller,
+      child: Row(
+        children: [
+          Expanded(child: child),
+          Expanded(
+            child: Material(
+              child: ListenableBuilder(
+                listenable: controller,
+                builder: (context, _) {
+                  final surface = controller.current;
+                  if (surface == null) {
+                    return const SizedBox.shrink();
+                  }
+                  return surface.bodyBuilder(context);
+                },
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 HostProfile _host(String id) => HostProfile(
   id: 'capability-ui-$id',
   label: 'Fake Host',
@@ -1357,6 +1436,139 @@ class _CapabilityFakeApi extends ApiClient {
   WebSocketChannel openLive(HostProfile host, String sessionId) => _channel;
 
   void dispose() => _channel.dispose();
+}
+
+class _WorkspaceBrowserCapabilityApi extends _CapabilityFakeApi {
+  _WorkspaceBrowserCapabilityApi(super.node, {required this.files});
+
+  final Map<String, String> files;
+  final _WorkspaceLiveTestChannel _fsChannel = _WorkspaceLiveTestChannel();
+
+  @override
+  Future<FsListing> listDirectory(
+    HostProfile host,
+    String path, {
+    String? agentProvider,
+    String? sessionId,
+  }) async {
+    final entries = <FsEntry>[];
+    final childDirs = <String>{};
+    for (final entryPath in files.keys) {
+      if (!entryPath.startsWith('$path/')) continue;
+      final remainder = entryPath.substring(path.length + 1);
+      if (remainder.isEmpty) continue;
+      final slash = remainder.indexOf('/');
+      if (slash == -1) {
+        entries.add(
+          FsEntry(
+            name: remainder,
+            path: entryPath,
+            isDirectory: false,
+            isFile: true,
+          ),
+        );
+        continue;
+      }
+      final dirName = remainder.substring(0, slash);
+      if (childDirs.add(dirName)) {
+        entries.add(
+          FsEntry(
+            name: dirName,
+            path: '$path/$dirName',
+            isDirectory: true,
+            isFile: false,
+          ),
+        );
+      }
+    }
+    entries.sort((a, b) => a.path.compareTo(b.path));
+    return FsListing(path: path, entries: entries);
+  }
+
+  @override
+  Future<FsFile> readFile(
+    HostProfile host,
+    String path, {
+    String? agentProvider,
+    String? sessionId,
+  }) async {
+    final contents = files[path] ?? '';
+    return FsFile(
+      path: path,
+      size: contents.length,
+      binary: false,
+      truncated: false,
+      modifiedAtMs: 0,
+      mimeHint: 'text/plain',
+      encoding: 'utf8',
+      contents: contents,
+    );
+  }
+
+  @override
+  WebSocketChannel openFsLive(
+    HostProfile host, {
+    String? agentProvider,
+    String? sessionId,
+  }) => _fsChannel;
+
+  @override
+  void dispose() {
+    _fsChannel.dispose();
+    super.dispose();
+  }
+}
+
+class _WorkspaceLiveTestChannel extends StreamChannelMixin<dynamic>
+    implements WebSocketChannel {
+  final StreamController<dynamic> _incoming = StreamController<dynamic>();
+  final StreamController<dynamic> _outgoing = StreamController<dynamic>();
+  int _nextWatchId = 1;
+
+  _WorkspaceLiveTestChannel() {
+    _outgoing.stream.listen((message) {
+      if (message is! String) return;
+      final decoded = jsonDecode(message);
+      if (decoded is! Map) return;
+      final type = decoded['type']?.toString();
+      if (type == 'subscribe') {
+        final id = decoded['id']?.toString();
+        final path = decoded['path']?.toString();
+        if (id == null || path == null) return;
+        _incoming.add(
+          jsonEncode({
+            'type': 'subscribed',
+            'id': id,
+            'watchId': 'watch-${_nextWatchId++}',
+            'path': path,
+          }),
+        );
+      }
+    });
+  }
+
+  @override
+  Stream<dynamic> get stream => _incoming.stream;
+
+  @override
+  WebSocketSink get sink => _IdleWebSocketSink(_outgoing.sink);
+
+  @override
+  int? get closeCode => null;
+
+  @override
+  String? get closeReason => null;
+
+  @override
+  String? get protocol => null;
+
+  @override
+  Future<void> get ready async {}
+
+  void dispose() {
+    unawaited(_incoming.close());
+    unawaited(_outgoing.close());
+  }
 }
 
 class _FileSearchRaceApi extends _CapabilityFakeApi {
