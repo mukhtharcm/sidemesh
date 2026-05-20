@@ -8,6 +8,7 @@ import '../theme/app_colors.dart';
 import '../theme/app_theme.dart';
 import '../widgets/mesh_widgets.dart';
 import 'file_viewer_pane.dart';
+import 'pdf_viewer_pane.dart';
 
 /// Mobile-friendly full-screen file viewer. Wraps [FileViewerPane] in a
 /// Scaffold + AppBar.
@@ -21,6 +22,7 @@ class FileViewerScreen extends StatefulWidget {
     this.sessionId,
     this.topPadding,
     this.liveStream,
+    this.pdfViewerBuilder,
   });
 
   final HostProfile host;
@@ -30,6 +32,7 @@ class FileViewerScreen extends StatefulWidget {
   final String? sessionId;
   final double? topPadding;
   final Stream<FsChangeEvent>? liveStream;
+  final PdfViewerPanePreviewBuilder? pdfViewerBuilder;
 
   @override
   State<FileViewerScreen> createState() => _FileViewerScreenState();
@@ -117,6 +120,7 @@ class _FileViewerScreenState extends State<FileViewerScreen> {
         sessionId: widget.sessionId,
         liveStream: widget.liveStream,
         observable: _observable,
+        pdfViewerBuilder: widget.pdfViewerBuilder,
       ),
     );
     final topPadding = widget.topPadding;
