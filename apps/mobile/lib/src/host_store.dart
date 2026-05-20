@@ -70,7 +70,15 @@ class HostStore {
   Future<Map<String, String>> _readTokenBundleFromStorage(
     FlutterSecureStorage storage,
   ) async {
-    final raw = await storage.read(key: _tokensBundleKey);
+    String? raw;
+    try {
+      raw = await storage.read(key: _tokensBundleKey);
+    } catch (_) {
+      // Keyring / secure-storage unavailable (e.g. Linux without a running
+      // secret service). Return an empty bundle so the app starts cleanly;
+      // the user will need to re-add their hosts on this device.
+      return <String, String>{};
+    }
     if (raw == null || raw.isEmpty) {
       return <String, String>{};
     }
