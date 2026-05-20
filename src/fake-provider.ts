@@ -749,6 +749,7 @@ export class FakeAgentProvider
         sha: "fake-sha",
         branch: "fake/main",
         originUrl: "https://example.invalid/fake/sidemesh.git",
+        gitCommonDir: "/fake/repo/.git",
       },
     };
     const state: FakeSessionState = {
