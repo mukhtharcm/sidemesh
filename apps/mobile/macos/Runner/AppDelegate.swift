@@ -4,8 +4,6 @@ import Sparkle
 
 @main
 class AppDelegate: FlutterAppDelegate {
-  @IBOutlet private weak var applicationMenu: NSMenu?
-
   private var updaterController: SPUStandardUpdaterController?
   private var updaterChannel: FlutterMethodChannel?
 
