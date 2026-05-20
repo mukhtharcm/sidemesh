@@ -2235,31 +2235,19 @@ class _DetailPaneState extends State<_DetailPane> {
     _ActiveSession active, {
     required Key key,
   }) {
-    return Stack(
-      key: key,
-      children: [
-        Positioned.fill(
-          child: SessionScreen(
-            key: ValueKey(
-              'session-${active.host.id}-${active.session.id}-${active.serial}',
-            ),
-            host: active.host,
-            session: active.session,
-            api: widget.api,
-            initialComposerSeed: active.composerSeed,
-            onOpenSession: (session) =>
-                widget.onOpenSession(active.host, session),
-            onArchived: () => widget.onArchived(active.host, active.session),
-            topPadding: widget.titlebarInset + 6,
-            desktopMode: true,
-          ),
-        ),
-        Positioned(
-          top: 6,
-          right: 10,
-          child: _CloseSessionButton(onClose: widget.onClose),
-        ),
-      ],
+    return SessionScreen(
+      key: ValueKey(
+        'session-${active.host.id}-${active.session.id}-${active.serial}',
+      ),
+      host: active.host,
+      session: active.session,
+      api: widget.api,
+      initialComposerSeed: active.composerSeed,
+      onOpenSession: (session) => widget.onOpenSession(active.host, session),
+      onArchived: () => widget.onArchived(active.host, active.session),
+      onClose: widget.onClose,
+      topPadding: widget.titlebarInset + 6,
+      desktopMode: true,
     );
   }
 

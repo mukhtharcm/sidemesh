@@ -87,6 +87,7 @@ class SessionScreen extends StatefulWidget {
     required this.api,
     this.onOpenSession,
     this.onArchived,
+    this.onClose,
     this.initialComposerSeed,
     this.topPadding,
     this.desktopMode = false,
@@ -98,6 +99,8 @@ class SessionScreen extends StatefulWidget {
   final ApiClient api;
   final ValueChanged<SessionSummary>? onOpenSession;
   final VoidCallback? onArchived;
+  /// Called when the user dismisses this session from the desktop detail pane.
+  final VoidCallback? onClose;
   final SessionComposerSeed? initialComposerSeed;
   // Extra top padding for embedded desktop use (to avoid overlapping the
   // transparent macOS titlebar). When null, SafeArea handles insets.
@@ -218,12 +221,14 @@ class _DesktopSessionCommandBar extends StatelessWidget {
     required this.canStop,
     required this.onStop,
     required this.onMore,
+    this.onClose,
   });
 
   final bool running;
   final bool canStop;
   final VoidCallback onStop;
   final VoidCallback onMore;
+  final VoidCallback? onClose;
 
   @override
   Widget build(BuildContext context) {
@@ -249,6 +254,15 @@ class _DesktopSessionCommandBar extends StatelessWidget {
           color: colors.textSecondary,
           onTap: onMore,
         ),
+        if (onClose != null) ...[
+          const SizedBox(width: 2),
+          MeshIconButton(
+            icon: Icons.close_rounded,
+            tooltip: 'Close session',
+            color: colors.textTertiary,
+            onTap: onClose!,
+          ),
+        ],
       ],
     );
   }
@@ -6602,6 +6616,9 @@ class _SessionScreenState extends State<SessionScreen>
         unawaited(_stopSession());
       case 'restart_provider':
         unawaited(_restartProvider());
+      case 'info':
+        _showSessionDetailsSheet(session);
+        break;
       case 'reload':
         _reloadSnapshot();
         break;
@@ -6746,6 +6763,12 @@ class _SessionScreenState extends State<SessionScreen>
               detail: 'Summarize older context to keep the session lighter.',
               icon: Icons.compress_rounded,
             ),
+          const _SessionActionSpec(
+            value: 'info',
+            label: 'Session details',
+            detail: 'View host, model, git, and usage info.',
+            icon: Icons.info_outline_rounded,
+          ),
           const _SessionActionSpec(
             value: 'reload',
             label: 'Reload',
@@ -7573,6 +7596,7 @@ class _SessionScreenState extends State<SessionScreen>
                       running: _running,
                       canStop: _supportsSessionInterrupt,
                       onStop: _stopSession,
+                      onClose: widget.onClose,
                       onMore: () => unawaited(
                         _showSessionActionsSheet(
                           session: session,
