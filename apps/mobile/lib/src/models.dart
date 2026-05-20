@@ -669,16 +669,21 @@ class HostBrowserPreviewInfo {
 }
 
 class GitInfoSummary {
-  const GitInfoSummary({this.sha, this.branch, this.originUrl});
+  const GitInfoSummary({this.sha, this.branch, this.originUrl, this.gitCommonDir});
 
   final String? sha;
   final String? branch;
   final String? originUrl;
+  /// Absolute path to the shared .git directory — same for all worktrees of
+  /// the same repository. Use this to group sessions by project in the sidebar
+  /// rather than by CWD basename, so worktree sessions stay with their repo.
+  final String? gitCommonDir;
 
   bool get isEmpty =>
       (sha ?? '').isEmpty &&
       (branch ?? '').isEmpty &&
-      (originUrl ?? '').isEmpty;
+      (originUrl ?? '').isEmpty &&
+      (gitCommonDir ?? '').isEmpty;
 
   String? get shortSha {
     final value = sha;
@@ -690,12 +695,14 @@ class GitInfoSummary {
     sha: _stringOrNull(json['sha']),
     branch: _stringOrNull(json['branch']),
     originUrl: _stringOrNull(json['originUrl']),
+    gitCommonDir: _stringOrNull(json['gitCommonDir']),
   );
 
   Map<String, dynamic> toJson() => {
     'sha': sha,
     'branch': branch,
     'originUrl': originUrl,
+    'gitCommonDir': gitCommonDir,
   };
 }
 
@@ -1225,6 +1232,7 @@ class SessionGitStatus {
     required this.isRepo,
     required this.cwd,
     required this.repoRoot,
+    required this.gitCommonDir,
     required this.branch,
     required this.sha,
     required this.shortSha,
@@ -1246,6 +1254,11 @@ class SessionGitStatus {
   final bool isRepo;
   final String cwd;
   final String? repoRoot;
+  /// The absolute path to the shared .git directory for this repository.
+  /// Identical across every linked worktree of the same repo, making it a
+  /// stable project identifier regardless of which worktree a session is in.
+  /// Null when the session is not inside a git repository.
+  final String? gitCommonDir;
   final String? branch;
   final String? sha;
   final String? shortSha;
@@ -1268,6 +1281,7 @@ class SessionGitStatus {
         isRepo: _boolValue(json['isRepo']),
         cwd: _stringValue(json['cwd']),
         repoRoot: _stringOrNull(json['repoRoot']),
+        gitCommonDir: _stringOrNull(json['gitCommonDir']),
         branch: _stringOrNull(json['branch']),
         sha: _stringOrNull(json['sha']),
         shortSha: _stringOrNull(json['shortSha']),

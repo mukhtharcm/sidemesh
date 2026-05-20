@@ -4507,8 +4507,9 @@ function mapGitInfo(raw: unknown): GitInfoSummary | null {
     sha: asString(typed.sha),
     branch: asString(typed.branch),
     originUrl: sanitizeGitUrl(asString(typed.originUrl ?? typed.origin_url)),
+    gitCommonDir: asString(typed.gitCommonDir) ?? null,
   };
-  return info.sha || info.branch || info.originUrl ? info : null;
+  return info.sha || info.branch || info.originUrl || info.gitCommonDir ? info : null;
 }
 
 function parseGitDiffKind(

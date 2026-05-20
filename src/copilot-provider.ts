@@ -3218,6 +3218,7 @@ function sdkSessionToThread(
       originUrl: session.context?.repository
         ? `https://github.com/${session.context.repository}`
         : null,
+      gitCommonDir: null,
     },
     turns: includeTurns ? (local?.turns.map(cloneTurn) ?? []) : undefined,
   };
