@@ -2,7 +2,7 @@
 # See https://dart.dev/tools/pub/glossary#lockfile
 packages:
   archive:
-    dependency: transitive
+    dependency: "direct main"
     description:
       name: archive
       sha256: a96e8b390886ee8abb49b7bd3ac8df6f451c621619f52a26e815fdcf568959ff
@@ -656,6 +656,38 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "2.3.0"
+  pdfium_dart:
+    dependency: transitive
+    description:
+      name: pdfium_dart
+      sha256: "38602496f0c152df618ffe08c8bf983a8d73881f31a1b54a6da01140c3a4e342"
+      url: "https://pub.dev"
+    source: hosted
+    version: "0.2.2"
+  pdfium_flutter:
+    dependency: transitive
+    description:
+      name: pdfium_flutter
+      sha256: "97ccb5cf207b66ba5549f09047e935376d967c6311ec3c5314405d1d04569fd2"
+      url: "https://pub.dev"
+    source: hosted
+    version: "0.2.1"
+  pdfrx:
+    dependency: "direct main"
+    description:
+      name: pdfrx
+      sha256: e32e1b6f32e92e3c144dec3e389f1dca989f5f28c3a1886fb114a50cf7db863c
+      url: "https://pub.dev"
+    source: hosted
+    version: "2.4.1"
+  pdfrx_engine:
+    dependency: transitive
+    description:
+      name: pdfrx_engine
+      sha256: a201b11e13b6c729d731ddc96ce06394cce8503c39e4c7e9d2fa51b3e7b351a5
+      url: "https://pub.dev"
+    source: hosted
+    version: "0.4.2"
   permission_handler:
     dependency: "direct main"
     description:
@@ -776,6 +808,14 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "0.6.0"
+  rxdart:
+    dependency: transitive
+    description:
+      name: rxdart
+      sha256: "5c3004a4a8dbb94bd4bf5412a4def4acdaa12e12f269737a5751369e12d1a962"
+      url: "https://pub.dev"
+    source: hosted
+    version: "0.28.0"
   shared_preferences:
     dependency: "direct main"
     description:
@@ -1254,7 +1294,7 @@ packages:
     source: hosted
     version: "4.0.0"
   yaml:
-    dependency: transitive
+    dependency: "direct main"
     description:
       name: yaml
       sha256: b9da305ac7c39faa3f030eccd175340f968459dae4af175130b3fc47e40d76ce
