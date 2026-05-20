@@ -204,12 +204,7 @@ class _DesktopSessionTitle extends StatelessWidget {
       children: [
         if (running) ...[const LivePulse(), const SizedBox(width: 9)],
         Expanded(child: titleContent),
-        const SizedBox(width: 8),
-        if (session.provider != null) ...[
-          AgentProviderBadge(providerKind: session.provider, compact: true),
-          const SizedBox(width: 8),
-        ],
-        if (running) _DesktopSessionStatusBadge(running: running),
+        if (running) ...[const SizedBox(width: 8), _DesktopSessionStatusBadge(running: running)],
       ],
     );
   }
@@ -7382,8 +7377,24 @@ class _SessionScreenState extends State<SessionScreen>
     final portsOpenInInspector = _isPortsInspectorOpen(inspectorScope);
     final PreferredSizeWidget? appBarBottom;
     if (widget.desktopMode) {
-      // Metadata is now embedded in _DesktopSessionTitle — no separate bar.
-      appBarBottom = null;
+      // Compact info strip: mirrors what compact mobile already shows via
+      // _SessionAppBarSubtitle. Gives desktop users host, folder, git branch,
+      // context %, and pinned count without cluttering the title row.
+      appBarBottom = PreferredSize(
+        preferredSize: const Size.fromHeight(30),
+        child: _SessionAppBarSubtitle(
+          host: widget.host,
+          session: session,
+          gitStatus: _gitStatus,
+          showGit: _supportsGitStatus,
+          running: _running,
+          pinnedCount: pinnedMessages.length,
+          pinnedActive: pinnedActive,
+          onPinnedTap: _openPinnedPanel,
+          onDetails: () => _showSessionDetailsSheet(session),
+          onGitDetails: () => _showGitSheet(session),
+        ),
+      );
     } else if (isCompact) {
       appBarBottom = PreferredSize(
         preferredSize: const Size.fromHeight(30),
