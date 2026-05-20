@@ -6,6 +6,7 @@ list(APPEND FLUTTER_PLUGIN_LIST
   desktop_multi_window
   flutter_secure_storage_windows
   irondash_engine_context
+  media_kit_video
   permission_handler_windows
   super_native_extensions
   url_launcher_windows

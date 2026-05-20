@@ -345,153 +345,6 @@ class _SessionActionRow extends StatelessWidget {
   }
 }
 
-class _SessionHeader extends StatelessWidget {
-  const _SessionHeader({
-    required this.host,
-    required this.session,
-    required this.gitStatus,
-    required this.showGit,
-    required this.running,
-    required this.favorite,
-    required this.pinnedCount,
-    required this.pinnedActive,
-    required this.onPinnedTap,
-    required this.onDetails,
-    required this.onGitDetails,
-  });
-
-  final HostProfile host;
-  final SessionSummary session;
-  final SessionGitStatus? gitStatus;
-  final bool showGit;
-  final bool running;
-  final bool favorite;
-  final int pinnedCount;
-  final bool pinnedActive;
-  final VoidCallback onPinnedTap;
-  final VoidCallback onDetails;
-  final VoidCallback onGitDetails;
-
-  @override
-  Widget build(BuildContext context) {
-    final colors = context.colors;
-    final gitLabel = showGit ? _gitHeaderLabel(session, gitStatus) : null;
-    final contextLabel = _contextUsageLabel(session.runtime);
-    final contextTone = _contextUsageTone(session.runtime);
-    return Padding(
-      padding: const EdgeInsets.only(left: 16, top: 2, right: 16, bottom: 8),
-      child: MeshCard(
-        padding: const EdgeInsets.only(left: 14, top: 9, right: 8, bottom: 9),
-        borderColor: running ? colors.success.withValues(alpha: 0.5) : null,
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.center,
-          children: [
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Row(
-                    children: [
-                      Flexible(
-                        child: Text(
-                          host.label,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: Theme.of(context).textTheme.titleSmall
-                              ?.copyWith(fontWeight: FontWeight.w700),
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                      _HeaderStatusDot(
-                        color: running ? colors.success : colors.textTertiary,
-                      ),
-                      const SizedBox(width: 4),
-                      Text(
-                        running ? 'running' : 'idle',
-                        style: monoStyle(
-                          color: running
-                              ? colors.success
-                              : colors.textSecondary,
-                          fontSize: 10.5,
-                        ),
-                      ),
-                      if (session.provider != null) ...[
-                        const SizedBox(width: 6),
-                        AgentProviderBadge(
-                          providerKind: session.provider,
-                          compact: true,
-                        ),
-                      ],
-                      if (favorite) ...[
-                        const SizedBox(width: 6),
-                        Icon(
-                          Icons.star_rounded,
-                          size: 13,
-                          color: colors.warning,
-                        ),
-                      ],
-                    ],
-                  ),
-                  const SizedBox(height: 2),
-                  Text(
-                    session.cwd,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: monoStyle(color: colors.textSecondary, fontSize: 11),
-                  ),
-                  if (gitLabel != null ||
-                      contextLabel != null ||
-                      pinnedCount > 0) ...[
-                    const SizedBox(height: 7),
-                    Wrap(
-                      spacing: 6,
-                      runSpacing: 6,
-                      children: [
-                        if (contextLabel != null)
-                          MeshPill(
-                            label: contextLabel,
-                            icon: Icons.data_usage_rounded,
-                            tone: contextTone,
-                            mono: true,
-                          ),
-                        if (gitLabel != null)
-                          _GitSummaryPill(
-                            label: gitLabel,
-                            dirty: gitStatus?.dirty ?? false,
-                            onTap: onGitDetails,
-                          ),
-                        if (pinnedCount > 0)
-                          _PinnedSummaryPill(
-                            count: pinnedCount,
-                            active: pinnedActive,
-                            onTap: onPinnedTap,
-                          ),
-                      ],
-                    ),
-                  ],
-                ],
-              ),
-            ),
-            const SizedBox(width: 4),
-            IconButton(
-              onPressed: onDetails,
-              icon: Icon(
-                Icons.info_outline_rounded,
-                size: 18,
-                color: colors.accent,
-              ),
-              tooltip: 'Session details',
-              visualDensity: VisualDensity.compact,
-              padding: const EdgeInsets.all(10),
-              constraints: const BoxConstraints(minWidth: 44, minHeight: 44),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
 
 String? _gitHeaderLabel(SessionSummary session, SessionGitStatus? status) {
   final branch = status?.branch ?? session.gitInfo?.branch;
@@ -511,65 +364,6 @@ String? _gitHeaderLabel(SessionSummary session, SessionGitStatus? status) {
   }
   return label;
 }
-
-class _GitSummaryPill extends StatelessWidget {
-  const _GitSummaryPill({
-    required this.label,
-    required this.dirty,
-    required this.onTap,
-  });
-
-  final String label;
-  final bool dirty;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    return Material(
-      color: Colors.transparent,
-      child: InkWell(
-        borderRadius: const BorderRadius.all(Radius.circular(999)),
-        onTap: onTap,
-        child: MeshPill(
-          label: label,
-          icon: Icons.account_tree_rounded,
-          tone: dirty ? MeshPillTone.warning : MeshPillTone.neutral,
-          mono: true,
-        ),
-      ),
-    );
-  }
-}
-
-class _PinnedSummaryPill extends StatelessWidget {
-  const _PinnedSummaryPill({
-    required this.count,
-    required this.active,
-    required this.onTap,
-  });
-
-  final int count;
-  final bool active;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    return Material(
-      color: Colors.transparent,
-      child: InkWell(
-        borderRadius: const BorderRadius.all(Radius.circular(999)),
-        onTap: onTap,
-        child: MeshPill(
-          label: '$count pinned',
-          icon: Icons.push_pin_rounded,
-          tone: active ? MeshPillTone.accent : MeshPillTone.neutral,
-          mono: true,
-        ),
-      ),
-    );
-  }
-}
-
 class _JumpToLatestPill extends StatelessWidget {
   const _JumpToLatestPill({required this.onTap});
 
@@ -778,30 +572,6 @@ class _CompactMetaChip extends StatelessWidget {
     }
     return GestureDetector(onTap: onTap, child: content);
   }
-}
-
-String _formatTokenLimit(int limit) {
-  if (limit >= 1_000_000) {
-    return '${(limit / 1_000_000).toStringAsFixed(0)}M';
-  }
-  if (limit >= 1_000) {
-    return '${(limit / 1_000).toStringAsFixed(0)}k';
-  }
-  return '$limit';
-}
-
-String? _contextUsageLabel(SessionRuntimeSummary? runtime) {
-  final context = runtime?.telemetry?.contextWindow;
-  if (context == null || context.tokenLimit <= 0) {
-    return null;
-  }
-  if (context.currentTokens == null) {
-    return '?/${_formatTokenLimit(context.tokenLimit)} ctx';
-  }
-  final usedPercent = ((context.currentTokens! / context.tokenLimit) * 100)
-      .clamp(0, 100)
-      .round();
-  return '$usedPercent% ctx used';
 }
 
 String? _contextUsageShortLabel(SessionRuntimeSummary? runtime) {
@@ -2262,3 +2032,8 @@ class _HistoryTruncationCard extends StatelessWidget {
     );
   }
 }
+
+/// Compact info strip shown just below the desktop AppBar, replacing the bare
+/// 1px divider. Surfaces CWD, git branch/dirty state, context-window usage,
+/// and pinned-message count — the same metadata that compact mobile shows in
+/// [_SessionAppBarSubtitle] — so desktop users always have session context
