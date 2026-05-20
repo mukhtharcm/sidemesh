@@ -17,6 +17,7 @@ import '../widgets/markdown_content.dart';
 import '../widgets/mesh_widgets.dart';
 import '../widgets/syntax_code_block.dart';
 import 'image_viewer_screen.dart';
+import 'video_viewer_pane.dart';
 
 /// Embeddable read/edit pane for a single workspace file. Does not render a
 /// Scaffold — use [FileViewerScreen] for the mobile-route variant.
@@ -60,6 +61,7 @@ class FileViewerPaneState extends State<FileViewerPane> {
   bool _saving = false;
   bool _markdownPreview = false;
   bool _imagePreview = false;
+  bool _videoPreview = false;
   late final TextEditingController _editController = TextEditingController();
   StreamSubscription<FsChangeEvent>? _liveSub;
 
@@ -82,6 +84,7 @@ class FileViewerPaneState extends State<FileViewerPane> {
       _editing = false;
       _markdownPreview = false;
       _imagePreview = false;
+      _videoPreview = false;
       _editController.clear();
       _load();
     }
@@ -137,6 +140,10 @@ class FileViewerPaneState extends State<FileViewerPane> {
         _error = null;
         _imagePreview =
             !_editing && _looksLikeImageFile(file.path, file.mimeHint);
+        _videoPreview =
+            !_editing &&
+            _videoPreview &&
+            _looksLikeVideoFile(file.path, file.mimeHint);
         if (!_editing) {
           _editController.text = file.contents;
         }
@@ -221,6 +228,7 @@ class FileViewerPaneState extends State<FileViewerPane> {
       if (_editing) {
         _markdownPreview = false;
         _imagePreview = false;
+        _videoPreview = false;
       }
       if (_editing) {
         _editController.text = _file!.contents;
@@ -239,6 +247,7 @@ class FileViewerPaneState extends State<FileViewerPane> {
       _markdownPreview = !_markdownPreview;
       if (_markdownPreview) {
         _imagePreview = false;
+        _videoPreview = false;
       }
     });
     _bump();
@@ -252,6 +261,21 @@ class FileViewerPaneState extends State<FileViewerPane> {
       _imagePreview = !_imagePreview;
       if (_imagePreview) {
         _markdownPreview = false;
+        _videoPreview = false;
+      }
+    });
+    _bump();
+  }
+
+  void toggleVideoPreview() {
+    if (!supportsVideoPreview) {
+      return;
+    }
+    setState(() {
+      _videoPreview = !_videoPreview;
+      if (_videoPreview) {
+        _markdownPreview = false;
+        _imagePreview = false;
       }
     });
     _bump();
@@ -271,11 +295,14 @@ class FileViewerPaneState extends State<FileViewerPane> {
   VoidCallback? get saveAction => _editing ? _save : null;
   bool get isMarkdownFile => languageForPath(widget.path) == 'markdown';
   bool get isImageFile => _looksLikeImageFile(widget.path, _file?.mimeHint);
+  bool get isVideoFile => _looksLikeVideoFile(widget.path, _file?.mimeHint);
   bool get supportsMarkdownPreview =>
       !_editing && _file != null && isMarkdownFile;
   bool get supportsImagePreview => !_editing && _file != null && isImageFile;
+  bool get supportsVideoPreview => !_editing && _file != null && isVideoFile;
   bool get markdownPreview => _markdownPreview;
   bool get imagePreview => _imagePreview;
+  bool get videoPreview => _videoPreview;
 
   @override
   Widget build(BuildContext context) {
@@ -303,13 +330,17 @@ class FileViewerPaneState extends State<FileViewerPane> {
         : const EdgeInsets.fromLTRB(12, 10, 12, 24);
 
     if (supportsImagePreview && _imagePreview) {
+      final mimeLabel = _displayMimeLabel(
+        file.path,
+        file.mimeHint,
+        fallback: 'image',
+      );
       return Padding(
         padding: outerPadding,
         child: ImageViewerPane(
           source: ImageViewerSource.loader(
             title: baseName(widget.path),
-            subtitle:
-                '${formatBytes(file.size)} • ${file.mimeHint.isEmpty ? 'image' : file.mimeHint}',
+            subtitle: '${formatBytes(file.size)} • $mimeLabel',
             imageProviderLoader: () async {
               final cached = await ImageBlobCacheStore.instance.load(
                 host: widget.host,
@@ -323,15 +354,44 @@ class FileViewerPaneState extends State<FileViewerPane> {
         ),
       );
     }
+    if (supportsVideoPreview && _videoPreview) {
+      final mimeLabel = _displayMimeLabel(
+        file.path,
+        file.mimeHint,
+        fallback: 'video',
+      );
+      return Padding(
+        padding: outerPadding,
+        child: VideoViewerPane(
+          host: widget.host,
+          api: widget.api,
+          path: widget.path,
+          mimeHint: mimeLabel,
+          agentProvider: widget.agentProvider,
+          sessionId: widget.sessionId,
+          dense: widget.dense,
+        ),
+      );
+    }
     if (file.binary) {
       return Padding(
         padding: const EdgeInsets.all(24),
         child: MeshEmptyState(
-          icon: isImageFile ? Icons.image_rounded : Icons.description_rounded,
-          title: isImageFile ? 'Image file' : 'Preview unavailable',
+          icon: isImageFile
+              ? Icons.image_rounded
+              : isVideoFile
+              ? Icons.play_circle_outline_rounded
+              : Icons.description_rounded,
+          title: isImageFile
+              ? 'Image file'
+              : isVideoFile
+              ? 'Video file'
+              : 'Preview unavailable',
           body: isImageFile
               ? '${formatBytes(file.size)} • Use Show image to open it.'
-              : '${formatBytes(file.size)} • ${file.mimeHint.isEmpty ? 'unknown type' : file.mimeHint}',
+              : isVideoFile
+              ? '${formatBytes(file.size)} • Use Play video to open it.'
+              : '${formatBytes(file.size)} • ${_displayMimeLabel(file.path, file.mimeHint, fallback: 'unknown type')}',
         ),
       );
     }
@@ -434,8 +494,10 @@ class FileViewerActions extends StatelessWidget {
     final canUseTextContents = hasFile && !(s?.file?.binary ?? false);
     final canPreviewMarkdown = s?.isMarkdownFile ?? false;
     final canPreviewImage = s?.isImageFile ?? false;
+    final canPreviewVideo = s?.isVideoFile ?? false;
     final markdownPreview = s?.markdownPreview ?? false;
     final imagePreview = s?.imagePreview ?? false;
+    final videoPreview = s?.videoPreview ?? false;
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
@@ -483,6 +545,19 @@ class FileViewerActions extends StatelessWidget {
                 : null,
             icon: Icon(
               imagePreview ? Icons.description_rounded : Icons.image_rounded,
+              size: 18,
+            ),
+          ),
+        if (canPreviewVideo)
+          IconButton(
+            tooltip: videoPreview ? 'View file' : 'Play video',
+            onPressed: hasFile && !editing
+                ? () => s?.toggleVideoPreview()
+                : null,
+            icon: Icon(
+              videoPreview
+                  ? Icons.description_rounded
+                  : Icons.play_circle_outline_rounded,
               size: 18,
             ),
           ),
@@ -587,6 +662,45 @@ String formatBytes(int bytes) {
   return '${(bytes / (1024 * 1024 * 1024)).toStringAsFixed(2)} GiB';
 }
 
+String _displayMimeLabel(
+  String path,
+  String? mimeHint, {
+  required String fallback,
+}) {
+  final mime = (mimeHint ?? '').trim().toLowerCase();
+  if (mime.isNotEmpty && mime != 'application/octet-stream') {
+    return mime;
+  }
+  return _guessMimeLabelFromPath(path) ?? fallback;
+}
+
+String? _guessMimeLabelFromPath(String path) {
+  final lower = path.toLowerCase();
+  if (lower.endsWith('.png')) return 'image/png';
+  if (lower.endsWith('.jpg') || lower.endsWith('.jpeg')) return 'image/jpeg';
+  if (lower.endsWith('.gif')) return 'image/gif';
+  if (lower.endsWith('.webp')) return 'image/webp';
+  if (lower.endsWith('.bmp')) return 'image/bmp';
+  if (lower.endsWith('.ico')) return 'image/x-icon';
+  if (lower.endsWith('.heic')) return 'image/heic';
+  if (lower.endsWith('.heif')) return 'image/heif';
+  if (lower.endsWith('.mp4')) return 'video/mp4';
+  if (lower.endsWith('.webm')) return 'video/webm';
+  if (lower.endsWith('.mov')) return 'video/quicktime';
+  if (lower.endsWith('.m4v')) return 'video/x-m4v';
+  if (lower.endsWith('.mkv')) return 'video/x-matroska';
+  if (lower.endsWith('.avi')) return 'video/x-msvideo';
+  if (lower.endsWith('.ogv')) return 'video/ogg';
+  if (lower.endsWith('.m3u8')) return 'application/vnd.apple.mpegurl';
+  if (lower.endsWith('.md')) return 'text/markdown';
+  if (lower.endsWith('.json')) return 'application/json';
+  if (lower.endsWith('.yaml') || lower.endsWith('.yml')) return 'text/yaml';
+  if (lower.endsWith('.xml')) return 'application/xml';
+  if (lower.endsWith('.pdf')) return 'application/pdf';
+  if (lower.endsWith('.zip')) return 'application/zip';
+  return null;
+}
+
 bool _looksLikeImageFile(String path, String? mimeHint) {
   final mime = (mimeHint ?? '').toLowerCase();
   if (mime == 'image/png' ||
@@ -610,4 +724,27 @@ bool _looksLikeImageFile(String path, String? mimeHint) {
       lower.endsWith('.ico') ||
       lower.endsWith('.heic') ||
       lower.endsWith('.heif');
+}
+
+bool _looksLikeVideoFile(String path, String? mimeHint) {
+  final mime = (mimeHint ?? '').toLowerCase();
+  if (mime == 'video/mp4' ||
+      mime == 'video/webm' ||
+      mime == 'video/quicktime' ||
+      mime == 'video/x-matroska' ||
+      mime == 'video/x-msvideo' ||
+      mime == 'video/ogg' ||
+      mime == 'application/vnd.apple.mpegurl' ||
+      mime == 'application/x-mpegurl') {
+    return true;
+  }
+  final lower = path.toLowerCase();
+  return lower.endsWith('.mp4') ||
+      lower.endsWith('.webm') ||
+      lower.endsWith('.mov') ||
+      lower.endsWith('.m4v') ||
+      lower.endsWith('.mkv') ||
+      lower.endsWith('.avi') ||
+      lower.endsWith('.ogv') ||
+      lower.endsWith('.m3u8');
 }

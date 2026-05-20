@@ -48,6 +48,54 @@ describe("filesystem routes", () => {
     }
   });
 
+  it("serves byte ranges for blob reads", async () => {
+    const root = await tempRoot(tempRoots);
+    const filePath = nodePath.join(root, "clip.mp4");
+    await writeFile(filePath, Buffer.from("hello world", "utf8"));
+    const app = testApp(root);
+    const server = await listen(app);
+    try {
+      const response = await fetch(
+        `${baseUrl(server)}/api/fs/blob?path=${encodeURIComponent(filePath)}`,
+        {
+          headers: {
+            Range: "bytes=2-5",
+          },
+        },
+      );
+      assert.equal(response.status, 206);
+      assert.equal(response.headers.get("accept-ranges"), "bytes");
+      assert.equal(response.headers.get("content-type"), "video/mp4");
+      assert.equal(response.headers.get("content-range"), "bytes 2-5/11");
+      assert.equal(response.headers.get("content-length"), "4");
+      assert.equal(await response.text(), "llo ");
+    } finally {
+      await close(server);
+    }
+  });
+
+  it("rejects unsatisfiable blob ranges", async () => {
+    const root = await tempRoot(tempRoots);
+    const filePath = nodePath.join(root, "clip.mp4");
+    await writeFile(filePath, Buffer.from("hello world", "utf8"));
+    const app = testApp(root);
+    const server = await listen(app);
+    try {
+      const response = await fetch(
+        `${baseUrl(server)}/api/fs/blob?path=${encodeURIComponent(filePath)}`,
+        {
+          headers: {
+            Range: "bytes=40-80",
+          },
+        },
+      );
+      assert.equal(response.status, 416);
+      assert.equal(response.headers.get("content-range"), "bytes */11");
+    } finally {
+      await close(server);
+    }
+  });
+
   it("caches workspace roots across adjacent filesystem requests", async () => {
     const root = await tempRoot(tempRoots);
     await writeFile(nodePath.join(root, "a.txt"), "a", "utf8");
