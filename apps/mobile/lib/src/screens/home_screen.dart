@@ -1605,12 +1605,36 @@ class _RecentPaneState extends State<RecentPane> {
     return parts.lastWhere((p) => p.isNotEmpty, orElse: () => 'Unknown');
   }
 
+  /// Returns a stable project key for grouping sessions.
+  ///
+  /// Prefers [GitInfoSummary.gitCommonDir] (the absolute path to the shared
+  /// .git directory) so that sessions running in automatically-created
+  /// worktrees collapse under the same project as the main repo. Falls back
+  /// to the CWD basename for sessions that aren't inside a git repository.
+  String _projectKey(RemoteSessionEntry entry) {
+    final commonDir = entry.session.gitInfo?.gitCommonDir;
+    if (commonDir != null && commonDir.isNotEmpty) return commonDir;
+    return _cwdBasename(entry.session.cwd);
+  }
+
+  /// Human-readable label for a project group key produced by [_projectKey].
+  ///
+  /// For git repos the key is the .git path, e.g. "/dev/sidemesh/.git"; we
+  /// strip "/.git" and take the basename to show just "sidemesh".
+  String _projectLabel(String key) {
+    // Strip trailing /.git if present (main worktree path)
+    final stripped = key.endsWith('/.git') ? key.substring(0, key.length - 5) : key;
+    final parts = stripped.split('/');
+    final name = parts.lastWhere((p) => p.isNotEmpty, orElse: () => key);
+    return name.isEmpty ? key : name;
+  }
+
   List<_SessionGroup> _groupEntries(List<RemoteSessionEntry> entries) {
     if (widget.viewMode == SessionViewMode.flat) return const [];
     final groups = <String, List<RemoteSessionEntry>>{};
     for (final entry in entries) {
       final key = switch (widget.viewMode) {
-        SessionViewMode.byCwd => _cwdBasename(entry.session.cwd),
+        SessionViewMode.byCwd => _projectKey(entry),
         SessionViewMode.byHost => entry.host.label,
         SessionViewMode.flat => '',
       };
@@ -1626,7 +1650,12 @@ class _RecentPaneState extends State<RecentPane> {
         return a.compareTo(b);
       });
     return sortedKeys
-        .map((k) => _SessionGroup(title: k, entries: groups[k]!))
+        .map((k) => _SessionGroup(
+          title: widget.viewMode == SessionViewMode.byCwd
+              ? _projectLabel(k)
+              : k,
+          entries: groups[k]!,
+        ))
         .toList();
   }
 

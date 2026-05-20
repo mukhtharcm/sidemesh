@@ -257,6 +257,12 @@ export interface GitInfoSummary {
   sha: string | null;
   branch: string | null;
   originUrl: string | null;
+  /**
+   * Absolute path to the shared .git directory (from `git rev-parse --git-common-dir`).
+   * Same for all worktrees of the same repo; used to group sessions by project
+   * in the sidebar regardless of which worktree each session runs in.
+   */
+  gitCommonDir: string | null;
 }
 
 export interface SessionGitFileStatus {
@@ -270,6 +276,15 @@ export interface SessionGitStatus {
   isRepo: boolean;
   cwd: string;
   repoRoot: string | null;
+  /**
+   * Result of `git rev-parse --git-common-dir` — the path to the shared .git
+   * directory for this repository. Identical across every linked worktree of
+   * the same repo, so it can be used as a stable project identifier even when
+   * sessions run in automatically-created worktrees at different paths.
+   *
+   * Example: all worktrees of /dev/sidemesh return "/dev/sidemesh/.git".
+   */
+  gitCommonDir: string | null;
   branch: string | null;
   sha: string | null;
   shortSha: string | null;
