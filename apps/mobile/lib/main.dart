@@ -22,15 +22,16 @@ import 'src/theme/app_theme.dart';
 import 'src/theme/theme_controller.dart';
 import 'src/windowing.dart';
 
-bool get _isMacOSDesktop =>
+bool get _isDesktopPlatform =>
     !kIsWeb &&
-    defaultTargetPlatform == TargetPlatform.macOS &&
-    Platform.isMacOS;
+    (defaultTargetPlatform == TargetPlatform.macOS ||
+     defaultTargetPlatform == TargetPlatform.linux ||
+     defaultTargetPlatform == TargetPlatform.windows);
 
 Future<void> main(List<String> args) async {
   WidgetsFlutterBinding.ensureInitialized();
   final launchState = await resolveCurrentWindowLaunchState();
-  if (_isMacOSDesktop) {
+  if (_isDesktopPlatform && Platform.isMacOS) {
     // Our macOS build runs unsandboxed by design so keychain access works
     // without extra signing setup. file_picker 11+ assumes a sandboxed app
     // and performs an entitlement check unless we opt out explicitly.
@@ -114,7 +115,7 @@ class SidemeshApp extends StatelessWidget {
                   MediaQuery.platformBrightnessOf(context) == Brightness.dark);
           final activePalette = isDark ? darkPalette : lightPalette;
           final home = switch (launchState.arguments.kind) {
-            SidemeshWindowKind.main => _isMacOSDesktop
+            SidemeshWindowKind.main => _isDesktopPlatform
                 ? const DesktopShell()
                 : onboardingCompleted
                     ? const SidemeshHomeScreen()

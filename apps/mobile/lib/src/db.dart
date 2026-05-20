@@ -1,12 +1,24 @@
 import 'dart:io';
 
 import 'package:path/path.dart';
-import 'package:sqflite/sqflite.dart';
+import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
 import 'app_directories.dart';
 
 class SidemeshDb {
   SidemeshDb._();
+
+  static bool _ffiInitialized = false;
+
+  static void _ensureFfiIfNeeded() {
+    if (Platform.isLinux || Platform.isWindows) {
+      if (!_ffiInitialized) {
+        sqfliteFfiInit();
+        databaseFactory = databaseFactoryFfi;
+        _ffiInitialized = true;
+      }
+    }
+  }
 
   static Database? _db;
   static Future<Database>? _openingDb;
@@ -35,6 +47,7 @@ class SidemeshDb {
   }
 
   static Future<Database> _open() async {
+    _ensureFfiIfNeeded();
     final dbPath = await _resolveDbPath();
     return openDatabase(
       dbPath,
