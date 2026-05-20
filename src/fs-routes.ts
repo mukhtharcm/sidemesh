@@ -780,6 +780,21 @@ function guessMime(filePath: string): string {
       return "image/gif";
     case "webp":
       return "image/webp";
+    case "mp3":
+      return "audio/mpeg";
+    case "wav":
+      return "audio/wav";
+    case "m4a":
+      return "audio/mp4";
+    case "aac":
+      return "audio/aac";
+    case "ogg":
+    case "oga":
+      return "audio/ogg";
+    case "opus":
+      return "audio/opus";
+    case "flac":
+      return "audio/flac";
     case "mp4":
       return "video/mp4";
     case "webm":

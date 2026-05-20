@@ -74,6 +74,24 @@ describe("filesystem routes", () => {
     }
   });
 
+  it("serves audio files with a playable MIME type", async () => {
+    const root = await tempRoot(tempRoots);
+    const filePath = nodePath.join(root, "theme.mp3");
+    await writeFile(filePath, Buffer.from("mp3 payload", "utf8"));
+    const app = testApp(root);
+    const server = await listen(app);
+    try {
+      const response = await fetch(
+        `${baseUrl(server)}/api/fs/blob?path=${encodeURIComponent(filePath)}`,
+      );
+      assert.equal(response.status, 200);
+      assert.equal(response.headers.get("content-type"), "audio/mpeg");
+      assert.equal(await response.text(), "mp3 payload");
+    } finally {
+      await close(server);
+    }
+  });
+
   it("rejects unsatisfiable blob ranges", async () => {
     const root = await tempRoot(tempRoots);
     const filePath = nodePath.join(root, "clip.mp4");
