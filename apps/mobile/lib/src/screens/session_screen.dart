@@ -141,28 +141,59 @@ class _DockedBrowserPreview {
 class _DesktopSessionTitle extends StatelessWidget {
   const _DesktopSessionTitle({
     required this.session,
+    required this.host,
     required this.running,
     required this.canRename,
+    required this.gitStatus,
+    required this.showGit,
+    required this.pinnedCount,
+    required this.pinnedActive,
     required this.onRename,
+    required this.onDetails,
+    required this.onGitDetails,
+    required this.onPinnedTap,
   });
 
   final SessionSummary session;
+  final HostProfile host;
   final bool running;
   final bool canRename;
+  final SessionGitStatus? gitStatus;
+  final bool showGit;
+  final int pinnedCount;
+  final bool pinnedActive;
   final VoidCallback onRename;
+  final VoidCallback onDetails;
+  final VoidCallback onGitDetails;
+  final VoidCallback onPinnedTap;
+
+  String _shortFolder(String cwd) {
+    if (cwd.isEmpty) return '~';
+    final trimmed = cwd.endsWith('/') ? cwd.substring(0, cwd.length - 1) : cwd;
+    final slash = trimmed.lastIndexOf('/');
+    if (slash < 0 || slash == trimmed.length - 1) return trimmed;
+    return trimmed.substring(slash + 1);
+  }
 
   @override
   Widget build(BuildContext context) {
     final colors = context.colors;
-    final title = Row(
+    final folder = _shortFolder(session.cwd);
+    final gitLabel = showGit ? _gitHeaderLabel(session, gitStatus) : null;
+    final contextLabel = _contextUsageShortLabel(session.runtime);
+    final contextTone = _contextUsageTone(session.runtime);
+    final gitDirty = gitStatus?.dirty ?? false;
+
+    final titleRow = Row(
       mainAxisSize: MainAxisSize.min,
       children: [
+        if (running) ...[const LivePulse(), const SizedBox(width: 8)],
         Flexible(
           child: Text(
             session.title,
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
-            style: Theme.of(context).textTheme.titleMedium?.copyWith(
+            style: Theme.of(context).textTheme.titleSmall?.copyWith(
               color: colors.textPrimary,
               fontWeight: AppWeights.title,
               letterSpacing: AppLetterSpacing.headline,
@@ -171,7 +202,7 @@ class _DesktopSessionTitle extends StatelessWidget {
         ),
         if (canRename) ...[
           const SizedBox(width: 5),
-          Icon(Icons.edit_rounded, size: 13, color: colors.textTertiary),
+          Icon(Icons.edit_rounded, size: 12, color: colors.textTertiary),
         ],
       ],
     );
@@ -187,24 +218,90 @@ class _DesktopSessionTitle extends StatelessWidget {
                 child: InkWell(
                   borderRadius: AppShapes.badge,
                   onTap: onRename,
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(vertical: 5),
-                    child: title,
-                  ),
+                  child: titleRow,
                 ),
               ),
             ),
           )
-        : title;
+        : titleRow;
+
+    // Compact metadata row — host · folder + optional chips
+    final metaRow = GestureDetector(
+      onTap: onDetails,
+      behavior: HitTestBehavior.opaque,
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          _HeaderStatusDot(
+            color: running ? colors.success : colors.textTertiary,
+          ),
+          const SizedBox(width: 5),
+          Flexible(
+            child: Text(
+              '${host.label} · $folder',
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                color: colors.textSecondary,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ),
+          if (gitLabel != null) ...[
+            const SizedBox(width: 6),
+            _CompactMetaChip(
+              label: gitDirty
+                  ? '${gitStatus?.changed ?? 0}'
+                  : gitLabel.split(' ').first,
+              icon: Icons.account_tree_rounded,
+              color: gitDirty ? colors.warning : colors.textSecondary,
+              onTap: onGitDetails,
+            ),
+          ],
+          if (contextLabel != null) ...[
+            const SizedBox(width: 4),
+            _CompactMetaChip(
+              label: contextLabel,
+              icon: Icons.data_usage_rounded,
+              color: switch (contextTone) {
+                MeshPillTone.danger => colors.danger,
+                MeshPillTone.warning => colors.warning,
+                _ => colors.textSecondary,
+              },
+            ),
+          ],
+          if (pinnedCount > 0) ...[
+            const SizedBox(width: 4),
+            _CompactMetaChip(
+              label: '$pinnedCount',
+              icon: Icons.push_pin_rounded,
+              color: pinnedActive ? colors.accent : colors.textSecondary,
+              onTap: onPinnedTap,
+            ),
+          ],
+        ],
+      ),
+    );
 
     return Row(
+      crossAxisAlignment: CrossAxisAlignment.center,
       children: [
-        if (running) ...[const LivePulse(), const SizedBox(width: 9)],
-        Expanded(child: titleContent),
+        Expanded(
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              titleContent,
+              const SizedBox(height: 2),
+              metaRow,
+            ],
+          ),
+        ),
         const SizedBox(width: 8),
         if (session.provider != null) ...[
           AgentProviderBadge(providerKind: session.provider, compact: true),
-          const SizedBox(width: 8),
+          const SizedBox(width: 6),
         ],
         if (running) _DesktopSessionStatusBadge(running: running),
       ],
@@ -7359,18 +7456,8 @@ class _SessionScreenState extends State<SessionScreen>
     final portsOpenInInspector = _isPortsInspectorOpen(inspectorScope);
     final PreferredSizeWidget? appBarBottom;
     if (widget.desktopMode) {
-      appBarBottom = _DesktopSessionInfoStrip(
-        host: widget.host,
-        session: session,
-        gitStatus: _gitStatus,
-        showGit: _supportsGitStatus,
-        running: _running,
-        pinnedCount: pinnedMessages.length,
-        pinnedActive: pinnedActive,
-        onPinnedTap: _openPinnedPanel,
-        onGitDetails: () => _showGitSheet(session),
-        onDetails: () => _showSessionDetailsSheet(session),
-      );
+      // Metadata is now embedded in _DesktopSessionTitle — no separate bar.
+      appBarBottom = null;
     } else if (isCompact) {
       appBarBottom = PreferredSize(
         preferredSize: const Size.fromHeight(30),
@@ -7397,14 +7484,22 @@ class _SessionScreenState extends State<SessionScreen>
         elevation: 0,
         scrolledUnderElevation: 0,
         titleSpacing: widget.desktopMode ? 16 : null,
-        toolbarHeight: isCompact ? 52 : (widget.desktopMode ? 60 : null),
+        toolbarHeight: isCompact ? 52 : (widget.desktopMode ? 52 : null),
         bottom: appBarBottom,
         title: widget.desktopMode
             ? _DesktopSessionTitle(
                 session: session,
+                host: widget.host,
                 running: _running,
                 canRename: _supportsSessionRename,
+                gitStatus: _gitStatus,
+                showGit: _supportsGitStatus,
+                pinnedCount: pinnedMessages.length,
+                pinnedActive: pinnedActive,
                 onRename: () => unawaited(_renameSession()),
+                onDetails: () => _showSessionDetailsSheet(session),
+                onGitDetails: () => _showGitSheet(session),
+                onPinnedTap: _openPinnedPanel,
               )
             : Row(
                 children: [
