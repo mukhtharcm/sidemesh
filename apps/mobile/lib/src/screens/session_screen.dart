@@ -7120,26 +7120,6 @@ class _SessionScreenState extends State<SessionScreen>
         widget.desktopMode && _pendingAction == null ? 8.0 : 0.0;
     final bodyContent = Column(
       children: [
-        if (!isCompact && !widget.desktopMode)
-          ListenableBuilder(
-            listenable: SessionLocalStore.instance,
-            builder: (context, _) {
-              final favorite = _localStore.isFavorite(widget.host, session.id);
-              return _SessionHeader(
-                host: widget.host,
-                session: session,
-                gitStatus: _gitStatus,
-                showGit: _supportsGitStatus,
-                running: _running,
-                favorite: favorite,
-                pinnedCount: pinnedMessages.length,
-                pinnedActive: pinnedActive,
-                onPinnedTap: _openPinnedPanel,
-                onDetails: () => _showSessionDetailsSheet(session),
-                onGitDetails: () => _showGitSheet(session),
-              );
-            },
-          ),
         if (_pendingAction != null)
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 4, 16, 12),
@@ -7448,45 +7428,26 @@ class _SessionScreenState extends State<SessionScreen>
     final resourcesOpenInInspector = _isResourcesInspectorOpen(inspectorScope);
     final terminalOpenInInspector = _isTerminalInspectorOpen(inspectorScope);
     final portsOpenInInspector = _isPortsInspectorOpen(inspectorScope);
-    final PreferredSizeWidget? appBarBottom;
-    if (widget.desktopMode) {
-      // Compact info strip: mirrors what compact mobile already shows via
-      // _SessionAppBarSubtitle. Gives desktop users host, folder, git branch,
-      // context %, and pinned count without cluttering the title row.
-      appBarBottom = PreferredSize(
-        preferredSize: const Size.fromHeight(30),
-        child: _SessionAppBarSubtitle(
-          host: widget.host,
-          session: session,
-          gitStatus: _gitStatus,
-          showGit: _supportsGitStatus,
-          running: _running,
-          pinnedCount: pinnedMessages.length,
-          pinnedActive: pinnedActive,
-          onPinnedTap: _openPinnedPanel,
-          onDetails: () => _showSessionDetailsSheet(session),
-          onGitDetails: () => _showGitSheet(session),
-        ),
-      );
-    } else if (isCompact) {
-      appBarBottom = PreferredSize(
-        preferredSize: const Size.fromHeight(30),
-        child: _SessionAppBarSubtitle(
-          host: widget.host,
-          session: session,
-          gitStatus: _gitStatus,
-          showGit: _supportsGitStatus,
-          running: _running,
-          pinnedCount: pinnedMessages.length,
-          pinnedActive: pinnedActive,
-          onPinnedTap: _openPinnedPanel,
-          onDetails: () => _showSessionDetailsSheet(session),
-          onGitDetails: () => _showGitSheet(session),
-        ),
-      );
-    } else {
-      appBarBottom = null;
-    }
+    // All layouts get the same compact info strip: status dot, host·folder,
+    // provider badge, git chip, context %, pinned count, ℹ️ tap for details.
+    // Desktop uses it as a subtitle since the title row has no room for meta.
+    // Tablet uses it instead of the old _SessionHeader card (~100px saved).
+    // Compact mobile already used it; now all three layouts are consistent.
+    final appBarBottom = PreferredSize(
+      preferredSize: const Size.fromHeight(30),
+      child: _SessionAppBarSubtitle(
+        host: widget.host,
+        session: session,
+        gitStatus: _gitStatus,
+        showGit: _supportsGitStatus,
+        running: _running,
+        pinnedCount: pinnedMessages.length,
+        pinnedActive: pinnedActive,
+        onPinnedTap: _openPinnedPanel,
+        onDetails: () => _showSessionDetailsSheet(session),
+        onGitDetails: () => _showGitSheet(session),
+      ),
+    );
     final scaffold = Scaffold(
       backgroundColor: colors.canvas,
       appBar: AppBar(
@@ -7494,7 +7455,7 @@ class _SessionScreenState extends State<SessionScreen>
         elevation: 0,
         scrolledUnderElevation: 0,
         titleSpacing: widget.desktopMode ? 16 : null,
-        toolbarHeight: isCompact ? 52 : (widget.desktopMode ? 52 : null),
+        toolbarHeight: 52,
         bottom: appBarBottom,
         title: widget.desktopMode
             ? _DesktopSessionTitle(
