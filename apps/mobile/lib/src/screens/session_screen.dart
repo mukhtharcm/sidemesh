@@ -6038,10 +6038,9 @@ class _SessionScreenState extends State<SessionScreen>
           ownerKey: _inspectorOwnerKey(),
           host: widget.host,
           api: widget.api,
-          root: session.cwd,
+          root: browserRoot,
           agentProvider: session.provider,
           sessionId: session.id,
-          selectedPath: path,
         ),
       );
       return;
