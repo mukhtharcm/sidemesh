@@ -22,18 +22,44 @@ InspectorSurface buildInspectorWorkspaceBrowserSurface({
   String? sessionId,
   String? selectedPath,
 }) {
+  // Shared notifier so the header's reload action can trigger a refresh
+  // inside the body without needing a GlobalKey or BuildContext indirection.
+  final reloadNotifier = ValueNotifier<int>(0);
   return InspectorSurface(
     kind: InspectorSurfaceKind.fileBrowser,
     ownerKey: ownerKey,
     title: 'Files',
     icon: Icons.folder_open_rounded,
+    actionsBuilder: (context) => [
+      Tooltip(
+        message: 'Reload files',
+        child: InkResponse(
+          radius: 18,
+          onTap: () => reloadNotifier.value++,
+          child: Padding(
+            padding: const EdgeInsets.all(6),
+            child: Icon(
+              Icons.refresh_rounded,
+              size: 16,
+              color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.6),
+            ),
+          ),
+        ),
+      ),
+    ],
     bodyBuilder: (context) => WorkspaceBrowserPane(
+      // ValueKey on ownerKey ensures the widget is fully replaced (and its
+      // state reset) when the active session changes. Without this, Flutter
+      // reuses _WorkspaceBrowserPaneState across sessions and FileBrowserTree
+      // keeps showing the previous session's directory tree.
+      key: ValueKey(ownerKey),
       host: host,
       api: api,
       root: root,
       agentProvider: agentProvider,
       sessionId: sessionId,
       initialSelectedPath: selectedPath,
+      reloadNotifier: reloadNotifier,
     ),
   );
 }
@@ -50,6 +76,7 @@ class WorkspaceBrowserPane extends StatefulWidget {
     this.agentProvider,
     this.sessionId,
     this.initialSelectedPath,
+    this.reloadNotifier,
   });
 
   final HostProfile host;
@@ -58,6 +85,8 @@ class WorkspaceBrowserPane extends StatefulWidget {
   final String? agentProvider;
   final String? sessionId;
   final String? initialSelectedPath;
+  /// When incremented, forces the file tree to reload from the host.
+  final ValueNotifier<int>? reloadNotifier;
 
   @override
   State<WorkspaceBrowserPane> createState() => _WorkspaceBrowserPaneState();
@@ -70,10 +99,32 @@ class _WorkspaceBrowserPaneState extends State<WorkspaceBrowserPane> {
   final GlobalKey<FileViewerPaneState> _viewerKey =
       GlobalKey<FileViewerPaneState>();
   late bool _inViewerMode = widget.initialSelectedPath != null;
+  // Incremented to force FileBrowserTree to rebuild and re-fetch from host.
+  int _treeGeneration = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    widget.reloadNotifier?.addListener(_onReload);
+  }
+
+  void _onReload() {
+    setState(() {
+      _treeGeneration++;
+      _selected = null;
+      _inViewerMode = false;
+      _liveStream = null;
+    });
+    _clearViewer();
+  }
 
   @override
   void didUpdateWidget(covariant WorkspaceBrowserPane oldWidget) {
     super.didUpdateWidget(oldWidget);
+    if (oldWidget.reloadNotifier != widget.reloadNotifier) {
+      oldWidget.reloadNotifier?.removeListener(_onReload);
+      widget.reloadNotifier?.addListener(_onReload);
+    }
     final initialChanged =
         oldWidget.initialSelectedPath != widget.initialSelectedPath;
     final rootChanged = oldWidget.root != widget.root;
@@ -84,11 +135,13 @@ class _WorkspaceBrowserPaneState extends State<WorkspaceBrowserPane> {
       _selected = widget.initialSelectedPath;
       _inViewerMode = widget.initialSelectedPath != null;
       _liveStream = null;
+      _treeGeneration++;
     });
   }
 
   @override
   void dispose() {
+    widget.reloadNotifier?.removeListener(_onReload);
     _viewerObservable.dispose();
     super.dispose();
   }
@@ -123,6 +176,7 @@ class _WorkspaceBrowserPaneState extends State<WorkspaceBrowserPane> {
             child: Container(
               color: colors.surfaceElevated,
               child: FileBrowserTree(
+                key: ValueKey(_treeGeneration),
                 host: widget.host,
                 api: widget.api,
                 root: widget.root,

@@ -12,7 +12,10 @@
 //   - sidemesh daemon running locally (see README / sidemesh start)
 //   - Update _kBaseUrl / _kToken / _kSessionId below to match your local setup
 
+import 'dart:io' show Platform;
 import 'package:flutter/material.dart';
+import 'package:sqflite_common_ffi/sqflite_ffi.dart';
+import 'package:video_player_media_kit/video_player_media_kit.dart';
 import 'src/api_client.dart';
 import 'src/models.dart';
 import 'src/screens/session_screen.dart';
@@ -22,12 +25,16 @@ import 'src/theme/theme_controller.dart';
 // ── Configure to match your local daemon ─────────────────────────────────────
 const _kBaseUrl = 'http://localhost:8899';
 const _kToken = 'test-token';
-const _kSessionId = ''; // Leave empty to use the first session from the API,
-                        // or paste a session ID from `sidemesh sessions list`.
+const _kSessionId = 'codex:MDE5ZTQzYmMtYTJlNi03YzcyLWFjMTUtNzgyNTZmM2Y2NWFj';
 // ─────────────────────────────────────────────────────────────────────────────
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  if (Platform.isLinux || Platform.isWindows) {
+    sqfliteFfiInit();
+    databaseFactory = databaseFactoryFfi;
+    VideoPlayerMediaKit.ensureInitialized(linux: true, windows: true);
+  }
   final themeController = await ThemeController.load();
   runApp(_DevHarnessApp(themeController: themeController));
 }
