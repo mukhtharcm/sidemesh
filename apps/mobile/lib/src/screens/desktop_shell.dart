@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io' show Platform;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -737,7 +738,7 @@ class _DesktopShellState extends State<DesktopShell> {
     _handlingNotificationIntent = true;
     try {
       if (!mounted) return;
-      unawaited(WindowManipulator.orderFrontRegardless());
+      if (Platform.isMacOS) unawaited(WindowManipulator.orderFrontRegardless());
       if (_section != _SidebarSection.inbox) {
         setState(() => _section = _SidebarSection.inbox);
       }
