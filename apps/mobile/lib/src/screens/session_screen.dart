@@ -233,12 +233,15 @@ class _DesktopSessionCommandBar extends StatelessWidget {
       children: [
         // Stop is a standalone danger action — keep it visually separate.
         if (running && canStop) ...[
-          MeshIconButton(
-            icon: Icons.stop_circle_rounded,
-            tooltip: 'Stop agent',
-            color: colors.danger,
-            onTap: onStop,
-            semanticLabel: 'Stop agent',
+          _DesktopButtonGroup(
+            children: [
+              _DesktopGroupButton(
+                icon: Icons.stop_circle_rounded,
+                tooltip: 'Stop agent',
+                color: colors.danger,
+                onTap: onStop,
+              ),
+            ],
           ),
           const SizedBox(width: 6),
         ],
