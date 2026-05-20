@@ -38,6 +38,7 @@ dependencies:
   path_provider: ^2.1.5
   shared_preferences: ^2.5.3
   sqflite: ^2.3.0
+  sqflite_common_ffi: ^2.3.0
   path: ^1.9.0
   web_socket_channel: ^3.0.3
   gpt_markdown: ^1.1.6
