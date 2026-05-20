@@ -231,6 +231,7 @@ class _DesktopSessionCommandBar extends StatelessWidget {
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
+        // Stop is a standalone danger action — keep it visually separate.
         if (running && canStop) ...[
           MeshIconButton(
             icon: Icons.stop_circle_rounded,
@@ -241,24 +242,93 @@ class _DesktopSessionCommandBar extends StatelessWidget {
           ),
           const SizedBox(width: 6),
         ],
-        MeshIconButton(
-          icon: Icons.more_horiz_rounded,
-          tooltip: running
-              ? 'Session actions (agent running)'
-              : 'Session actions',
-          color: colors.textSecondary,
-          onTap: onMore,
+        // ⋯ and × are grouped in a compact desktop-scale container.
+        _DesktopButtonGroup(
+          children: [
+            _DesktopGroupButton(
+              icon: Icons.more_horiz_rounded,
+              tooltip: running ? 'Session actions (agent running)' : 'Session actions',
+              color: colors.textSecondary,
+              onTap: onMore,
+            ),
+            if (onClose != null) ...[
+              _DesktopGroupDivider(),
+              _DesktopGroupButton(
+                icon: Icons.close_rounded,
+                tooltip: 'Close session',
+                color: colors.textTertiary,
+                onTap: onClose!,
+              ),
+            ],
+          ],
         ),
-        if (onClose != null) ...[
-          const SizedBox(width: 2),
-          MeshIconButton(
-            icon: Icons.close_rounded,
-            tooltip: 'Close session',
-            color: colors.textTertiary,
-            onTap: onClose!,
-          ),
-        ],
       ],
+    );
+  }
+}
+
+/// A compact grouped button bar for the desktop session AppBar.
+/// Renders children in a rounded container with a subtle border — gives
+/// ⋯ and ✕ a shared visual frame rather than two floating icon buttons.
+class _DesktopButtonGroup extends StatelessWidget {
+  const _DesktopButtonGroup({required this.children});
+  final List<Widget> children;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    return Container(
+      height: 28,
+      decoration: BoxDecoration(
+        color: colors.surface,
+        borderRadius: BorderRadius.circular(AppRadii.control),
+        border: Border.all(color: colors.border),
+      ),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(AppRadii.control - 1),
+        child: Row(mainAxisSize: MainAxisSize.min, children: children),
+      ),
+    );
+  }
+}
+
+class _DesktopGroupButton extends StatelessWidget {
+  const _DesktopGroupButton({
+    required this.icon,
+    required this.tooltip,
+    required this.color,
+    required this.onTap,
+  });
+  final IconData icon;
+  final String tooltip;
+  final Color color;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Tooltip(
+      message: tooltip,
+      child: InkWell(
+        onTap: onTap,
+        child: SizedBox(
+          width: 32,
+          height: 28,
+          child: Center(child: Icon(icon, size: 15, color: color)),
+        ),
+      ),
+    );
+  }
+}
+
+class _DesktopGroupDivider extends StatelessWidget {
+  const _DesktopGroupDivider();
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      width: 1,
+      height: 28,
+      child: ColoredBox(color: context.colors.border),
     );
   }
 }
