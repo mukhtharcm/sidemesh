@@ -273,7 +273,7 @@ void main() {
   });
 
   test('SessionSummary.copyWith preserves legacy sub-agent badges', () {
-    const legacySummary = SessionSummary(
+    final legacySummary = SessionSummary(
       id: 'session-child',
       title: 'Delegated explorer',
       preview: 'Delegated explorer',
