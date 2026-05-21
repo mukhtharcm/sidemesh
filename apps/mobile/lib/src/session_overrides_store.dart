@@ -18,6 +18,11 @@ class SessionOverridesStore extends ChangeNotifier {
 
   final Map<String, SessionSummary> _overrides = <String, SessionSummary>{};
 
+  @visibleForTesting
+  void clearForTest() {
+    _overrides.clear();
+  }
+
   String _keyFor(String hostId, String sessionId) => '$hostId:$sessionId';
 
   /// Record a locally-confirmed summary for the given host. Replaces any
@@ -39,19 +44,11 @@ class SessionOverridesStore extends ChangeNotifier {
       return incoming;
     }
     // Keep the server's updatedAt so ordering reflects real activity,
-    // but apply the user's pending mutations (title, status).
-    return SessionSummary(
-      id: incoming.id,
+    // but apply the user's pending title while preserving lineage metadata.
+    return incoming.copyWith(
       title: override.title,
-      preview: incoming.preview,
-      cwd: incoming.cwd,
-      createdAt: incoming.createdAt,
-      updatedAt: incoming.updatedAt,
-      source: incoming.source,
-      provider: incoming.provider,
-      status: incoming.status,
-      runtime: incoming.runtime,
-      gitInfo: incoming.gitInfo,
+      isSubAgent: incoming.isSubAgent || override.isSubAgent,
+      subAgent: incoming.subAgent ?? override.subAgent,
     );
   }
 }

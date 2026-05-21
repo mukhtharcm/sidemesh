@@ -97,6 +97,29 @@ void main() {
     expect(recents.first.title, 'Updated');
   });
 
+  test('upsert and getRecentSessions preserve sub-agent lineage', () async {
+    final store = SessionLocalStore.instance;
+    final session = _summary(
+      'session-child',
+      updatedAt: DateTime.now(),
+      isSubAgent: true,
+      subAgent: const SessionSubAgentInfo(
+        parentSessionId: 'session-parent',
+        sourceKind: 'thread_spawn',
+        agentRole: 'explorer',
+        agentNickname: 'scout',
+        depth: 1,
+      ),
+    );
+
+    await store.upsertSessions(host, [session]);
+    final recents = await store.getRecentSessions(host);
+
+    expect(recents.single.isSubAgent, isTrue);
+    expect(recents.single.subAgent?.parentSessionId, 'session-parent');
+    expect(recents.single.subAgent?.agentRole, 'explorer');
+  });
+
   test('upsertSessions replaces stale recent rows', () async {
     final store = SessionLocalStore.instance;
     final first = _summary('s1', updatedAt: DateTime.now(), title: 'First');
@@ -132,6 +155,30 @@ void main() {
     expect(recents.map((session) => session.id), ['recent']);
     expect(favorites.map((session) => session.id), contains('favorite'));
     expect(ghosts.map((session) => session.id), ['favorite']);
+  });
+
+  test('updateGhost preserves sub-agent lineage for favorites', () async {
+    final store = SessionLocalStore.instance;
+    await store.toggleFavorite(host, 'session-child');
+
+    final session = _summary(
+      'session-child',
+      updatedAt: DateTime.now(),
+      isSubAgent: true,
+      subAgent: const SessionSubAgentInfo(
+        parentSessionId: 'session-parent',
+        sourceKind: 'child_session',
+        agentName: 'explore',
+        agentDisplayName: 'Explore',
+      ),
+    );
+
+    await store.updateGhost(host, session);
+    final favorites = await store.getFavoriteSessions(host);
+
+    expect(favorites.single.isSubAgent, isTrue);
+    expect(favorites.single.subAgent?.sourceKind, 'child_session');
+    expect(favorites.single.subAgent?.agentDisplayName, 'Explore');
   });
 
   test('toggleFavorite and isFavorite', () async {
@@ -284,7 +331,7 @@ void main() {
   test('migration from old SharedPreferences', () async {
     SharedPreferences.setMockInitialValues({
       'sidemesh_cached_recent_sessions_v1:host-1':
-          '[{"id":"old-s1","title":"Old","preview":"p","cwd":"/","createdAt":1700000000000,"updatedAt":1700000000000,"source":"codex","provider":null,"status":"complete","runtime":null,"gitInfo":null}]',
+          '[{"id":"old-s1","title":"Old","preview":"p","cwd":"/","createdAt":1700000000000,"updatedAt":1700000000000,"source":"sub-agent","provider":null,"status":"complete","runtime":null,"gitInfo":null,"isSubAgent":true,"subAgent":{"parentSessionId":"old-parent","sourceKind":"thread_spawn","agentRole":"explorer"}}]',
       'sidemesh_session_favorites_v1': ['host-1::old-fav'],
     });
 
@@ -293,6 +340,8 @@ void main() {
     final recents = await store.getRecentSessions(host);
     expect(recents.length, 1);
     expect(recents.first.id, 'old-s1');
+    expect(recents.first.isSubAgent, isTrue);
+    expect(recents.first.subAgent?.parentSessionId, 'old-parent');
 
     final favorites = await store.getFavoriteSessions(host);
     expect(favorites.length, 1);
@@ -325,6 +374,8 @@ SessionSummary _summary(
   String id, {
   String title = 'Session',
   DateTime? updatedAt,
+  bool isSubAgent = false,
+  SessionSubAgentInfo? subAgent,
 }) {
   final now = updatedAt ?? DateTime.now();
   return SessionSummary(
@@ -339,6 +390,8 @@ SessionSummary _summary(
     status: 'complete',
     runtime: null,
     gitInfo: null,
+    isSubAgent: isSubAgent,
+    subAgent: subAgent,
   );
 }
 
