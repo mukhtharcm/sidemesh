@@ -11,7 +11,6 @@ import {
   type AgentSkillListOptions,
   type AgentSessionListOptions,
   type AgentSessionResumeOptions,
-  type AgentRemoteGitDiff,
   type AgentCreateSessionRequest,
   type AgentCreateSessionResult,
   type AgentPendingAction,
@@ -337,17 +336,6 @@ public async health(): Promise<boolean> {
     }
     this.bridge.respond(action.providerRequestId, result);
     return true;
-  }
-
-  public async readRemoteGitDiff(cwd: string): Promise<AgentRemoteGitDiff> {
-    const result = (await this.bridge.request("gitDiffToRemote", { cwd })) as {
-      diff?: unknown;
-      sha?: unknown;
-    };
-    return {
-      diff: asString(result.diff) ?? "",
-      sha: asString(result.sha),
-    };
   }
 
   public async listSkills(options: AgentSkillListOptions): Promise<SkillCatalogEntry> {
@@ -2409,9 +2397,6 @@ export const CODEX_PROVIDER_CAPABILITIES: AgentProviderCapabilities = {
     sandboxMode: true,
     networkAccess: true,
     webSearch: true,
-  },
-  workspace: {
-    remoteGitDiff: true,
   },
   lifecycle: {
     restart: true,

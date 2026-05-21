@@ -1169,7 +1169,6 @@ const Map<String, Object?> _fullCapabilities = {
     'networkAccess': true,
     'webSearch': true,
   },
-  'workspace': {'remoteGitDiff': true},
 };
 
 const Map<String, Object?> _minimalCapabilities = {
@@ -1197,7 +1196,6 @@ const Map<String, Object?> _minimalCapabilities = {
     'networkAccess': false,
     'webSearch': false,
   },
-  'workspace': {'remoteGitDiff': false},
 };
 
 const Map<String, Object?> _fileMentionCapabilities = {
@@ -1226,7 +1224,6 @@ const Map<String, Object?> _fileMentionCapabilities = {
     'networkAccess': false,
     'webSearch': false,
   },
-  'workspace': {'remoteGitDiff': false},
 };
 
 const Map<String, Object?> _copilotApprovalCapabilities = {
@@ -1249,7 +1246,6 @@ const Map<String, Object?> _copilotApprovalCapabilities = {
     'networkAccess': false,
     'webSearch': false,
   },
-  'workspace': {'remoteGitDiff': false},
 };
 
 const _fakeModel = ModelCatalogEntry(

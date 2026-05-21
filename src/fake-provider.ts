@@ -18,7 +18,6 @@ import {
   type AgentProvider,
   type AgentProviderCapabilities,
   type AgentProviderEvents,
-  type AgentRemoteGitDiff,
   type AgentSessionActivityDraft,
   type AgentSessionInputItem,
   type AgentSessionListOptions,
@@ -125,9 +124,6 @@ export const FAKE_PROVIDER_CAPABILITIES: AgentProviderCapabilities = {
     networkAccess: true,
     webSearch: true,
   },
-  workspace: {
-    remoteGitDiff: true,
-  },
   lifecycle: {
     restart: false,
   },
@@ -196,7 +192,6 @@ function cloneCapabilities(
     approvals: { ...capabilities.approvals },
     configuration: { ...capabilities.configuration },
     runtimeControls: { ...capabilities.runtimeControls },
-    workspace: { ...capabilities.workspace },
     lifecycle: { ...capabilities.lifecycle },
     usage: { ...capabilities.usage },
   };
@@ -235,7 +230,6 @@ function disableRuntimeControls(capabilities: AgentProviderCapabilities): void {
 }
 
 function disableWorkspace(capabilities: AgentProviderCapabilities): void {
-  capabilities.workspace.remoteGitDiff = false;
 }
 
 export class FakeAgentProvider
@@ -523,22 +517,6 @@ export class FakeAgentProvider
     }
     pending.resolve(normalized.legacyDecision);
     return true;
-  }
-
-  public async readRemoteGitDiff(cwd: string): Promise<AgentRemoteGitDiff> {
-    return {
-      sha: "fake-remote-sha",
-      diff: [
-        "diff --git a/fake-remote.md b/fake-remote.md",
-        "new file mode 100644",
-        "--- /dev/null",
-        "+++ b/fake-remote.md",
-        "@@ -0,0 +1,2 @@",
-        "+# Fake remote diff",
-        `+cwd: ${cwd}`,
-        "",
-      ].join("\n"),
-    };
   }
 
   public async listSkills(options: AgentSkillListOptions): Promise<SkillCatalogEntry> {

@@ -2107,7 +2107,6 @@ NodeInfo _nodeInfo({
       'sandboxMode': false,
       'networkAccess': false,
     },
-    'workspace': {'remoteGitDiff': false},
   },
   'defaultProviderCapabilities': {
     'sessions': {
@@ -2129,7 +2128,6 @@ NodeInfo _nodeInfo({
       'sandboxMode': false,
       'networkAccess': false,
     },
-    'workspace': {'remoteGitDiff': false},
   },
   'hostCapabilities': {'workspace': hostWorkspaceCapabilities},
   'supportedProviders': const [],
