@@ -57,6 +57,40 @@ export async function readGitCommonDir(cwd: string): Promise<string | null> {
   }
 }
 
+/**
+ * Cheaply reads the git identity fields (branch, HEAD sha, origin URL) for a
+ * CWD. Runs three git commands in parallel. Returns null for non-git paths.
+ */
+export async function readGitIdentity(cwd: string): Promise<{
+  branch: string | null;
+  sha: string | null;
+  originUrl: string | null;
+} | null> {
+  try {
+    const [branchResult, shaResult, originResult] = await Promise.allSettled([
+      runGit(cwd, ["branch", "--show-current"]),
+      runGit(cwd, ["rev-parse", "HEAD"]),
+      runGit(cwd, ["remote", "get-url", "origin"]),
+    ]);
+    // If branch lookup fails it's not a git repo — bail out.
+    if (branchResult.status !== "fulfilled") return null;
+    return {
+      branch: branchResult.value.stdout.trim() || null,
+      sha:
+        shaResult.status === "fulfilled"
+          ? (shaResult.value.stdout.trim() || null)
+          : null,
+      originUrl:
+        originResult.status === "fulfilled"
+          ? sanitizeGitUrl(originResult.value.stdout.trim())
+          : null,
+    };
+  } catch {
+    return null;
+  }
+}
+
+
 export const GIT_DIFF_MAX_CHARS = 240_000;
 const DIFF_MAX_BUFFER = 2 * 1024 * 1024;
 const MAX_STATUS_FILES = 200;
@@ -199,7 +233,7 @@ export async function readGitStatus(
   };
 }
 
-export async function readGitDiff(cwd: string, kind: Exclude<GitDiffKind, "remote">): Promise<SessionGitDiff> {
+export async function readGitDiff(cwd: string, kind: "working" | "staged" | "unstaged"): Promise<SessionGitDiff> {
   const args = gitDiffArgs(kind);
   const result = await runGit(cwd, args, {
     allowExitCodes: [0, 1],
@@ -219,7 +253,7 @@ export function buildGitDiff(kind: GitDiffKind, diff: string, baseSha: string | 
   };
 }
 
-function gitDiffArgs(kind: Exclude<GitDiffKind, "remote">): string[] {
+function gitDiffArgs(kind: GitDiffKind): string[] {
   if (kind === "staged") {
     return ["diff", "--cached", "--no-ext-diff", "--no-textconv"];
   }
