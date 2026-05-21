@@ -25,6 +25,38 @@ function resolveGitCommonDir(repoRoot: string, raw: string): string {
   // Relative path (e.g. ".git") — resolve against the repo root.
   return resolve(repoRoot, raw);
 }
+
+/**
+ * Cheaply resolves the shared .git directory for the repository that contains
+ * `cwd`. This is the single stable identifier for a repo across all its
+ * worktrees: every linked worktree of the same repo returns the same value.
+ *
+ * Uses `resolveGitCommonDir` internally so the normalisation logic (relative
+ * ".git" vs absolute path) lives in exactly one place.
+ *
+ * Returns `null` when `cwd` is not inside a git repository or if the git
+ * command fails for any reason.
+ */
+export async function readGitCommonDir(cwd: string): Promise<string | null> {
+  try {
+    const [toplevelResult, commonDirResult] = await Promise.allSettled([
+      runGit(cwd, ["rev-parse", "--show-toplevel"]),
+      runGit(cwd, ["rev-parse", "--git-common-dir"]),
+    ]);
+    if (
+      toplevelResult.status !== "fulfilled" ||
+      commonDirResult.status !== "fulfilled"
+    ) {
+      return null;
+    }
+    const repoRoot = toplevelResult.value.stdout.trim();
+    const raw = commonDirResult.value.stdout.trim();
+    return raw ? resolveGitCommonDir(repoRoot, raw) : null;
+  } catch {
+    return null;
+  }
+}
+
 export const GIT_DIFF_MAX_CHARS = 240_000;
 const DIFF_MAX_BUFFER = 2 * 1024 * 1024;
 const MAX_STATUS_FILES = 200;
