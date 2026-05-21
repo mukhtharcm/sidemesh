@@ -70,6 +70,7 @@ import 'package:sidemesh_mobile/src/host_reconnect_scheduler.dart';
 import '../widgets/provider_badge.dart';
 import '../relative_time_ticker.dart';
 import '../widgets/syntax_code_block.dart';
+import '../app_icons.dart';
 
 part 'session_screen_header.dart';
 part 'session_screen_composer.dart';
@@ -196,7 +197,7 @@ class _DesktopSessionTitle extends StatelessWidget {
         ),
         if (canRename) ...[
           const SizedBox(width: 5),
-          Icon(Icons.edit_rounded, size: 13, color: colors.textTertiary),
+          Icon(AppIcons.edit_rounded, size: 13, color: colors.textTertiary),
         ],
       ],
     );
@@ -258,7 +259,7 @@ class _DesktopSessionCommandBar extends StatelessWidget {
           _DesktopButtonGroup(
             children: [
               _DesktopGroupButton(
-                icon: Icons.stop_circle_rounded,
+                icon: AppIcons.stop_circle_rounded,
                 tooltip: 'Stop agent',
                 color: colors.danger,
                 onTap: onStop,
@@ -271,7 +272,7 @@ class _DesktopSessionCommandBar extends StatelessWidget {
         _DesktopButtonGroup(
           children: [
             _DesktopGroupButton(
-              icon: Icons.more_horiz_rounded,
+              icon: AppIcons.more_horiz_rounded,
               tooltip: running ? 'Session actions (agent running)' : 'Session actions',
               color: colors.textSecondary,
               onTap: onMore,
@@ -279,7 +280,7 @@ class _DesktopSessionCommandBar extends StatelessWidget {
             if (onClose != null) ...[
               _DesktopGroupDivider(),
               _DesktopGroupButton(
-                icon: Icons.close_rounded,
+                icon: AppIcons.close_rounded,
                 tooltip: 'Close session',
                 color: colors.textTertiary,
                 onTap: onClose!,
@@ -454,7 +455,7 @@ class _SessionBrowserPreviewDock extends StatelessWidget {
                       MeshPill(
                         label: 'paused',
                         tone: MeshPillTone.warning,
-                        icon: Icons.pause_rounded,
+                        icon: AppIcons.pause_rounded,
                         mono: true,
                       ),
                     ],
@@ -471,7 +472,7 @@ class _SessionBrowserPreviewDock extends StatelessWidget {
             ),
             const SizedBox(width: 8),
             _BrowserDockCloseButton(
-              icon: Icons.close_rounded,
+              icon: AppIcons.close_rounded,
               tooltip: 'Hide preview',
               onTap: onClose,
             ),
@@ -511,7 +512,7 @@ class _SessionBrowserPreviewDock extends StatelessWidget {
                           MeshPill(
                             label: 'open',
                             tone: MeshPillTone.success,
-                            icon: Icons.bolt_rounded,
+                            icon: AppIcons.bolt_rounded,
                             mono: true,
                           ),
                         ],
@@ -543,20 +544,20 @@ class _SessionBrowserPreviewDock extends StatelessWidget {
                 ),
                 const SizedBox(width: 8),
                 _BrowserDockAction(
-                  icon: Icons.keyboard_arrow_down_rounded,
+                  icon: AppIcons.keyboard_arrow_down_rounded,
                   tooltip: 'Minimize',
                   onTap: onMinimize,
                 ),
                 const SizedBox(width: 6),
                 _BrowserDockAction(
-                  icon: Icons.fullscreen_rounded,
+                  icon: AppIcons.fullscreen_rounded,
                   tooltip: 'Full page',
                   color: colors.accent,
                   onTap: onFullPage,
                 ),
                 const SizedBox(width: 6),
                 _BrowserDockAction(
-                  icon: Icons.stop_circle_rounded,
+                  icon: AppIcons.stop_circle_rounded,
                   tooltip: 'Stop remote browser',
                   color: colors.danger,
                   onTap: onStop,
@@ -1653,7 +1654,7 @@ class _SessionScreenState extends State<SessionScreen>
       builder: (sheetContext) {
         final bottomInset = MediaQuery.of(sheetContext).viewInsets.bottom;
         return MeshBottomSheetScaffold(
-          icon: Icons.search_rounded,
+          icon: AppIcons.search_rounded,
           title: 'Search this session',
           description:
               'Look through messages, activities, and tool results without leaving the session.',
@@ -1779,7 +1780,7 @@ class _SessionScreenState extends State<SessionScreen>
       useSafeArea: true,
       backgroundColor: Colors.transparent,
       builder: (sheetContext) => MeshBottomSheetScaffold(
-        icon: Icons.perm_media_rounded,
+        icon: AppIcons.perm_media_rounded,
         title: 'Session resources',
         description:
             'Review files, images, and links saved from this session in one place.',
@@ -4711,7 +4712,7 @@ class _SessionScreenState extends State<SessionScreen>
       context: context,
       builder: (dialogContext) {
         return MeshDialogScaffold(
-          icon: Icons.edit_outlined,
+          icon: AppIcons.edit_outlined,
           title: 'Rename session',
           description: 'Choose the name shown in Sidemesh.',
           maxWidth: 460,
@@ -4749,7 +4750,7 @@ class _SessionScreenState extends State<SessionScreen>
       return;
     }
     final confirmed = await _showSessionConfirmDialog(
-      icon: Icons.stop_circle_outlined,
+      icon: AppIcons.stop_circle_outlined,
       title: 'Stop the agent?',
       body:
           'The current task will stop. Any tools that are still running may not finish cleanly.',
@@ -4800,7 +4801,7 @@ class _SessionScreenState extends State<SessionScreen>
       return;
     }
     final confirmed = await _showSessionConfirmDialog(
-      icon: Icons.compress_rounded,
+      icon: AppIcons.compress_rounded,
       title: 'Compact this session?',
       body:
           'Older context will be summarized so future replies can use fewer tokens. Recent messages stay visible in Sidemesh.',
@@ -4868,7 +4869,7 @@ class _SessionScreenState extends State<SessionScreen>
       return;
     }
     final confirmed = await _showSessionConfirmDialog(
-      icon: Icons.archive_outlined,
+      icon: AppIcons.archive_outlined,
       title: 'Archive this session?',
       body:
           'Archived sessions disappear from Recent. You can still restore them later from the host.',
@@ -5116,7 +5117,7 @@ class _SessionScreenState extends State<SessionScreen>
       useSafeArea: true,
       isScrollControlled: true,
       builder: (context) => MeshBottomSheetScaffold(
-        icon: Icons.info_outline_rounded,
+        icon: AppIcons.info_outline_rounded,
         title: 'Session details',
         description:
             'See where this session is running and the live settings the agent is using.',
@@ -5153,27 +5154,27 @@ class _SessionScreenState extends State<SessionScreen>
                         MeshPill(
                           label: _running ? 'running' : 'idle',
                           icon: _running
-                              ? Icons.play_circle_outline_rounded
-                              : Icons.pause_circle_outline_rounded,
+                              ? AppIcons.play_circle_outline_rounded
+                              : AppIcons.pause_circle_outline_rounded,
                           tone: _running
                               ? MeshPillTone.success
                               : MeshPillTone.neutral,
                         ),
                         MeshPill(
                           label: session.source,
-                          icon: Icons.route_rounded,
+                          icon: AppIcons.route_rounded,
                           tone: MeshPillTone.neutral,
                         ),
                         if (subAgentLabel != null)
                           MeshPill(
                             label: subAgentLabel,
-                            icon: Icons.account_tree_outlined,
+                            icon: AppIcons.account_tree_outlined,
                             tone: MeshPillTone.info,
                           ),
                         if (gitLabel != null)
                           MeshPill(
                             label: gitLabel,
-                            icon: Icons.account_tree_rounded,
+                            icon: AppIcons.account_tree_rounded,
                             tone: MeshPillTone.info,
                           ),
                       ],
@@ -5226,7 +5227,7 @@ class _SessionScreenState extends State<SessionScreen>
                     Navigator.of(context).pop();
                     unawaited(_showGitSheet(session));
                   },
-                  icon: const Icon(Icons.account_tree_rounded, size: 18),
+                  icon: const Icon(AppIcons.account_tree_rounded, size: 18),
                   label: const Text('View Git details'),
                 ),
               ],
@@ -6819,7 +6820,7 @@ class _SessionScreenState extends State<SessionScreen>
               value: 'stop',
               label: 'Stop agent',
               detail: 'Stop the current task immediately.',
-              icon: Icons.stop_circle_rounded,
+              icon: AppIcons.stop_circle_rounded,
               tone: _SessionActionTone.danger,
             ),
           ],
@@ -6833,7 +6834,7 @@ class _SessionScreenState extends State<SessionScreen>
               value: 'new',
               label: 'New session',
               detail: 'Start beside this working directory.',
-              icon: Icons.add_circle_outline_rounded,
+              icon: AppIcons.add_circle_outline_rounded,
             ),
           if (includeControls)
             _SessionActionSpec(
@@ -6842,7 +6843,7 @@ class _SessionScreenState extends State<SessionScreen>
                   ? 'Session controls changed'
                   : 'Session controls',
               detail: 'Model, thinking, permissions, and access.',
-              icon: Icons.tune_rounded,
+              icon: AppIcons.tune_rounded,
               tone: controlsCustomized
                   ? _SessionActionTone.accent
                   : _SessionActionTone.neutral,
@@ -6854,7 +6855,7 @@ class _SessionScreenState extends State<SessionScreen>
             detail: favorite
                 ? 'Take this session out of your shortcuts.'
                 : 'Keep this session easy to find.',
-            icon: favorite ? Icons.star_rounded : Icons.star_outline_rounded,
+            icon: favorite ? AppIcons.star_rounded : AppIcons.star_outline_rounded,
             tone: favorite
                 ? _SessionActionTone.warning
                 : _SessionActionTone.neutral,
@@ -6864,26 +6865,26 @@ class _SessionScreenState extends State<SessionScreen>
             value: 'unread',
             label: 'Flag for follow-up',
             detail: 'Adds a blue dot to this session in your recents list.',
-            icon: Icons.flag_rounded,
+            icon: AppIcons.flag_rounded,
           ),
           if (_supportsSessionCompact)
             const _SessionActionSpec(
               value: 'compact',
               label: 'Compact context',
               detail: 'Summarize older context to keep the session lighter.',
-              icon: Icons.compress_rounded,
+              icon: AppIcons.compress_rounded,
             ),
           const _SessionActionSpec(
             value: 'info',
             label: 'Session details',
             detail: 'View host, model, git, and usage info.',
-            icon: Icons.info_outline_rounded,
+            icon: AppIcons.info_outline_rounded,
           ),
           const _SessionActionSpec(
             value: 'reload',
             label: 'Reload',
             detail: 'Refresh this transcript from the host.',
-            icon: Icons.refresh_rounded,
+            icon: AppIcons.refresh_rounded,
           ),
           if (widget.topPadding != null &&
               SidemeshSessionWindowManager.instance.isSupported)
@@ -6891,7 +6892,7 @@ class _SessionScreenState extends State<SessionScreen>
               value: 'popout',
               label: 'Open in new window',
               detail: 'Detach this session into its own macOS window.',
-              icon: Icons.open_in_new_rounded,
+              icon: AppIcons.open_in_new_rounded,
             ),
         ],
       ),
@@ -6906,7 +6907,7 @@ class _SessionScreenState extends State<SessionScreen>
                 value: 'restart_provider',
                 label: 'Restart agent',
                 detail: 'Restart the active agent on this host.',
-                icon: Icons.restart_alt_rounded,
+                icon: AppIcons.restart_alt_rounded,
                 tone: _SessionActionTone.warning,
               ),
             if (_supportsSessionRename)
@@ -6914,14 +6915,14 @@ class _SessionScreenState extends State<SessionScreen>
                 value: 'rename',
                 label: 'Rename',
                 detail: 'Change the session title.',
-                icon: Icons.drive_file_rename_outline,
+                icon: AppIcons.drive_file_rename_outline,
               ),
             if (_supportsSessionArchive)
               const _SessionActionSpec(
                 value: 'archive',
                 label: 'Archive',
                 detail: 'Move this session out of recents.',
-                icon: Icons.archive_rounded,
+                icon: AppIcons.archive_rounded,
                 tone: _SessionActionTone.danger,
               ),
           ],
@@ -6937,7 +6938,7 @@ class _SessionScreenState extends State<SessionScreen>
               detail: terminalOpen
                   ? 'Jump back to the active terminal surface.'
                   : 'Open a shell for this workspace.',
-              icon: Icons.terminal_rounded,
+              icon: AppIcons.terminal_rounded,
               tone: terminalOpen
                   ? _SessionActionTone.accent
                   : _SessionActionTone.neutral,
@@ -6948,14 +6949,14 @@ class _SessionScreenState extends State<SessionScreen>
               value: 'browse',
               label: 'Browse files',
               detail: 'Open the workspace file browser.',
-              icon: Icons.folder_rounded,
+              icon: AppIcons.folder_rounded,
             ),
           if (_supportsBrowserPreview)
             const _SessionActionSpec(
               value: 'preview',
               label: 'Open browser',
               detail: 'Open a local app or URL from this host.',
-              icon: Icons.open_in_browser_rounded,
+              icon: AppIcons.open_in_browser_rounded,
               tone: _SessionActionTone.accent,
             ),
           if (_supportsBrowserPreview &&
@@ -6964,14 +6965,14 @@ class _SessionScreenState extends State<SessionScreen>
               value: 'preview_window',
               label: 'Open browser in new window',
               detail: 'Detach the browser into its own macOS window.',
-              icon: Icons.open_in_new_rounded,
+              icon: AppIcons.open_in_new_rounded,
             ),
           if (_supportsConnections)
             _SessionActionSpec(
               value: 'connections',
               label: portsOpen ? 'Browsers are open' : 'Manage browsers',
               detail: 'Inspect active browsers for this session.',
-              icon: Icons.open_in_browser_rounded,
+              icon: AppIcons.open_in_browser_rounded,
               tone: portsOpen
                   ? _SessionActionTone.accent
                   : _SessionActionTone.neutral,
@@ -6982,7 +6983,7 @@ class _SessionScreenState extends State<SessionScreen>
               value: 'resources',
               label: resourcesOpen ? 'Resources are open' : 'Open resources',
               detail: 'View generated images and session assets.',
-              icon: Icons.perm_media_rounded,
+              icon: AppIcons.perm_media_rounded,
               tone: resourcesOpen
                   ? _SessionActionTone.accent
                   : _SessionActionTone.neutral,
@@ -6994,7 +6995,7 @@ class _SessionScreenState extends State<SessionScreen>
             detail: searchOpen
                 ? 'Hide the current search panel.'
                 : 'Find text in loaded messages.',
-            icon: searchOpen ? Icons.search_off_rounded : Icons.search_rounded,
+            icon: searchOpen ? AppIcons.search_off_rounded : AppIcons.search_rounded,
             tone: searchOpen
                 ? _SessionActionTone.accent
                 : _SessionActionTone.neutral,
@@ -7007,7 +7008,7 @@ class _SessionScreenState extends State<SessionScreen>
               detail: gitDirty
                   ? 'Working tree has changes.'
                   : 'Branch, upstream, and diff shortcuts.',
-              icon: Icons.account_tree_rounded,
+              icon: AppIcons.account_tree_rounded,
               tone: gitDirty
                   ? _SessionActionTone.warning
                   : _SessionActionTone.neutral,
@@ -7504,7 +7505,7 @@ class _SessionScreenState extends State<SessionScreen>
                       color: Colors.transparent,
                       child: Builder(
                         builder: (ctx) => ListTile(
-                          leading: const Icon(Icons.arrow_back_rounded),
+                          leading: const Icon(AppIcons.arrow_back_rounded),
                           title: const Text('Sessions'),
                           dense: true,
                           onTap: () {
@@ -7541,7 +7542,7 @@ class _SessionScreenState extends State<SessionScreen>
                 builder: (ctx) => Tooltip(
                   message: 'Sessions',
                   child: IconButton(
-                    icon: const Icon(Icons.menu_rounded),
+                    icon: const Icon(AppIcons.menu_rounded),
                     onPressed: () => Scaffold.of(ctx).openDrawer(),
                   ),
                 ),
@@ -7579,7 +7580,7 @@ class _SessionScreenState extends State<SessionScreen>
                                 ),
                                 const SizedBox(width: 4),
                                 Icon(
-                                  Icons.edit_rounded,
+                                  AppIcons.edit_rounded,
                                   size: 13,
                                   color: colors.textTertiary,
                                 ),
@@ -7607,7 +7608,7 @@ class _SessionScreenState extends State<SessionScreen>
                 child: IgnorePointer(
                   ignoring: !_running,
                   child: MeshIconButton(
-                    icon: Icons.stop_circle_rounded,
+                    icon: AppIcons.stop_circle_rounded,
                     tooltip: 'Stop agent',
                     color: colors.danger,
                     onTap: _stopSession,
@@ -7639,7 +7640,7 @@ class _SessionScreenState extends State<SessionScreen>
                   final customised =
                       !policy.isEmpty || !turnConfig.isEmpty || runtimeLoosened;
                   return MeshIconButton(
-                    icon: Icons.tune_rounded,
+                    icon: AppIcons.tune_rounded,
                     tooltip: 'Session controls',
                     color: customised ? colors.accent : colors.textSecondary,
                     onTap: () => _showSessionPolicySheet(session),
@@ -7686,7 +7687,7 @@ class _SessionScreenState extends State<SessionScreen>
                     mainAxisSize: MainAxisSize.min,
                     children: [
                       MeshIconButton(
-                        icon: Icons.tune_rounded,
+                        icon: AppIcons.tune_rounded,
                         tooltip: 'Session controls',
                         color: sessionControlsCustomized
                             ? colors.accent
@@ -7696,15 +7697,15 @@ class _SessionScreenState extends State<SessionScreen>
                       const SizedBox(width: AppSpacing.xs),
                       MeshIconButton(
                         icon: favorite
-                            ? Icons.star_rounded
-                            : Icons.star_outline_rounded,
+                            ? AppIcons.star_rounded
+                            : AppIcons.star_outline_rounded,
                         tooltip: favorite ? 'Unpin session' : 'Pin session',
                         color: favorite ? colors.warning : colors.textSecondary,
                         onTap: _toggleFavorite,
                       ),
                       const SizedBox(width: AppSpacing.xs),
                       MeshIconButton(
-                        icon: Icons.more_vert_rounded,
+                        icon: AppIcons.more_vert_rounded,
                         tooltip: _running
                             ? 'Session actions (agent running)'
                             : 'Session actions',
@@ -7759,7 +7760,7 @@ class _SessionScreenState extends State<SessionScreen>
               return Padding(
                 padding: const EdgeInsets.only(right: 10),
                 child: MeshIconButton(
-                  icon: Icons.more_horiz_rounded,
+                  icon: AppIcons.more_horiz_rounded,
                   tooltip: _running
                       ? 'Session actions (agent running)'
                       : 'Session actions',

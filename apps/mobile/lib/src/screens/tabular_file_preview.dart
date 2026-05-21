@@ -6,6 +6,7 @@ import '../theme/app_colors.dart';
 import '../theme/app_theme.dart';
 import '../theme/app_tokens.dart';
 import '../widgets/mesh_widgets.dart';
+import '../app_icons.dart';
 
 const int defaultTabularPreviewRowLimit = 200;
 const int defaultTabularPreviewColumnLimit = 24;
@@ -232,7 +233,7 @@ class TabularFilePreview extends StatelessWidget {
     final colors = context.colors;
     if (preview.isEmpty) {
       return const MeshEmptyState.compact(
-        icon: Icons.table_chart_rounded,
+        icon: AppIcons.table_chart_rounded,
         title: 'No rows to preview',
         body: 'This file is empty, or it does not contain any delimited rows.',
       );
@@ -248,7 +249,7 @@ class TabularFilePreview extends StatelessWidget {
             MeshPill(
               label: preview.format.label,
               tone: MeshPillTone.accent,
-              icon: Icons.table_chart_rounded,
+              icon: AppIcons.table_chart_rounded,
             ),
             MeshPill(label: _countLabel(preview.rowCount, 'row'), mono: true),
             MeshPill(
@@ -271,7 +272,7 @@ class TabularFilePreview extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Icon(
-                  Icons.info_outline_rounded,
+                  AppIcons.info_outline_rounded,
                   size: 16,
                   color: colors.textSecondary,
                 ),

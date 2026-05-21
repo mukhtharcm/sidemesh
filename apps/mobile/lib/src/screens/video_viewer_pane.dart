@@ -11,6 +11,7 @@ import '../models.dart';
 import '../theme/app_colors.dart';
 import '../theme/app_theme.dart';
 import '../widgets/mesh_widgets.dart';
+import '../app_icons.dart';
 
 class VideoViewerPane extends StatelessWidget {
   const VideoViewerPane({
@@ -243,8 +244,8 @@ class _VideoPlayerVideoViewerPaneState
                 ),
                 child: Icon(
                   value.isCompleted
-                      ? Icons.replay_rounded
-                      : Icons.play_arrow_rounded,
+                      ? AppIcons.replay_rounded
+                      : AppIcons.play_arrow_rounded,
                   color: Colors.white,
                   size: 34,
                 ),
@@ -296,10 +297,10 @@ class _VideoPlayerVideoViewerPaneState
                           onPressed: _togglePlayback,
                           icon: Icon(
                             value.isPlaying
-                                ? Icons.pause_rounded
+                                ? AppIcons.pause_rounded
                                 : value.isCompleted
-                                ? Icons.replay_rounded
-                                : Icons.play_arrow_rounded,
+                                ? AppIcons.replay_rounded
+                                : AppIcons.play_arrow_rounded,
                           ),
                         ),
                         Expanded(
@@ -611,8 +612,8 @@ class _MediaKitVideoViewerPaneState extends State<_MediaKitVideoViewerPane> {
                 ),
                 child: Icon(
                   state.completed
-                      ? Icons.replay_rounded
-                      : Icons.play_arrow_rounded,
+                      ? AppIcons.replay_rounded
+                      : AppIcons.play_arrow_rounded,
                   color: Colors.white,
                   size: 34,
                 ),
@@ -664,10 +665,10 @@ class _MediaKitVideoViewerPaneState extends State<_MediaKitVideoViewerPane> {
                           onPressed: _togglePlayback,
                           icon: Icon(
                             state.playing
-                                ? Icons.pause_rounded
+                                ? AppIcons.pause_rounded
                                 : state.completed
-                                ? Icons.replay_rounded
-                                : Icons.play_arrow_rounded,
+                                ? AppIcons.replay_rounded
+                                : AppIcons.play_arrow_rounded,
                           ),
                         ),
                         Expanded(
@@ -744,7 +745,7 @@ class _VideoViewerErrorState extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MeshEmptyState(
-      icon: Icons.error_outline_rounded,
+      icon: AppIcons.error_outline_rounded,
       title: 'Could not load video',
       body: error,
     );

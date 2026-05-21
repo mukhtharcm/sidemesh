@@ -39,6 +39,7 @@ import 'pair_scanner_sheet.dart';
 import 'settings_screen.dart';
 import 'session_screen.dart';
 import 'usage_pane.dart';
+import '../app_icons.dart';
 
 class SidemeshHomeScreen extends StatefulWidget {
   const SidemeshHomeScreen({super.key});
@@ -53,26 +54,26 @@ class _SidemeshHomeScreenState extends State<SidemeshHomeScreen>
     _TabDef(
       title: 'Recent',
       subtitle: 'Pick up where your agents left off',
-      icon: Icons.schedule_rounded,
-      selectedIcon: Icons.schedule_rounded,
+      icon: AppIcons.schedule_rounded,
+      selectedIcon: AppIcons.schedule_rounded,
     ),
     _TabDef(
       title: 'Inbox',
       subtitle: 'Approvals and pending replies in one place',
-      icon: Icons.all_inbox_rounded,
-      selectedIcon: Icons.all_inbox_rounded,
+      icon: AppIcons.all_inbox_rounded,
+      selectedIcon: AppIcons.all_inbox_rounded,
     ),
     _TabDef(
       title: 'Usage',
       subtitle: 'Limits, versions, and host health',
-      icon: Icons.speed_rounded,
-      selectedIcon: Icons.speed_rounded,
+      icon: AppIcons.speed_rounded,
+      selectedIcon: AppIcons.speed_rounded,
     ),
     _TabDef(
       title: 'Hosts',
       subtitle: 'Machines you can reach from this device',
-      icon: Icons.hub_rounded,
-      selectedIcon: Icons.hub_rounded,
+      icon: AppIcons.hub_rounded,
+      selectedIcon: AppIcons.hub_rounded,
     ),
   ];
 
@@ -549,20 +550,20 @@ class _SidemeshHomeScreenState extends State<SidemeshHomeScreen>
     if (_hosts.isEmpty || tab.title == 'Hosts') {
       return _HomePrimaryAction(
         label: 'Add host',
-        icon: Icons.add_link_rounded,
+        icon: AppIcons.add_link_rounded,
         onTap: () => _showHostEditor(),
       );
     }
     if (_enabledHosts.isEmpty) {
       return _HomePrimaryAction(
         label: 'Open hosts',
-        icon: Icons.hub_rounded,
+        icon: AppIcons.hub_rounded,
         onTap: () => setState(() => _tabIndex = 3),
       );
     }
     return _HomePrimaryAction(
       label: 'New session',
-      icon: Icons.add_rounded,
+      icon: AppIcons.add_rounded,
       onTap: _startSessionFromHome,
     );
   }
@@ -689,7 +690,7 @@ class _SidemeshHomeScreenState extends State<SidemeshHomeScreen>
       floatingActionButton: _tabIndex == 3 && _hosts.isNotEmpty
           ? FloatingActionButton.extended(
               onPressed: () => _showHostEditor(),
-              icon: const Icon(Icons.add_link_rounded),
+              icon: const Icon(AppIcons.add_link_rounded),
               label: const Text('Add host'),
             )
           : null,
@@ -856,7 +857,7 @@ class _HomeStickyHeader extends StatelessWidget {
                     value: _HomeHeaderMenuAction.refresh,
                     child: ListTile(
                       dense: true,
-                      leading: Icon(Icons.refresh_rounded),
+                      leading: Icon(AppIcons.refresh_rounded),
                       title: Text('Refresh'),
                     ),
                   ),
@@ -864,7 +865,7 @@ class _HomeStickyHeader extends StatelessWidget {
                     value: _HomeHeaderMenuAction.settings,
                     child: ListTile(
                       dense: true,
-                      leading: Icon(Icons.tune_rounded),
+                      leading: Icon(AppIcons.tune_rounded),
                       title: Text('Settings'),
                     ),
                   ),
@@ -879,7 +880,7 @@ class _HomeStickyHeader extends StatelessWidget {
                   ),
                   alignment: Alignment.center,
                   child: Icon(
-                    Icons.more_horiz_rounded,
+                    AppIcons.more_horiz_rounded,
                     color: colors.textSecondary,
                     size: 20,
                   ),
@@ -954,7 +955,7 @@ class _HomeSearchField extends StatelessWidget {
                 hintText: hintText,
                 hintStyle: TextStyle(color: colors.textTertiary, fontSize: 14),
                 prefixIcon: Icon(
-                  Icons.search_rounded,
+                  AppIcons.search_rounded,
                   size: 18,
                   color: colors.textSecondary,
                 ),
@@ -968,7 +969,7 @@ class _HomeSearchField extends StatelessWidget {
                         iconSize: 16,
                         onPressed: controller.clear,
                         icon: Icon(
-                          Icons.close_rounded,
+                          AppIcons.close_rounded,
                           color: colors.textSecondary,
                         ),
                       )
@@ -1001,19 +1002,19 @@ class _HomeSearchField extends StatelessWidget {
                 runSpacing: AppSpacing.xs,
                 children: [
                   _HomeSearchFilterToken(
-                    icon: Icons.star_rounded,
+                    icon: AppIcons.star_rounded,
                       label: 'Favorites',
                       selected: filters.favoritesOnly,
                       onSelected: onFavoritesOnlyChanged,
                     ),
                     _HomeSearchFilterToken(
-                      icon: Icons.play_circle_outline_rounded,
+                      icon: AppIcons.play_circle_outline_rounded,
                       label: 'Running',
                       selected: filters.runningOnly,
                       onSelected: onRunningOnlyChanged,
                     ),
                     _HomeSearchFilterToken(
-                      icon: Icons.mark_chat_unread_rounded,
+                      icon: AppIcons.mark_chat_unread_rounded,
                       label: 'Unread',
                       selected: filters.unreadOnly,
                       onSelected: onUnreadOnlyChanged,
@@ -1877,7 +1878,7 @@ class _RecentPaneState extends State<RecentPane> {
               mainAxisSize: MainAxisSize.min,
               children: [
                 const MeshEmptyState(
-                  icon: Icons.hub_rounded,
+                  icon: AppIcons.hub_rounded,
                   title: 'Connect a machine',
                   body:
                       'Add a host to check sessions, approvals, files, and terminals from this device.',
@@ -1885,7 +1886,7 @@ class _RecentPaneState extends State<RecentPane> {
                 const SizedBox(height: AppSpacing.lg),
                 FilledButton.icon(
                   onPressed: widget.onAddHost,
-                  icon: const Icon(Icons.add_link_rounded),
+                  icon: const Icon(AppIcons.add_link_rounded),
                   label: const Text('Add your first host'),
                 ),
               ],
@@ -1894,7 +1895,7 @@ class _RecentPaneState extends State<RecentPane> {
         );
       }
       return const MeshEmptyState(
-        icon: Icons.pause_circle_outline_rounded,
+        icon: AppIcons.pause_circle_outline_rounded,
         title: 'No enabled hosts',
         body: 'Enable a saved host from Hosts to load recent sessions.',
       );
@@ -1970,9 +1971,9 @@ class _RecentPaneState extends State<RecentPane> {
                 MeshEmptyState(
                   icon: widget.query.trim().isEmpty
                       ? (widget.filters.isAnyActive
-                            ? Icons.filter_alt_off_rounded
-                            : Icons.cloud_off_rounded)
-                      : Icons.search_off_rounded,
+                            ? AppIcons.filter_alt_off_rounded
+                            : AppIcons.cloud_off_rounded)
+                      : AppIcons.search_off_rounded,
                   title: _emptyStateTitle(),
                   body: _emptyStateBody(),
                 ),
@@ -1989,7 +1990,7 @@ class _RecentPaneState extends State<RecentPane> {
                 padding: EdgeInsets.fromLTRB(16, 4, 16, 6),
                 child: MeshStatusRail(
                   label: 'Updating results',
-                  icon: Icons.search_rounded,
+                  icon: AppIcons.search_rounded,
                   active: true,
                   tone: MeshStatusRailTone.accent,
                 ),
@@ -2112,7 +2113,7 @@ class _RecentPaneState extends State<RecentPane> {
               child: _buildSessionSectionHeader(
                 context,
                 group: group,
-                icon: Icons.folder_rounded,
+                icon: AppIcons.folder_rounded,
                 collapsed: collapsed,
               ),
             );
@@ -2157,7 +2158,7 @@ class _RecentPaneState extends State<RecentPane> {
                 duration: const Duration(milliseconds: 180),
                 curve: Curves.easeOutCubic,
                 child: Icon(
-                  Icons.expand_more_rounded,
+                  AppIcons.expand_more_rounded,
                   size: 15,
                   color: colors.textSecondary,
                 ),
@@ -2668,8 +2669,8 @@ class _InboxPaneState extends State<InboxPane> {
     if (widget.allHosts.isEmpty && allPending.isEmpty) {
       return MeshEmptyState(
         icon: widget.hasSavedHosts
-            ? Icons.notifications_paused_rounded
-            : Icons.checklist_rounded,
+            ? AppIcons.notifications_paused_rounded
+            : AppIcons.checklist_rounded,
         title: widget.hasSavedHosts
             ? 'No enabled hosts'
             : 'Nothing needs attention',
@@ -2728,7 +2729,7 @@ class _InboxPaneState extends State<InboxPane> {
           if (hasFailures) sectionSpacing,
           if (pending.isNotEmpty) ...[
             _InboxSectionHeader(
-              icon: Icons.cloud_sync_rounded,
+              icon: AppIcons.cloud_sync_rounded,
               title: 'Queued',
               subtitle: pending.length == 1
                   ? '1 message waiting to send'
@@ -2743,7 +2744,7 @@ class _InboxPaneState extends State<InboxPane> {
           ],
           if (entries.isNotEmpty) ...[
             _InboxSectionHeader(
-              icon: Icons.verified_user_rounded,
+              icon: AppIcons.verified_user_rounded,
               title: 'Needs review',
               subtitle: entries.length == 1
                   ? '1 item waiting for your reply'
@@ -2771,14 +2772,14 @@ class _InboxPaneState extends State<InboxPane> {
             const SizedBox(height: 80),
             if (query.isNotEmpty)
               MeshEmptyState(
-                icon: Icons.search_off_rounded,
+                icon: AppIcons.search_off_rounded,
                 title: 'No matches',
                 body:
                     'No queued messages or requests match "${widget.query.trim()}".',
               )
             else
               const MeshEmptyState(
-                icon: Icons.verified_rounded,
+                icon: AppIcons.verified_rounded,
                 title: 'Inbox is clear',
                 body:
                     'Queued sends and agent requests from your nodes will show up here.',
@@ -2937,37 +2938,37 @@ class _PendingSendCard extends StatelessWidget {
               children: [
                 if (onEnableHost != null)
                   _PendingSendActionChip(
-                    icon: Icons.play_circle_outline_rounded,
+                    icon: AppIcons.play_circle_outline_rounded,
                     label: 'Enable',
                     onTap: onEnableHost,
                   ),
                 if (onFixHost != null)
                   _PendingSendActionChip(
-                    icon: Icons.tune_rounded,
+                    icon: AppIcons.tune_rounded,
                     label: 'Fix host',
                     onTap: onFixHost,
                   ),
                 if (onUseCurrentHost != null)
                   _PendingSendActionChip(
-                    icon: Icons.link_rounded,
+                    icon: AppIcons.link_rounded,
                     label: 'Use current',
                     onTap: onUseCurrentHost,
                   ),
                 if (onOpenSession != null)
                   _PendingSendActionChip(
-                    icon: Icons.chat_bubble_outline_rounded,
+                    icon: AppIcons.chat_bubble_outline_rounded,
                     label: 'Open',
                     onTap: onOpenSession,
                   ),
                 if (onEditCopy != null)
                   _PendingSendActionChip(
-                    icon: Icons.edit_rounded,
+                    icon: AppIcons.edit_rounded,
                     label: 'Edit',
                     onTap: onEditCopy,
                   ),
                 if (onRetryNow != null)
                   _PendingSendActionChip(
-                    icon: Icons.refresh_rounded,
+                    icon: AppIcons.refresh_rounded,
                     label: analysis.state == PendingSendDisplayState.retrying
                         ? 'Retrying'
                         : 'Retry',
@@ -2976,7 +2977,7 @@ class _PendingSendCard extends StatelessWidget {
                         : onRetryNow,
                   ),
                 _PendingSendActionChip(
-                  icon: Icons.delete_outline_rounded,
+                  icon: AppIcons.delete_outline_rounded,
                   label: 'Discard',
                   destructive: true,
                   onTap: onDiscard,
@@ -3049,37 +3050,37 @@ class _PendingSendCard extends StatelessWidget {
             children: [
               if (onEnableHost != null)
                 _PendingSendActionChip(
-                  icon: Icons.play_circle_outline_rounded,
+                  icon: AppIcons.play_circle_outline_rounded,
                   label: 'Enable host',
                   onTap: onEnableHost,
                 ),
               if (onFixHost != null)
                 _PendingSendActionChip(
-                  icon: Icons.tune_rounded,
+                  icon: AppIcons.tune_rounded,
                   label: 'Fix host',
                   onTap: onFixHost,
                 ),
               if (onUseCurrentHost != null)
                 _PendingSendActionChip(
-                  icon: Icons.link_rounded,
+                  icon: AppIcons.link_rounded,
                   label: 'Use current host',
                   onTap: onUseCurrentHost,
                 ),
               if (onOpenSession != null)
                 _PendingSendActionChip(
-                  icon: Icons.chat_bubble_outline_rounded,
+                  icon: AppIcons.chat_bubble_outline_rounded,
                   label: 'Open',
                   onTap: onOpenSession,
                 ),
               if (onEditCopy != null)
                 _PendingSendActionChip(
-                  icon: Icons.edit_rounded,
+                  icon: AppIcons.edit_rounded,
                   label: 'Edit',
                   onTap: onEditCopy,
                 ),
               if (onRetryNow != null)
                 _PendingSendActionChip(
-                  icon: Icons.refresh_rounded,
+                  icon: AppIcons.refresh_rounded,
                   label: analysis.state == PendingSendDisplayState.retrying
                       ? 'Retrying...'
                       : 'Retry now',
@@ -3088,7 +3089,7 @@ class _PendingSendCard extends StatelessWidget {
                       : onRetryNow,
                 ),
               _PendingSendActionChip(
-                icon: Icons.delete_outline_rounded,
+                icon: AppIcons.delete_outline_rounded,
                 label: 'Discard',
                 destructive: true,
                 onTap: onDiscard,
@@ -3239,9 +3240,9 @@ MeshStatusTone _pendingSendStateTone(PendingSendDisplayState state) {
 
 IconData _pendingSendStateIcon(PendingSendDisplayState state) {
   return switch (state) {
-    PendingSendDisplayState.queued => Icons.schedule_rounded,
-    PendingSendDisplayState.retrying => Icons.sync_rounded,
-    PendingSendDisplayState.blocked => Icons.pause_circle_outline_rounded,
+    PendingSendDisplayState.queued => AppIcons.schedule_rounded,
+    PendingSendDisplayState.retrying => AppIcons.sync_rounded,
+    PendingSendDisplayState.blocked => AppIcons.pause_circle_outline_rounded,
   };
 }
 
@@ -3277,16 +3278,16 @@ MeshStatusTone _pendingSendIssueTone(PendingSendIssueKind issue) {
 
 IconData _pendingSendIssueIcon(PendingSendIssueKind issue) {
   return switch (issue) {
-    PendingSendIssueKind.none => Icons.info_outline_rounded,
-    PendingSendIssueKind.timeout => Icons.timer_outlined,
-    PendingSendIssueKind.unreachable => Icons.wifi_off_rounded,
-    PendingSendIssueKind.rateLimited => Icons.hourglass_top_rounded,
-    PendingSendIssueKind.server => Icons.dns_rounded,
-    PendingSendIssueKind.hostDisabled => Icons.pause_circle_outline_rounded,
-    PendingSendIssueKind.hostMissing => Icons.dns_rounded,
-    PendingSendIssueKind.hostChanged => Icons.sync_problem_rounded,
-    PendingSendIssueKind.unauthorized => Icons.key_off_rounded,
-    PendingSendIssueKind.unknown => Icons.report_problem_outlined,
+    PendingSendIssueKind.none => AppIcons.info_outline_rounded,
+    PendingSendIssueKind.timeout => AppIcons.timer_outlined,
+    PendingSendIssueKind.unreachable => AppIcons.wifi_off_rounded,
+    PendingSendIssueKind.rateLimited => AppIcons.hourglass_top_rounded,
+    PendingSendIssueKind.server => AppIcons.dns_rounded,
+    PendingSendIssueKind.hostDisabled => AppIcons.pause_circle_outline_rounded,
+    PendingSendIssueKind.hostMissing => AppIcons.dns_rounded,
+    PendingSendIssueKind.hostChanged => AppIcons.sync_problem_rounded,
+    PendingSendIssueKind.unauthorized => AppIcons.key_off_rounded,
+    PendingSendIssueKind.unknown => AppIcons.report_problem_outlined,
   };
 }
 
@@ -3472,7 +3473,7 @@ class _InboxCard extends StatelessWidget {
             children: [
               if (action.canApproveForSession)
                 _MobileInboxAction(
-                  icon: Icons.history_toggle_off_rounded,
+                  icon: AppIcons.history_toggle_off_rounded,
                   tooltip: 'Approve for session',
                   foreground: colors.textSecondary,
                   background: colors.surfaceMuted,
@@ -3483,7 +3484,7 @@ class _InboxCard extends StatelessWidget {
               if (action.canDecline) ...[
                 if (action.canApproveForSession) const SizedBox(width: 8),
                 _MobileInboxAction(
-                  icon: Icons.close_rounded,
+                  icon: AppIcons.close_rounded,
                   tooltip: 'Decline',
                   foreground: colors.danger,
                   background: colors.danger.withValues(alpha: 0.12),
@@ -3494,7 +3495,7 @@ class _InboxCard extends StatelessWidget {
               if (action.canApprove) ...[
                 const SizedBox(width: 8),
                 _MobileInboxAction(
-                  icon: Icons.check_rounded,
+                  icon: AppIcons.check_rounded,
                   tooltip: 'Approve',
                   foreground: visibleUiColorOn(
                     colors,
@@ -3536,11 +3537,11 @@ MeshStatusTone _actionKindTone(String kind) {
 
 IconData _actionKindIcon(String kind) {
   return switch (kind) {
-    'user_input' => Icons.chat_bubble_outline_rounded,
-    'elicitation' => Icons.fact_check_rounded,
-    'file_change' => Icons.description_outlined,
-    'command' => Icons.terminal_rounded,
-    _ => Icons.shield_rounded,
+    'user_input' => AppIcons.chat_bubble_outline_rounded,
+    'elicitation' => AppIcons.fact_check_rounded,
+    'file_change' => AppIcons.description_outlined,
+    'command' => AppIcons.terminal_rounded,
+    _ => AppIcons.shield_rounded,
   };
 }
 
@@ -3562,7 +3563,7 @@ class _InboxDenseActions extends StatelessWidget {
       children: [
         if (action.canApprove)
           _SquareIconAction(
-            icon: Icons.check_rounded,
+            icon: AppIcons.check_rounded,
             tooltip: canExtended ? 'Approve (right-click for more)' : 'Approve',
             foreground: colors.success,
             background: colors.success.withValues(alpha: 0.12),
@@ -3575,7 +3576,7 @@ class _InboxDenseActions extends StatelessWidget {
         if (action.canDecline) ...[
           const SizedBox(width: 4),
           _SquareIconAction(
-            icon: Icons.close_rounded,
+            icon: AppIcons.close_rounded,
             tooltip: 'Decline',
             foreground: colors.danger,
             background: colors.danger.withValues(alpha: 0.12),
@@ -3729,14 +3730,14 @@ class HostsPane extends StatelessWidget {
             mainAxisSize: MainAxisSize.min,
             children: [
               const MeshEmptyState(
-                icon: Icons.route_rounded,
+                icon: AppIcons.route_rounded,
                 title: 'No machines yet',
                 body: 'Add a laptop, desktop, or server to reach it from here.',
               ),
               const SizedBox(height: 12),
               FilledButton.icon(
                 onPressed: onAddHost,
-                icon: const Icon(Icons.add_link_rounded),
+                icon: const Icon(AppIcons.add_link_rounded),
                 label: const Text('Add a machine'),
               ),
             ],
@@ -3753,7 +3754,7 @@ class HostsPane extends StatelessWidget {
               .toList();
     if (visibleHosts.isEmpty) {
       return MeshEmptyState(
-        icon: Icons.search_off_rounded,
+        icon: AppIcons.search_off_rounded,
         title: 'No matching machines',
         body: 'No machines match "${query.trim()}".',
       );
@@ -3852,7 +3853,7 @@ class _HostRowCard extends StatelessWidget {
                           ),
                           alignment: Alignment.center,
                           child: Icon(
-                            Icons.dns_rounded,
+                            AppIcons.dns_rounded,
                             color: colors.accent,
                             size: 15,
                           ),
@@ -3921,14 +3922,14 @@ class _HostRowCard extends StatelessWidget {
               label: node?.usesBleedingEdgeTrack == true
                   ? 'New commits'
                   : 'App update',
-              icon: Icons.system_update_alt_rounded,
+              icon: AppIcons.system_update_alt_rounded,
               tone: MeshPillTone.warning,
             ),
           if (compatibility.level == MobileClientCompatibilityLevel.required)
             MeshPill(
               label:
                   'Mobile ${mobileClientVersionLabel(compatibility.targetVersion)} needed',
-              icon: Icons.phone_android_rounded,
+              icon: AppIcons.phone_android_rounded,
               tone: MeshPillTone.danger,
             )
           else if (compatibility.level ==
@@ -3936,7 +3937,7 @@ class _HostRowCard extends StatelessWidget {
             MeshPill(
               label:
                   'Mobile ${mobileClientVersionLabel(compatibility.targetVersion)} recommended',
-              icon: Icons.phone_android_rounded,
+              icon: AppIcons.phone_android_rounded,
               tone: MeshPillTone.info,
             ),
         ];
@@ -3966,7 +3967,7 @@ class _HostRowCard extends StatelessWidget {
                         ),
                         alignment: Alignment.center,
                         child: Icon(
-                          Icons.dns_rounded,
+                          AppIcons.dns_rounded,
                           color: colors.accent,
                           size: 20,
                         ),
@@ -4177,8 +4178,8 @@ class _HostRowActionsMenu extends StatelessWidget {
           value: _HostRowAction.toggleEnabled,
           child: _HostActionMenuItem(
             icon: hostEnabled
-                ? Icons.pause_circle_outline_rounded
-                : Icons.play_circle_outline_rounded,
+                ? AppIcons.pause_circle_outline_rounded
+                : AppIcons.play_circle_outline_rounded,
             label: hostEnabled ? 'Disable host' : 'Enable host',
             color: hostEnabled ? colors.textSecondary : colors.accent,
           ),
@@ -4186,7 +4187,7 @@ class _HostRowActionsMenu extends StatelessWidget {
         PopupMenuItem(
           value: _HostRowAction.edit,
           child: _HostActionMenuItem(
-            icon: Icons.edit_rounded,
+            icon: AppIcons.edit_rounded,
             label: 'Edit host',
             color: colors.textSecondary,
           ),
@@ -4194,7 +4195,7 @@ class _HostRowActionsMenu extends StatelessWidget {
         PopupMenuItem(
           value: _HostRowAction.remove,
           child: _HostActionMenuItem(
-            icon: Icons.delete_outline,
+            icon: AppIcons.delete_outline,
             label: 'Remove host',
             color: colors.danger,
           ),
@@ -4208,7 +4209,7 @@ class _HostRowActionsMenu extends StatelessWidget {
           width: compact ? 34 : 40,
           height: compact ? 34 : 40,
           child: Icon(
-            Icons.more_horiz_rounded,
+            AppIcons.more_horiz_rounded,
             size: compact ? 18 : 22,
             color: colors.textSecondary,
           ),
@@ -4246,7 +4247,7 @@ MeshStatusBadge _hostStatusBadge(HostStatus status, bool enabled) {
     return const MeshStatusBadge(
       label: 'disabled',
       tone: MeshStatusTone.offline,
-      icon: Icons.pause_circle_outline_rounded,
+      icon: AppIcons.pause_circle_outline_rounded,
       compact: true,
     );
   }
@@ -4254,25 +4255,25 @@ MeshStatusBadge _hostStatusBadge(HostStatus status, bool enabled) {
     HostReachability.online => const MeshStatusBadge(
       label: 'online',
       tone: MeshStatusTone.success,
-      icon: Icons.check_circle_outline_rounded,
+      icon: AppIcons.check_circle_outline_rounded,
       compact: true,
     ),
     HostReachability.probing => const MeshStatusBadge(
       label: 'checking',
       tone: MeshStatusTone.queued,
-      icon: Icons.sync_rounded,
+      icon: AppIcons.sync_rounded,
       compact: true,
     ),
     HostReachability.offline => const MeshStatusBadge(
       label: 'offline',
       tone: MeshStatusTone.danger,
-      icon: Icons.wifi_off_rounded,
+      icon: AppIcons.wifi_off_rounded,
       compact: true,
     ),
     HostReachability.unknown => const MeshStatusBadge(
       label: 'unknown',
       tone: MeshStatusTone.stale,
-      icon: Icons.help_outline_rounded,
+      icon: AppIcons.help_outline_rounded,
       compact: true,
     ),
   };
@@ -4447,7 +4448,7 @@ class _HostEditorSheetState extends State<HostEditorSheet> {
     return Padding(
       padding: EdgeInsets.only(bottom: bottom),
       child: MeshBottomSheetScaffold(
-        icon: isEditing ? Icons.edit_note_rounded : Icons.add_link_rounded,
+        icon: isEditing ? AppIcons.edit_note_rounded : AppIcons.add_link_rounded,
         title: isEditing ? 'Edit host' : 'Add host',
         description: isEditing
             ? 'Update this machine connection.'
@@ -4470,7 +4471,7 @@ class _HostEditorSheetState extends State<HostEditorSheet> {
                       ),
                       const SizedBox(height: 8),
                       _HostEditorActionCard(
-                        icon: Icons.qr_code_scanner_rounded,
+                        icon: AppIcons.qr_code_scanner_rounded,
                         title: isEditing
                             ? 'Replace from pairing code'
                             : 'Pair with a code',
@@ -4487,7 +4488,7 @@ class _HostEditorSheetState extends State<HostEditorSheet> {
                     ),
                     const SizedBox(height: 8),
                     _HostEditorFieldFrame(
-                      icon: Icons.label_rounded,
+                      icon: AppIcons.label_rounded,
                       label: 'Name',
                       child: TextField(
                         controller: _labelController,
@@ -4511,7 +4512,7 @@ class _HostEditorSheetState extends State<HostEditorSheet> {
                     ),
                     const SizedBox(height: 8),
                     _HostEditorFieldFrame(
-                      icon: Icons.link_rounded,
+                      icon: AppIcons.link_rounded,
                       label: 'Address',
                       child: TextField(
                         controller: _baseUrlController,
@@ -4533,7 +4534,7 @@ class _HostEditorSheetState extends State<HostEditorSheet> {
                     ),
                     const SizedBox(height: 10),
                     _HostEditorFieldFrame(
-                      icon: Icons.key_rounded,
+                      icon: AppIcons.key_rounded,
                       label: 'Token',
                       child: TextField(
                         controller: _tokenController,
@@ -4560,8 +4561,8 @@ class _HostEditorSheetState extends State<HostEditorSheet> {
                             padding: EdgeInsets.zero,
                             icon: Icon(
                               _tokenVisible
-                                  ? Icons.visibility_off_rounded
-                                  : Icons.visibility_rounded,
+                                  ? AppIcons.visibility_off_rounded
+                                  : AppIcons.visibility_rounded,
                               size: 18,
                             ),
                             onPressed: () => setState(
@@ -4585,7 +4586,7 @@ class _HostEditorSheetState extends State<HostEditorSheet> {
                                 ),
                               )
                             : const Icon(
-                                Icons.wifi_tethering_rounded,
+                                AppIcons.wifi_tethering_rounded,
                                 size: 18,
                               ),
                         label: Text(
@@ -4806,7 +4807,7 @@ class _HostEditorStatusCard extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Icon(
-            success ? Icons.check_circle_rounded : Icons.info_outline_rounded,
+            success ? AppIcons.check_circle_rounded : AppIcons.info_outline_rounded,
             color: tone,
             size: 18,
           ),
@@ -4842,7 +4843,7 @@ class _HostEnabledCard extends StatelessWidget {
       dense: true,
       onTap: () => onChanged(!enabled),
       leading: Icon(
-        enabled ? Icons.sensors_rounded : Icons.pause_rounded,
+        enabled ? AppIcons.sensors_rounded : AppIcons.pause_rounded,
         color: enabled ? colors.accent : colors.textSecondary,
         size: 18,
       ),
@@ -4930,7 +4931,7 @@ class _HostEditorError extends StatelessWidget {
       ),
       child: Row(
         children: [
-          Icon(Icons.error_outline_rounded, color: colors.danger, size: 18),
+          Icon(AppIcons.error_outline_rounded, color: colors.danger, size: 18),
           const SizedBox(width: 10),
           Expanded(
             child: Text(
@@ -4965,7 +4966,7 @@ class _HostEditorFooter extends StatelessWidget {
         final compact = constraints.maxWidth < 420;
         final saveButton = FilledButton.icon(
           onPressed: onSubmit,
-          icon: const Icon(Icons.check_rounded),
+          icon: const Icon(AppIcons.check_rounded),
           label: Text(isEditing ? 'Save changes' : 'Save host'),
         );
         if (compact) {
@@ -5020,7 +5021,7 @@ class _RecentProgressStrip extends StatelessWidget {
         label: showingCached
             ? 'Syncing sessions, $loaded of $total hosts ready'
             : 'Loading sessions, $loaded of $total hosts ready',
-        icon: Icons.hub_rounded,
+        icon: AppIcons.hub_rounded,
         progress: progress,
         active: true,
         tone: MeshStatusRailTone.accent,
@@ -5052,7 +5053,7 @@ class _RecentErrorBanner extends StatelessWidget {
       ),
       child: Row(
         children: [
-          Icon(Icons.cloud_off_rounded, size: 18, color: colors.warning),
+          Icon(AppIcons.cloud_off_rounded, size: 18, color: colors.warning),
           const SizedBox(width: 10),
           Expanded(
             child: Text(
@@ -5148,7 +5149,7 @@ class _MobileClientUpdateBanner extends StatelessWidget {
               border: Border.all(color: accent.withValues(alpha: 0.28)),
             ),
             alignment: Alignment.center,
-            child: Icon(Icons.phone_android_rounded, size: 18, color: accent),
+            child: Icon(AppIcons.phone_android_rounded, size: 18, color: accent),
           ),
           const SizedBox(width: 12),
           Expanded(
@@ -5185,7 +5186,7 @@ class _MobileClientUpdateBanner extends StatelessWidget {
                           side: BorderSide(color: accent),
                           visualDensity: VisualDensity.compact,
                         ),
-                        icon: const Icon(Icons.visibility_rounded, size: 16),
+                        icon: const Icon(AppIcons.visibility_rounded, size: 16),
                         label: Text(
                           count == 1 ? 'Review host' : 'Review hosts',
                         ),
@@ -5206,7 +5207,7 @@ class _MobileClientUpdateBanner extends StatelessWidget {
               tooltip: 'Dismiss',
               visualDensity: VisualDensity.compact,
               onPressed: onDismiss,
-              icon: Icon(Icons.close_rounded, color: colors.textSecondary),
+              icon: Icon(AppIcons.close_rounded, color: colors.textSecondary),
             ),
         ],
       ),

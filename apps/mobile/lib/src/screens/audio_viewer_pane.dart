@@ -6,6 +6,7 @@ import '../models.dart';
 import '../theme/app_colors.dart';
 import '../theme/app_theme.dart';
 import '../widgets/mesh_widgets.dart';
+import '../app_icons.dart';
 
 class AudioViewerPane extends StatefulWidget {
   const AudioViewerPane({
@@ -227,7 +228,7 @@ class _AudioViewerPaneState extends State<AudioViewerPane> {
                       border: Border.all(color: colors.border),
                     ),
                     child: Icon(
-                      Icons.graphic_eq_rounded,
+                      AppIcons.graphic_eq_rounded,
                       size: 34,
                       color: colors.accent,
                     ),
@@ -261,10 +262,10 @@ class _AudioViewerPaneState extends State<AudioViewerPane> {
                   iconSize: 30,
                   icon: Icon(
                     value.isPlaying
-                        ? Icons.pause_circle_filled_rounded
+                        ? AppIcons.pause_circle_filled_rounded
                         : value.isCompleted
-                        ? Icons.replay_circle_filled_rounded
-                        : Icons.play_circle_fill_rounded,
+                        ? AppIcons.replay_circle_filled_rounded
+                        : AppIcons.play_circle_fill_rounded,
                   ),
                 ),
                 Expanded(
@@ -337,7 +338,7 @@ class _AudioViewerErrorState extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MeshEmptyState(
-      icon: Icons.error_outline_rounded,
+      icon: AppIcons.error_outline_rounded,
       title: 'Could not load audio',
       body: error,
     );

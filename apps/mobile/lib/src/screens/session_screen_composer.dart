@@ -185,7 +185,7 @@ class _Composer extends StatelessWidget {
             label: modelLabel!,
             detail: modelDetail,
             customized: modelCustomized,
-            icon: Icons.memory_rounded,
+            icon: AppIcons.memory_rounded,
             tooltipLabel: 'Choose model',
             onPressed: onModelTap!,
             compact: !isDesktop,
@@ -196,7 +196,7 @@ class _Composer extends StatelessWidget {
             label: thinkingLabel!,
             detail: thinkingDetail,
             customized: thinkingCustomized,
-            icon: Icons.psychology_alt_rounded,
+            icon: AppIcons.psychology_alt_rounded,
             tooltipLabel: 'Choose thinking level',
             onPressed: onThinkingTap!,
             compact: !isDesktop,
@@ -429,7 +429,7 @@ class _ComposerContextShelf extends StatelessWidget {
                   ),
                 )
               : Icon(
-                  Icons.image_rounded,
+                  AppIcons.image_rounded,
                   size: 14,
                   color: shelfSecondary,
                 ),
@@ -441,7 +441,7 @@ class _ComposerContextShelf extends StatelessWidget {
       for (final s in skills)
         _ComposerShelfChip(
           icon: Icon(
-            Icons.auto_awesome_rounded,
+            AppIcons.auto_awesome_rounded,
             size: 14,
             color: shelfAccent,
           ),
@@ -452,8 +452,8 @@ class _ComposerContextShelf extends StatelessWidget {
         _ComposerShelfChip(
           icon: Icon(
             f.file.isDirectory
-                ? Icons.folder_rounded
-                : Icons.insert_drive_file_rounded,
+                ? AppIcons.folder_rounded
+                : AppIcons.insert_drive_file_rounded,
             size: 14,
             color: shelfSecondary,
           ),
@@ -575,7 +575,7 @@ class _ComposerShelfChip extends StatelessWidget {
             child: Padding(
               padding: const EdgeInsets.all(3),
               child: Icon(
-                Icons.close_rounded,
+                AppIcons.close_rounded,
                 size: 14,
                 color: iconForeground,
               ),
@@ -616,11 +616,11 @@ class _ComposerPlusButton extends StatelessWidget {
     // Collect available options.
     final options = <(IconData, String, VoidCallback)>[
       if (supportsImageInput)
-        (Icons.add_photo_alternate_rounded, 'Attach image', onPickImages),
+        (AppIcons.add_photo_alternate_rounded, 'Attach image', onPickImages),
       if (supportsSkillInput && onAddSkillTrigger != null)
-        (Icons.auto_awesome_rounded, 'Insert skill', onAddSkillTrigger!),
+        (AppIcons.auto_awesome_rounded, 'Insert skill', onAddSkillTrigger!),
       if (supportsFileMentions && onAddFileTrigger != null)
-        (Icons.insert_drive_file_rounded, 'Mention file', onAddFileTrigger!),
+        (AppIcons.insert_drive_file_rounded, 'Mention file', onAddFileTrigger!),
     ];
 
     if (options.isEmpty) return;
@@ -639,7 +639,7 @@ class _ComposerPlusButton extends StatelessWidget {
       builder: (ctx) {
         final colors = ctx.colors;
         return MeshBottomSheetScaffold(
-          icon: Icons.add_rounded,
+          icon: AppIcons.add_rounded,
           title: 'Add something',
           description:
               'Attach an image, insert a skill, or mention a file in this message.',
@@ -705,7 +705,7 @@ class _ComposerPlusButton extends StatelessWidget {
                   border: Border.all(color: borderColor),
                 ),
                 child: Icon(
-                  Icons.add_rounded,
+                  AppIcons.add_rounded,
                   color: iconColor,
                   size: 20,
                 ),
@@ -744,7 +744,7 @@ class _ComposerAttachButton extends StatelessWidget {
             width: 34,
             height: 34,
             child: Icon(
-              Icons.add_photo_alternate_rounded,
+              AppIcons.add_photo_alternate_rounded,
               color: iconColor,
               size: 20,
             ),
@@ -862,7 +862,7 @@ class _ComposerModelButton extends StatelessWidget {
                   ),
                   const SizedBox(width: 4),
                   Icon(
-                    Icons.expand_more_rounded,
+                    AppIcons.expand_more_rounded,
                     size: 16,
                     color: chevronColor,
                   ),
@@ -953,7 +953,7 @@ class _SendButton extends StatelessWidget {
                           ),
                         )
                       : Icon(
-                          Icons.arrow_upward_rounded,
+                          AppIcons.arrow_upward_rounded,
                           size: compact ? 19 : 22,
                           color: canSend
                               ? activeForeground
@@ -1024,7 +1024,7 @@ class _ComposerSkillSuggestionTrayState
         child: Row(
           children: [
             Icon(
-              Icons.auto_awesome_rounded,
+              AppIcons.auto_awesome_rounded,
               size: 16,
               color: colors.textTertiary,
             ),
@@ -1090,7 +1090,7 @@ class _ComposerSkillSuggestionTrayState
           border: Border.all(color: colors.border),
         ),
         alignment: Alignment.center,
-        child: Icon(Icons.auto_awesome_rounded, size: 15, color: colors.accent),
+        child: Icon(AppIcons.auto_awesome_rounded, size: 15, color: colors.accent),
       ),
       title: Text(
         skill.displayName,
@@ -1201,7 +1201,7 @@ class _ComposerFileSuggestionTrayState
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
         child: Row(
           children: [
-            Icon(Icons.error_outline_rounded, size: 16, color: colors.danger),
+            Icon(AppIcons.error_outline_rounded, size: 16, color: colors.danger),
             const SizedBox(width: 8),
             Expanded(
               child: Text(
@@ -1220,7 +1220,7 @@ class _ComposerFileSuggestionTrayState
         child: Row(
           children: [
             Icon(
-              Icons.search_off_rounded,
+              AppIcons.search_off_rounded,
               size: 16,
               color: colors.textTertiary,
             ),
@@ -1301,8 +1301,8 @@ class _ComposerFileSuggestionTrayState
         alignment: Alignment.center,
         child: Icon(
           file.isDirectory
-              ? Icons.folder_rounded
-              : Icons.insert_drive_file_rounded,
+              ? AppIcons.folder_rounded
+              : AppIcons.insert_drive_file_rounded,
           size: 15,
           color: colors.textTertiary,
         ),

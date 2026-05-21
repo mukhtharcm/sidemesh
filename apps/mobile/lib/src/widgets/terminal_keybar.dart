@@ -6,6 +6,7 @@ import '../terminal_key_models.dart';
 import '../theme/app_colors.dart';
 import '../theme/app_tokens.dart';
 import 'terminal_keybar_sheet.dart';
+import '../app_icons.dart';
 
 class TerminalKeyBar extends StatefulWidget {
   const TerminalKeyBar({
@@ -250,7 +251,7 @@ class _MoreButton extends StatelessWidget {
           mainAxisSize: MainAxisSize.min,
           children: [
             Icon(
-              Icons.more_horiz_rounded,
+              AppIcons.more_horiz_rounded,
               size: compact ? 16 : 18,
               color: colors.textSecondary,
             ),

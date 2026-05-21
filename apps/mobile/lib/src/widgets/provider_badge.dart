@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../models.dart';
 import '../provider_labels.dart';
 import '../theme/app_colors.dart';
+import '../app_icons.dart';
 
 class AgentProviderBadge extends StatelessWidget {
   const AgentProviderBadge({
@@ -43,7 +44,7 @@ class AgentProviderBadge extends StatelessWidget {
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(Icons.hub_rounded, size: iconSize, color: fg),
+          Icon(AppIcons.hub_rounded, size: iconSize, color: fg),
           SizedBox(width: compact ? 4 : 5),
           ConstrainedBox(
             constraints: BoxConstraints(maxWidth: compact ? 92 : 160),

@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../theme/app_colors.dart';
 import '../theme/app_tokens.dart';
 import 'mesh_widgets.dart';
+import '../app_icons.dart';
 
 /// Shared visual atoms used by launch-option surfaces (create-session,
 /// new-session defaults in settings, per-session overrides).
@@ -126,7 +127,7 @@ class LaunchSelectorRow extends StatelessWidget {
               ],
             ),
           ),
-          Icon(Icons.keyboard_arrow_down_rounded, color: colors.accent),
+          Icon(AppIcons.keyboard_arrow_down_rounded, color: colors.accent),
         ],
       ),
     );

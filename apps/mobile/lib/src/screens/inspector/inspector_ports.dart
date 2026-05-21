@@ -4,6 +4,7 @@ import '../../api_client.dart';
 import '../../models.dart';
 import '../port_forward_screen.dart';
 import 'inspector_controller.dart';
+import '../../app_icons.dart';
 
 InspectorSurface buildInspectorPortsSurface({
   required String ownerKey,
@@ -21,7 +22,7 @@ InspectorSurface buildInspectorPortsSurface({
       supportsBrowserPreview: supportsBrowserPreview,
       supportsPortForwarding: supportsPortForwarding,
     ),
-    icon: Icons.open_in_browser_rounded,
+    icon: AppIcons.open_in_browser_rounded,
     bodyBuilder: (context) => PortForwardPane(
       key: ValueKey('ports:${host.id}:${session.id}:${session.cwd}'),
       host: host,

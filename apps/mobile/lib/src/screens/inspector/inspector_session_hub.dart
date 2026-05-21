@@ -4,6 +4,7 @@ import '../../theme/app_colors.dart';
 import '../../theme/app_tokens.dart';
 import '../../widgets/mesh_widgets.dart';
 import 'inspector_controller.dart';
+import '../../app_icons.dart';
 
 /// Builds the default inspector surface shown when a session first becomes
 /// active and no previously-saved surface exists for it.
@@ -29,7 +30,7 @@ InspectorSurface buildInspectorSessionHubSurface({
     kind: InspectorSurfaceKind.sessionHub,
     ownerKey: ownerKey,
     title: 'Tools',
-    icon: Icons.widgets_rounded,
+    icon: AppIcons.widgets_rounded,
     bodyBuilder: (context) => _SessionHubBody(
       onOpenSearch: onOpenSearch,
       onOpenPinned: onOpenPinned,
@@ -62,19 +63,19 @@ class _SessionHubBody extends StatelessWidget {
   Widget build(BuildContext context) {
     final workspaceTools = [
       _HubTool(
-        icon: Icons.terminal_rounded,
+        icon: AppIcons.terminal_rounded,
         label: 'Terminal',
         description: 'Open a command line on this machine.',
         onTap: onOpenTerminal,
       ),
       _HubTool(
-        icon: Icons.folder_rounded,
+        icon: AppIcons.folder_rounded,
         label: 'Files',
         description: 'Browse files for this session.',
         onTap: onOpenFiles,
       ),
       _HubTool(
-        icon: Icons.open_in_browser_rounded,
+        icon: AppIcons.open_in_browser_rounded,
         label: 'Previews',
         description: 'Open sites running on this machine.',
         onTap: onOpenPorts,
@@ -82,19 +83,19 @@ class _SessionHubBody extends StatelessWidget {
     ];
     final sessionTools = [
       _HubTool(
-        icon: Icons.search_rounded,
+        icon: AppIcons.search_rounded,
         label: 'Search',
         description: 'Search this conversation.',
         onTap: onOpenSearch,
       ),
       _HubTool(
-        icon: Icons.push_pin_rounded,
+        icon: AppIcons.push_pin_rounded,
         label: 'Saved messages',
         description: 'Jump back to messages you pinned.',
         onTap: onOpenPinned,
       ),
       _HubTool(
-        icon: Icons.perm_media_rounded,
+        icon: AppIcons.perm_media_rounded,
         label: 'Resources',
         description: 'Open images, links, and files from this session.',
         onTap: onOpenResources,
@@ -219,7 +220,7 @@ class _HubToolRow extends StatelessWidget {
         ),
       ),
       trailing: Icon(
-        Icons.chevron_right_rounded,
+        AppIcons.chevron_right_rounded,
         size: 18,
         color: colors.textTertiary,
       ),

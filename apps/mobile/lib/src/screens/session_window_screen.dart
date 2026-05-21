@@ -9,6 +9,7 @@ import '../theme/app_colors.dart';
 import '../widgets/mesh_widgets.dart';
 import '../windowing.dart';
 import 'session_screen.dart';
+import '../app_icons.dart';
 
 class SessionWindowScreen extends StatefulWidget {
   const SessionWindowScreen({
@@ -136,7 +137,7 @@ class _SessionWindowScreenState extends State<SessionWindowScreen> {
         backgroundColor: colors.canvas,
         appBar: AppBar(title: Text(_session.title)),
         body: const MeshEmptyState(
-          icon: Icons.archive_rounded,
+          icon: AppIcons.archive_rounded,
           title: 'Session archived',
           body: 'This session was archived. You can close this window.',
         ),
@@ -148,7 +149,7 @@ class _SessionWindowScreenState extends State<SessionWindowScreen> {
         backgroundColor: colors.canvas,
         appBar: AppBar(title: Text(_session.title)),
         body: MeshEmptyState(
-          icon: Icons.desktop_mac_rounded,
+          icon: AppIcons.desktop_mac_rounded,
           title: 'Session unavailable',
           body: _error ?? 'This session could not be reopened here.',
         ),

@@ -10,6 +10,7 @@ import '../../widgets/mesh_widgets.dart';
 import '../file_browser_screen.dart';
 import '../file_viewer_pane.dart';
 import 'inspector_controller.dart';
+import '../../app_icons.dart';
 
 /// Builds an [InspectorSurface] that hosts the workspace browser
 /// (file tree + viewer) in pane 3 on desktop.
@@ -29,7 +30,7 @@ InspectorSurface buildInspectorWorkspaceBrowserSurface({
     kind: InspectorSurfaceKind.fileBrowser,
     ownerKey: ownerKey,
     title: 'Files',
-    icon: Icons.folder_open_rounded,
+    icon: AppIcons.folder_open_rounded,
     actionsBuilder: (context) => [
       Tooltip(
         message: 'Reload files',
@@ -39,7 +40,7 @@ InspectorSurface buildInspectorWorkspaceBrowserSurface({
           child: Padding(
             padding: const EdgeInsets.all(6),
             child: Icon(
-              Icons.refresh_rounded,
+              AppIcons.refresh_rounded,
               size: 16,
               color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.6),
             ),
@@ -258,7 +259,7 @@ class _ViewerToolbar extends StatelessWidget {
             child: Padding(
               padding: const EdgeInsets.all(8),
               child: Icon(
-                Icons.arrow_back_rounded,
+                AppIcons.arrow_back_rounded,
                 size: 18,
                 color: colors.textSecondary,
               ),

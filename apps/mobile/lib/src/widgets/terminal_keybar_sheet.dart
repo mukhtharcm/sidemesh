@@ -9,6 +9,7 @@ import '../theme/app_colors.dart';
 import '../theme/app_tokens.dart';
 import 'app_sheets.dart';
 import 'mesh_widgets.dart';
+import '../app_icons.dart';
 
 Future<void> showTerminalKeyBarSheet({
   required BuildContext context,
@@ -47,7 +48,7 @@ class _TerminalKeyBarSheetState extends State<_TerminalKeyBarSheet> {
   Widget build(BuildContext context) {
     final colors = context.colors;
     return MeshBottomSheetScaffold(
-      icon: Icons.keyboard_command_key_rounded,
+      icon: AppIcons.keyboard_command_key_rounded,
       title: 'Extra keys',
       description: 'Useful keys and shortcuts for terminal work.',
       maxWidth: 760,

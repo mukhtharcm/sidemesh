@@ -6,6 +6,7 @@ import 'package:highlight/highlight.dart' show highlight, Node;
 
 import '../theme/app_colors.dart';
 import '../theme/app_theme.dart';
+import '../app_icons.dart';
 
 /// A code block that renders syntax-highlighted text with the Sidemesh
 /// app theme.
@@ -146,7 +147,7 @@ class _CopyIconButton extends StatelessWidget {
             mainAxisSize: MainAxisSize.min,
             children: [
               Icon(
-                copied ? Icons.check_rounded : Icons.copy_rounded,
+                copied ? AppIcons.check_rounded : AppIcons.copy_rounded,
                 size: 14,
                 color: copied ? colors.accent : colors.textSecondary,
               ),

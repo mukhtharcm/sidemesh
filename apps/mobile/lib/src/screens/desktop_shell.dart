@@ -30,6 +30,7 @@ import 'inspector/inspector_controller.dart';
 import 'settings_screen.dart';
 import 'session_screen.dart';
 import 'usage_pane.dart';
+import '../app_icons.dart';
 
 /// macOS shell with rail, list pane, active detail, and optional tools pane.
 /// Reuses the same panes as the mobile home
@@ -71,7 +72,7 @@ class _OnboardingEmptyState extends StatelessWidget {
                   ),
                 ),
                 alignment: Alignment.center,
-                child: Icon(Icons.hub_rounded, size: 32, color: colors.accent),
+                child: Icon(AppIcons.hub_rounded, size: 32, color: colors.accent),
               ),
               const SizedBox(height: 24),
               Text(
@@ -95,7 +96,7 @@ class _OnboardingEmptyState extends StatelessWidget {
               const SizedBox(height: 24),
               FilledButton.icon(
                 onPressed: onAddHost,
-                icon: const Icon(Icons.add_rounded),
+                icon: const Icon(AppIcons.add_rounded),
                 label: const Text('Add your first host'),
               ),
               const SizedBox(height: 10),
@@ -471,7 +472,7 @@ class _DesktopShellState extends State<DesktopShell> {
                   Row(
                     children: [
                       Icon(
-                        Icons.keyboard_rounded,
+                        AppIcons.keyboard_rounded,
                         size: 18,
                         color: colors.textSecondary,
                       ),
@@ -490,7 +491,7 @@ class _DesktopShellState extends State<DesktopShell> {
                         iconSize: 18,
                         onPressed: () => Navigator.of(dialogContext).pop(),
                         icon: Icon(
-                          Icons.close_rounded,
+                          AppIcons.close_rounded,
                           color: colors.textSecondary,
                         ),
                       ),
@@ -868,7 +869,7 @@ class _DesktopShellState extends State<DesktopShell> {
         kind: InspectorSurfaceKind.debug,
         ownerKey: ownerKey,
         title: 'Side panel',
-        icon: Icons.tune_rounded,
+        icon: AppIcons.tune_rounded,
         bodyBuilder: (context) {
           final colors = context.colors;
           return Padding(
@@ -1185,9 +1186,9 @@ String _sidebarSectionTitle(_SidebarSection section) {
 
 IconData _sidebarSectionIcon(_SidebarSection section) {
   return switch (section) {
-    _SidebarSection.recent => Icons.chat_bubble_outline_rounded,
-    _SidebarSection.inbox => Icons.all_inbox_rounded,
-    _SidebarSection.hosts => Icons.devices_rounded,
+    _SidebarSection.recent => AppIcons.chat_bubble_outline_rounded,
+    _SidebarSection.inbox => AppIcons.all_inbox_rounded,
+    _SidebarSection.hosts => AppIcons.devices_rounded,
   };
 }
 
@@ -1236,7 +1237,7 @@ class _DesktopRail extends StatelessWidget {
               ),
               alignment: Alignment.center,
               child: Icon(
-                Icons.hub_rounded,
+                AppIcons.hub_rounded,
                 size: 18,
                 color: colors.textSecondary,
               ),
@@ -1268,19 +1269,19 @@ class _DesktopRail extends StatelessWidget {
           ),
           const Spacer(),
           _RailUtilityButton(
-            icon: Icons.keyboard_rounded,
+            icon: AppIcons.keyboard_rounded,
             label: 'Shortcuts',
             onTap: onShowShortcuts,
           ),
           const SizedBox(height: 8),
           _RailUtilityButton(
-            icon: Icons.speed_rounded,
+            icon: AppIcons.speed_rounded,
             label: 'Usage',
             onTap: onOpenUsage,
           ),
           const SizedBox(height: 8),
           _RailUtilityButton(
-            icon: Icons.tune_rounded,
+            icon: AppIcons.tune_rounded,
             label: 'Settings',
             onTap: onOpenSettings,
           ),
@@ -1496,12 +1497,12 @@ class _Sidebar extends StatelessWidget {
     final canStartSession = enabledHosts.isNotEmpty;
     final headerAction = switch (section) {
       _SidebarSection.recent => _ListPaneActionButton(
-        icon: Icons.add_rounded,
+        icon: AppIcons.add_rounded,
         label: 'New',
         onTap: hosts.isEmpty || canStartSession ? onStartSession : null,
       ),
       _SidebarSection.hosts => _ListPaneActionButton(
-        icon: Icons.add_link_rounded,
+        icon: AppIcons.add_link_rounded,
         label: 'Add',
         onTap: onAddHost,
       ),
@@ -1749,7 +1750,7 @@ class _RecentControlsBar extends StatelessWidget {
       crossAxisAlignment: WrapCrossAlignment.center,
       children: [
         _RecentFilterToken(
-          icon: Icons.star_rounded,
+          icon: AppIcons.star_rounded,
           label: 'Favorites',
           selected: filters.favoritesOnly,
           onTap: onFavoritesOnlyChanged == null
@@ -1757,7 +1758,7 @@ class _RecentControlsBar extends StatelessWidget {
               : () => onFavoritesOnlyChanged!(!filters.favoritesOnly),
         ),
         _RecentFilterToken(
-          icon: Icons.play_circle_outline_rounded,
+          icon: AppIcons.play_circle_outline_rounded,
           label: 'Running',
           selected: filters.runningOnly,
           onTap: onRunningOnlyChanged == null
@@ -1765,7 +1766,7 @@ class _RecentControlsBar extends StatelessWidget {
               : () => onRunningOnlyChanged!(!filters.runningOnly),
         ),
         _RecentFilterToken(
-          icon: Icons.mark_chat_unread_rounded,
+          icon: AppIcons.mark_chat_unread_rounded,
           label: 'Unread',
           selected: filters.unreadOnly,
           onTap: onUnreadOnlyChanged == null
@@ -2075,8 +2076,8 @@ class _DetailPaneState extends State<_DetailPane> {
                           alignment: Alignment.center,
                           child: Icon(
                             hasEnabledHosts
-                                ? Icons.play_circle_outline_rounded
-                                : Icons.hub_rounded,
+                                ? AppIcons.play_circle_outline_rounded
+                                : AppIcons.hub_rounded,
                             color: hasEnabledHosts
                                 ? colors.textSecondary
                                 : colors.textTertiary,
@@ -2109,8 +2110,8 @@ class _DetailPaneState extends State<_DetailPane> {
                               : widget.onShowHosts,
                           icon: Icon(
                             hasEnabledHosts
-                                ? Icons.play_arrow_rounded
-                                : Icons.hub_rounded,
+                                ? AppIcons.play_arrow_rounded
+                                : AppIcons.hub_rounded,
                           ),
                           label: Text(
                             hasEnabledHosts
@@ -2123,7 +2124,7 @@ class _DetailPaneState extends State<_DetailPane> {
                           MeshPill(
                             label:
                                 '${widget.enabledHosts.length} of ${widget.hosts.length} machines ready',
-                            icon: Icons.hub_rounded,
+                            icon: AppIcons.hub_rounded,
                           ),
                         ],
                       ],
@@ -2209,7 +2210,7 @@ class _CloseSessionButton extends StatelessWidget {
             ),
             alignment: Alignment.center,
             child: Icon(
-              Icons.close_rounded,
+              AppIcons.close_rounded,
               size: 15,
               color: colors.textSecondary,
             ),
@@ -2275,7 +2276,7 @@ class _SidebarSearchFieldState extends State<_SidebarSearchField> {
       child: Row(
         children: [
           Icon(
-            Icons.search_rounded,
+            AppIcons.search_rounded,
             size: 15,
             color: _focused ? colors.accent : colors.textTertiary,
           ),
@@ -2318,7 +2319,7 @@ class _SidebarSearchFieldState extends State<_SidebarSearchField> {
                 child: Padding(
                   padding: const EdgeInsets.all(4),
                   child: Icon(
-                    Icons.close_rounded,
+                    AppIcons.close_rounded,
                     size: 14,
                     color: colors.textTertiary,
                   ),
@@ -2437,7 +2438,7 @@ class _InspectorPane extends StatelessWidget {
                   child: Padding(
                     padding: const EdgeInsets.all(6),
                     child: Icon(
-                      Icons.close_rounded,
+                      AppIcons.close_rounded,
                       size: 16,
                       color: colors.textSecondary,
                     ),

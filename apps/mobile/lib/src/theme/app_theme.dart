@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../app_icons.dart';
 import 'app_colors.dart';
 import 'color_contrast.dart';
 import 'app_tokens.dart';
@@ -226,6 +227,12 @@ ThemeData _buildTheme(
     ),
     iconButtonTheme: IconButtonThemeData(
       style: IconButton.styleFrom(foregroundColor: palette.textSecondary),
+    ),
+    actionIconTheme: ActionIconThemeData(
+      backButtonIconBuilder: (context) => const Icon(AppIcons.arrow_back_rounded),
+      closeButtonIconBuilder: (context) => const Icon(AppIcons.close_rounded),
+      drawerButtonIconBuilder: (context) => const Icon(AppIcons.menu_rounded),
+      endDrawerButtonIconBuilder: (context) => const Icon(AppIcons.menu_rounded),
     ),
     inputDecorationTheme: InputDecorationTheme(
       filled: true,

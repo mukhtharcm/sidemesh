@@ -5,6 +5,7 @@ import '../../theme/app_colors.dart';
 import '../../theme/app_tokens.dart';
 import '../../widgets/mesh_widgets.dart';
 import 'inspector_controller.dart';
+import '../../app_icons.dart';
 
 /// Builds an [InspectorSurface] that hosts the pinned-messages list in
 /// pane 3. Passes [refresh] through so the body rebuilds when the pins
@@ -20,7 +21,7 @@ InspectorSurface buildInspectorPinnedSurface({
     kind: InspectorSurfaceKind.pinned,
     ownerKey: ownerKey,
     title: 'Saved messages',
-    icon: Icons.push_pin_rounded,
+    icon: AppIcons.push_pin_rounded,
     bodyBuilder: (context) {
       Widget buildPanel() => PinnedListPanel(
         pins: pinsBuilder(),
@@ -55,7 +56,7 @@ class PinnedListPanel extends StatelessWidget {
   Widget build(BuildContext context) {
     if (pins.isEmpty) {
       return const MeshEmptyState.compact(
-        icon: Icons.push_pin_rounded,
+        icon: AppIcons.push_pin_rounded,
         title: 'Nothing saved yet',
         body: 'Pin a message to keep it easy to find.',
       );
@@ -91,8 +92,8 @@ class _PinnedListTile extends StatelessWidget {
   Widget build(BuildContext context) {
     final colors = context.colors;
     final roleIcon = pin.role == 'assistant'
-        ? Icons.smart_toy_rounded
-        : Icons.person_outline_rounded;
+        ? AppIcons.smart_toy_rounded
+        : AppIcons.person_outline_rounded;
     return MeshSurface(
       onTap: onOpen,
       radius: AppRadii.control,
@@ -124,7 +125,7 @@ class _PinnedListTile extends StatelessWidget {
                   child: Padding(
                     padding: const EdgeInsets.all(8),
                     child: Icon(
-                      Icons.close_rounded,
+                      AppIcons.close_rounded,
                       size: 16,
                       color: colors.textTertiary,
                     ),
@@ -154,12 +155,12 @@ class _PinnedListTile extends StatelessWidget {
                     label:
                         '${pin.attachmentCount} attachment'
                         '${pin.attachmentCount == 1 ? '' : 's'}',
-                    icon: Icons.attachment_rounded,
+                    icon: AppIcons.attachment_rounded,
                   ),
                 if (pin.textTruncated)
                   const MeshPill(
                     label: 'truncated',
-                    icon: Icons.content_cut_rounded,
+                    icon: AppIcons.content_cut_rounded,
                     tone: MeshPillTone.warning,
                   ),
               ],

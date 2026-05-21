@@ -4,6 +4,7 @@ import '../theme/app_colors.dart';
 import '../theme/color_contrast.dart';
 import '../theme/app_tokens.dart';
 import 'mesh_widgets.dart';
+import '../app_icons.dart';
 
 class MeshBottomSheetScaffold extends StatelessWidget {
   const MeshBottomSheetScaffold({
@@ -117,7 +118,7 @@ class MeshBottomSheetScaffold extends StatelessWidget {
                             ),
                           ),
                           MeshIconButton(
-                            icon: Icons.close_rounded,
+                            icon: AppIcons.close_rounded,
                             tooltip: 'Close',
                             color: colors.textSecondary,
                             onTap: () => Navigator.of(context).maybePop(),

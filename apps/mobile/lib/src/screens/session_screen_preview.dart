@@ -27,7 +27,7 @@ class _StopAgentPill extends StatelessWidget {
             mainAxisSize: MainAxisSize.min,
             children: [
               Icon(
-                Icons.stop_circle_rounded,
+                AppIcons.stop_circle_rounded,
                 size: 16,
                 color: foreground,
               ),
@@ -87,7 +87,7 @@ class _PreviewTargetPickerSheetState extends State<_PreviewTargetPickerSheet> {
   Widget build(BuildContext context) {
     final bottomInset = MediaQuery.of(context).viewInsets.bottom;
     return MeshBottomSheetScaffold(
-      icon: Icons.open_in_browser_rounded,
+      icon: AppIcons.open_in_browser_rounded,
       title: 'Open browser',
       description: 'Enter a URL on this host, or use a detected local app.',
       maxWidth: 680,
@@ -149,7 +149,7 @@ class _PreviewTargetPickerSheetState extends State<_PreviewTargetPickerSheet> {
                 const Spacer(),
                 FilledButton.icon(
                   onPressed: _submitManual,
-                  icon: const Icon(Icons.open_in_browser_rounded),
+                  icon: const Icon(AppIcons.open_in_browser_rounded),
                   label: const Text('Open'),
                 ),
               ],
@@ -186,7 +186,7 @@ class _PreviewSuggestionTile extends StatelessWidget {
           ),
           alignment: Alignment.center,
           child: Icon(
-            Icons.open_in_browser_rounded,
+            AppIcons.open_in_browser_rounded,
             size: 18,
             color: colors.accent,
           ),

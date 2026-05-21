@@ -7,6 +7,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:sidemesh_mobile/src/screens/image_viewer_screen.dart';
 import 'package:sidemesh_mobile/src/theme/app_palettes.dart';
 import 'package:sidemesh_mobile/src/theme/app_theme.dart';
+import 'package:sidemesh_mobile/src/app_icons.dart';
 
 void main() {
   ImageViewerSource buildSource({
@@ -41,12 +42,12 @@ void main() {
     expect(find.text('Generated image'), findsOneWidget);
     expect(find.text('/tmp/generated.png'), findsOneWidget);
 
-    await tester.tap(find.byIcon(Icons.add_rounded));
+    await tester.tap(find.byIcon(AppIcons.add_rounded));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 220));
     expect(find.text('200%'), findsOneWidget);
 
-    await tester.tap(find.byIcon(Icons.center_focus_strong_rounded));
+    await tester.tap(find.byIcon(AppIcons.center_focus_strong_rounded));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 220));
     expect(find.text('100%'), findsOneWidget);

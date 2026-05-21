@@ -17,9 +17,9 @@ class _CachedTranscriptStrip extends StatelessWidget {
   Widget build(BuildContext context) {
     final colors = context.colors;
     final icon = switch (mode) {
-      _TranscriptFreshnessMode.cached => Icons.history_rounded,
-      _TranscriptFreshnessMode.reconnecting => Icons.sync_rounded,
-      _TranscriptFreshnessMode.offline => Icons.wifi_off_rounded,
+      _TranscriptFreshnessMode.cached => AppIcons.history_rounded,
+      _TranscriptFreshnessMode.reconnecting => AppIcons.sync_rounded,
+      _TranscriptFreshnessMode.offline => AppIcons.wifi_off_rounded,
     };
     final text = switch (mode) {
       _TranscriptFreshnessMode.cached =>
@@ -159,7 +159,7 @@ class _SessionActionSheet extends StatelessWidget {
                     ),
                     alignment: Alignment.center,
                     child: Icon(
-                      Icons.auto_awesome_mosaic_rounded,
+                      AppIcons.auto_awesome_mosaic_rounded,
                       size: desktop ? 18 : 19,
                       color: colors.accent,
                     ),
@@ -194,7 +194,7 @@ class _SessionActionSheet extends StatelessWidget {
                   ),
                   if (!desktop)
                     MeshIconButton(
-                      icon: Icons.close_rounded,
+                      icon: AppIcons.close_rounded,
                       tooltip: 'Close',
                       color: colors.textSecondary,
                       onTap: () => Navigator.of(context).pop(),
@@ -387,7 +387,7 @@ class _JumpToLatestPill extends StatelessWidget {
             mainAxisSize: MainAxisSize.min,
             children: [
               Icon(
-                Icons.arrow_downward_rounded,
+                AppIcons.arrow_downward_rounded,
                 size: 16,
                 color: foreground,
               ),
@@ -489,7 +489,7 @@ class _SessionAppBarSubtitle extends StatelessWidget {
                 const SizedBox(width: 6),
                 _CompactMetaChip(
                   label: '${gitStatus?.changed ?? 0}',
-                  icon: Icons.account_tree_rounded,
+                  icon: AppIcons.account_tree_rounded,
                   color: colors.warning,
                   onTap: onGitDetails,
                 ),
@@ -498,7 +498,7 @@ class _SessionAppBarSubtitle extends StatelessWidget {
                 const SizedBox(width: 6),
                 _CompactMetaChip(
                   label: contextLabel,
-                  icon: Icons.data_usage_rounded,
+                  icon: AppIcons.data_usage_rounded,
                   color: switch (contextTone) {
                     MeshPillTone.danger => colors.danger,
                     MeshPillTone.warning => colors.warning,
@@ -510,13 +510,13 @@ class _SessionAppBarSubtitle extends StatelessWidget {
                 const SizedBox(width: 6),
                 _CompactMetaChip(
                   label: '$pinnedCount',
-                  icon: Icons.push_pin_rounded,
+                  icon: AppIcons.push_pin_rounded,
                   color: pinnedActive ? colors.accent : colors.textSecondary,
                   onTap: onPinnedTap,
                 ),
               ],
               const SizedBox(width: 6),
-              Icon(Icons.info_outline_rounded, size: 14, color: colors.accent),
+              Icon(AppIcons.info_outline_rounded, size: 14, color: colors.accent),
             ],
           ),
         ),
@@ -645,7 +645,7 @@ class _GitDetailsSheet extends StatelessWidget {
     final originUrl = status?.originUrl ?? gitInfo?.originUrl;
 
     return MeshBottomSheetScaffold(
-      icon: Icons.account_tree_rounded,
+      icon: AppIcons.account_tree_rounded,
       title: 'Git details',
       description:
           'Review branch status, changed files, and the diffs available for this session.',
@@ -660,7 +660,7 @@ class _GitDetailsSheet extends StatelessWidget {
               alignment: Alignment.centerRight,
               child: OutlinedButton.icon(
                 onPressed: loading ? null : onRefresh,
-                icon: const Icon(Icons.refresh_rounded, size: 18),
+                icon: const Icon(AppIcons.refresh_rounded, size: 18),
                 label: const Text('Refresh'),
               ),
             ),
@@ -669,7 +669,7 @@ class _GitDetailsSheet extends StatelessWidget {
               const _GitDetailsLoadingState()
             else if (status != null && !status!.isRepo)
               MeshEmptyState(
-                icon: Icons.account_tree_rounded,
+                icon: AppIcons.account_tree_rounded,
                 title: 'No Git repo found',
                 body:
                     'This session working directory is not inside a Git worktree.',
@@ -681,14 +681,14 @@ class _GitDetailsSheet extends StatelessWidget {
                 children: [
                   MeshPill(
                     label: branch ?? 'detached',
-                    icon: Icons.account_tree_rounded,
+                    icon: AppIcons.account_tree_rounded,
                     tone: MeshPillTone.accent,
                     mono: true,
                   ),
                   if (shortSha != null)
                     MeshPill(
                       label: shortSha,
-                      icon: Icons.tag_rounded,
+                      icon: AppIcons.tag_rounded,
                       tone: MeshPillTone.neutral,
                       mono: true,
                     ),
@@ -698,8 +698,8 @@ class _GitDetailsSheet extends StatelessWidget {
                           ? '${status!.changed} changed'
                           : 'clean',
                       icon: status!.dirty
-                          ? Icons.warning_amber_rounded
-                          : Icons.check_rounded,
+                          ? AppIcons.warning_amber_rounded
+                          : AppIcons.check_rounded,
                       tone: status!.dirty
                           ? MeshPillTone.warning
                           : MeshPillTone.success,
@@ -750,12 +750,12 @@ class _GitDetailsSheet extends StatelessWidget {
                 children: [
                   OutlinedButton.icon(
                     onPressed: () => onShowDiff('working'),
-                    icon: const Icon(Icons.difference_rounded, size: 18),
+                    icon: const Icon(AppIcons.difference_rounded, size: 18),
                     label: const Text('Working diff'),
                   ),
                   OutlinedButton.icon(
                     onPressed: () => onShowDiff('staged'),
-                    icon: const Icon(Icons.inventory_2_rounded, size: 18),
+                    icon: const Icon(AppIcons.inventory_2_rounded, size: 18),
                     label: const Text('Staged diff'),
                   ),
                 ],
@@ -955,7 +955,7 @@ class _GitDiffSheet extends StatelessWidget {
             ? 'Git diff'
             : _gitDiffTitle(snapshot.data!);
         return MeshBottomSheetScaffold(
-          icon: Icons.difference_rounded,
+          icon: AppIcons.difference_rounded,
           title: title,
           description: 'Review the Git patch for this session.',
           maxWidth: 980,
@@ -967,7 +967,7 @@ class _GitDiffSheet extends StatelessWidget {
               }
               if (snapshot.hasError) {
                 return MeshEmptyState(
-                  icon: Icons.error_outline_rounded,
+                  icon: AppIcons.error_outline_rounded,
                   title: 'Could not load diff',
                   body: friendlyError(snapshot.error ?? 'Unknown error'),
                 );
@@ -975,7 +975,7 @@ class _GitDiffSheet extends StatelessWidget {
               final diff = snapshot.data!;
               if (diff.diff.trim().isEmpty) {
                 return MeshEmptyState(
-                  icon: Icons.check_rounded,
+                  icon: AppIcons.check_rounded,
                   title: 'No diff',
                   body: 'Git did not report changes for this view.',
                 );
@@ -989,7 +989,7 @@ class _GitDiffSheet extends StatelessWidget {
                         padding: const EdgeInsets.only(bottom: 10),
                         child: MeshPill(
                           label: 'Truncated after ${diff.maxChars} chars',
-                          icon: Icons.content_cut_rounded,
+                          icon: AppIcons.content_cut_rounded,
                           tone: MeshPillTone.warning,
                           mono: true,
                         ),
@@ -1107,7 +1107,7 @@ class _PinnedListSheet extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MeshBottomSheetScaffold(
-      icon: Icons.push_pin_rounded,
+      icon: AppIcons.push_pin_rounded,
       title: 'Pinned messages',
       description:
           'Jump back to saved messages or remove them from the pinned list.',
@@ -1153,7 +1153,7 @@ class _PinnedMessageSheet extends StatelessWidget {
       baseStyle: textStyle,
     );
     return MeshBottomSheetScaffold(
-      icon: Icons.push_pin_rounded,
+      icon: AppIcons.push_pin_rounded,
       title: 'Pinned ${pin.roleLabel.toLowerCase()} message',
       description:
           'Keep an important message visible while you work through this session.',
@@ -1174,7 +1174,7 @@ class _PinnedMessageSheet extends StatelessWidget {
               if (pin.hasText) const SizedBox(width: 6),
               TextButton.icon(
                 onPressed: onUnpin,
-                icon: const Icon(Icons.push_pin_rounded, size: 17),
+                icon: const Icon(AppIcons.push_pin_rounded, size: 17),
                 label: const Text('Unpin'),
               ),
             ],
@@ -1187,23 +1187,23 @@ class _PinnedMessageSheet extends StatelessWidget {
               MeshPill(
                 label: pin.roleLabel,
                 icon: pin.role == 'assistant'
-                    ? Icons.smart_toy_rounded
-                    : Icons.person_outline_rounded,
+                    ? AppIcons.smart_toy_rounded
+                    : AppIcons.person_outline_rounded,
               ),
               MeshPill(
                 label: 'Pinned ${_formatPinnedTimestamp(pin.pinnedAt)}',
-                icon: Icons.schedule_rounded,
+                icon: AppIcons.schedule_rounded,
               ),
               if (pin.attachmentCount > 0)
                 MeshPill(
                   label:
                       '${pin.attachmentCount} attachment${pin.attachmentCount == 1 ? '' : 's'}',
-                  icon: Icons.attachment_rounded,
+                  icon: AppIcons.attachment_rounded,
                 ),
               if (pin.textTruncated)
                 const MeshPill(
                   label: 'Stored preview truncated',
-                  icon: Icons.content_cut_rounded,
+                  icon: AppIcons.content_cut_rounded,
                   tone: MeshPillTone.warning,
                 ),
             ],
@@ -1494,7 +1494,7 @@ class _PendingActionCardState extends State<_PendingActionCard> {
             padding: const EdgeInsets.only(bottom: 8),
             child: MeshPill(
               label: source,
-              icon: Icons.extension_rounded,
+              icon: AppIcons.extension_rounded,
               tone: MeshPillTone.neutral,
               mono: true,
             ),
@@ -1504,7 +1504,7 @@ class _PendingActionCardState extends State<_PendingActionCard> {
             onTap: _openElicitationUrl,
             child: MeshPill(
               label: 'Open browser link',
-              icon: Icons.open_in_new_rounded,
+              icon: AppIcons.open_in_new_rounded,
               tone: MeshPillTone.accent,
             ),
           ),
@@ -1640,6 +1640,7 @@ class _PendingActionCardState extends State<_PendingActionCard> {
           child = DropdownButtonFormField<String>(
             key: ValueKey('${field.key}:${_singleValues[field.key] ?? ''}'),
             initialValue: _singleValues[field.key],
+            icon: const Icon(AppIcons.keyboard_arrow_down_rounded),
             decoration: _fieldDecoration(colors, label, field.description),
             items: options
                 .map(
@@ -1723,7 +1724,7 @@ class _PendingActionCardState extends State<_PendingActionCard> {
       return [
         FilledButton.icon(
           onPressed: _responding ? null : _submitUserInput,
-          icon: const Icon(Icons.send_rounded, size: 18),
+          icon: const Icon(AppIcons.send_rounded, size: 18),
           label: const Text('Send answer'),
         ),
       ];
@@ -1732,7 +1733,7 @@ class _PendingActionCardState extends State<_PendingActionCard> {
       return [
         FilledButton.icon(
           onPressed: _responding ? null : _submitElicitation,
-          icon: const Icon(Icons.check_rounded, size: 18),
+          icon: const Icon(AppIcons.check_rounded, size: 18),
           label: Text(
             action.elicitation?.mode == 'url' ? 'Continue' : 'Submit',
           ),
@@ -1742,14 +1743,14 @@ class _PendingActionCardState extends State<_PendingActionCard> {
             onPressed: () => widget.onRespond(
               PendingActionResponseDraft.elicitation(action: 'decline'),
             ),
-            icon: Icons.thumb_down_alt_rounded,
+            icon: AppIcons.thumb_down_alt_rounded,
             label: 'Decline',
           ),
         OutlinedButton.icon(
           onPressed: () => widget.onRespond(
             PendingActionResponseDraft.elicitation(action: 'cancel'),
           ),
-          icon: const Icon(Icons.close_rounded, size: 18),
+          icon: const Icon(AppIcons.close_rounded, size: 18),
           label: const Text('Cancel'),
         ),
       ];
@@ -1765,7 +1766,7 @@ class _PendingActionCardState extends State<_PendingActionCard> {
                     PendingActionResponseDraft.approval('accept'),
                   );
                 },
-          icon: const Icon(Icons.check_rounded, size: 18),
+          icon: const Icon(AppIcons.check_rounded, size: 18),
           label: const Text('Approve'),
         ),
       if (action.canApproveForSession)
@@ -1773,7 +1774,7 @@ class _PendingActionCardState extends State<_PendingActionCard> {
           onPressed: () => widget.onRespond(
             PendingActionResponseDraft.approval('acceptForSession'),
           ),
-          icon: const Icon(Icons.all_inclusive_rounded, size: 18),
+          icon: const Icon(AppIcons.all_inclusive_rounded, size: 18),
           label: const Text('Approve for session'),
         ),
       if (action.canDecline)
@@ -1786,7 +1787,7 @@ class _PendingActionCardState extends State<_PendingActionCard> {
                     PendingActionResponseDraft.approval('decline'),
                   );
                 },
-          icon: Icons.close_rounded,
+          icon: AppIcons.close_rounded,
           label: 'Decline',
         ),
     ];
@@ -1913,7 +1914,7 @@ _PendingActionKindMeta _kindMeta(PendingAction action, AppColors colors) {
   if (action.isUserInput) {
     return _PendingActionKindMeta(
       kicker: 'INPUT NEEDED',
-      icon: Icons.chat_bubble_outline_rounded,
+      icon: AppIcons.chat_bubble_outline_rounded,
       accent: colors.accent,
       tone: MeshStatusTone.waiting,
     );
@@ -1921,14 +1922,14 @@ _PendingActionKindMeta _kindMeta(PendingAction action, AppColors colors) {
   if (action.isElicitation) {
     return _PendingActionKindMeta(
       kicker: 'FORM REQUIRED',
-      icon: Icons.fact_check_rounded,
+      icon: AppIcons.fact_check_rounded,
       accent: colors.info,
       tone: MeshStatusTone.queued,
     );
   }
   return _PendingActionKindMeta(
     kicker: 'APPROVAL REQUIRED',
-    icon: Icons.shield_rounded,
+    icon: AppIcons.shield_rounded,
     accent: colors.warning,
     tone: MeshStatusTone.approval,
   );
@@ -1970,7 +1971,7 @@ class _HistoryTruncationCard extends StatelessWidget {
       padding: const EdgeInsets.all(4),
       child: Row(
         children: [
-          Icon(Icons.history_rounded, size: 14, color: colors.textSecondary),
+          Icon(AppIcons.history_rounded, size: 14, color: colors.textSecondary),
           const SizedBox(width: 8),
           Expanded(
             child: Text(
@@ -2015,7 +2016,7 @@ class _HistoryTruncationCard extends StatelessWidget {
               child: Padding(
                 padding: const EdgeInsets.all(6),
                 child: Icon(
-                  Icons.close_rounded,
+                  AppIcons.close_rounded,
                   size: 14,
                   color: colors.textTertiary,
                 ),

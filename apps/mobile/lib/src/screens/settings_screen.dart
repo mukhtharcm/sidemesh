@@ -26,6 +26,7 @@ import '../widgets/mesh_widgets.dart';
 import '../onboarding_store.dart';
 import 'desktop_welcome_overlay.dart';
 import 'onboarding_screen.dart';
+import '../app_icons.dart';
 
 Future<void> openSettingsScreen(
   BuildContext context, {
@@ -195,7 +196,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     if (_busyAction != null) return;
     final confirmed = await showMeshConfirmDialog(
       context,
-      icon: Icons.delete_sweep_rounded,
+      icon: AppIcons.delete_sweep_rounded,
       title: title,
       description: body,
       confirmLabel: 'Clear data',
@@ -217,7 +218,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   Future<void> _replayOnboarding() async {
     final confirmed = await showMeshConfirmDialog(
       context,
-      icon: Icons.play_circle_outline_rounded,
+      icon: AppIcons.play_circle_outline_rounded,
       title: 'Show the guide again?',
       description:
           'This opens the first-run guide again. You can close it whenever you want.',
@@ -399,7 +400,7 @@ class _LaunchDefaultsSheetState extends State<_LaunchDefaultsSheet> {
               children: [
                 Row(
                   children: [
-                    Icon(Icons.rocket_launch_rounded, color: colors.accent),
+                    Icon(AppIcons.rocket_launch_rounded, color: colors.accent),
                     const SizedBox(width: 10),
                     Expanded(
                       child: Text(
@@ -410,7 +411,7 @@ class _LaunchDefaultsSheetState extends State<_LaunchDefaultsSheet> {
                       ),
                     ),
                     MeshIconButton(
-                      icon: Icons.close_rounded,
+                      icon: AppIcons.close_rounded,
                       tooltip: 'Close',
                       onTap: () => Navigator.of(context).maybePop(),
                     ),
@@ -608,22 +609,22 @@ class _LaunchDefaultsSummaryCard extends StatelessWidget {
             children: [
               MeshPill(
                 label: draft.approval.label,
-                icon: Icons.verified_user_rounded,
+                icon: AppIcons.verified_user_rounded,
               ),
               MeshPill(
                 label: draft.sandbox.label,
-                icon: Icons.folder_special_rounded,
+                icon: AppIcons.folder_special_rounded,
               ),
               MeshPill(
                 label: draft.fastMode ? 'fast mode on' : 'fast mode off',
-                icon: Icons.bolt_rounded,
+                icon: AppIcons.bolt_rounded,
                 tone: draft.fastMode
                     ? MeshPillTone.accent
                     : MeshPillTone.neutral,
               ),
               MeshPill(
                 label: draft.webSearch ? 'web search on' : 'web search off',
-                icon: Icons.public_rounded,
+                icon: AppIcons.public_rounded,
                 tone: draft.webSearch
                     ? MeshPillTone.info
                     : MeshPillTone.neutral,
@@ -717,14 +718,14 @@ class _SettingsContent extends StatelessWidget {
       ),
       children: [
         _SettingsSection(
-          icon: Icons.palette_rounded,
+          icon: AppIcons.palette_rounded,
           title: 'Appearance & device',
           subtitle: 'Theme, text, and screen behavior.',
           children: [
             ListenableBuilder(
               listenable: themeController,
               builder: (context, _) => _SettingsCard(
-                icon: Icons.palette_rounded,
+                icon: AppIcons.palette_rounded,
                 title: 'Appearance',
                 subtitle:
                     '${themeModeLabelFor(themeController.mode)} · ${themeController.variant.label} · ${themeController.typography.interfaceFont.label}',
@@ -740,7 +741,7 @@ class _SettingsContent extends StatelessWidget {
               builder: (context, _) {
                 final enabled = screenAwakeStore.keepScreenAwakeWhileAgentRuns;
                 return _SettingsCard(
-                  icon: Icons.light_mode_rounded,
+                  icon: AppIcons.light_mode_rounded,
                   title: 'Display',
                   subtitle: enabled
                       ? 'This screen stays awake while an agent is working.'
@@ -748,7 +749,7 @@ class _SettingsContent extends StatelessWidget {
                   body:
                       'Sidemesh only keeps this screen awake while an agent run is active. The wake lock ends when the run stops, the app leaves the foreground, or you turn this off.',
                   footer: _ToggleTile(
-                    icon: Icons.screen_lock_portrait_rounded,
+                    icon: AppIcons.screen_lock_portrait_rounded,
                     title: 'Keep screen awake while agent runs',
                     subtitle: 'Useful for long turns. May use more battery.',
                     value: enabled,
@@ -763,12 +764,12 @@ class _SettingsContent extends StatelessWidget {
         ),
         const SizedBox(height: AppSpacing.lg),
         _SettingsSection(
-          icon: Icons.notifications_rounded,
+          icon: AppIcons.notifications_rounded,
           title: 'Alerts',
           subtitle: 'Notification permissions and background support.',
           children: [
             _SettingsCard(
-              icon: Icons.notifications_rounded,
+              icon: AppIcons.notifications_rounded,
               title: 'Notifications',
               subtitle: notificationsLoading
                   ? 'Checking device notification status...'
@@ -791,8 +792,8 @@ class _SettingsContent extends StatelessWidget {
                         ? MeshPillTone.success
                         : MeshPillTone.warning,
                     icon: notificationsAllowed
-                        ? Icons.notifications_active_rounded
-                        : Icons.notifications_off_rounded,
+                        ? AppIcons.notifications_active_rounded
+                        : AppIcons.notifications_off_rounded,
                   ),
                   MeshPill(
                     label:
@@ -802,13 +803,13 @@ class _SettingsContent extends StatelessWidget {
                     tone: BackgroundSyncService.instance.supportsBackgroundFetch
                         ? MeshPillTone.info
                         : MeshPillTone.neutral,
-                    icon: Icons.sync_rounded,
+                    icon: AppIcons.sync_rounded,
                   ),
                   if (liveActivitiesSupported)
                     const MeshPill(
                       label: 'live activity',
                       tone: MeshPillTone.info,
-                      icon: Icons.view_agenda_rounded,
+                      icon: AppIcons.view_agenda_rounded,
                     ),
                 ],
               ),
@@ -840,7 +841,7 @@ class _SettingsContent extends StatelessWidget {
         const SizedBox(height: AppSpacing.lg),
         if (showAppUpdateSection) ...[
           _SettingsSection(
-            icon: Icons.system_update_rounded,
+            icon: AppIcons.system_update_rounded,
             title: 'App updates',
             subtitle: 'Sparkle checks and release cadence.',
             children: [
@@ -856,7 +857,7 @@ class _SettingsContent extends StatelessWidget {
           const SizedBox(height: AppSpacing.lg),
         ],
         _SettingsSection(
-          icon: Icons.rocket_launch_rounded,
+          icon: AppIcons.rocket_launch_rounded,
           title: 'Session defaults',
           subtitle: 'Starting values before host-specific overrides.',
           children: [
@@ -865,7 +866,7 @@ class _SettingsContent extends StatelessWidget {
               builder: (context, _) {
                 final defaults = defaultsStore.defaults;
                 return _SettingsCard(
-                  icon: Icons.rocket_launch_rounded,
+                  icon: AppIcons.rocket_launch_rounded,
                   title: 'New session defaults',
                   subtitle:
                       '${defaults.approval.label} · ${defaults.sandbox.label}',
@@ -877,7 +878,7 @@ class _SettingsContent extends StatelessWidget {
                         label: defaults.fastMode
                             ? 'fast mode on'
                             : 'fast mode off',
-                        icon: Icons.bolt_rounded,
+                        icon: AppIcons.bolt_rounded,
                         tone: defaults.fastMode
                             ? MeshPillTone.accent
                             : MeshPillTone.neutral,
@@ -886,7 +887,7 @@ class _SettingsContent extends StatelessWidget {
                         label: defaults.webSearch
                             ? 'web search on'
                             : 'web search off',
-                        icon: Icons.public_rounded,
+                        icon: AppIcons.public_rounded,
                         tone: defaults.webSearch
                             ? MeshPillTone.info
                             : MeshPillTone.neutral,
@@ -904,19 +905,19 @@ class _SettingsContent extends StatelessWidget {
         ),
         const SizedBox(height: AppSpacing.lg),
         _SettingsSection(
-          icon: Icons.warning_amber_rounded,
+          icon: AppIcons.warning_amber_rounded,
           title: 'Local data',
           subtitle: 'Clear information saved only on this device.',
           children: [
             _SettingsCard(
-              icon: Icons.storage_rounded,
+              icon: AppIcons.storage_rounded,
               title: 'On-device state',
               subtitle: 'These actions only touch local data.',
               footer: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
                   _ActionRow(
-                    icon: Icons.history_rounded,
+                    icon: AppIcons.history_rounded,
                     title: 'Clear saved transcript cache',
                     danger: true,
                     subtitle: 'Drop saved recent sessions and saved logs.',
@@ -934,7 +935,7 @@ class _SettingsContent extends StatelessWidget {
                   ),
                   Divider(color: colors.border),
                   _ActionRow(
-                    icon: Icons.image_rounded,
+                    icon: AppIcons.image_rounded,
                     title: 'Clear saved image cache',
                     danger: true,
                     subtitle: 'Remove saved image blobs from disk.',
@@ -952,7 +953,7 @@ class _SettingsContent extends StatelessWidget {
                   ),
                   Divider(color: colors.border),
                   _ActionRow(
-                    icon: Icons.outbox_rounded,
+                    icon: AppIcons.outbox_rounded,
                     title: 'Clear queued sends',
                     danger: true,
                     subtitle:
@@ -1015,7 +1016,7 @@ class _SettingsContent extends StatelessWidget {
                   ),
                 ),
                 alignment: Alignment.center,
-                child: Icon(Icons.tune_rounded, size: 20, color: colors.accent),
+                child: Icon(AppIcons.tune_rounded, size: 20, color: colors.accent),
               ),
               const SizedBox(width: 12),
               Expanded(
@@ -1039,7 +1040,7 @@ class _SettingsContent extends StatelessWidget {
                 ),
               ),
               MeshIconButton(
-                icon: Icons.close_rounded,
+                icon: AppIcons.close_rounded,
                 tooltip: 'Close',
                 onTap: onClose ?? () => Navigator.of(context).maybePop(),
               ),
@@ -1112,7 +1113,7 @@ class _SettingsSectionState extends State<_SettingsSection>
             duration: const Duration(milliseconds: 180),
             turns: _expanded ? 0.5 : 0,
             child: Icon(
-              Icons.expand_more_rounded,
+              AppIcons.expand_more_rounded,
               color: colors.textSecondary,
               size: 22,
             ),
@@ -1185,7 +1186,7 @@ class _AppUpdateSettingsCard extends StatelessWidget {
             : 'You are on $versionLabel. Install the signed production macOS build if you want in-app update checks.';
         final selectedInterval = settings.selectedIntervalOption;
         return _SettingsCard(
-          icon: Icons.system_update_rounded,
+          icon: AppIcons.system_update_rounded,
           title: 'Mac app updates',
           subtitle: subtitle,
           body: cardBody,
@@ -1199,7 +1200,7 @@ class _AppUpdateSettingsCard extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               _ToggleTile(
-                icon: Icons.schedule_rounded,
+                icon: AppIcons.schedule_rounded,
                 title: 'Check automatically',
                 subtitle:
                     'Let Sidemesh ask Sparkle for new releases on a schedule. Manual checks stay available either way.',
@@ -1375,19 +1376,19 @@ class _AboutFooter extends StatelessWidget {
                 if (onReplayOnboarding != null)
                   OutlinedButton.icon(
                     onPressed: onReplayOnboarding,
-                    icon: const Icon(Icons.replay_rounded, size: 16),
+                    icon: const Icon(AppIcons.replay_rounded, size: 16),
                     label: const Text('Replay onboarding'),
                   ),
                 if (hasDesktopControls && onResetSidebarWidth != null)
                   OutlinedButton.icon(
                     onPressed: onResetSidebarWidth,
-                    icon: const Icon(Icons.view_sidebar_rounded, size: 16),
+                    icon: const Icon(AppIcons.view_sidebar_rounded, size: 16),
                     label: const Text('Reset sidebar'),
                   ),
                 if (hasDesktopControls && onResetInspectorWidth != null)
                   OutlinedButton.icon(
                     onPressed: onResetInspectorWidth,
-                    icon: const Icon(Icons.tune_rounded, size: 16),
+                    icon: const Icon(AppIcons.tune_rounded, size: 16),
                     label: const Text('Reset inspector'),
                   ),
               ],

@@ -22,6 +22,7 @@ import '../widgets/mesh_widgets.dart';
 import '../widgets/session_row_card.dart';
 import 'create_session_sheet.dart';
 import 'terminal_screen.dart';
+import '../app_icons.dart';
 
 String _hostEndpointLabel(String baseUrl) {
   final uri = Uri.tryParse(baseUrl.trim());
@@ -351,13 +352,13 @@ class _HostDetailScreenState extends State<HostDetailScreen>
           IconButton(
             tooltip: 'Refresh',
             onPressed: _refresh,
-            icon: const Icon(Icons.refresh_rounded),
+            icon: const Icon(AppIcons.refresh_rounded),
           ),
         ],
       ),
       floatingActionButton: FloatingActionButton.extended(
         onPressed: () => _startSession(),
-        icon: const Icon(Icons.play_arrow_rounded),
+        icon: const Icon(AppIcons.play_arrow_rounded),
         label: const Text('New session'),
       ),
       body: _buildBody(context),
@@ -374,7 +375,7 @@ class _HostDetailScreenState extends State<HostDetailScreen>
         }
         if (snapshot.hasError) {
           return MeshEmptyState(
-            icon: Icons.wifi_off_rounded,
+            icon: AppIcons.wifi_off_rounded,
             title: 'Could not reach host',
             body: friendlyError(snapshot.error!),
           );
@@ -415,7 +416,7 @@ class _HostDetailScreenState extends State<HostDetailScreen>
                   if (data.workspaces.length > 1) ...[
                     const SizedBox(height: AppSpacing.lg),
                     _SectionHeader(
-                      icon: Icons.folder_open_rounded,
+                      icon: AppIcons.folder_open_rounded,
                       title: 'Start from folder',
                       subtitle:
                           '${data.workspaces.length} recent ${data.workspaces.length == 1 ? "folder" : "folders"}',
@@ -429,7 +430,7 @@ class _HostDetailScreenState extends State<HostDetailScreen>
                   ],
                   const SizedBox(height: AppSpacing.xl),
                   _SectionHeader(
-                    icon: Icons.medical_services_rounded,
+                    icon: AppIcons.medical_services_rounded,
                     title: 'Manage this machine',
                     subtitle: 'Open tools, updates, and restart controls',
                   ),
@@ -443,7 +444,7 @@ class _HostDetailScreenState extends State<HostDetailScreen>
                   ),
                   const SizedBox(height: AppSpacing.lg),
                   _SectionHeader(
-                    icon: Icons.history_rounded,
+                    icon: AppIcons.history_rounded,
                     title: 'Recent sessions',
                     subtitle:
                         '${data.sessions.length} ${data.sessions.length == 1 ? "session" : "sessions"}',
@@ -451,7 +452,7 @@ class _HostDetailScreenState extends State<HostDetailScreen>
                   const SizedBox(height: AppSpacing.sm),
                   if (sortedSessions.isEmpty)
                     const MeshEmptyState(
-                      icon: Icons.chat_bubble_outline_rounded,
+                      icon: AppIcons.chat_bubble_outline_rounded,
                       title: 'No sessions yet',
                       body: 'Start a session on this machine to see it here.',
                     )
@@ -513,7 +514,7 @@ class _EmbeddedHostHeader extends StatelessWidget {
               borderRadius: BorderRadius.circular(9),
             ),
             alignment: Alignment.center,
-            child: Icon(Icons.dns_rounded, size: 17, color: colors.accent),
+            child: Icon(AppIcons.dns_rounded, size: 17, color: colors.accent),
           ),
           const SizedBox(width: 12),
           Expanded(
@@ -541,13 +542,13 @@ class _EmbeddedHostHeader extends StatelessWidget {
           ),
           IconButton(
             tooltip: 'Refresh',
-            icon: const Icon(Icons.refresh_rounded, size: 18),
+            icon: const Icon(AppIcons.refresh_rounded, size: 18),
             onPressed: onRefresh,
           ),
           const SizedBox(width: 4),
           FilledButton.icon(
             onPressed: onNewSession,
-            icon: const Icon(Icons.play_arrow_rounded, size: 16),
+            icon: const Icon(AppIcons.play_arrow_rounded, size: 16),
             label: const Text('New session'),
             style: FilledButton.styleFrom(
               backgroundColor: colors.accent,
@@ -733,7 +734,7 @@ class _NodeCard extends StatelessWidget {
                   ),
                 ),
                 alignment: Alignment.center,
-                child: Icon(Icons.dns_rounded, color: colors.accent, size: 18),
+                child: Icon(AppIcons.dns_rounded, color: colors.accent, size: 18),
               ),
               const SizedBox(width: 12),
               Expanded(
@@ -766,26 +767,26 @@ class _NodeCard extends StatelessWidget {
             children: [
               MeshPill(
                 label: node.hostname,
-                icon: Icons.memory_rounded,
+                icon: AppIcons.memory_rounded,
                 tone: MeshPillTone.neutral,
                 mono: true,
               ),
               MeshPill(
                 label: node.platform,
-                icon: Icons.devices_other_rounded,
+                icon: AppIcons.devices_other_rounded,
                 tone: MeshPillTone.neutral,
                 mono: true,
               ),
               MeshPill(
                 label: node.providerPillLabel,
-                icon: Icons.auto_awesome_rounded,
+                icon: AppIcons.auto_awesome_rounded,
                 tone: MeshPillTone.accent,
                 mono: true,
               ),
               if (node.providerConfig.command != null)
                 MeshPill(
                   label: node.providerConfig.command!,
-                  icon: Icons.terminal_rounded,
+                  icon: AppIcons.terminal_rounded,
                   tone: MeshPillTone.neutral,
                   mono: true,
                 ),
@@ -794,7 +795,7 @@ class _NodeCard extends StatelessWidget {
                   label: node.usesBleedingEdgeTrack
                       ? 'New commits on main'
                       : 'Update: ${node.latestInstallLabel} available',
-                  icon: Icons.system_update_alt_rounded,
+                  icon: AppIcons.system_update_alt_rounded,
                   tone: MeshPillTone.warning,
                   mono: true,
                 ),
@@ -869,7 +870,7 @@ class _MobileClientCompatibilityCard extends StatelessWidget {
               border: Border.all(color: accent.withValues(alpha: 0.3)),
             ),
             alignment: Alignment.center,
-            child: Icon(Icons.phone_android_rounded, color: accent, size: 18),
+            child: Icon(AppIcons.phone_android_rounded, color: accent, size: 18),
           ),
           const SizedBox(width: 12),
           Expanded(
@@ -897,7 +898,7 @@ class _MobileClientCompatibilityCard extends StatelessWidget {
                   children: [
                     MeshPill(
                       label: appVersionInfo.displayVersion,
-                      icon: Icons.smartphone_rounded,
+                      icon: AppIcons.smartphone_rounded,
                       tone: MeshPillTone.neutral,
                       mono: true,
                     ),
@@ -905,7 +906,7 @@ class _MobileClientCompatibilityCard extends StatelessWidget {
                       MeshPill(
                         label:
                             'minimum ${mobileClientVersionLabel(node.minimumMobileClientVersion!)}',
-                        icon: Icons.lock_outline_rounded,
+                        icon: AppIcons.lock_outline_rounded,
                         tone: requiresUpdate
                             ? MeshPillTone.danger
                             : MeshPillTone.neutral,
@@ -915,7 +916,7 @@ class _MobileClientCompatibilityCard extends StatelessWidget {
                       MeshPill(
                         label:
                             'recommended ${mobileClientVersionLabel(node.recommendedMobileClientVersion!)}',
-                        icon: Icons.system_update_alt_rounded,
+                        icon: AppIcons.system_update_alt_rounded,
                         tone: recommendsUpdate
                             ? MeshPillTone.info
                             : MeshPillTone.neutral,
@@ -1082,7 +1083,7 @@ class _ProviderContractOverviewCard extends StatelessWidget {
                   ),
                 ),
                 alignment: Alignment.center,
-                child: Icon(Icons.hub_rounded, color: colors.info, size: 19),
+                child: Icon(AppIcons.hub_rounded, color: colors.info, size: 19),
               ),
               const SizedBox(width: 12),
               Expanded(
@@ -1119,7 +1120,7 @@ class _ProviderContractOverviewCard extends StatelessWidget {
             children: [
               MeshPill(
                 label: _agentInUseLabel(node.providerDisplayName),
-                icon: Icons.radio_button_checked_rounded,
+                icon: AppIcons.radio_button_checked_rounded,
                 tone: isViewingActiveProvider
                     ? MeshPillTone.success
                     : MeshPillTone.neutral,
@@ -1127,18 +1128,18 @@ class _ProviderContractOverviewCard extends StatelessWidget {
               if (!isViewingActiveProvider)
                 MeshPill(
                   label: _agentViewingLabel(selectedDisplayName),
-                  icon: Icons.visibility_rounded,
+                  icon: AppIcons.visibility_rounded,
                   tone: MeshPillTone.accent,
                 ),
               if (selectedCommand != null)
                 MeshPill(
                   label: _agentCommandLabel(selectedCommand!),
-                  icon: Icons.terminal_rounded,
+                  icon: AppIcons.terminal_rounded,
                   tone: MeshPillTone.neutral,
                 ),
               MeshPill(
                 label: _agentAvailabilityLabel(node.supportedProviders.length),
-                icon: Icons.extension_rounded,
+                icon: AppIcons.extension_rounded,
                 tone: node.supportedProviders.isEmpty
                     ? MeshPillTone.warning
                     : MeshPillTone.info,
@@ -1171,7 +1172,7 @@ class _ProviderDefinitionSection extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         _ContractSectionLabel(
-          icon: Icons.extension_rounded,
+          icon: AppIcons.extension_rounded,
           title: 'Available agents',
           detail: '${providers.length} available',
         ),
@@ -1236,8 +1237,8 @@ class _ProviderDefinitionRow extends StatelessWidget {
         alignment: Alignment.center,
         child: Icon(
           selected
-              ? Icons.radio_button_checked_rounded
-              : Icons.radio_button_unchecked_rounded,
+              ? AppIcons.radio_button_checked_rounded
+              : AppIcons.radio_button_unchecked_rounded,
           size: 17,
           color: iconTone,
         ),
@@ -1276,7 +1277,7 @@ class _ProviderDefinitionRow extends StatelessWidget {
         ).textTheme.bodySmall?.copyWith(color: colors.textTertiary),
       ),
       trailing: selected
-          ? Icon(Icons.check_rounded, color: colors.accent, size: 18)
+          ? Icon(AppIcons.check_rounded, color: colors.accent, size: 18)
           : null,
     );
   }
@@ -1309,8 +1310,8 @@ class _CapabilitySummaryMatrix extends StatelessWidget {
       children: [
         _ContractSectionLabel(
           icon: title.startsWith('Machine')
-              ? Icons.dns_rounded
-              : Icons.verified_user_rounded,
+              ? AppIcons.dns_rounded
+              : AppIcons.verified_user_rounded,
           title: title,
           detail: total == 0 ? null : '$enabled/$total ready',
         ),
@@ -1404,7 +1405,7 @@ class _CapabilityStatusChip extends StatelessWidget {
   Widget build(BuildContext context) {
     return MeshPill(
       label: feature.label,
-      icon: feature.enabled ? Icons.check_rounded : Icons.remove_rounded,
+      icon: feature.enabled ? AppIcons.check_rounded : AppIcons.remove_rounded,
       tone: feature.enabled ? MeshPillTone.success : MeshPillTone.neutral,
       mono: true,
     );
@@ -1565,7 +1566,7 @@ class _ProviderContractSummaryCard extends StatelessWidget {
                     ),
                   ),
                   alignment: Alignment.center,
-                  child: Icon(Icons.hub_rounded, color: colors.info, size: 18),
+                  child: Icon(AppIcons.hub_rounded, color: colors.info, size: 18),
                 ),
                 const SizedBox(width: 12),
                 Expanded(
@@ -1593,7 +1594,7 @@ class _ProviderContractSummaryCard extends StatelessWidget {
                 ),
                 const SizedBox(width: 8),
                 Icon(
-                  Icons.chevron_right_rounded,
+                  AppIcons.chevron_right_rounded,
                   color: colors.textTertiary,
                   size: 22,
                 ),
@@ -1668,7 +1669,7 @@ class _ProviderContractCardState extends State<_ProviderContractCard> {
               border: Border.all(color: colors.info.withValues(alpha: 0.35)),
             ),
             alignment: Alignment.center,
-            child: Icon(Icons.hub_rounded, color: colors.info, size: 16),
+            child: Icon(AppIcons.hub_rounded, color: colors.info, size: 16),
           ),
           title: Text(
             'Agents on this machine',
@@ -1694,7 +1695,7 @@ class _ProviderContractCardState extends State<_ProviderContractCard> {
                 children: [
                   MeshPill(
                     label: _agentInUseLabel(node.providerDisplayName),
-                    icon: Icons.radio_button_checked_rounded,
+                    icon: AppIcons.radio_button_checked_rounded,
                     tone: isViewingActiveProvider
                         ? MeshPillTone.success
                         : MeshPillTone.neutral,
@@ -1702,18 +1703,18 @@ class _ProviderContractCardState extends State<_ProviderContractCard> {
                   if (!isViewingActiveProvider)
                     MeshPill(
                       label: _agentViewingLabel(selectedDisplayName),
-                      icon: Icons.visibility_rounded,
+                      icon: AppIcons.visibility_rounded,
                       tone: MeshPillTone.accent,
                     ),
                   if (selectedCommand != null)
                     MeshPill(
                       label: _agentCommandLabel(selectedCommand),
-                      icon: Icons.terminal_rounded,
+                      icon: AppIcons.terminal_rounded,
                       tone: MeshPillTone.neutral,
                     ),
                   MeshPill(
                     label: _agentAvailabilityLabel(supportedProviders.length),
-                    icon: Icons.extension_rounded,
+                    icon: AppIcons.extension_rounded,
                     tone: supportedProviders.isEmpty
                         ? MeshPillTone.warning
                         : MeshPillTone.info,
@@ -1860,8 +1861,8 @@ class _ProviderDefinitionList extends StatelessWidget {
                       ? '${provider.displayName} in use'
                       : provider.displayName,
                   icon: active
-                      ? Icons.check_circle_rounded
-                      : Icons.circle_outlined,
+                      ? AppIcons.check_circle_rounded
+                      : AppIcons.circle_outlined,
                   tone: selected
                       ? (active ? MeshPillTone.success : MeshPillTone.accent)
                       : MeshPillTone.neutral,
@@ -2001,8 +2002,8 @@ class _CapabilityGroupRow extends StatelessWidget {
                   return MeshPill(
                     label: feature.label,
                     icon: feature.enabled
-                        ? Icons.check_rounded
-                        : Icons.remove_rounded,
+                        ? AppIcons.check_rounded
+                        : AppIcons.remove_rounded,
                     tone: feature.enabled
                         ? MeshPillTone.success
                         : MeshPillTone.neutral,
@@ -2150,14 +2151,14 @@ String _capabilitySectionTitle(String key) {
 
 IconData _capabilitySectionIcon(String key) {
   return switch (key) {
-    'sessions' => Icons.forum_rounded,
-    'input' => Icons.input_rounded,
-    'interaction' => Icons.rate_review_rounded,
-    'approvals' => Icons.verified_user_rounded,
-    'configuration' => Icons.tune_rounded,
-    'runtimeControls' => Icons.speed_rounded,
-    'workspace' => Icons.folder_special_rounded,
-    _ => Icons.extension_rounded,
+    'sessions' => AppIcons.forum_rounded,
+    'input' => AppIcons.input_rounded,
+    'interaction' => AppIcons.rate_review_rounded,
+    'approvals' => AppIcons.verified_user_rounded,
+    'configuration' => AppIcons.tune_rounded,
+    'runtimeControls' => AppIcons.speed_rounded,
+    'workspace' => AppIcons.folder_special_rounded,
+    _ => AppIcons.extension_rounded,
   };
 }
 
@@ -2225,7 +2226,7 @@ class _WorkspaceLaunchRow extends StatelessWidget {
               child: Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  Icon(Icons.folder_rounded, size: 14, color: colors.accent),
+                  Icon(AppIcons.folder_rounded, size: 14, color: colors.accent),
                   const SizedBox(width: 6),
                   Text(
                     ws.label,
@@ -2369,7 +2370,7 @@ class _HostManagementCardState extends State<_HostManagementCard> {
       builder: (context) {
         final colors = context.colors;
         return MeshBottomSheetScaffold(
-          icon: Icons.system_update_rounded,
+          icon: AppIcons.system_update_rounded,
           title: 'Choose release track',
           description:
               'Stable gets tagged releases. Early access gets the newest changes.',
@@ -2383,11 +2384,11 @@ class _HostManagementCardState extends State<_HostManagementCard> {
                 framed: false,
                 dense: true,
                 radius: AppRadii.control,
-                leading: Icon(Icons.verified_rounded, color: colors.accent),
+                leading: Icon(AppIcons.verified_rounded, color: colors.accent),
                 title: const Text('Stable'),
                 subtitle: const Text('Tagged releases'),
                 trailing: _selectedUpdateChannel == 'stable'
-                    ? Icon(Icons.check_rounded, color: colors.accent)
+                    ? Icon(AppIcons.check_rounded, color: colors.accent)
                     : null,
                 onTap: () => Navigator.of(context).pop('stable'),
               ),
@@ -2395,11 +2396,11 @@ class _HostManagementCardState extends State<_HostManagementCard> {
                 framed: false,
                 dense: true,
                 radius: AppRadii.control,
-                leading: Icon(Icons.science_rounded, color: colors.accent),
+                leading: Icon(AppIcons.science_rounded, color: colors.accent),
                 title: const Text('Early access'),
                 subtitle: const Text('Newest changes'),
                 trailing: _selectedUpdateChannel == 'bleeding-edge'
-                    ? Icon(Icons.check_rounded, color: colors.accent)
+                    ? Icon(AppIcons.check_rounded, color: colors.accent)
                     : null,
                 onTap: () => Navigator.of(context).pop('bleeding-edge'),
               ),
@@ -2467,7 +2468,7 @@ class _HostManagementCardState extends State<_HostManagementCard> {
       final confirmed = await showDialog<bool>(
         context: context,
         builder: (dialogContext) => MeshDialogScaffold(
-          icon: Icons.system_update_alt_rounded,
+          icon: AppIcons.system_update_alt_rounded,
           title: _updateDialogTitle,
           description: _useBleedingEdgeForNextUpdate
               ? 'This installs the newest Early access build of Sidemesh on this machine.'
@@ -2626,12 +2627,12 @@ class _HostManagementCardState extends State<_HostManagementCard> {
 
   IconData get _updateIcon {
     if (widget.checkingUpdateInfo) {
-      return Icons.sync_rounded;
+      return AppIcons.sync_rounded;
     }
     if (!widget.node.updateAvailable) {
-      return Icons.check_circle_rounded;
+      return AppIcons.check_circle_rounded;
     }
-    return Icons.system_update_alt_rounded;
+    return AppIcons.system_update_alt_rounded;
   }
 
   @override
@@ -2670,7 +2671,7 @@ class _HostManagementCardState extends State<_HostManagementCard> {
               ],
               if (widget.node.supportsHostCapability('workspace', 'terminal'))
                 _ManagementRow(
-                  icon: Icons.terminal_rounded,
+                  icon: AppIcons.terminal_rounded,
                   label: 'Open terminal',
                   detail: 'Open a shell on this machine.',
                   busy: false,
@@ -2680,7 +2681,7 @@ class _HostManagementCardState extends State<_HostManagementCard> {
                 Divider(height: 1, indent: 46, color: colors.border),
               if (_supportsRestart)
                 _ManagementRow(
-                  icon: Icons.refresh_rounded,
+                  icon: AppIcons.refresh_rounded,
                   label: 'Restart $_providerDisplayName',
                   detail: 'Leaves terminals and forwarded ports running.',
                   busy: _restartingProvider,
@@ -2690,7 +2691,7 @@ class _HostManagementCardState extends State<_HostManagementCard> {
                 Divider(height: 1, indent: 46, color: colors.border),
               if (_supportsChannelSelection)
                 _ManagementRow(
-                  icon: Icons.alt_route_rounded,
+                  icon: AppIcons.alt_route_rounded,
                   label: 'Release track',
                   detail: _updateChannelDetail(),
                   busy: _savingUpdateChannel,
@@ -2711,7 +2712,7 @@ class _HostManagementCardState extends State<_HostManagementCard> {
               if (_updateSupported)
                 Divider(height: 1, indent: 46, color: colors.border),
               _ManagementRow(
-                icon: Icons.restart_alt_rounded,
+                icon: AppIcons.restart_alt_rounded,
                 label: 'Restart Sidemesh',
                 detail: 'Reconnects automatically after the restart.',
                 busy: _restartingDaemon,
@@ -2796,7 +2797,7 @@ class _UpdateProgressBanner extends StatelessWidget {
     return _buildRow(
       context,
       colors: colors,
-      icon: Icons.update_rounded,
+      icon: AppIcons.update_rounded,
       iconColor: colors.accent,
       title: 'Installing ${targetLabel ?? 'latest update'}…',
       subtitle: 'This usually takes 20 to 45 seconds',
@@ -2808,7 +2809,7 @@ class _UpdateProgressBanner extends StatelessWidget {
     return _buildRow(
       context,
       colors: colors,
-      icon: Icons.check_circle_rounded,
+      icon: AppIcons.check_circle_rounded,
       iconColor: colors.success,
       title: 'Updated to $label',
       showDismiss: true,
@@ -2821,7 +2822,7 @@ class _UpdateProgressBanner extends StatelessWidget {
       child: _buildRow(
         context,
         colors: colors,
-        icon: Icons.error_outline_rounded,
+        icon: AppIcons.error_outline_rounded,
         iconColor: colors.danger,
         title: 'Update did not finish',
         subtitle: 'Tap to try again',
@@ -2889,7 +2890,7 @@ class _UpdateProgressBanner extends StatelessWidget {
           ),
           if (showDismiss)
             MeshIconButton(
-              icon: Icons.close_rounded,
+              icon: AppIcons.close_rounded,
               onTap: onDismiss,
               color: colors.textSecondary,
             ),

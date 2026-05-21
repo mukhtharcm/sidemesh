@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../theme/app_colors.dart';
 import '../theme/color_contrast.dart';
 import '../theme/app_tokens.dart';
+import '../app_icons.dart';
 
 class MeshDialogScaffold extends StatelessWidget {
   const MeshDialogScaffold({
@@ -122,7 +123,7 @@ class MeshDialogScaffold extends StatelessWidget {
                           if (showCloseButton) ...[
                             const SizedBox(width: 8),
                             IconButton(
-                              icon: const Icon(Icons.close_rounded, size: 18),
+                              icon: const Icon(AppIcons.close_rounded, size: 18),
                               tooltip: 'Close',
                               visualDensity: VisualDensity.compact,
                               onPressed:

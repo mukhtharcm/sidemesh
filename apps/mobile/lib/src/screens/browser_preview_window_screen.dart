@@ -9,6 +9,7 @@ import '../theme/app_colors.dart';
 import '../widgets/mesh_widgets.dart';
 import '../windowing.dart';
 import 'browser_preview_screen.dart';
+import '../app_icons.dart';
 
 class BrowserPreviewWindowScreen extends StatefulWidget {
   const BrowserPreviewWindowScreen({super.key, required this.arguments});
@@ -99,7 +100,7 @@ class _BrowserPreviewWindowScreenState
         backgroundColor: colors.canvas,
         appBar: AppBar(title: Text(_preview.label)),
         body: MeshEmptyState(
-          icon: Icons.open_in_browser_rounded,
+          icon: AppIcons.open_in_browser_rounded,
           title: 'Preview unavailable',
           body: _error ?? 'This preview could not be reopened here.',
         ),

@@ -6,6 +6,7 @@ import '../theme/app_colors.dart';
 import '../theme/app_theme.dart';
 import '../theme/theme_controller.dart';
 import '../widgets/mesh_widgets.dart';
+import '../app_icons.dart';
 
 enum _OnboardingTab { overview, setup, shortcuts }
 
@@ -155,7 +156,7 @@ class _Content extends StatelessWidget {
                   ),
                   alignment: Alignment.center,
                   child: Icon(
-                    Icons.hub_rounded,
+                    AppIcons.hub_rounded,
                     size: 16,
                     color: colors.accent,
                   ),
@@ -228,9 +229,9 @@ class _TabBar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final tabs = <(_OnboardingTab, String, IconData)>[
-      (_OnboardingTab.overview, 'Overview', Icons.grid_view_rounded),
-      (_OnboardingTab.setup, 'Connect', Icons.link_rounded),
-      (_OnboardingTab.shortcuts, 'Shortcuts', Icons.keyboard_rounded),
+      (_OnboardingTab.overview, 'Overview', AppIcons.grid_view_rounded),
+      (_OnboardingTab.setup, 'Connect', AppIcons.link_rounded),
+      (_OnboardingTab.shortcuts, 'Shortcuts', AppIcons.keyboard_rounded),
     ];
     return Row(
       children: tabs.map((entry) {
@@ -332,22 +333,22 @@ class _WelcomeTab extends StatelessWidget {
           runSpacing: 8,
           children: [
             _FeatureChip(
-              icon: Icons.chat_bubble_outline_rounded,
+              icon: AppIcons.chat_bubble_outline_rounded,
               label: 'Sessions',
               colors: colors,
             ),
             _FeatureChip(
-              icon: Icons.rule_folder_rounded,
+              icon: AppIcons.rule_folder_rounded,
               label: 'Approvals',
               colors: colors,
             ),
             _FeatureChip(
-              icon: Icons.folder_open_rounded,
+              icon: AppIcons.folder_open_rounded,
               label: 'Files',
               colors: colors,
             ),
             _FeatureChip(
-              icon: Icons.terminal_rounded,
+              icon: AppIcons.terminal_rounded,
               label: 'Terminal',
               colors: colors,
             ),
@@ -362,7 +363,7 @@ class _WelcomeTab extends StatelessWidget {
           children: [
             FilledButton.icon(
               onPressed: onOpenSetup,
-              icon: const Icon(Icons.link_rounded, size: 18),
+              icon: const Icon(AppIcons.link_rounded, size: 18),
               label: const Text('Connect a machine'),
             ),
             const SizedBox(width: 12),
@@ -484,7 +485,7 @@ class _SetupTab extends StatelessWidget {
                   onAddHost!();
                   onDismiss();
                 },
-                icon: const Icon(Icons.add_rounded, size: 18),
+                icon: const Icon(AppIcons.add_rounded, size: 18),
                 label: const Text('Add a machine'),
               ),
               const SizedBox(width: 12),

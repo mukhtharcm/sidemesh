@@ -5,6 +5,7 @@ import '../models.dart'
 import '../session_policy_store.dart';
 import '../theme/app_tokens.dart';
 import 'launch_controls.dart';
+import '../app_icons.dart';
 
 /// Immutable snapshot of the launch options the user has chosen.
 ///
@@ -176,7 +177,7 @@ class LaunchOptionsForm extends StatelessWidget {
 
   Widget _buildBrainGroup(BuildContext context) {
     return LaunchControlGroup(
-      icon: Icons.memory_rounded,
+      icon: AppIcons.memory_rounded,
       title: 'Agent',
       children: [
         if (brainExtras != null) ...[
@@ -189,7 +190,7 @@ class LaunchOptionsForm extends StatelessWidget {
           if (brainExtras != null && brainExtras!.isNotEmpty)
             const SizedBox(height: AppSpacing.sm),
           LaunchChoiceWrap<String?>(
-            icon: Icons.alt_route_rounded,
+            icon: AppIcons.alt_route_rounded,
             label: 'Work style',
             value: value.sessionMode,
             options: <String?>[null, ...sessionModes.map((mode) => mode.id)],
@@ -208,7 +209,7 @@ class LaunchOptionsForm extends StatelessWidget {
               (brainExtras != null && brainExtras!.isNotEmpty))
             const SizedBox(height: AppSpacing.sm),
           LaunchSwitchRow(
-            icon: Icons.bolt_rounded,
+            icon: AppIcons.bolt_rounded,
             title: 'Fast mode',
             subtitle: 'Prefer the faster service tier when it is available.',
             value: value.fastMode,
@@ -224,13 +225,13 @@ class LaunchOptionsForm extends StatelessWidget {
 
   Widget _buildPermissionsGroup(BuildContext context) {
     return LaunchControlGroup(
-      icon: Icons.verified_user_rounded,
+      icon: AppIcons.verified_user_rounded,
       title: 'Permissions',
       trailing: permissionsTrailing,
       children: [
         if (capabilities.supportsApprovalPolicy)
           LaunchChoiceWrap<ApprovalPolicy>(
-            icon: Icons.verified_user_rounded,
+            icon: AppIcons.verified_user_rounded,
             label: 'Approval',
             value: value.approval,
             options: capabilities.approvalOptions,
@@ -246,7 +247,7 @@ class LaunchOptionsForm extends StatelessWidget {
           const SizedBox(height: AppSpacing.sm),
         if (capabilities.supportsSandboxMode)
           LaunchChoiceWrap<SandboxMode>(
-            icon: Icons.folder_special_rounded,
+            icon: AppIcons.folder_special_rounded,
             label: 'Sandbox',
             value: value.sandbox,
             options: SandboxMode.values,
@@ -259,7 +260,7 @@ class LaunchOptionsForm extends StatelessWidget {
           ),
         const SizedBox(height: AppSpacing.sm),
         LaunchInfoLine(
-          icon: Icons.info_outline_rounded,
+          icon: AppIcons.info_outline_rounded,
           text: _permissionsDescription(),
         ),
       ],
@@ -268,11 +269,11 @@ class LaunchOptionsForm extends StatelessWidget {
 
   Widget _buildNetworkGroup(BuildContext context) {
     return LaunchControlGroup(
-      icon: Icons.public_rounded,
+      icon: AppIcons.public_rounded,
       title: 'Network',
       children: [
         LaunchSwitchRow(
-          icon: Icons.public_rounded,
+          icon: AppIcons.public_rounded,
           title: 'Live web search',
           subtitle: 'Starts the thread with web search enabled.',
           value: value.webSearch,

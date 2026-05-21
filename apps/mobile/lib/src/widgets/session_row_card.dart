@@ -9,6 +9,7 @@ import '../theme/app_theme.dart';
 import '../theme/app_tokens.dart';
 import 'mesh_widgets.dart';
 import 'provider_badge.dart';
+import '../app_icons.dart';
 
 /// Returns a short human-readable label for how long ago [updatedAt] was.
 String sessionTimeLabel(DateTime updatedAt) {
@@ -240,8 +241,8 @@ class SessionRowCard extends StatelessWidget {
                     height: 30,
                     child: Icon(
                       favorite
-                          ? Icons.star_rounded
-                          : Icons.star_outline_rounded,
+                          ? AppIcons.star_rounded
+                          : AppIcons.star_outline_rounded,
                       size: 15,
                       color:
                           favorite ? colors.warning : colors.textTertiary,
@@ -293,7 +294,7 @@ class SessionRowCard extends StatelessWidget {
                 iconSize: 20,
                 constraints: const BoxConstraints(minWidth: 44, minHeight: 44),
                 icon: Icon(
-                  favorite ? Icons.star_rounded : Icons.star_outline_rounded,
+                  favorite ? AppIcons.star_rounded : AppIcons.star_outline_rounded,
                   color: favorite ? colors.warning : colors.textTertiary,
                 ),
               ),
@@ -303,7 +304,7 @@ class SessionRowCard extends StatelessWidget {
           Row(
             children: [
               if (showHost) ...[
-                Icon(Icons.dns_rounded, size: 14, color: colors.textTertiary),
+                Icon(AppIcons.dns_rounded, size: 14, color: colors.textTertiary),
                 const SizedBox(width: 4),
                 Flexible(
                   child: Text(
@@ -318,7 +319,7 @@ class SessionRowCard extends StatelessWidget {
                 ),
                 const SizedBox(width: 10),
               ],
-              Icon(Icons.folder_outlined, size: 14, color: colors.textTertiary),
+              Icon(AppIcons.folder_outlined, size: 14, color: colors.textTertiary),
               const SizedBox(width: 4),
               Expanded(
                 child: Text(
@@ -391,37 +392,37 @@ MeshStatusBadge? _sessionStatusBadge(SessionSummary session) {
     'waiting_for_approval' || 'pendingApproval' => const MeshStatusBadge(
         label: 'approval',
         tone: MeshStatusTone.approval,
-        icon: Icons.verified_user_outlined,
+        icon: AppIcons.verified_user_outlined,
         compact: true,
       ),
     'waiting_for_input' => const MeshStatusBadge(
         label: 'waiting',
         tone: MeshStatusTone.waiting,
-        icon: Icons.question_answer_outlined,
+        icon: AppIcons.question_answer_outlined,
         compact: true,
       ),
     'queued' => const MeshStatusBadge(
         label: 'queued',
         tone: MeshStatusTone.queued,
-        icon: Icons.schedule_rounded,
+        icon: AppIcons.schedule_rounded,
         compact: true,
       ),
     'blocked' => const MeshStatusBadge(
         label: 'blocked',
         tone: MeshStatusTone.waiting,
-        icon: Icons.pause_circle_outline_rounded,
+        icon: AppIcons.pause_circle_outline_rounded,
         compact: true,
       ),
     'failed' || 'errored' => const MeshStatusBadge(
         label: 'failed',
         tone: MeshStatusTone.danger,
-        icon: Icons.error_outline_rounded,
+        icon: AppIcons.error_outline_rounded,
         compact: true,
       ),
     'stale' => const MeshStatusBadge(
         label: 'stale',
         tone: MeshStatusTone.stale,
-        icon: Icons.history_toggle_off_rounded,
+        icon: AppIcons.history_toggle_off_rounded,
         compact: true,
       ),
     'active' || 'running' => const MeshStatusBadge(

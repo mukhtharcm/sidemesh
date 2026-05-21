@@ -3,6 +3,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:sidemesh_mobile/src/theme/app_palettes.dart';
 import 'package:sidemesh_mobile/src/theme/app_theme.dart';
 import 'package:sidemesh_mobile/src/widgets/mesh_widgets.dart';
+import 'package:sidemesh_mobile/src/app_icons.dart';
 
 void main() {
   testWidgets('MeshSurface forwards taps', (tester) async {
@@ -54,13 +55,13 @@ void main() {
         const MeshStatusBadge(
           label: 'approval',
           tone: MeshStatusTone.approval,
-          icon: Icons.verified_user_outlined,
+          icon: AppIcons.verified_user_outlined,
         ),
       ),
     );
 
     expect(find.text('approval'), findsOneWidget);
-    expect(find.byIcon(Icons.verified_user_outlined), findsOneWidget);
+    expect(find.byIcon(AppIcons.verified_user_outlined), findsOneWidget);
   });
 
   testWidgets('MeshStatusBadge constrains long labels', (tester) async {
@@ -71,7 +72,7 @@ void main() {
           child: MeshStatusBadge(
             label: 'Waiting for very long pending approval kind',
             tone: MeshStatusTone.approval,
-            icon: Icons.gpp_maybe_rounded,
+            icon: AppIcons.gpp_maybe_rounded,
             compact: true,
           ),
         ),
@@ -100,7 +101,7 @@ void main() {
               compact: true,
             ),
           ],
-          trailing: Icon(Icons.chevron_right_rounded),
+          trailing: Icon(AppIcons.chevron_right_rounded),
         ),
       ),
     );
@@ -108,7 +109,7 @@ void main() {
     expect(find.text('Remote host'), findsOneWidget);
     expect(find.text('ssh://desk.local'), findsOneWidget);
     expect(find.text('online'), findsOneWidget);
-    expect(find.byIcon(Icons.chevron_right_rounded), findsOneWidget);
+    expect(find.byIcon(AppIcons.chevron_right_rounded), findsOneWidget);
   });
 
   testWidgets('MeshListRow can render unframed grouped rows', (tester) async {
@@ -118,8 +119,8 @@ void main() {
         MeshListRow(
           title: const Text('Terminal'),
           subtitle: const Text('Open a shell in this workspace.'),
-          leading: const Icon(Icons.terminal_rounded),
-          trailing: const Icon(Icons.chevron_right_rounded),
+          leading: const Icon(AppIcons.terminal_rounded),
+          trailing: const Icon(AppIcons.chevron_right_rounded),
           onTap: () => taps++,
           framed: false,
           dense: true,

@@ -13,6 +13,7 @@ import '../theme/app_tokens.dart';
 import '../widgets/mesh_widgets.dart';
 import 'home_screen.dart';
 import 'pair_scanner_sheet.dart';
+import '../app_icons.dart';
 
 Future<void> showOnboardingScreen(BuildContext context) {
   return Navigator.of(context).pushReplacement(
@@ -273,7 +274,7 @@ class _WelcomePage extends StatelessWidget {
               ),
             ),
             child: Icon(
-              Icons.hub_rounded,
+              AppIcons.hub_rounded,
               size: 56,
               color: colors.accent,
             ),
@@ -305,17 +306,17 @@ class _WelcomePage extends StatelessWidget {
             alignment: WrapAlignment.center,
             children: [
               _FeatureChip(
-                icon: Icons.link_rounded,
+                icon: AppIcons.link_rounded,
                 label: 'Connect once',
                 colors: colors,
               ),
               _FeatureChip(
-                icon: Icons.rule_folder_rounded,
+                icon: AppIcons.rule_folder_rounded,
                 label: 'Review approvals',
                 colors: colors,
               ),
               _FeatureChip(
-                icon: Icons.playlist_play_rounded,
+                icon: AppIcons.playlist_play_rounded,
                 label: 'Pick up later',
                 colors: colors,
               ),
@@ -507,14 +508,14 @@ class _ActionsPage extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 _ActionLine(
-                  icon: Icons.chat_bubble_outline_rounded,
+                  icon: AppIcons.chat_bubble_outline_rounded,
                   title: 'Sessions',
                   body: 'See what each agent is doing and jump back in.',
                   colors: colors,
                 ),
                 const SizedBox(height: 14),
                 _ActionLine(
-                  icon: Icons.rule_folder_rounded,
+                  icon: AppIcons.rule_folder_rounded,
                   title: 'Approvals',
                   body:
                       'Approve or reject risky actions without reopening your laptop.',
@@ -522,14 +523,14 @@ class _ActionsPage extends StatelessWidget {
                 ),
                 const SizedBox(height: 14),
                 _ActionLine(
-                  icon: Icons.folder_open_rounded,
+                  icon: AppIcons.folder_open_rounded,
                   title: 'Files',
                   body: 'Check changed files, logs, and saved outputs.',
                   colors: colors,
                 ),
                 const SizedBox(height: 14),
                 _ActionLine(
-                  icon: Icons.terminal_rounded,
+                  icon: AppIcons.terminal_rounded,
                   title: 'Terminal',
                   body: 'Open a terminal when the agent needs a hand.',
                   colors: colors,
@@ -680,7 +681,7 @@ class _ConnectPage extends StatelessWidget {
               ),
             ),
             child: Icon(
-              Icons.qr_code_scanner_rounded,
+              AppIcons.qr_code_scanner_rounded,
               size: 36,
               color: colors.accent,
             ),
@@ -905,7 +906,7 @@ class _ManualHostSheetState extends State<_ManualHostSheet> {
                       ),
                       const Spacer(),
                       MeshIconButton(
-                        icon: Icons.close_rounded,
+                        icon: AppIcons.close_rounded,
                         onTap: () => Navigator.of(context).pop(),
                       ),
                     ],
@@ -1003,7 +1004,7 @@ class _PairingSuccessPage extends StatelessWidget {
               shape: BoxShape.circle,
             ),
             child: Icon(
-              Icons.check_rounded,
+              AppIcons.check_rounded,
               size: 40,
               color: colors.success,
             ),

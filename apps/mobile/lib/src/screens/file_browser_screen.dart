@@ -9,6 +9,7 @@ import '../theme/app_colors.dart';
 import '../workspace_live_store.dart';
 import 'file_viewer_pane.dart';
 import 'file_viewer_screen.dart';
+import '../app_icons.dart';
 
 /// Embeddable workspace browser tree. Manages its own live subscription,
 /// changed-path badges, and expansion state. Use [FileBrowserScreen] for
@@ -272,7 +273,7 @@ class _DirectoryNodeState extends State<_DirectoryNode> {
       children: [
         _Row(
           indent: indent,
-          icon: _expanded ? Icons.folder_open_rounded : Icons.folder_rounded,
+          icon: _expanded ? AppIcons.folder_open_rounded : AppIcons.folder_rounded,
           iconColor: colors.accent,
           title: _baseName(widget.path),
           modified: widget.changedPaths.any((p) => p.startsWith(widget.path)),
@@ -284,8 +285,8 @@ class _DirectoryNodeState extends State<_DirectoryNode> {
                 )
               : Icon(
                   _expanded
-                      ? Icons.keyboard_arrow_down_rounded
-                      : Icons.keyboard_arrow_right_rounded,
+                      ? AppIcons.keyboard_arrow_down_rounded
+                      : AppIcons.keyboard_arrow_right_rounded,
                   size: 18,
                   color: colors.textTertiary,
                 ),
@@ -322,7 +323,7 @@ class _DirectoryNodeState extends State<_DirectoryNode> {
             }
             return _Row(
               indent: indent + 14.0,
-              icon: Icons.description_rounded,
+              icon: AppIcons.description_rounded,
               iconColor: colors.textSecondary,
               title: entry.name,
               modified: widget.changedPaths.contains(entry.path),

@@ -18,6 +18,7 @@ import '../widgets/app_snackbar.dart';
 import '../widgets/mesh_widgets.dart';
 import '../host_reconnect_scheduler.dart';
 import '../host_status_store.dart';
+import '../app_icons.dart';
 
 class BrowserPreviewScreen extends StatelessWidget {
   const BrowserPreviewScreen({
@@ -824,7 +825,7 @@ class _BrowserPreviewPaneState extends State<BrowserPreviewPane>
   Future<void> _stopRemoteBrowser() async {
     final confirmed = await showMeshConfirmDialog(
       context,
-      icon: Icons.close_fullscreen_rounded,
+      icon: AppIcons.close_fullscreen_rounded,
       title: 'Close this preview?',
       description:
           'This closes the browser window on the connected machine. You can start another preview any time.',
@@ -1109,7 +1110,7 @@ class _BrowserPreviewPaneState extends State<BrowserPreviewPane>
   ) async {
     final confirmed = await showMeshConfirmDialog(
       context,
-      icon: Icons.delete_outline_rounded,
+      icon: AppIcons.delete_outline_rounded,
       title: 'Delete this ${_storageAreaLabel(area)} item?',
       description:
           'This removes `${entry.key}` from ${_storageAreaLabel(area)} for the current page.',
@@ -1127,7 +1128,7 @@ class _BrowserPreviewPaneState extends State<BrowserPreviewPane>
   Future<void> _confirmClearStorageArea(String area) async {
     final confirmed = await showMeshConfirmDialog(
       context,
-      icon: Icons.clear_all_rounded,
+      icon: AppIcons.clear_all_rounded,
       title: 'Clear ${_storageAreaLabel(area)}?',
       description:
           'This removes every saved item from ${_storageAreaLabel(area)} for the current page.',
@@ -1141,7 +1142,7 @@ class _BrowserPreviewPaneState extends State<BrowserPreviewPane>
   Future<void> _confirmDeleteCookie(_StorageCookie cookie) async {
     final confirmed = await showMeshConfirmDialog(
       context,
-      icon: Icons.cookie_outlined,
+      icon: AppIcons.cookie_outlined,
       title: 'Delete this cookie?',
       description:
           'This removes the `${cookie.name}` cookie from the current page.',
@@ -1160,7 +1161,7 @@ class _BrowserPreviewPaneState extends State<BrowserPreviewPane>
   Future<void> _confirmClearCookies() async {
     final confirmed = await showMeshConfirmDialog(
       context,
-      icon: Icons.cookie_outlined,
+      icon: AppIcons.cookie_outlined,
       title: 'Clear cookies?',
       description:
           'This removes every cookie currently available to the current page.',
@@ -1530,7 +1531,7 @@ class _BrowserPreviewPaneState extends State<BrowserPreviewPane>
             const SizedBox(height: 14),
             OutlinedButton.icon(
               onPressed: _retryPreviewStream,
-              icon: const Icon(Icons.refresh_rounded),
+              icon: const Icon(AppIcons.refresh_rounded),
               label: const Text('Reconnect preview'),
             ),
           ],
@@ -1796,7 +1797,7 @@ class _BrowserChromeBar extends StatelessWidget {
           children: [
             if (onBack != null) ...[
               _ChromeButton(
-                icon: Icons.close_rounded,
+                icon: AppIcons.close_rounded,
                 tooltip: 'Close preview',
                 onTap: onBack!,
               ),
@@ -1804,19 +1805,19 @@ class _BrowserChromeBar extends StatelessWidget {
             ],
             if (desktopLike) ...[
               _ChromeButton(
-                icon: Icons.arrow_back_rounded,
+                icon: AppIcons.arrow_back_rounded,
                 tooltip: 'Back',
                 onTap: onBackNavigation,
               ),
               const SizedBox(width: 2),
               _ChromeButton(
-                icon: Icons.arrow_forward_rounded,
+                icon: AppIcons.arrow_forward_rounded,
                 tooltip: 'Forward',
                 onTap: onForwardNavigation,
               ),
               const SizedBox(width: 2),
               _ChromeButton(
-                icon: Icons.refresh_rounded,
+                icon: AppIcons.refresh_rounded,
                 tooltip: 'Reload',
                 onTap: onReload,
               ),
@@ -1849,8 +1850,8 @@ class _BrowserChromeBar extends StatelessWidget {
                             : 'Connection is not secure (HTTP)',
                         child: Icon(
                           _isHttps
-                              ? Icons.lock_rounded
-                              : Icons.info_outline_rounded,
+                              ? AppIcons.lock_rounded
+                              : AppIcons.info_outline_rounded,
                           size: 14,
                           color: _isHttps
                               ? colors.textTertiary
@@ -1897,8 +1898,8 @@ class _BrowserChromeBar extends StatelessWidget {
               const SizedBox(width: 6),
               _ChromeButton(
                 icon: inputRailOpen
-                    ? Icons.keyboard_hide_rounded
-                    : Icons.keyboard_alt_rounded,
+                    ? AppIcons.keyboard_hide_rounded
+                    : AppIcons.keyboard_alt_rounded,
                 tooltip: inputRailOpen ? 'Hide keyboard' : 'Keyboard',
                 color: inputRailOpen ? colors.accent : null,
                 onTap: onToggleInput,
@@ -1906,8 +1907,8 @@ class _BrowserChromeBar extends StatelessWidget {
               const SizedBox(width: 2),
               _ChromeButton(
                 icon: devToolsOpen
-                    ? Icons.construction_rounded
-                    : Icons.construction_outlined,
+                    ? AppIcons.construction_rounded
+                    : AppIcons.construction_outlined,
                 tooltip: devToolsOpen ? 'Hide tools' : 'Tools',
                 color: devToolsOpen ? colors.accent : null,
                 onTap: onToggleDevTools,
@@ -1915,8 +1916,8 @@ class _BrowserChromeBar extends StatelessWidget {
               const SizedBox(width: 2),
               _ChromeButton(
                 icon: streamPaused
-                    ? Icons.play_circle_outline_rounded
-                    : Icons.pause_circle_outline_rounded,
+                    ? AppIcons.play_circle_outline_rounded
+                    : AppIcons.pause_circle_outline_rounded,
                 tooltip: streamPaused ? 'Resume preview' : 'Pause preview',
                 color: streamPaused ? colors.success : null,
                 onTap: onTogglePause,
@@ -1924,7 +1925,7 @@ class _BrowserChromeBar extends StatelessWidget {
               if (onOpenInWindow != null) ...[
                 const SizedBox(width: 2),
                 _ChromeButton(
-                  icon: Icons.open_in_new_rounded,
+                  icon: AppIcons.open_in_new_rounded,
                   tooltip: 'Open in its own window',
                   color: colors.accent,
                   onTap: onOpenInWindow!,
@@ -1934,7 +1935,7 @@ class _BrowserChromeBar extends StatelessWidget {
             ],
             if (onMinimize != null) ...[
               _ChromeButton(
-                icon: Icons.keyboard_arrow_down_rounded,
+                icon: AppIcons.keyboard_arrow_down_rounded,
                 tooltip: 'Minimize',
                 onTap: onMinimize!,
               ),
@@ -1942,7 +1943,7 @@ class _BrowserChromeBar extends StatelessWidget {
             ],
             if (onStop != null)
               _ChromeButton(
-                icon: Icons.stop_circle_rounded,
+                icon: AppIcons.stop_circle_rounded,
                 tooltip: 'Close preview',
                 color: colors.danger,
                 onTap: onStop!,
@@ -2034,25 +2035,25 @@ class _BrowserBottomToolbar extends StatelessWidget {
           child: Row(
             children: [
               _ChromeButton(
-                icon: Icons.arrow_back_rounded,
+                icon: AppIcons.arrow_back_rounded,
                 tooltip: 'Back',
                 onTap: onBack,
               ),
               const SizedBox(width: 4),
               _ChromeButton(
-                icon: Icons.arrow_forward_rounded,
+                icon: AppIcons.arrow_forward_rounded,
                 tooltip: 'Forward',
                 onTap: onForward,
               ),
               const SizedBox(width: 4),
               _ChromeButton(
-                icon: Icons.refresh_rounded,
+                icon: AppIcons.refresh_rounded,
                 tooltip: 'Reload',
                 onTap: onReload,
               ),
               const SizedBox(width: 4),
               _ChromeButton(
-                icon: Icons.home_rounded,
+                icon: AppIcons.home_rounded,
                 tooltip: 'Home',
                 onTap: onHome,
               ),
@@ -2065,8 +2066,8 @@ class _BrowserBottomToolbar extends StatelessWidget {
               const SizedBox(width: 6),
               _ChromeButton(
                 icon: inputRailOpen
-                    ? Icons.keyboard_hide_rounded
-                    : Icons.keyboard_alt_rounded,
+                    ? AppIcons.keyboard_hide_rounded
+                    : AppIcons.keyboard_alt_rounded,
                 tooltip: inputRailOpen ? 'Hide keyboard' : 'Keyboard',
                 color: inputRailOpen ? colors.accent : null,
                 onTap: onToggleInput,
@@ -2074,8 +2075,8 @@ class _BrowserBottomToolbar extends StatelessWidget {
               const SizedBox(width: 4),
               _ChromeButton(
                 icon: devToolsOpen
-                    ? Icons.construction_rounded
-                    : Icons.construction_outlined,
+                    ? AppIcons.construction_rounded
+                    : AppIcons.construction_outlined,
                 tooltip: 'Tools',
                 color: devToolsOpen ? colors.accent : null,
                 onTap: onToggleDevTools,
@@ -2083,8 +2084,8 @@ class _BrowserBottomToolbar extends StatelessWidget {
               const SizedBox(width: 4),
               _ChromeButton(
                 icon: streamPaused
-                    ? Icons.play_circle_outline_rounded
-                    : Icons.pause_circle_outline_rounded,
+                    ? AppIcons.play_circle_outline_rounded
+                    : AppIcons.pause_circle_outline_rounded,
                 tooltip: streamPaused ? 'Resume preview' : 'Pause preview',
                 color: streamPaused ? colors.success : null,
                 onTap: onTogglePause,
@@ -2215,7 +2216,7 @@ class _DevToolsPanel extends StatelessWidget {
                 if (showingInspector)
                   IconButton(
                     key: const ValueKey('browserPreviewInspectorPickButton'),
-                    icon: const Icon(Icons.ads_click_rounded, size: 18),
+                    icon: const Icon(AppIcons.ads_click_rounded, size: 18),
                     tooltip: inspectorPickMode
                         ? 'Stop selecting from page'
                         : 'Select from page',
@@ -2230,7 +2231,7 @@ class _DevToolsPanel extends StatelessWidget {
                           ? 'browserPreviewStorageRefreshButton'
                           : 'browserPreviewInspectorRefreshButton',
                     ),
-                    icon: const Icon(Icons.refresh_rounded, size: 18),
+                    icon: const Icon(AppIcons.refresh_rounded, size: 18),
                     tooltip: showingStorage
                         ? 'Refresh site data'
                         : 'Refresh page details',
@@ -2241,7 +2242,7 @@ class _DevToolsPanel extends StatelessWidget {
                   )
                 else
                   IconButton(
-                    icon: const Icon(Icons.delete_outline_rounded, size: 18),
+                    icon: const Icon(AppIcons.delete_outline_rounded, size: 18),
                     tooltip: showingConsole
                         ? 'Clear messages'
                         : 'Clear requests',
@@ -2529,12 +2530,12 @@ class _InspectorTab extends StatelessWidget {
                 children: [
                   OutlinedButton.icon(
                     onPressed: onRefresh,
-                    icon: const Icon(Icons.refresh_rounded),
+                    icon: const Icon(AppIcons.refresh_rounded),
                     label: const Text('Load page details'),
                   ),
                   OutlinedButton.icon(
                     onPressed: onTogglePickMode,
-                    icon: const Icon(Icons.ads_click_rounded),
+                    icon: const Icon(AppIcons.ads_click_rounded),
                     label: Text(
                       pickMode
                           ? 'Stop selecting from page'
@@ -2929,7 +2930,7 @@ class _StorageTab extends StatelessWidget {
               const SizedBox(height: 12),
               OutlinedButton.icon(
                 onPressed: onRefresh,
-                icon: const Icon(Icons.refresh_rounded),
+                icon: const Icon(AppIcons.refresh_rounded),
                 label: const Text('Load site data'),
               ),
             ],
@@ -3066,7 +3067,7 @@ class _StorageTab extends StatelessWidget {
           title: 'Cookies',
           actions: [
             _StorageSectionButton(
-              icon: Icons.delete_sweep_outlined,
+              icon: AppIcons.delete_sweep_outlined,
               tooltip: 'Clear cookies',
               buttonKey: const ValueKey('browserPreviewStorageClear-cookies'),
               onTap: snapshot!.cookies.isEmpty ? null : onClearCookies,
@@ -3089,7 +3090,7 @@ class _StorageTab extends StatelessWidget {
           title: 'Local storage',
           actions: [
             _StorageSectionButton(
-              icon: Icons.add_rounded,
+              icon: AppIcons.add_rounded,
               tooltip: 'Add local storage item',
               buttonKey: const ValueKey(
                 'browserPreviewStorageAdd-localStorage',
@@ -3097,7 +3098,7 @@ class _StorageTab extends StatelessWidget {
               onTap: () => onAddStorageEntry('localStorage'),
             ),
             _StorageSectionButton(
-              icon: Icons.delete_sweep_outlined,
+              icon: AppIcons.delete_sweep_outlined,
               tooltip: 'Clear local storage',
               buttonKey: const ValueKey(
                 'browserPreviewStorageClear-localStorage',
@@ -3127,7 +3128,7 @@ class _StorageTab extends StatelessWidget {
           title: 'Session storage',
           actions: [
             _StorageSectionButton(
-              icon: Icons.add_rounded,
+              icon: AppIcons.add_rounded,
               tooltip: 'Add session storage item',
               buttonKey: const ValueKey(
                 'browserPreviewStorageAdd-sessionStorage',
@@ -3135,7 +3136,7 @@ class _StorageTab extends StatelessWidget {
               onTap: () => onAddStorageEntry('sessionStorage'),
             ),
             _StorageSectionButton(
-              icon: Icons.delete_sweep_outlined,
+              icon: AppIcons.delete_sweep_outlined,
               tooltip: 'Clear session storage',
               buttonKey: const ValueKey(
                 'browserPreviewStorageClear-sessionStorage',
@@ -3665,7 +3666,7 @@ class _StorageCookieRow extends StatelessWidget {
                 ),
               ),
               IconButton(
-                icon: const Icon(Icons.delete_outline_rounded, size: 18),
+                icon: const Icon(AppIcons.delete_outline_rounded, size: 18),
                 tooltip: 'Delete cookie',
                 onPressed: onDelete,
                 visualDensity: VisualDensity.compact,
@@ -3730,7 +3731,7 @@ class _StorageEntryRow extends StatelessWidget {
                 ),
               ),
               IconButton(
-                icon: const Icon(Icons.edit_outlined, size: 18),
+                icon: const Icon(AppIcons.edit_outlined, size: 18),
                 tooltip: 'Edit storage entry',
                 onPressed: onEdit,
                 visualDensity: VisualDensity.compact,
@@ -3739,7 +3740,7 @@ class _StorageEntryRow extends StatelessWidget {
               ),
               const SizedBox(width: 6),
               IconButton(
-                icon: const Icon(Icons.delete_outline_rounded, size: 18),
+                icon: const Icon(AppIcons.delete_outline_rounded, size: 18),
                 tooltip: 'Delete storage entry',
                 onPressed: onDelete,
                 visualDensity: VisualDensity.compact,
@@ -3806,7 +3807,7 @@ class _StorageEntryEditorDialogState extends State<_StorageEntryEditorDialog> {
   @override
   Widget build(BuildContext context) {
     return MeshDialogScaffold(
-      icon: Icons.edit_note_rounded,
+      icon: AppIcons.edit_note_rounded,
       title: widget.title,
       description:
           'Keys identify each saved item for the current page. The value is stored exactly as entered.',
@@ -3890,7 +3891,7 @@ class _NetworkTab extends StatelessWidget {
                       decoration: InputDecoration(
                         isDense: true,
                         hintText: 'Search requests',
-                        prefixIcon: const Icon(Icons.search_rounded, size: 18),
+                        prefixIcon: const Icon(AppIcons.search_rounded, size: 18),
                         border: const OutlineInputBorder(),
                         contentPadding: const EdgeInsets.symmetric(
                           horizontal: 10,
@@ -4172,7 +4173,7 @@ class _NetworkDetailSheet extends StatelessWidget {
   Widget build(BuildContext context) {
     final colors = context.colors;
     return MeshBottomSheetScaffold(
-      icon: Icons.travel_explore_rounded,
+      icon: AppIcons.travel_explore_rounded,
       title: _networkDisplayName(entry.url),
       description:
           'Review request details, headers, and captured payloads for this page request.',
@@ -4374,7 +4375,7 @@ class _NetworkDetailActionsButton extends StatelessWidget {
   Widget build(BuildContext context) {
     return PopupMenuButton<_NetworkCopyAction>(
       tooltip: 'Copy request details',
-      icon: const Icon(Icons.copy_all_rounded, size: 18),
+      icon: const Icon(AppIcons.copy_all_rounded, size: 18),
       onSelected: (action) =>
           _copyNetworkDetailAction(context, action, entry, detail),
       itemBuilder: (context) {
@@ -5808,7 +5809,7 @@ class _PausedPreviewOverlay extends StatelessWidget {
               mainAxisSize: MainAxisSize.min,
               children: [
                 Icon(
-                  Icons.pause_circle_filled_rounded,
+                  AppIcons.pause_circle_filled_rounded,
                   size: 34,
                   color: colors.textSecondary,
                 ),
@@ -5833,7 +5834,7 @@ class _PausedPreviewOverlay extends StatelessWidget {
                 const SizedBox(height: 14),
                 FilledButton.icon(
                   onPressed: onResume,
-                  icon: const Icon(Icons.play_arrow_rounded),
+                  icon: const Icon(AppIcons.play_arrow_rounded),
                   label: const Text('Resume preview'),
                 ),
               ],
@@ -5879,7 +5880,7 @@ class _InputRail extends StatelessWidget {
               Row(
                 children: [
                   Icon(
-                    Icons.keyboard_alt_rounded,
+                    AppIcons.keyboard_alt_rounded,
                     size: 18,
                     color: colors.textSecondary,
                   ),
@@ -5895,14 +5896,14 @@ class _InputRail extends StatelessWidget {
                   ),
                   TextButton.icon(
                     onPressed: onFocusInput,
-                    icon: const Icon(Icons.keyboard_rounded, size: 17),
+                    icon: const Icon(AppIcons.keyboard_rounded, size: 17),
                     label: const Text('Focus'),
                   ),
                   const SizedBox(width: 4),
                   IconButton(
                     tooltip: 'Hide keyboard',
                     onPressed: onClose,
-                    icon: const Icon(Icons.close_rounded),
+                    icon: const Icon(AppIcons.close_rounded),
                     visualDensity: VisualDensity.compact,
                   ),
                 ],
@@ -6009,7 +6010,7 @@ class _ViewportChip extends StatelessWidget {
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(Icons.aspect_ratio_rounded, size: 14, color: colors.accent),
+            Icon(AppIcons.aspect_ratio_rounded, size: 14, color: colors.accent),
             const SizedBox(width: 6),
             Text(
               '$width x $height',
@@ -6089,7 +6090,7 @@ class _ViewportResizeSheetState extends State<_ViewportResizeSheet> {
         ),
     ];
     return MeshBottomSheetScaffold(
-      icon: Icons.aspect_ratio_rounded,
+      icon: AppIcons.aspect_ratio_rounded,
       title: 'Resize browser viewport',
       description:
           'This changes the remote Chromium viewport, not just the local image scale.',
@@ -6141,7 +6142,7 @@ class _ViewportResizeSheetState extends State<_ViewportResizeSheet> {
               width: double.infinity,
               child: FilledButton.icon(
                 onPressed: _submitCustom,
-                icon: const Icon(Icons.aspect_ratio_rounded),
+                icon: const Icon(AppIcons.aspect_ratio_rounded),
                 label: const Text('Apply custom viewport'),
               ),
             ),

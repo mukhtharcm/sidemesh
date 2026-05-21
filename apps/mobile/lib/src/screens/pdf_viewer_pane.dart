@@ -9,6 +9,7 @@ import '../models.dart';
 import '../theme/app_colors.dart';
 import '../theme/app_theme.dart';
 import '../widgets/mesh_widgets.dart';
+import '../app_icons.dart';
 
 typedef PdfViewerPanePreviewBuilder =
     Widget Function(BuildContext context, PdfViewerPanePreviewData data);
@@ -292,7 +293,7 @@ class _PdfViewerPaneState extends State<PdfViewerPane> {
                     onPressed: (_currentPageNumber ?? 1) > 1
                         ? () => _goToPage((_currentPageNumber ?? 1) - 1)
                         : null,
-                    icon: const Icon(Icons.chevron_left_rounded),
+                    icon: const Icon(AppIcons.chevron_left_rounded),
                   ),
                   Expanded(
                     child: Text(
@@ -312,7 +313,7 @@ class _PdfViewerPaneState extends State<PdfViewerPane> {
                             (_currentPageNumber ?? 1) < _pageCount!
                         ? () => _goToPage((_currentPageNumber ?? 1) + 1)
                         : null,
-                    icon: const Icon(Icons.chevron_right_rounded),
+                    icon: const Icon(AppIcons.chevron_right_rounded),
                   ),
                   const SizedBox(width: 8),
                   IconButton(
@@ -320,7 +321,7 @@ class _PdfViewerPaneState extends State<PdfViewerPane> {
                     onPressed: _controller.isReady
                         ? () => _stepZoom(false)
                         : null,
-                    icon: const Icon(Icons.remove_rounded),
+                    icon: const Icon(AppIcons.remove_rounded),
                   ),
                   SizedBox(
                     width: 52,
@@ -338,12 +339,12 @@ class _PdfViewerPaneState extends State<PdfViewerPane> {
                     onPressed: _controller.isReady
                         ? () => _stepZoom(true)
                         : null,
-                    icon: const Icon(Icons.add_rounded),
+                    icon: const Icon(AppIcons.add_rounded),
                   ),
                   IconButton(
                     tooltip: 'Fit width',
                     onPressed: _controller.isReady ? _fitWidth : null,
-                    icon: const Icon(Icons.fit_screen_rounded),
+                    icon: const Icon(AppIcons.fit_screen_rounded),
                   ),
                 ],
               ),
@@ -440,7 +441,7 @@ class _PdfViewerErrorState extends StatelessWidget {
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
           MeshEmptyState(
-            icon: Icons.picture_as_pdf_rounded,
+            icon: AppIcons.picture_as_pdf_rounded,
             title: 'Could not load PDF',
             body: error,
           ),
@@ -448,7 +449,7 @@ class _PdfViewerErrorState extends StatelessWidget {
             onPressed: () {
               unawaited(onRetry());
             },
-            icon: const Icon(Icons.refresh_rounded),
+            icon: const Icon(AppIcons.refresh_rounded),
             label: const Text('Try again'),
           ),
         ],

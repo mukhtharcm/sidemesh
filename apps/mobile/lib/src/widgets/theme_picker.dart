@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../theme/app_palettes.dart';
 import '../theme/theme_controller.dart';
+import '../app_icons.dart';
 
 /// A horizontal scrollable theme-variant picker that previews each palette
 /// live and lets the user tap to select.
@@ -103,7 +104,7 @@ class ThemePicker extends StatelessWidget {
                                 right: 10,
                                 top: 10,
                                 child: Icon(
-                                  Icons.check_circle_rounded,
+                                  AppIcons.check_circle_rounded,
                                   size: 18,
                                   color: palette.accent,
                                 ),

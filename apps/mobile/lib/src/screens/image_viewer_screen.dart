@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 
 import '../theme/app_colors.dart';
 import '../widgets/mesh_widgets.dart';
+import '../app_icons.dart';
 
 enum ImageViewerPresentation { auto, route, dialog }
 
@@ -248,7 +249,7 @@ class _ImageViewerScreenState extends State<ImageViewerScreen> {
                           IconButton(
                             onPressed: () => Navigator.of(context).maybePop(),
                             icon: const Icon(
-                              Icons.arrow_back_rounded,
+                              AppIcons.arrow_back_rounded,
                               color: Colors.white,
                             ),
                           ),
@@ -676,21 +677,21 @@ class ImageViewerActions extends StatelessWidget {
             color: foreground,
             visualDensity: compact ? VisualDensity.compact : null,
             onPressed: s?.canZoomOut == true ? s?.zoomOut : null,
-            icon: Icon(Icons.remove_rounded, size: iconSize),
+            icon: Icon(AppIcons.remove_rounded, size: iconSize),
           ),
           IconButton(
             tooltip: 'Zoom in',
             color: foreground,
             visualDensity: compact ? VisualDensity.compact : null,
             onPressed: s?.canZoomIn == true ? s?.zoomIn : null,
-            icon: Icon(Icons.add_rounded, size: iconSize),
+            icon: Icon(AppIcons.add_rounded, size: iconSize),
           ),
           IconButton(
             tooltip: 'Actual size',
             color: foreground,
             visualDensity: compact ? VisualDensity.compact : null,
             onPressed: s?.canReset == true ? s?.reset : null,
-            icon: Icon(Icons.center_focus_strong_rounded, size: iconSize),
+            icon: Icon(AppIcons.center_focus_strong_rounded, size: iconSize),
           ),
         ],
       ),
@@ -820,7 +821,7 @@ class _ImageViewerDialogState extends State<_ImageViewerDialog> {
                       ),
                       alignment: Alignment.center,
                       child: Icon(
-                        Icons.image_rounded,
+                        AppIcons.image_rounded,
                         size: 18,
                         color: colors.accent,
                       ),
@@ -836,12 +837,12 @@ class _ImageViewerDialogState extends State<_ImageViewerDialog> {
                       IconButton(
                         tooltip: 'Previous',
                         onPressed: _canGoPrevious ? _goPrevious : null,
-                        icon: const Icon(Icons.chevron_left_rounded, size: 20),
+                        icon: const Icon(AppIcons.chevron_left_rounded, size: 20),
                       ),
                       IconButton(
                         tooltip: 'Next',
                         onPressed: _canGoNext ? _goNext : null,
-                        icon: const Icon(Icons.chevron_right_rounded, size: 20),
+                        icon: const Icon(AppIcons.chevron_right_rounded, size: 20),
                       ),
                       const SizedBox(width: 4),
                       MeshPill(
@@ -859,7 +860,7 @@ class _ImageViewerDialogState extends State<_ImageViewerDialog> {
                     IconButton(
                       tooltip: 'Close',
                       onPressed: () => Navigator.of(context).pop(),
-                      icon: const Icon(Icons.close_rounded, size: 20),
+                      icon: const Icon(AppIcons.close_rounded, size: 20),
                     ),
                   ],
                 ),
@@ -1142,7 +1143,7 @@ class _ImageViewerErrorState extends StatelessWidget {
             ),
             alignment: Alignment.center,
             child: Icon(
-              Icons.broken_image_rounded,
+              AppIcons.broken_image_rounded,
               size: 28,
               color: colors.danger,
             ),

@@ -14,6 +14,7 @@ import 'package:stream_channel/stream_channel.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
 
 import 'test_path_provider.dart';
+import 'package:sidemesh_mobile/src/app_icons.dart';
 
 void main() {
   setUpAll(() async {
@@ -37,7 +38,7 @@ void main() {
       await _pumpFrames(tester);
       expect(find.text('Session A'), findsOneWidget);
 
-      await tester.tap(find.byIcon(Icons.menu_rounded).hitTestable());
+      await tester.tap(find.byIcon(AppIcons.menu_rounded).hitTestable());
       await tester.pumpAndSettle();
       await tester.tap(find.widgetWithText(ListTile, 'Session B').hitTestable());
       await _pumpFrames(tester);
@@ -63,13 +64,13 @@ void main() {
       await _pumpFrames(tester);
       expect(find.text('Session A'), findsOneWidget);
 
-      await tester.tap(find.byIcon(Icons.menu_rounded).hitTestable());
+      await tester.tap(find.byIcon(AppIcons.menu_rounded).hitTestable());
       await tester.pumpAndSettle();
       await tester.tap(find.widgetWithText(ListTile, 'Session B').hitTestable());
       await _pumpFrames(tester);
       expect(find.text('Session B'), findsOneWidget);
 
-      await tester.tap(find.byIcon(Icons.menu_rounded).hitTestable());
+      await tester.tap(find.byIcon(AppIcons.menu_rounded).hitTestable());
       await tester.pumpAndSettle();
       await tester.tap(find.widgetWithText(ListTile, 'Sessions').hitTestable());
       await tester.pumpAndSettle();

@@ -4,6 +4,7 @@ import '../../api_client.dart';
 import '../../models.dart';
 import 'inspector_controller.dart';
 import '../browser_preview_screen.dart';
+import '../../app_icons.dart';
 
 InspectorSurface buildInspectorBrowserPreviewSurface({
   required String ownerKey,
@@ -16,14 +17,14 @@ InspectorSurface buildInspectorBrowserPreviewSurface({
     kind: InspectorSurfaceKind.browserPreview,
     ownerKey: ownerKey,
     title: preview.url,
-    icon: Icons.open_in_browser_rounded,
+    icon: AppIcons.open_in_browser_rounded,
     actionsBuilder: onOpenInWindow == null
         ? null
         : (context) => <Widget>[
             IconButton(
               tooltip: 'Open in separate window',
               onPressed: onOpenInWindow,
-              icon: const Icon(Icons.open_in_new_rounded, size: 18),
+              icon: const Icon(AppIcons.open_in_new_rounded, size: 18),
               visualDensity: VisualDensity.compact,
             ),
           ],

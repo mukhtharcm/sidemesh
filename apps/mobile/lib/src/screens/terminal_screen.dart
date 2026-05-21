@@ -18,6 +18,7 @@ import '../widgets/terminal_keybar.dart';
 import '../host_reconnect_scheduler.dart';
 import '../host_status_store.dart';
 import '../relative_time_ticker.dart';
+import '../app_icons.dart';
 
 class TerminalScreen extends StatefulWidget {
   const TerminalScreen({
@@ -642,7 +643,7 @@ class _TerminalStatusStrip extends StatelessWidget {
             )
           else
             Icon(
-              running ? Icons.bolt_rounded : Icons.stop_circle_rounded,
+              running ? AppIcons.bolt_rounded : AppIcons.stop_circle_rounded,
               size: 16,
               color: error == null
                   ? (running ? colors.success : colors.textSecondary)
@@ -691,7 +692,7 @@ class _TerminalStatusStrip extends StatelessWidget {
           if (running) ...[
             const SizedBox(width: 8),
             MeshIconButton(
-              icon: Icons.stop_circle_rounded,
+              icon: AppIcons.stop_circle_rounded,
               tooltip: 'Stop terminal',
               color: colors.danger,
               onTap: stopping ? () {} : onStop,
@@ -699,7 +700,7 @@ class _TerminalStatusStrip extends StatelessWidget {
           ] else if (canRestart) ...[
             const SizedBox(width: 8),
             MeshIconButton(
-              icon: Icons.restart_alt_rounded,
+              icon: AppIcons.restart_alt_rounded,
               tooltip: 'Start a new terminal',
               color: colors.accent,
               onTap: onRestart,

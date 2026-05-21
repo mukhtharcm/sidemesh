@@ -8,6 +8,7 @@ import '../theme/app_tokens.dart';
 import '../widgets/mesh_widgets.dart';
 import 'file_browser_screen.dart';
 import 'file_viewer_pane.dart';
+import '../app_icons.dart';
 
 /// Desktop-friendly workspace browser: split-pane dialog with the file tree
 /// on the left and the selected file on the right.
@@ -110,7 +111,7 @@ class _WorkspaceBrowserDialogState extends State<_WorkspaceBrowserDialog> {
                             crossAxisAlignment: CrossAxisAlignment.stretch,
                             children: [
                               _DialogPaneHeader(
-                                icon: Icons.folder_copy_rounded,
+                                icon: AppIcons.folder_copy_rounded,
                                 title: 'Folders',
                                 subtitle: baseName(widget.root).isEmpty
                                     ? widget.root
@@ -144,8 +145,8 @@ class _WorkspaceBrowserDialogState extends State<_WorkspaceBrowserDialog> {
                           children: [
                             _DialogPaneHeader(
                               icon: _selected == null
-                                  ? Icons.description_rounded
-                                  : Icons.insert_drive_file_rounded,
+                                  ? AppIcons.description_rounded
+                                  : AppIcons.insert_drive_file_rounded,
                               title: _selected == null
                                   ? 'Preview'
                                   : baseName(_selected!),
@@ -167,7 +168,7 @@ class _WorkspaceBrowserDialogState extends State<_WorkspaceBrowserDialog> {
                               child: _selected == null
                                   ? const Center(
                                       child: MeshEmptyState(
-                                        icon: Icons.description_rounded,
+                                        icon: AppIcons.description_rounded,
                                         title: 'Choose a file',
                                         body:
                                             'Pick a file on the left to open it here.',
@@ -221,7 +222,7 @@ class _DialogHeader extends StatelessWidget {
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.center,
         children: [
-          Icon(Icons.folder_open_rounded, size: 18, color: colors.accent),
+          Icon(AppIcons.folder_open_rounded, size: 18, color: colors.accent),
           const SizedBox(width: 10),
           Expanded(
             child: Column(
@@ -251,7 +252,7 @@ class _DialogHeader extends StatelessWidget {
           IconButton(
             tooltip: 'Close',
             onPressed: onClose,
-            icon: const Icon(Icons.close_rounded, size: 20),
+            icon: const Icon(AppIcons.close_rounded, size: 20),
           ),
         ],
       ),

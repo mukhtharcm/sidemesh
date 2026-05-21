@@ -23,6 +23,7 @@ import 'package:stream_channel/stream_channel.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
 
 import 'test_path_provider.dart';
+import 'package:sidemesh_mobile/src/app_icons.dart';
 
 void main() {
   setUpAll(() async {
@@ -190,7 +191,7 @@ void main() {
       expect(controller.current?.kind, InspectorSurfaceKind.fileBrowser);
       expect(find.byType(FileBrowserTree), findsOneWidget);
       expect(find.text('README.md'), findsOneWidget);
-      expect(find.byIcon(Icons.arrow_back_rounded), findsNothing);
+      expect(find.byIcon(AppIcons.arrow_back_rounded), findsNothing);
 
       await tester.pumpWidget(const SizedBox.shrink());
       await tester.pump();

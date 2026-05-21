@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 
 import '../theme/app_colors.dart';
 import '../theme/app_tokens.dart';
+import '../app_icons.dart';
 
 /// Shows a floating toast anchored to the bottom-right corner on wide windows
 /// (desktop) and bottom-center on phones. Runs through the root [Overlay] so
@@ -358,7 +359,7 @@ class _ToastOverlayState extends State<_ToastOverlay>
                           ),
                           onPressed: _ToastQueue.instance.clear,
                           icon: Icon(
-                            Icons.close_rounded,
+                            AppIcons.close_rounded,
                             color: colors.textSecondary,
                           ),
                         ),

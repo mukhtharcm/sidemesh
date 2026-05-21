@@ -9,6 +9,7 @@ import '../theme/app_tokens.dart';
 import '../usage_models.dart';
 import '../usage_store.dart';
 import '../widgets/mesh_widgets.dart';
+import '../app_icons.dart';
 
 class UsagePane extends StatefulWidget {
   const UsagePane({
@@ -99,7 +100,7 @@ class _UsagePaneState extends State<UsagePane> {
         color: colors.canvas,
         padding: EdgeInsets.only(top: widget.topPadding),
         child: const MeshEmptyState(
-          icon: Icons.speed_rounded,
+          icon: AppIcons.speed_rounded,
           title: 'No machines turned on',
           body: 'Turn on a machine to see usage here.',
         ),
@@ -145,7 +146,7 @@ class _UsagePaneState extends State<UsagePane> {
             ] else if (accounts.isEmpty) ...[
               const SizedBox(height: 36),
               const MeshEmptyState.compact(
-                icon: Icons.speed_rounded,
+                icon: AppIcons.speed_rounded,
                 title: 'Nothing to show yet',
                 body:
                     'Pull to refresh, or check that your machines are online.',
@@ -368,7 +369,7 @@ class _UsageHeader extends StatelessWidget {
           ),
         ),
         MeshIconButton(
-          icon: loading ? Icons.hourglass_top_rounded : Icons.refresh_rounded,
+          icon: loading ? AppIcons.hourglass_top_rounded : AppIcons.refresh_rounded,
           tooltip: 'Refresh',
           onTap: onRefresh,
         ),
@@ -573,7 +574,7 @@ class _CreditsRow extends StatelessWidget {
       child: Row(
         children: [
           Icon(
-            Icons.account_balance_wallet_rounded,
+            AppIcons.account_balance_wallet_rounded,
             size: 17,
             color: colors.accent,
           ),
@@ -601,7 +602,7 @@ class _UnsupportedUsageCard extends StatelessWidget {
       child: Row(
         children: [
           Icon(
-            Icons.visibility_off_rounded,
+            AppIcons.visibility_off_rounded,
             color: colors.textTertiary,
             size: 19,
           ),
@@ -633,7 +634,7 @@ class _UsageFailureBanner extends StatelessWidget {
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Icon(Icons.warning_amber_rounded, color: colors.warning, size: 20),
+          Icon(AppIcons.warning_amber_rounded, color: colors.warning, size: 20),
           const SizedBox(width: 10),
           Expanded(
             child: Text(

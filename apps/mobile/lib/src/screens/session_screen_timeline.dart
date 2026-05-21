@@ -250,7 +250,7 @@ class _ReasoningBlockState extends State<_ReasoningBlock> {
                     )
                   else ...[
                     Icon(
-                      Icons.psychology_outlined,
+                      AppIcons.psychology_outlined,
                       size: 16,
                       color: colors.textSecondary,
                     ),
@@ -269,8 +269,8 @@ class _ReasoningBlockState extends State<_ReasoningBlock> {
                   const SizedBox(width: 4),
                   Icon(
                     _expanded
-                        ? Icons.expand_less_rounded
-                        : Icons.expand_more_rounded,
+                        ? AppIcons.expand_less_rounded
+                        : AppIcons.expand_more_rounded,
                     size: 16,
                     color: colors.textSecondary,
                   ),
@@ -361,9 +361,9 @@ class _ProviderWarningRow extends StatelessWidget {
       _ => MeshPillTone.warning,
     };
     final icon = switch (level) {
-      'error' => Icons.error_outline_rounded,
-      'info' => Icons.info_outline_rounded,
-      _ => Icons.warning_amber_rounded,
+      'error' => AppIcons.error_outline_rounded,
+      'info' => AppIcons.info_outline_rounded,
+      _ => AppIcons.warning_amber_rounded,
     };
     final accent = switch (level) {
       'error' => colors.danger,
@@ -475,7 +475,7 @@ class _PlanUpdateCardState extends State<_PlanUpdateCard> {
                         ),
                         alignment: Alignment.center,
                         child: Icon(
-                          Icons.route_rounded,
+                          AppIcons.route_rounded,
                           size: 16,
                           color: colors.textSecondary,
                         ),
@@ -513,14 +513,14 @@ class _PlanUpdateCardState extends State<_PlanUpdateCard> {
                       MeshStatusBadge(
                         label: '$completedCount/${steps.length}',
                         tone: MeshStatusTone.neutral,
-                        icon: Icons.checklist_rounded,
+                        icon: AppIcons.checklist_rounded,
                         compact: true,
                       ),
                       const SizedBox(width: 4),
                       Icon(
                         _expanded
-                            ? Icons.keyboard_arrow_up_rounded
-                            : Icons.keyboard_arrow_down_rounded,
+                            ? AppIcons.keyboard_arrow_up_rounded
+                            : AppIcons.keyboard_arrow_down_rounded,
                         size: 18,
                         color: colors.textTertiary,
                       ),
@@ -590,9 +590,9 @@ class _PlanUpdateCardState extends State<_PlanUpdateCard> {
   }
 
   IconData _planStepIcon(String status) => switch (status) {
-    'completed' => Icons.check_circle_rounded,
-    'in_progress' => Icons.timelapse_rounded,
-    _ => Icons.radio_button_unchecked_rounded,
+    'completed' => AppIcons.check_circle_rounded,
+    'in_progress' => AppIcons.timelapse_rounded,
+    _ => AppIcons.radio_button_unchecked_rounded,
   };
 
   Color _planStepColor(AppColors colors, String status) => switch (status) {
@@ -658,7 +658,7 @@ class _RuntimeSignalStrip extends StatelessWidget {
           label:
               'Queue · ${queue!.steeringCount ?? 0} steering · ${queue.followUpCount ?? 0} follow-up',
           tone: MeshPillTone.info,
-          icon: Icons.queue_rounded,
+          icon: AppIcons.queue_rounded,
         ),
       );
       final queuePreview = _queuePreview(queue);
@@ -759,12 +759,12 @@ class _RuntimeSignalStrip extends StatelessWidget {
   };
 
   IconData _threadStatusIcon(String? status) => switch (status) {
-    'waiting_for_input' => Icons.keyboard_rounded,
-    'waiting_for_approval' => Icons.gpp_maybe_rounded,
-    'errored' => Icons.error_outline_rounded,
-    'closed' => Icons.lock_outline_rounded,
-    'running' => Icons.play_circle_outline_rounded,
-    _ => Icons.info_outline_rounded,
+    'waiting_for_input' => AppIcons.keyboard_rounded,
+    'waiting_for_approval' => AppIcons.gpp_maybe_rounded,
+    'errored' => AppIcons.error_outline_rounded,
+    'closed' => AppIcons.lock_outline_rounded,
+    'running' => AppIcons.play_circle_outline_rounded,
+    _ => AppIcons.info_outline_rounded,
   };
 
   String _queuePreview(LiveEvent event) {
@@ -804,11 +804,11 @@ class _RuntimeSignalStrip extends StatelessWidget {
 
   IconData _retryIcon(LiveEvent event) {
     if (event.phase == 'started') {
-      return Icons.schedule_rounded;
+      return AppIcons.schedule_rounded;
     }
     return event.success == true
-        ? Icons.check_circle_outline_rounded
-        : Icons.error_outline_rounded;
+        ? AppIcons.check_circle_outline_rounded
+        : AppIcons.error_outline_rounded;
   }
 
   String _formatDelay(int delayMs) {
@@ -893,7 +893,7 @@ class _PendingSendStrip extends StatelessWidget {
               Row(
                 children: [
                   Icon(
-                    Icons.cloud_sync_rounded,
+                    AppIcons.cloud_sync_rounded,
                     color: colors.accent,
                     size: 20,
                   ),
@@ -1518,7 +1518,7 @@ class _LocalImageFallback extends StatelessWidget {
       child: Row(
         children: [
           Icon(
-            loading ? Icons.downloading_rounded : Icons.image_rounded,
+            loading ? AppIcons.downloading_rounded : AppIcons.image_rounded,
             color: colors.accent,
             size: 18,
           ),
@@ -1563,7 +1563,7 @@ class _AttachmentLoadError extends StatelessWidget {
       color: colors.surfaceMuted,
       alignment: Alignment.center,
       child: Icon(
-        Icons.broken_image_rounded,
+        AppIcons.broken_image_rounded,
         color: colors.textTertiary,
         size: 28,
       ),
@@ -1612,7 +1612,7 @@ class _MessageCopyButtonState extends State<_MessageCopyButton> {
           mainAxisSize: MainAxisSize.min,
           children: [
             Icon(
-              _copied ? Icons.check_rounded : Icons.copy_rounded,
+              _copied ? AppIcons.check_rounded : AppIcons.copy_rounded,
               size: 13,
               color: color,
             ),
@@ -1657,7 +1657,7 @@ class _MessagePinButton extends StatelessWidget {
           mainAxisSize: MainAxisSize.min,
           children: [
             Icon(
-              pinned ? Icons.push_pin_rounded : Icons.push_pin_outlined,
+              pinned ? AppIcons.push_pin_rounded : AppIcons.push_pin_outlined,
               size: 13,
               color: color,
             ),
@@ -2058,7 +2058,7 @@ class _ActivityCardState extends State<_ActivityCard> {
       actions.add(
         _ActivityActionSpec(
           label: previewTarget.previewLabel,
-          icon: Icons.open_in_browser_rounded,
+          icon: AppIcons.open_in_browser_rounded,
           tone: _ActivityActionTone.accent,
           onTap: () => widget.onOpenBrowserPreview!(previewTarget),
         ),
@@ -2071,7 +2071,7 @@ class _ActivityCardState extends State<_ActivityCard> {
           label: widget.activity.isFileChange && widget.opensFilesInInspector
               ? 'Open in inspector'
               : 'Browse files',
-          icon: Icons.folder_open_rounded,
+          icon: AppIcons.folder_open_rounded,
           onTap: () => widget.onBrowsePath!(browsePath),
         ),
       );
@@ -2081,7 +2081,7 @@ class _ActivityCardState extends State<_ActivityCard> {
       actions.add(
         _ActivityActionSpec(
           label: 'Open file',
-          icon: Icons.description_rounded,
+          icon: AppIcons.description_rounded,
           onTap: () => widget.onOpenFile!(openFilePath),
         ),
       );
@@ -2090,7 +2090,7 @@ class _ActivityCardState extends State<_ActivityCard> {
       actions.add(
         _ActivityActionSpec(
           label: 'Open terminal',
-          icon: Icons.terminal_rounded,
+          icon: AppIcons.terminal_rounded,
           onTap: () => widget.onOpenTerminal!(widget.activity.cwd),
         ),
       );
@@ -2113,9 +2113,9 @@ class _ActivityCardState extends State<_ActivityCard> {
       _ => 'running',
     };
     final statusIcon = switch (activity.status) {
-      'failed' => Icons.error_outline_rounded,
-      'declined' => Icons.block_rounded,
-      _ => Icons.bolt_rounded,
+      'failed' => AppIcons.error_outline_rounded,
+      'declined' => AppIcons.block_rounded,
+      _ => AppIcons.bolt_rounded,
     };
     return MeshStatusBadge(
       label: statusLabel,
@@ -2294,14 +2294,14 @@ class _ActivityCardState extends State<_ActivityCard> {
     };
 
     final activityIcon = switch (activity.type) {
-      'command' => Icons.terminal_rounded,
+      'command' => AppIcons.terminal_rounded,
       'tool' => _toolActivityIcon(activity),
-      'file_change' => Icons.edit_note_rounded,
-      'turn_diff' => Icons.difference_rounded,
-      'web_search' => Icons.travel_explore_rounded,
-      'image_generation' => Icons.image_rounded,
-      'context_compaction' => Icons.compress_rounded,
-      _ => Icons.bolt_rounded,
+      'file_change' => AppIcons.edit_note_rounded,
+      'turn_diff' => AppIcons.difference_rounded,
+      'web_search' => AppIcons.travel_explore_rounded,
+      'image_generation' => AppIcons.image_rounded,
+      'context_compaction' => AppIcons.compress_rounded,
+      _ => AppIcons.bolt_rounded,
     };
 
     final statusBadge = _activityStatusBadge(activity);
@@ -2415,8 +2415,8 @@ class _ActivityCardState extends State<_ActivityCard> {
                         const SizedBox(width: 4),
                         Icon(
                           _cardCollapsed
-                              ? Icons.keyboard_arrow_down_rounded
-                              : Icons.keyboard_arrow_up_rounded,
+                              ? AppIcons.keyboard_arrow_down_rounded
+                              : AppIcons.keyboard_arrow_up_rounded,
                           size: 18,
                           color: colors.textTertiary,
                         ),
@@ -2549,7 +2549,7 @@ class _ActivityCardState extends State<_ActivityCard> {
                           ),
                           alignment: Alignment.center,
                           child: Icon(
-                            Icons.edit_note_rounded,
+                            AppIcons.edit_note_rounded,
                             size: 16,
                             color: colors.textSecondary,
                           ),
@@ -2594,8 +2594,8 @@ class _ActivityCardState extends State<_ActivityCard> {
                         const SizedBox(width: 4),
                         Icon(
                           _cardCollapsed
-                              ? Icons.keyboard_arrow_down_rounded
-                              : Icons.keyboard_arrow_up_rounded,
+                              ? AppIcons.keyboard_arrow_down_rounded
+                              : AppIcons.keyboard_arrow_up_rounded,
                           size: 18,
                           color: colors.textTertiary,
                         ),
@@ -3074,27 +3074,27 @@ class _ActivityCardState extends State<_ActivityCard> {
 
   IconData _toolActivityIcon(SessionActivity activity) {
     if (activity.toolAction == 'mode_change') {
-      return Icons.tune_rounded;
+      return AppIcons.tune_rounded;
     }
     if (_toolIsCommandActivity(activity)) {
-      return Icons.terminal_rounded;
+      return AppIcons.terminal_rounded;
     }
     return switch (activity.toolCategory) {
       'filesystem' => switch (activity.toolAction) {
-        'write' => Icons.edit_note_rounded,
-        'search' => Icons.manage_search_rounded,
-        'list' => Icons.folder_open_rounded,
-        _ => Icons.description_rounded,
+        'write' => AppIcons.edit_note_rounded,
+        'search' => AppIcons.manage_search_rounded,
+        'list' => AppIcons.folder_open_rounded,
+        _ => AppIcons.description_rounded,
       },
       'network' =>
         activity.toolAction == 'search'
-            ? Icons.travel_explore_rounded
-            : Icons.public_rounded,
-      'command' => Icons.terminal_rounded,
-      'session' => Icons.tune_rounded,
-      'memory' => Icons.psychology_alt_rounded,
-      'task' => Icons.checklist_rounded,
-      _ => Icons.extension_rounded,
+            ? AppIcons.travel_explore_rounded
+            : AppIcons.public_rounded,
+      'command' => AppIcons.terminal_rounded,
+      'session' => AppIcons.tune_rounded,
+      'memory' => AppIcons.psychology_alt_rounded,
+      'task' => AppIcons.checklist_rounded,
+      _ => AppIcons.extension_rounded,
     };
   }
 
@@ -3528,8 +3528,8 @@ class _DiffToggle extends StatelessWidget {
               children: [
                 Icon(
                   expanded
-                      ? Icons.unfold_less_rounded
-                      : Icons.unfold_more_rounded,
+                      ? AppIcons.unfold_less_rounded
+                      : AppIcons.unfold_more_rounded,
                   size: 15,
                   color: colors.textSecondary,
                 ),
@@ -3578,7 +3578,7 @@ class _ExpandToggle extends StatelessWidget {
           mainAxisSize: MainAxisSize.min,
           children: [
             Icon(
-              expanded ? Icons.unfold_less_rounded : Icons.unfold_more_rounded,
+              expanded ? AppIcons.unfold_less_rounded : AppIcons.unfold_more_rounded,
               size: 16,
               color: colors.accent,
             ),
@@ -3625,7 +3625,7 @@ class _FileChangeBlock extends StatelessWidget {
     final canOpen = onOpen != null && !isDeleted;
     final pathRow = Row(
       children: [
-        Icon(Icons.description_rounded, size: 16, color: colors.textSecondary),
+        Icon(AppIcons.description_rounded, size: 16, color: colors.textSecondary),
         const SizedBox(width: 8),
         Expanded(
           child: Text(
@@ -3707,7 +3707,7 @@ class _InlineFileChangeRow extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.center,
         children: [
           Icon(
-            Icons.description_rounded,
+            AppIcons.description_rounded,
             size: 15,
             color: colors.textTertiary,
           ),
@@ -3902,7 +3902,7 @@ class _SessionRuntimeDetails extends StatelessWidget {
         children: [
           Row(
             children: [
-              Icon(Icons.memory_rounded, size: 16, color: colors.accent),
+              Icon(AppIcons.memory_rounded, size: 16, color: colors.accent),
               const SizedBox(width: 7),
               Text(
                 'Runtime',
@@ -4801,7 +4801,7 @@ class _SessionWaitingState extends StatelessWidget {
             const SizedBox(height: AppSpacing.lg),
             OutlinedButton.icon(
               onPressed: onStop,
-              icon: const Icon(Icons.stop_circle_rounded, size: 17),
+              icon: const Icon(AppIcons.stop_circle_rounded, size: 17),
               label: const Text('Stop agent'),
               style: OutlinedButton.styleFrom(
                 foregroundColor: colors.danger,

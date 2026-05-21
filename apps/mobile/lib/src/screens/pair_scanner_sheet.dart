@@ -5,6 +5,7 @@ import 'package:mobile_scanner/mobile_scanner.dart';
 import '../pairing.dart';
 import '../theme/app_colors.dart';
 import '../widgets/app_sheets.dart';
+import '../app_icons.dart';
 
 bool get canScanPairingQr {
   if (kIsWeb) return false;
@@ -71,7 +72,7 @@ class _PairScannerSheetState extends State<PairScannerSheet> {
   Widget build(BuildContext context) {
     final colors = context.colors;
     return MeshBottomSheetScaffold(
-      icon: Icons.qr_code_scanner_rounded,
+      icon: AppIcons.qr_code_scanner_rounded,
       title: 'Scan a pairing code',
       description:
           'On the machine you want to connect, run sidemesh pair, then scan the code here.',

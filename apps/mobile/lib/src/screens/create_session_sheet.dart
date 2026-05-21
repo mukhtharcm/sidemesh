@@ -20,6 +20,7 @@ import '../widgets/app_sheets.dart';
 import '../widgets/launch_controls.dart';
 import '../widgets/launch_options_form.dart';
 import '../widgets/mesh_widgets.dart';
+import '../app_icons.dart';
 
 enum CreateSessionPresentation { sheet, dialog }
 
@@ -165,7 +166,7 @@ class _HostPickerSurface extends StatelessWidget {
                     ),
                     alignment: Alignment.center,
                     child: Icon(
-                      Icons.hub_rounded,
+                      AppIcons.hub_rounded,
                       color: colors.accent,
                       size: 20,
                     ),
@@ -214,7 +215,7 @@ class _HostPickerSurface extends StatelessWidget {
                             ),
                             alignment: Alignment.center,
                             child: Icon(
-                              Icons.dns_rounded,
+                              AppIcons.dns_rounded,
                               color: colors.accent,
                               size: 17,
                             ),
@@ -1411,7 +1412,7 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
             border: Border.all(color: colors.accent.withValues(alpha: 0.24)),
           ),
           alignment: Alignment.center,
-          child: Icon(Icons.play_arrow_rounded, color: colors.accent, size: 20),
+          child: Icon(AppIcons.play_arrow_rounded, color: colors.accent, size: 20),
         ),
         const SizedBox(width: 12),
         Expanded(
@@ -1440,7 +1441,7 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
         ),
         const SizedBox(width: 8),
         MeshIconButton(
-          icon: Icons.close_rounded,
+          icon: AppIcons.close_rounded,
           tooltip: 'Close',
           color: colors.textSecondary,
           onTap: () => Navigator.of(context).pop(),
@@ -1457,7 +1458,7 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
         if (_availableProviders.length > 1) ...[
           LaunchSelectorRow(
             key: const ValueKey('create-session-provider-selector'),
-            icon: Icons.smart_toy_rounded,
+            icon: AppIcons.smart_toy_rounded,
             label: 'Agent',
             value: _providerName,
             detail: _providerPillLabel,
@@ -1466,14 +1467,14 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
           const SizedBox(height: 10),
         ],
         LaunchFieldFrame(
-          icon: Icons.folder_open_rounded,
+          icon: AppIcons.folder_open_rounded,
           label: 'Folder',
           trailing: _nodeInfo != null
               ? IconButton(
                   tooltip: 'Browse folders on this machine',
                   onPressed: _submitting ? null : _browseDirectory,
                   icon: Icon(
-                    Icons.folder_rounded,
+                    AppIcons.folder_rounded,
                     size: 18,
                     color: context.colors.accent,
                   ),
@@ -1502,7 +1503,7 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
         ),
         const SizedBox(height: 10),
         LaunchFieldFrame(
-          icon: Icons.keyboard_command_key_rounded,
+          icon: AppIcons.keyboard_command_key_rounded,
           label: 'Task',
           alignTop: true,
           child: TextField(
@@ -1535,7 +1536,7 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
       padding: const EdgeInsets.fromLTRB(12, 10, 10, 10),
       child: Row(
         children: [
-          Icon(Icons.tune_rounded, size: 18, color: colors.accent),
+          Icon(AppIcons.tune_rounded, size: 18, color: colors.accent),
           const SizedBox(width: 10),
           Expanded(
             child: Column(
@@ -1560,7 +1561,7 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
               ],
             ),
           ),
-          Icon(Icons.keyboard_arrow_down_rounded, color: colors.accent),
+          Icon(AppIcons.keyboard_arrow_down_rounded, color: colors.accent),
         ],
       ),
     );
@@ -1596,14 +1597,14 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           _PanelHeading(
-            icon: Icons.tune_rounded,
+            icon: AppIcons.tune_rounded,
             title: 'Session setup',
             subtitle:
                 'Only the options available for $_providerName are shown here.',
             trailing: IconButton(
               tooltip: 'Hide advanced',
               onPressed: _submitting ? null : _toggleAdvanced,
-              icon: const Icon(Icons.expand_less_rounded),
+              icon: const Icon(AppIcons.expand_less_rounded),
             ),
           ),
           const SizedBox(height: 14),
@@ -1646,7 +1647,7 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
                     _supportsSandboxMode
                 ? TextButton.icon(
                     onPressed: _applyAutopilot,
-                    icon: const Icon(Icons.auto_awesome_rounded, size: 16),
+                    icon: const Icon(AppIcons.auto_awesome_rounded, size: 16),
                     label: const Text('Autopilot'),
                   )
                 : null,
@@ -1680,7 +1681,7 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
                             HapticFeedback.mediumImpact();
                           }
                         },
-                  icon: const Icon(Icons.save_outlined, size: 18),
+                  icon: const Icon(AppIcons.save_outlined, size: 18),
                   label: const Text('Save as defaults'),
                 ),
               ),
@@ -1706,7 +1707,7 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
             ? const MeshSelectionCardSkeleton(compact: true, badgeCount: 2)
             : MeshSelectionCard(
                 title: 'Profile',
-                icon: Icons.badge_rounded,
+                icon: AppIcons.badge_rounded,
                 value: _profileLabel,
                 subtitle: _profileDescription,
                 loading: _loadingProfiles,
@@ -1726,7 +1727,7 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
             ? const MeshSelectionCardSkeleton(compact: true, badgeCount: 3)
             : MeshSelectionCard(
                 title: 'Model',
-                icon: Icons.memory_rounded,
+                icon: AppIcons.memory_rounded,
                 value: _modelLabel,
                 subtitle: _modelDescription,
                 loading: _loadingModels,
@@ -1750,7 +1751,7 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
     if (!_supportsProfiles && (!_supportsModels || !_supportsModelOverride)) {
       extras.add(
         LaunchInfoLine(
-          icon: Icons.info_outline_rounded,
+          icon: AppIcons.info_outline_rounded,
           text: '$_providerName does not offer profiles or model choices here.',
         ),
       );
@@ -1762,21 +1763,21 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
       } else if (_controlModelIsAuto) {
         extras.add(
           LaunchInfoLine(
-            icon: Icons.psychology_alt_rounded,
+            icon: AppIcons.psychology_alt_rounded,
             text: 'Thinking follows the selected model automatically.',
           ),
         );
       } else if (_supportedReasoningOptions.isEmpty) {
         extras.add(
           const LaunchInfoLine(
-            icon: Icons.psychology_alt_rounded,
+            icon: AppIcons.psychology_alt_rounded,
             text: 'Choose a model to adjust thinking.',
           ),
         );
       } else {
         extras.add(
           LaunchChoiceWrap<String>(
-            icon: Icons.psychology_alt_rounded,
+            icon: AppIcons.psychology_alt_rounded,
             label: 'Thinking',
             value: effectiveReasoning,
             options: _supportedReasoningOptions
@@ -1814,7 +1815,7 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
     if (_supportsFastMode) {
       extras.add(
         LaunchSwitchRow(
-          icon: Icons.bolt_rounded,
+          icon: AppIcons.bolt_rounded,
           title: 'Fast mode',
           subtitle: _fastSupported
               ? 'Ask for the fast service tier.'
@@ -1854,7 +1855,7 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
                       color: actionForeground,
                     ),
                   )
-                : const Icon(Icons.play_arrow_rounded),
+                : const Icon(AppIcons.play_arrow_rounded),
             label: const Text('Start session'),
           ),
         ];
@@ -1875,7 +1876,7 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
                           color: actionForeground,
                         ),
                       )
-                    : const Icon(Icons.play_arrow_rounded),
+                    : const Icon(AppIcons.play_arrow_rounded),
                 label: const Text('Start session'),
               ),
               const SizedBox(height: 6),
@@ -1906,13 +1907,13 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
     return [
       MeshPill(
         label: _providerPillLabel,
-        icon: Icons.smart_toy_rounded,
+        icon: AppIcons.smart_toy_rounded,
         tone: MeshPillTone.neutral,
       ),
       if (_supportsProfiles)
         MeshPill(
           label: _profileLabel,
-          icon: Icons.badge_rounded,
+          icon: AppIcons.badge_rounded,
           tone: _profileToSubmit == null
               ? MeshPillTone.neutral
               : MeshPillTone.accent,
@@ -1920,7 +1921,7 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
       if (_supportsMode)
         MeshPill(
           label: _sessionModeChoiceLabel(_modeToSubmit, _availableModeChoices),
-          icon: Icons.alt_route_rounded,
+          icon: AppIcons.alt_route_rounded,
           tone: _modeToSubmit == null
               ? MeshPillTone.neutral
               : MeshPillTone.info,
@@ -1928,7 +1929,7 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
       if (_supportsModels && _supportsModelOverride)
         MeshPill(
           label: _modelLabel,
-          icon: Icons.memory_rounded,
+          icon: AppIcons.memory_rounded,
           tone: _selectedModel == null
               ? MeshPillTone.neutral
               : MeshPillTone.accent,
@@ -1940,25 +1941,25 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
               : reasoning == null
               ? 'thinking default'
               : _reasoningEffortLabel(reasoning),
-          icon: Icons.psychology_alt_rounded,
+          icon: AppIcons.psychology_alt_rounded,
         ),
       if (_supportsFastMode && _effectiveFastMode)
         const MeshPill(
           label: 'fast',
-          icon: Icons.bolt_rounded,
+          icon: AppIcons.bolt_rounded,
           tone: MeshPillTone.warning,
         ),
       if (_supportsApprovalPolicy)
         MeshPill(
           label: _effectiveApproval.label,
-          icon: Icons.verified_user_rounded,
+          icon: AppIcons.verified_user_rounded,
         ),
       if (_supportsSandboxMode)
         MeshPill(
           label: _effectiveSandbox.label,
           icon: _effectiveSandbox == SandboxMode.dangerFullAccess
-              ? Icons.lock_open_rounded
-              : Icons.folder_special_rounded,
+              ? AppIcons.lock_open_rounded
+              : AppIcons.folder_special_rounded,
           tone: _effectiveSandbox == SandboxMode.dangerFullAccess
               ? MeshPillTone.danger
               : MeshPillTone.neutral,
@@ -1966,7 +1967,7 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
       if (_supportsWebSearch && _effectiveWebSearch)
         const MeshPill(
           label: 'web search',
-          icon: Icons.public_rounded,
+          icon: AppIcons.public_rounded,
           tone: MeshPillTone.info,
         ),
     ];
@@ -2063,7 +2064,7 @@ class _ErrorPanel extends StatelessWidget {
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Icon(Icons.error_outline_rounded, color: colors.danger, size: 18),
+          Icon(AppIcons.error_outline_rounded, color: colors.danger, size: 18),
           const SizedBox(width: 10),
           Expanded(
             child: Text(
@@ -2181,7 +2182,7 @@ class _ProviderPickerSheet extends StatelessWidget {
                             ),
                             alignment: Alignment.center,
                             child: Icon(
-                              Icons.account_tree_rounded,
+                              AppIcons.account_tree_rounded,
                               size: 19,
                               color: colors.accent,
                             ),
@@ -2213,7 +2214,7 @@ class _ProviderPickerSheet extends StatelessWidget {
                             ),
                           ),
                           MeshIconButton(
-                            icon: Icons.close_rounded,
+                            icon: AppIcons.close_rounded,
                             tooltip: 'Close',
                             color: colors.textSecondary,
                             onTap: () => Navigator.of(context).pop(),
@@ -2327,8 +2328,8 @@ class _ProviderPickerTile extends StatelessWidget {
             alignment: Alignment.center,
             child: Icon(
               selected
-                  ? Icons.radio_button_checked_rounded
-                  : Icons.smart_toy_rounded,
+                  ? AppIcons.radio_button_checked_rounded
+                  : AppIcons.smart_toy_rounded,
               size: 19,
               color: selected ? colors.accent : colors.textSecondary,
             ),
@@ -2354,7 +2355,7 @@ class _ProviderPickerTile extends StatelessWidget {
                     if (selected)
                       MeshPill(
                         label: 'current',
-                        icon: Icons.check_rounded,
+                        icon: AppIcons.check_rounded,
                         tone: MeshPillTone.accent,
                       ),
                   ],
@@ -2460,7 +2461,7 @@ class _ProfilePickerSheetState extends State<_ProfilePickerSheet> {
         .toList(growable: false);
 
     return MeshBottomSheetScaffold(
-      icon: Icons.layers_rounded,
+      icon: AppIcons.layers_rounded,
       title: 'Choose a profile',
       description:
           'Pick a saved setup for this session. A profile can fill in the model and other launch options for you.',
@@ -2472,14 +2473,14 @@ class _ProfilePickerSheetState extends State<_ProfilePickerSheet> {
           TextField(
             controller: _queryController,
             decoration: const InputDecoration(
-              prefixIcon: Icon(Icons.search_rounded),
+              prefixIcon: Icon(AppIcons.search_rounded),
               hintText: 'Search profiles',
             ),
           ),
           if (widget.loadError != null) ...[
             const SizedBox(height: 12),
             _CompactInfoLine(
-              icon: Icons.info_outline_rounded,
+              icon: AppIcons.info_outline_rounded,
               text: 'Could not load profiles: ${widget.loadError}',
             ),
           ],
@@ -2602,7 +2603,7 @@ class _ModelPickerSheetState extends State<_ModelPickerSheet> {
         .toList(growable: false);
 
     return MeshBottomSheetScaffold(
-      icon: Icons.memory_rounded,
+      icon: AppIcons.memory_rounded,
       title: 'Choose a model',
       description: widget.profileName == null
           ? 'Use the machine default, or choose a model just for this session.'
@@ -2614,7 +2615,7 @@ class _ModelPickerSheetState extends State<_ModelPickerSheet> {
           TextField(
             controller: _queryController,
             decoration: const InputDecoration(
-              prefixIcon: Icon(Icons.search_rounded),
+              prefixIcon: Icon(AppIcons.search_rounded),
               hintText: 'Search models',
             ),
           ),
@@ -2979,7 +2980,7 @@ class _DirectoryPickerSheetState extends State<_DirectoryPickerSheet> {
   Widget build(BuildContext context) {
     final colors = context.colors;
     return MeshBottomSheetScaffold(
-      icon: Icons.folder_open_rounded,
+      icon: AppIcons.folder_open_rounded,
       title: 'Choose a folder',
       description:
           'Start the session inside one of your workspace folders on this machine.',
@@ -3012,7 +3013,7 @@ class _DirectoryPickerSheetState extends State<_DirectoryPickerSheet> {
                   children: [
                     OutlinedButton.icon(
                       onPressed: _up,
-                      icon: const Icon(Icons.arrow_upward_rounded, size: 18),
+                      icon: const Icon(AppIcons.arrow_upward_rounded, size: 18),
                       label: const Text('Up'),
                     ),
                     FilledButton(
@@ -3100,13 +3101,13 @@ class _DirectoryPickerSheetState extends State<_DirectoryPickerSheet> {
                         dense: true,
                         radius: AppRadii.control,
                         leading: Icon(
-                          Icons.folder_rounded,
+                          AppIcons.folder_rounded,
                           size: 18,
                           color: colors.accent,
                         ),
                         title: Text(entry.name),
                         trailing: Icon(
-                          Icons.chevron_right_rounded,
+                          AppIcons.chevron_right_rounded,
                           size: 16,
                           color: colors.textTertiary,
                         ),

@@ -10,6 +10,7 @@ import '../../theme/app_theme.dart';
 import '../../theme/app_tokens.dart';
 import '../../widgets/mesh_widgets.dart';
 import 'inspector_controller.dart';
+import '../../app_icons.dart';
 
 enum SearchRecordKind { message, activity }
 
@@ -50,7 +51,7 @@ InspectorSurface buildInspectorSearchSurface({
     kind: InspectorSurfaceKind.search,
     ownerKey: ownerKey,
     title: 'Search',
-    icon: Icons.search_rounded,
+    icon: AppIcons.search_rounded,
     bodyBuilder: (context) {
       Widget buildPanel() => SearchPanel(
         controller: controller,
@@ -184,7 +185,7 @@ class _SearchPanelState extends State<SearchPanel> {
               child: Row(
                 children: [
                   Icon(
-                    Icons.search_rounded,
+                    AppIcons.search_rounded,
                     size: 18,
                     color: colors.textTertiary,
                   ),
@@ -221,7 +222,7 @@ class _SearchPanelState extends State<SearchPanel> {
                       child: Padding(
                         padding: const EdgeInsets.all(6),
                         child: Icon(
-                          Icons.close_rounded,
+                          AppIcons.close_rounded,
                           size: 16,
                           color: colors.textSecondary,
                         ),
@@ -240,7 +241,7 @@ class _SearchPanelState extends State<SearchPanel> {
                       child: Padding(
                         padding: const EdgeInsets.all(6),
                         child: Icon(
-                          Icons.close_rounded,
+                          AppIcons.close_rounded,
                           size: 16,
                           color: colors.textSecondary,
                         ),
@@ -379,7 +380,7 @@ class _SearchPanelEmptyState extends StatelessWidget {
   Widget build(BuildContext context) {
     final hasQuery = query.isNotEmpty;
     return MeshEmptyState.compact(
-      icon: hasQuery ? Icons.search_off_rounded : Icons.search_rounded,
+      icon: hasQuery ? AppIcons.search_off_rounded : AppIcons.search_rounded,
       title: hasQuery
           ? 'No matches for "$query"'
           : 'Search this session',
@@ -410,8 +411,8 @@ class _SearchResultRow extends StatelessWidget {
     final isMessage = record.kind == SearchRecordKind.message;
     final leadingIcon = isMessage
         ? (record.message!.role == 'user'
-              ? Icons.person_outline_rounded
-              : Icons.auto_awesome_rounded)
+              ? AppIcons.person_outline_rounded
+              : AppIcons.auto_awesome_rounded)
         : _iconForActivity(record.activity!.type);
     final snippet = _SnippetText(
       body: record.kind == SearchRecordKind.message
@@ -485,8 +486,8 @@ class _SearchResultRow extends StatelessWidget {
                 const SizedBox(width: 4),
                 Icon(
                   expanded
-                      ? Icons.expand_less_rounded
-                      : Icons.expand_more_rounded,
+                      ? AppIcons.expand_less_rounded
+                      : AppIcons.expand_more_rounded,
                   size: 18,
                   color: colors.textTertiary,
                 ),
@@ -726,19 +727,19 @@ class _SearchResultExpanded extends StatelessWidget {
 IconData _iconForActivity(String type) {
   switch (type) {
     case 'command':
-      return Icons.terminal_rounded;
+      return AppIcons.terminal_rounded;
     case 'tool':
-      return Icons.extension_rounded;
+      return AppIcons.extension_rounded;
     case 'file_change':
-      return Icons.edit_note_rounded;
+      return AppIcons.edit_note_rounded;
     case 'turn_diff':
-      return Icons.difference_rounded;
+      return AppIcons.difference_rounded;
     case 'web_search':
-      return Icons.travel_explore_rounded;
+      return AppIcons.travel_explore_rounded;
     case 'image_generation':
-      return Icons.image_rounded;
+      return AppIcons.image_rounded;
     default:
-      return Icons.bolt_rounded;
+      return AppIcons.bolt_rounded;
   }
 }
 

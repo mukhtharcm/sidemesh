@@ -16,6 +16,7 @@ import '../../widgets/app_snackbar.dart';
 import '../../widgets/mesh_widgets.dart';
 import '../image_viewer_screen.dart';
 import 'inspector_controller.dart';
+import '../../app_icons.dart';
 
 InspectorSurface buildInspectorResourcesSurface({
   required String ownerKey,
@@ -28,7 +29,7 @@ InspectorSurface buildInspectorResourcesSurface({
     kind: InspectorSurfaceKind.resources,
     ownerKey: ownerKey,
     title: 'Resources',
-    icon: Icons.perm_media_rounded,
+    icon: AppIcons.perm_media_rounded,
     bodyBuilder: (context) => SessionResourcesPanel(
       host: host,
       session: session,
@@ -256,7 +257,7 @@ class _SessionResourcesPanelState extends State<SessionResourcesPanel> {
             ),
           ),
           MeshIconButton(
-            icon: Icons.refresh_rounded,
+            icon: AppIcons.refresh_rounded,
             tooltip: 'Refresh',
             color: colors.textSecondary,
             onTap: _load,
@@ -299,7 +300,7 @@ class _SessionResourcesPanelState extends State<SessionResourcesPanel> {
     }
     if (_error != null && _resources.isEmpty) {
       return _ResourcesEmptyState(
-        icon: Icons.error_outline_rounded,
+        icon: AppIcons.error_outline_rounded,
         title: 'Could not load items',
         detail: _error.toString(),
         actionLabel: 'Retry',
@@ -314,7 +315,7 @@ class _SessionResourcesPanelState extends State<SessionResourcesPanel> {
         _ResourceFilter.files => 'No files yet.',
       };
       return _ResourcesEmptyState(
-        icon: Icons.perm_media_rounded,
+        icon: AppIcons.perm_media_rounded,
         title: 'Nothing saved yet',
         detail: detail,
       );
@@ -904,7 +905,7 @@ class _MediaFallback extends StatelessWidget {
       padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
       child: Row(
         children: [
-          Icon(Icons.image_rounded, color: colors.accent, size: 18),
+          Icon(AppIcons.image_rounded, color: colors.accent, size: 18),
           const SizedBox(width: 10),
           Expanded(
             child: Column(
@@ -981,7 +982,7 @@ class _ResourcesEmptyState extends StatelessWidget {
               const SizedBox(height: 14),
               TextButton.icon(
                 onPressed: onAction,
-                icon: const Icon(Icons.refresh_rounded),
+                icon: const Icon(AppIcons.refresh_rounded),
                 label: Text(actionLabel!),
               ),
             ],
@@ -997,15 +998,15 @@ IconData _resourceIcon(
   required bool preferFileOpen,
 }) {
   if (preferFileOpen && resource.hasPath) {
-    return Icons.insert_drive_file_rounded;
+    return AppIcons.insert_drive_file_rounded;
   }
   if (resource.isImage) {
-    return Icons.image_rounded;
+    return AppIcons.image_rounded;
   }
   if (resource.isLink) {
-    return Icons.link_rounded;
+    return AppIcons.link_rounded;
   }
-  return Icons.insert_drive_file_rounded;
+  return AppIcons.insert_drive_file_rounded;
 }
 
 String _sourceLabel(SessionResource resource) {

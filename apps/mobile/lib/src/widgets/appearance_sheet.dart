@@ -6,6 +6,7 @@ import '../theme/app_tokens.dart';
 import '../theme/app_palettes.dart';
 import '../theme/theme_controller.dart';
 import 'mesh_widgets.dart';
+import '../app_icons.dart';
 
 /// Opens the Appearance sheet — a single surface holding brightness,
 /// palette, and typography controls. Used by both the mobile top-bar button
@@ -101,7 +102,7 @@ class _AppearanceSheet extends StatelessWidget {
                       Row(
                         children: [
                           Icon(
-                            Icons.tune_rounded,
+                            AppIcons.tune_rounded,
                             size: 20,
                             color: colors.accent,
                           ),
@@ -113,7 +114,7 @@ class _AppearanceSheet extends StatelessWidget {
                           ),
                           const Spacer(),
                           MeshIconButton(
-                            icon: Icons.close_rounded,
+                            icon: AppIcons.close_rounded,
                             tooltip: 'Close',
                             onTap: () => Navigator.of(context).maybePop(),
                           ),
@@ -247,15 +248,15 @@ class _AppearanceSummaryCard extends StatelessWidget {
             children: [
               MeshPill(
                 label: _themeModeLabel(controller.mode),
-                icon: Icons.brightness_6_rounded,
+                icon: AppIcons.brightness_6_rounded,
               ),
               MeshPill(
                 label: controller.variant.label,
-                icon: Icons.palette_outlined,
+                icon: AppIcons.palette_outlined,
               ),
               MeshPill(
                 label: controller.typography.interfaceScale.label,
-                icon: Icons.format_size_rounded,
+                icon: AppIcons.format_size_rounded,
                 tone: MeshPillTone.neutral,
               ),
             ],
@@ -333,9 +334,9 @@ class _BrightnessSegmented extends StatelessWidget {
       ),
       child: Row(
         children: [
-          seg(ThemeMode.system, Icons.brightness_auto_rounded, 'System'),
-          seg(ThemeMode.light, Icons.light_mode_rounded, 'Light'),
-          seg(ThemeMode.dark, Icons.dark_mode_rounded, 'Dark'),
+          seg(ThemeMode.system, AppIcons.brightness_auto_rounded, 'System'),
+          seg(ThemeMode.light, AppIcons.light_mode_rounded, 'Light'),
+          seg(ThemeMode.dark, AppIcons.dark_mode_rounded, 'Dark'),
         ],
       ),
     );
@@ -475,7 +476,7 @@ class _SwatchCard extends StatelessWidget {
                           right: compact ? 6 : 8,
                           top: compact ? 5 : 8,
                           child: Icon(
-                            Icons.check_circle_rounded,
+                            AppIcons.check_circle_rounded,
                             size: compact ? 14 : 18,
                             color: frameColors.accent,
                           ),
@@ -677,11 +678,11 @@ class _TypographyPreview extends StatelessWidget {
             children: [
               MeshPill(
                 label: typography.interfaceFont.label,
-                icon: Icons.font_download_rounded,
+                icon: AppIcons.font_download_rounded,
               ),
               MeshPill(
                 label: 'UI ${typography.interfaceScale.label.toLowerCase()}',
-                icon: Icons.format_size_rounded,
+                icon: AppIcons.format_size_rounded,
                 tone: MeshPillTone.neutral,
               ),
             ],
@@ -766,8 +767,8 @@ class _ChoiceCard extends StatelessWidget {
               const SizedBox(width: 10),
               Icon(
                 selected
-                    ? Icons.radio_button_checked_rounded
-                    : Icons.radio_button_off_rounded,
+                    ? AppIcons.radio_button_checked_rounded
+                    : AppIcons.radio_button_off_rounded,
                 size: 18,
                 color: selected ? colors.accent : colors.textTertiary,
               ),

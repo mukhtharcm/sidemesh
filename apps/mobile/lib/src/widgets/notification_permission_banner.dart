@@ -6,6 +6,7 @@ import '../theme/app_colors.dart';
 import '../theme/color_contrast.dart';
 import 'app_snackbar.dart';
 import 'mesh_widgets.dart';
+import '../app_icons.dart';
 
 class NotificationPermissionBanner extends StatefulWidget {
   const NotificationPermissionBanner({
@@ -159,7 +160,7 @@ class _BannerBody extends StatelessWidget {
           tooltip: 'Dismiss',
           visualDensity: VisualDensity.compact,
           onPressed: onDismiss,
-          icon: Icon(Icons.close_rounded, color: colors.textSecondary),
+          icon: Icon(AppIcons.close_rounded, color: colors.textSecondary),
         ),
       ],
     );
@@ -201,7 +202,7 @@ class _CompactBannerBody extends StatelessWidget {
               radius: 16,
               onTap: onDismiss,
               child: Icon(
-                Icons.close_rounded,
+                AppIcons.close_rounded,
                 size: 17,
                 color: colors.textSecondary,
               ),
@@ -241,7 +242,7 @@ class _BellBadge extends StatelessWidget {
       ),
       alignment: Alignment.center,
       child: Icon(
-        Icons.notifications_active_rounded,
+        AppIcons.notifications_active_rounded,
         size: size * 0.55,
         color: colors.accent,
       ),
@@ -275,7 +276,7 @@ class _EnableButton extends StatelessWidget {
                 color: foreground,
               ),
             )
-          : const Icon(Icons.notifications_rounded, size: 16),
+          : const Icon(AppIcons.notifications_rounded, size: 16),
       label: Text(requesting ? 'Opening...' : 'Turn on'),
     );
   }

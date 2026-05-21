@@ -4,6 +4,7 @@ import '../theme/app_colors.dart';
 import '../theme/color_contrast.dart';
 import '../theme/app_theme.dart';
 import '../theme/app_tokens.dart';
+import '../app_icons.dart';
 
 /// Small pill chip used for status / metadata.
 class MeshPill extends StatelessWidget {
@@ -704,7 +705,7 @@ class MeshDangerAction extends StatelessWidget {
     super.key,
     required this.label,
     required this.onPressed,
-    this.icon = Icons.delete_outline_rounded,
+    this.icon = AppIcons.delete_outline_rounded,
   });
 
   final String label;
@@ -1042,7 +1043,7 @@ class MeshSelectionCard extends StatelessWidget {
                 )
               else
                 Icon(
-                  Icons.keyboard_arrow_down_rounded,
+                  AppIcons.keyboard_arrow_down_rounded,
                   color: colors.textSecondary,
                 ),
             ],
@@ -1086,7 +1087,7 @@ class MeshSelectionCard extends StatelessWidget {
             const SizedBox(height: 8),
             TextButton.icon(
               onPressed: onRetry,
-              icon: const Icon(Icons.refresh_rounded, size: 18),
+              icon: const Icon(AppIcons.refresh_rounded, size: 18),
               label: Text(retryLabel),
             ),
           ],

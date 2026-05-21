@@ -731,7 +731,7 @@ class _SessionControlsSheetState extends State<SessionControlsSheet> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Icon(
-                  Icons.info_outline_rounded,
+                  AppIcons.info_outline_rounded,
                   color: colors.textSecondary,
                   size: 20,
                 ),
@@ -1056,7 +1056,7 @@ class _SessionControlsSheetState extends State<SessionControlsSheet> {
           children: [
             TextButton.icon(
               onPressed: _reset,
-              icon: const Icon(Icons.restart_alt_rounded, size: 18),
+              icon: const Icon(AppIcons.restart_alt_rounded, size: 18),
               label: const Text('Reset'),
             ),
             const Spacer(),
@@ -1067,7 +1067,7 @@ class _SessionControlsSheetState extends State<SessionControlsSheet> {
             const SizedBox(width: 8),
             FilledButton.icon(
               onPressed: _save,
-              icon: const Icon(Icons.check_rounded, size: 18),
+              icon: const Icon(AppIcons.check_rounded, size: 18),
               label: const Text('Apply'),
             ),
           ],
@@ -1077,7 +1077,7 @@ class _SessionControlsSheetState extends State<SessionControlsSheet> {
 
     if (widget.useBottomSheetChrome) {
       return MeshBottomSheetScaffold(
-        icon: Icons.tune_rounded,
+        icon: AppIcons.tune_rounded,
         title: 'Session controls',
         description: intro,
         maxWidth: 760,
@@ -1187,7 +1187,7 @@ class _FastModeTile extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.center,
         children: [
           Icon(
-            Icons.bolt_rounded,
+            AppIcons.bolt_rounded,
             size: 20,
             color: value ? colors.accent : colors.textSecondary,
           ),
@@ -1278,7 +1278,7 @@ class _ModelPickerSheetState extends State<_ModelPickerSheet> {
         .toList(growable: false);
 
     return MeshBottomSheetScaffold(
-      icon: Icons.memory_rounded,
+      icon: AppIcons.memory_rounded,
       title: 'Choose a model',
       description: widget.providerName == null
           ? 'Pick the model for the next reply. Auto models keep things simple, while named models let you choose thinking effort.'
@@ -1290,7 +1290,7 @@ class _ModelPickerSheetState extends State<_ModelPickerSheet> {
           TextField(
             controller: _queryController,
             decoration: const InputDecoration(
-              prefixIcon: Icon(Icons.search_rounded),
+              prefixIcon: Icon(AppIcons.search_rounded),
               hintText: 'Search models',
             ),
           ),
@@ -1407,7 +1407,7 @@ class _ReasoningPickerSheet extends StatelessWidget {
   Widget build(BuildContext context) {
     final colors = context.colors;
     return MeshBottomSheetScaffold(
-      icon: Icons.psychology_alt_rounded,
+      icon: AppIcons.psychology_alt_rounded,
       title: 'Choose thinking level',
       description:
           'Set how much thinking the next reply should use with $modelLabel.',
@@ -1430,7 +1430,7 @@ class _ReasoningPickerSheet extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Icon(
-                  Icons.psychology_alt_rounded,
+                  AppIcons.psychology_alt_rounded,
                   size: 19,
                   color: selected ? colors.accent : colors.textSecondary,
                 ),
@@ -1498,7 +1498,7 @@ class _PolicyAutopilotCard extends StatelessWidget {
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Icon(Icons.auto_awesome_rounded, color: colors.accent, size: 20),
+          Icon(AppIcons.auto_awesome_rounded, color: colors.accent, size: 20),
           const SizedBox(width: 12),
           Expanded(
             child: Column(
@@ -1523,7 +1523,7 @@ class _PolicyAutopilotCard extends StatelessWidget {
             ),
           ),
           if (active)
-            Icon(Icons.check_circle_rounded, color: colors.accent, size: 20),
+            Icon(AppIcons.check_circle_rounded, color: colors.accent, size: 20),
         ],
       ),
     );
@@ -1555,7 +1555,7 @@ class _PolicyNetworkTile extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.center,
         children: [
           Icon(
-            value ? Icons.public_rounded : Icons.public_off_rounded,
+            value ? AppIcons.public_rounded : AppIcons.public_off_rounded,
             size: 20,
             color: value ? colors.accent : colors.textSecondary,
           ),
@@ -1629,8 +1629,8 @@ class _PolicyRadioTile<T> extends StatelessWidget {
           children: [
             Icon(
               selected
-                  ? Icons.radio_button_checked_rounded
-                  : Icons.radio_button_unchecked_rounded,
+                  ? AppIcons.radio_button_checked_rounded
+                  : AppIcons.radio_button_unchecked_rounded,
               size: 20,
               color: selected ? accent : colors.textSecondary,
             ),

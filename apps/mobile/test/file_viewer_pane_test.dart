@@ -15,6 +15,7 @@ import 'package:sidemesh_mobile/src/screens/pdf_viewer_pane.dart';
 import 'package:sidemesh_mobile/src/theme/app_palettes.dart';
 import 'package:sidemesh_mobile/src/theme/app_theme.dart';
 import 'package:sidemesh_mobile/src/widgets/syntax_code_block.dart';
+import 'package:sidemesh_mobile/src/app_icons.dart';
 
 void main() {
   late VideoPlayerPlatform originalPlatform;
@@ -71,7 +72,7 @@ void main() {
       await tester.tap(
         find.descendant(
           of: find.byType(IconButton),
-          matching: find.byIcon(Icons.play_arrow_rounded),
+          matching: find.byIcon(AppIcons.play_arrow_rounded),
         ),
       );
       await tester.pump();
@@ -123,7 +124,7 @@ void main() {
       await tester.tap(
         find.descendant(
           of: find.byType(IconButton),
-          matching: find.byIcon(Icons.play_circle_fill_rounded),
+          matching: find.byIcon(AppIcons.play_circle_fill_rounded),
         ),
       );
       await tester.pump();
@@ -220,7 +221,7 @@ void main() {
       expect(find.text('docs/guide.md'), findsOneWidget);
       expect(api.blobFetchPaths, <String>['/workspace/build/artifacts.zip']);
 
-      await tester.tap(_appBarAction(Icons.description_rounded));
+      await tester.tap(_appBarAction(AppIcons.description_rounded));
       await tester.pumpAndSettle();
 
       expect(find.text('ZIP archive'), findsOneWidget);
@@ -305,7 +306,7 @@ void main() {
       expect(find.text('port'), findsOneWidget);
       expect(find.text('8080'), findsOneWidget);
 
-      await tester.tap(_appBarAction(Icons.description_rounded));
+      await tester.tap(_appBarAction(AppIcons.description_rounded));
       await tester.pumpAndSettle();
 
       expect(find.byType(SyntaxCodeBlock), findsOneWidget);
@@ -387,7 +388,7 @@ void main() {
         findsOneWidget,
       );
 
-      await tester.tap(_appBarAction(Icons.description_rounded));
+      await tester.tap(_appBarAction(AppIcons.description_rounded));
       await tester.pumpAndSettle();
 
       expect(find.byType(SyntaxCodeBlock), findsOneWidget);
@@ -437,7 +438,7 @@ void main() {
       expect(find.text('missing'), findsOneWidget);
       expect(find.textContaining('name,notes,count'), findsNothing);
 
-      await tester.tap(_appBarAction(Icons.description_rounded));
+      await tester.tap(_appBarAction(AppIcons.description_rounded));
       await tester.pumpAndSettle();
 
       expect(find.byType(Table), findsNothing);

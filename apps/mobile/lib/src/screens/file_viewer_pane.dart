@@ -23,6 +23,7 @@ import 'pdf_viewer_pane.dart';
 import 'structured_data_preview_pane.dart';
 import 'tabular_file_preview.dart';
 import 'video_viewer_pane.dart';
+import '../app_icons.dart';
 
 /// Embeddable read/edit pane for a single workspace file. Does not render a
 /// Scaffold — use [FileViewerScreen] for the mobile-route variant.
@@ -175,7 +176,7 @@ class FileViewerPaneState extends State<FileViewerPane> {
     if (file == null) return;
     final confirmed = await showMeshConfirmDialog(
       context,
-      icon: Icons.save_outlined,
+      icon: AppIcons.save_outlined,
       title: 'Save these changes?',
       description:
           'This will overwrite the file on the connected machine with what you see here now.',
@@ -475,7 +476,7 @@ class FileViewerPaneState extends State<FileViewerPane> {
       return Padding(
         padding: const EdgeInsets.all(24),
         child: MeshEmptyState(
-          icon: Icons.error_outline_rounded,
+          icon: AppIcons.error_outline_rounded,
           title: 'Could not open file',
           body: friendlyError(_error!),
         ),
@@ -598,16 +599,16 @@ class FileViewerPaneState extends State<FileViewerPane> {
         padding: const EdgeInsets.all(24),
         child: MeshEmptyState(
           icon: isImageFile
-              ? Icons.image_rounded
+              ? AppIcons.image_rounded
               : isAudioFile
-              ? Icons.audio_file_rounded
+              ? AppIcons.audio_file_rounded
               : isVideoFile
-              ? Icons.play_circle_outline_rounded
+              ? AppIcons.play_circle_outline_rounded
               : isPdfFile
-              ? Icons.picture_as_pdf_rounded
+              ? AppIcons.picture_as_pdf_rounded
               : isZipArchiveFile
-              ? Icons.archive_outlined
-              : Icons.description_rounded,
+              ? AppIcons.archive_outlined
+              : AppIcons.description_rounded,
           title: isImageFile
               ? 'Image file'
               : isAudioFile
@@ -673,7 +674,7 @@ class FileViewerPaneState extends State<FileViewerPane> {
                 child: Row(
                   children: [
                     Icon(
-                      Icons.warning_amber_rounded,
+                      AppIcons.warning_amber_rounded,
                       size: 16,
                       color: colors.warning,
                     ),
@@ -776,20 +777,20 @@ class FileViewerActions extends StatelessWidget {
                     height: 16,
                     child: CircularProgressIndicator(strokeWidth: 2),
                   )
-                : const Icon(Icons.save_rounded, size: 20),
+                : const Icon(AppIcons.save_rounded, size: 20),
           ),
         IconButton(
           tooltip: editing ? 'Done editing' : 'Edit',
           onPressed: canUseTextContents ? () => s?.toggleEdit() : null,
           icon: Icon(
-            editing ? Icons.visibility_rounded : Icons.edit_rounded,
+            editing ? AppIcons.visibility_rounded : AppIcons.edit_rounded,
             size: 18,
           ),
         ),
         IconButton(
           tooltip: 'Copy',
           onPressed: canUseTextContents ? () => s?.copyContents() : null,
-          icon: const Icon(Icons.content_copy_rounded, size: 18),
+          icon: const Icon(AppIcons.content_copy_rounded, size: 18),
         ),
         if (canPreviewTable)
           IconButton(
@@ -799,8 +800,8 @@ class FileViewerActions extends StatelessWidget {
                 : null,
             icon: Icon(
               tablePreview
-                  ? Icons.description_rounded
-                  : Icons.table_chart_rounded,
+                  ? AppIcons.description_rounded
+                  : AppIcons.table_chart_rounded,
               size: 18,
             ),
           ),
@@ -812,8 +813,8 @@ class FileViewerActions extends StatelessWidget {
                 : null,
             icon: Icon(
               structuredPreview
-                  ? Icons.description_rounded
-                  : Icons.account_tree_rounded,
+                  ? AppIcons.description_rounded
+                  : AppIcons.account_tree_rounded,
               size: 18,
             ),
           ),
@@ -824,7 +825,7 @@ class FileViewerActions extends StatelessWidget {
                 ? () => s?.toggleMarkdownPreview()
                 : null,
             icon: Icon(
-              markdownPreview ? Icons.code_rounded : Icons.article_rounded,
+              markdownPreview ? AppIcons.code_rounded : AppIcons.article_rounded,
               size: 18,
             ),
           ),
@@ -835,7 +836,7 @@ class FileViewerActions extends StatelessWidget {
                 ? () => s?.toggleImagePreview()
                 : null,
             icon: Icon(
-              imagePreview ? Icons.description_rounded : Icons.image_rounded,
+              imagePreview ? AppIcons.description_rounded : AppIcons.image_rounded,
               size: 18,
             ),
           ),
@@ -847,8 +848,8 @@ class FileViewerActions extends StatelessWidget {
                 : null,
             icon: Icon(
               audioPreview
-                  ? Icons.description_rounded
-                  : Icons.graphic_eq_rounded,
+                  ? AppIcons.description_rounded
+                  : AppIcons.graphic_eq_rounded,
               size: 18,
             ),
           ),
@@ -860,8 +861,8 @@ class FileViewerActions extends StatelessWidget {
                 : null,
             icon: Icon(
               videoPreview
-                  ? Icons.description_rounded
-                  : Icons.play_circle_outline_rounded,
+                  ? AppIcons.description_rounded
+                  : AppIcons.play_circle_outline_rounded,
               size: 18,
             ),
           ),
@@ -871,8 +872,8 @@ class FileViewerActions extends StatelessWidget {
             onPressed: hasFile && !editing ? () => s?.togglePdfPreview() : null,
             icon: Icon(
               pdfPreview
-                  ? Icons.description_rounded
-                  : Icons.picture_as_pdf_rounded,
+                  ? AppIcons.description_rounded
+                  : AppIcons.picture_as_pdf_rounded,
               size: 18,
             ),
           ),
@@ -884,15 +885,15 @@ class FileViewerActions extends StatelessWidget {
                 : null,
             icon: Icon(
               archivePreview
-                  ? Icons.description_rounded
-                  : Icons.archive_outlined,
+                  ? AppIcons.description_rounded
+                  : AppIcons.archive_outlined,
               size: 18,
             ),
           ),
         IconButton(
           tooltip: 'Refresh',
           onPressed: hasFile ? () => s?.refresh() : null,
-          icon: const Icon(Icons.refresh_rounded, size: 18),
+          icon: const Icon(AppIcons.refresh_rounded, size: 18),
         ),
       ],
     );

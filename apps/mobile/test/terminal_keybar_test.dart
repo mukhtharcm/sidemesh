@@ -4,6 +4,7 @@ import 'package:sidemesh_mobile/src/terminal_key_models.dart';
 import 'package:sidemesh_mobile/src/theme/app_palettes.dart';
 import 'package:sidemesh_mobile/src/theme/app_theme.dart';
 import 'package:sidemesh_mobile/src/widgets/terminal_keybar.dart';
+import 'package:sidemesh_mobile/src/app_icons.dart';
 
 void main() {
   testWidgets('renders essential row with modifiers and more button', (
@@ -34,7 +35,7 @@ void main() {
     expect(find.text('Shift'), findsOneWidget);
 
     // More button (icon) should appear.
-    expect(find.byIcon(Icons.more_horiz_rounded), findsOneWidget);
+    expect(find.byIcon(AppIcons.more_horiz_rounded), findsOneWidget);
 
     // Tapping a key should fire the callback.
     await tester.tap(find.text('Esc'));
@@ -88,7 +89,7 @@ void main() {
       ),
     );
 
-    await tester.tap(find.byIcon(Icons.more_horiz_rounded));
+    await tester.tap(find.byIcon(AppIcons.more_horiz_rounded));
     await tester.pumpAndSettle();
 
     // The sheet should show category labels and additional keys.

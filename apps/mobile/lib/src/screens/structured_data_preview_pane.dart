@@ -7,6 +7,7 @@ import '../theme/app_colors.dart';
 import '../theme/app_theme.dart';
 import '../theme/app_tokens.dart';
 import '../widgets/mesh_widgets.dart';
+import '../app_icons.dart';
 
 enum StructuredDataFormat { json, yaml }
 
@@ -56,12 +57,12 @@ class StructuredDataPreviewPane extends StatelessWidget {
       _StructuredPreviewState.ready when document != null =>
         _StructuredTreeBody(root: document.root, dense: dense),
       _StructuredPreviewState.empty => MeshEmptyState.compact(
-        icon: Icons.data_object_rounded,
+        icon: AppIcons.data_object_rounded,
         title: 'Empty ${format.label} file',
         body: 'There is no structured data to preview yet.',
       ),
       _StructuredPreviewState.error => MeshEmptyState.compact(
-        icon: Icons.error_outline_rounded,
+        icon: AppIcons.error_outline_rounded,
         title: 'Could not parse ${format.label}',
         body:
             '${result.message ?? 'This file is not valid ${format.label}.'} The raw text view is still available.',
@@ -310,7 +311,7 @@ class _StructuredTreeBody extends StatelessWidget {
     final children = _childrenForNode(root);
     if (children.isEmpty) {
       return MeshEmptyState.compact(
-        icon: Icons.account_tree_rounded,
+        icon: AppIcons.account_tree_rounded,
         title: 'No entries here',
         body: 'This ${_nodeKindLabel(root)} does not contain any values yet.',
       );

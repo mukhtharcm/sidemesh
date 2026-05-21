@@ -4,6 +4,7 @@ import '../../api_client.dart';
 import '../../models.dart';
 import '../terminal_screen.dart';
 import 'inspector_controller.dart';
+import '../../app_icons.dart';
 
 InspectorSurface buildInspectorTerminalSurface({
   required String ownerKey,
@@ -15,7 +16,7 @@ InspectorSurface buildInspectorTerminalSurface({
     kind: InspectorSurfaceKind.terminal,
     ownerKey: ownerKey,
     title: 'Terminal',
-    icon: Icons.terminal_rounded,
+    icon: AppIcons.terminal_rounded,
     bodyBuilder: (context) => TerminalPane(
       key: ValueKey('terminal:${host.id}:${session.id}:${session.cwd}'),
       host: host,

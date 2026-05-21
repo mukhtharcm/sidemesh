@@ -7,6 +7,7 @@ import '../theme/app_colors.dart';
 import '../theme/app_theme.dart';
 import '../theme/app_tokens.dart';
 import '../widgets/mesh_widgets.dart';
+import '../app_icons.dart';
 
 const int archivePreviewMaxArchiveBytes = 16 * 1024 * 1024;
 const int archivePreviewMaxEntries = 200;
@@ -204,7 +205,7 @@ class _ArchivePreviewPaneState extends State<ArchivePreviewPane> {
     }
     if (_skippedForSize) {
       return MeshEmptyState.compact(
-        icon: Icons.archive_outlined,
+        icon: AppIcons.archive_outlined,
         title: 'Archive preview skipped',
         body:
             'ZIP previews currently load archives up to ${_formatBytes(archivePreviewMaxArchiveBytes)}. This archive is ${_formatBytes(widget.fileSize)}.',
@@ -212,7 +213,7 @@ class _ArchivePreviewPaneState extends State<ArchivePreviewPane> {
     }
     if (_error != null) {
       return MeshEmptyState.compact(
-        icon: Icons.archive_outlined,
+        icon: AppIcons.archive_outlined,
         title: 'Could not preview archive',
         body: _archivePreviewErrorMessage(_error!),
       );
@@ -221,7 +222,7 @@ class _ArchivePreviewPaneState extends State<ArchivePreviewPane> {
     final preview = _preview;
     if (preview == null || preview.totalEntries == 0) {
       return const MeshEmptyState.compact(
-        icon: Icons.archive_outlined,
+        icon: AppIcons.archive_outlined,
         title: 'Archive is empty',
         body: 'No entries were found in this ZIP archive.',
       );
@@ -259,7 +260,7 @@ class _ArchivePreviewPaneState extends State<ArchivePreviewPane> {
                       ),
                     ),
                     child: Icon(
-                      Icons.archive_outlined,
+                      AppIcons.archive_outlined,
                       size: widget.dense ? 18 : 20,
                       color: colors.accent,
                     ),
@@ -287,26 +288,26 @@ class _ArchivePreviewPaneState extends State<ArchivePreviewPane> {
                 children: [
                   MeshPill(
                     label: _countLabel(preview.totalEntries, 'entry'),
-                    icon: Icons.list_alt_rounded,
+                    icon: AppIcons.list_alt_rounded,
                   ),
                   MeshPill(
                     label: _countLabel(preview.fileCount, 'file'),
-                    icon: Icons.insert_drive_file_rounded,
+                    icon: AppIcons.insert_drive_file_rounded,
                   ),
                   MeshPill(
                     label: _countLabel(preview.directoryCount, 'folder'),
-                    icon: Icons.folder_rounded,
+                    icon: AppIcons.folder_rounded,
                   ),
                   if (preview.symbolicLinkCount > 0)
                     MeshPill(
                       label: _countLabel(preview.symbolicLinkCount, 'link'),
-                      icon: Icons.shortcut_rounded,
+                      icon: AppIcons.shortcut_rounded,
                     ),
                   if (preview.totalUncompressedBytes > 0)
                     MeshPill(
                       label:
                           '${_formatBytes(preview.totalUncompressedBytes)} unpacked',
-                      icon: Icons.unarchive_rounded,
+                      icon: AppIcons.unarchive_rounded,
                     ),
                 ],
               ),
@@ -383,10 +384,10 @@ class _ArchiveEntryIcon extends StatelessWidget {
   Widget build(BuildContext context) {
     final colors = context.colors;
     final icon = entry.isDirectory
-        ? Icons.folder_rounded
+        ? AppIcons.folder_rounded
         : entry.isSymbolicLink
-        ? Icons.shortcut_rounded
-        : Icons.insert_drive_file_rounded;
+        ? AppIcons.shortcut_rounded
+        : AppIcons.insert_drive_file_rounded;
     final tint = entry.isDirectory
         ? colors.info
         : entry.isSymbolicLink
@@ -432,7 +433,7 @@ class _ArchiveLimitBanner extends StatelessWidget {
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Icon(Icons.info_outline_rounded, size: 16, color: colors.warning),
+          Icon(AppIcons.info_outline_rounded, size: 16, color: colors.warning),
           const SizedBox(width: AppSpacing.sm),
           Expanded(
             child: Text(

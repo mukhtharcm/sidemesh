@@ -11,6 +11,7 @@ import '../theme/app_tokens.dart';
 import '../widgets/app_snackbar.dart';
 import '../widgets/mesh_widgets.dart';
 import 'browser_preview_screen.dart';
+import '../app_icons.dart';
 
 String portForwardScreenTitle({
   required bool supportsBrowserPreview,
@@ -322,7 +323,7 @@ class _PortForwardPaneState extends State<PortForwardPane> {
         children: [
           if (!widget.supportsBrowserPreview)
             const MeshEmptyState(
-              icon: Icons.open_in_browser_rounded,
+              icon: AppIcons.open_in_browser_rounded,
               title: 'Previews unavailable',
               body: 'This machine does not support previews yet.',
             )
@@ -335,7 +336,7 @@ class _PortForwardPaneState extends State<PortForwardPane> {
                   Row(
                     children: [
                       Icon(
-                        Icons.open_in_browser_rounded,
+                        AppIcons.open_in_browser_rounded,
                         color: colors.accent,
                         size: 18,
                       ),
@@ -357,8 +358,8 @@ class _PortForwardPaneState extends State<PortForwardPane> {
                         ),
                         icon: Icon(
                           _showAdvancedLauncherOptions
-                              ? Icons.expand_less_rounded
-                              : Icons.tune_rounded,
+                              ? AppIcons.expand_less_rounded
+                              : AppIcons.tune_rounded,
                           size: 16,
                         ),
                         label: Text(
@@ -407,7 +408,7 @@ class _PortForwardPaneState extends State<PortForwardPane> {
                                       strokeWidth: 2,
                                     ),
                                   )
-                                : const Icon(Icons.open_in_browser_rounded),
+                                : const Icon(AppIcons.open_in_browser_rounded),
                             label: const Text('Start preview'),
                           ),
                         ),
@@ -442,7 +443,7 @@ class _PortForwardPaneState extends State<PortForwardPane> {
                                     strokeWidth: 2,
                                   ),
                                 )
-                              : const Icon(Icons.open_in_browser_rounded),
+                              : const Icon(AppIcons.open_in_browser_rounded),
                           label: const Text('Start preview'),
                         ),
                       ],
@@ -506,8 +507,8 @@ class _PortForwardPaneState extends State<PortForwardPane> {
                             selected: _rememberBrowserLogins,
                             avatar: Icon(
                               _rememberBrowserLogins
-                                  ? Icons.lock_clock_rounded
-                                  : Icons.lock_reset_rounded,
+                                  ? AppIcons.lock_clock_rounded
+                                  : AppIcons.lock_reset_rounded,
                               size: 17,
                             ),
                             label: const Text('Keep sign-ins'),
@@ -527,20 +528,20 @@ class _PortForwardPaneState extends State<PortForwardPane> {
               const _BrowserPreviewListLoadingState()
             else if (_error != null)
               MeshEmptyState(
-                icon: Icons.warning_amber_rounded,
+                icon: AppIcons.warning_amber_rounded,
                 title: 'Could not load previews',
                 body: _error!,
               )
             else if (browserPreviews.isEmpty)
               MeshEmptyState(
-                icon: Icons.open_in_browser_rounded,
+                icon: AppIcons.open_in_browser_rounded,
                 title: 'No previews yet',
                 body:
                     'Start a preview for a local app on ${widget.host.label}.',
               )
             else ...[
               const _SectionHeading(
-                icon: Icons.open_in_browser_rounded,
+                icon: AppIcons.open_in_browser_rounded,
                 title: 'Running previews',
                 subtitle: 'Opened from this session',
               ),
@@ -628,7 +629,7 @@ class _BrowserPreviewListLoadingState extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: const [
         _SectionHeading(
-          icon: Icons.open_in_browser_rounded,
+          icon: AppIcons.open_in_browser_rounded,
           title: 'Running previews',
           subtitle: 'Loading preview routes for this session',
         ),
@@ -709,8 +710,8 @@ class _BrowserPreviewCard extends StatelessWidget {
             children: [
               Icon(
                 running
-                    ? Icons.open_in_browser_rounded
-                    : Icons.stop_circle_rounded,
+                    ? AppIcons.open_in_browser_rounded
+                    : AppIcons.stop_circle_rounded,
                 color: running ? colors.success : colors.textSecondary,
                 size: 18,
               ),
@@ -752,12 +753,12 @@ class _BrowserPreviewCard extends StatelessWidget {
               if (running)
                 FilledButton.icon(
                   onPressed: onOpen,
-                  icon: const Icon(Icons.open_in_browser_rounded),
+                  icon: const Icon(AppIcons.open_in_browser_rounded),
                   label: const Text('Open preview'),
                 ),
               TextButton.icon(
                 onPressed: onStop,
-                icon: const Icon(Icons.stop_circle_rounded),
+                icon: const Icon(AppIcons.stop_circle_rounded),
                 label: const Text('Stop preview'),
               ),
             ],
