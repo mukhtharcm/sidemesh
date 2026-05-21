@@ -10,7 +10,9 @@ import {
   buildBrowserTargetUrlCandidates,
   browserPreviewReuseKey,
   isBrowserNavigationUrl,
+  maybeRecoverStaleChromeSingletonProfile,
   normalizeBrowserPreviewTargetUrl,
+  parseChromeProfileSingletonError,
 } from "./browser-preview.js";
 
 describe("browser preview", () => {
@@ -155,6 +157,62 @@ describe("browser preview", () => {
     assert.equal(isBrowserNavigationUrl("file:///etc/passwd"), false);
     assert.equal(isBrowserNavigationUrl("javascript:alert(1)"), false);
     assert.equal(isBrowserNavigationUrl("not a url"), false);
+  });
+
+  it("parses Chrome singleton profile errors", () => {
+    const details = parseChromeProfileSingletonError(
+      [
+        "Chromium exited before opening DevTools.",
+        "[649051:649051:0521/070933.051854:ERROR:chrome/browser/process_singleton_posix.cc:363]",
+        "The profile appears to be in use by another Google Chrome process (1353711) on another computer (cortex-dev).",
+      ].join(" "),
+    );
+
+    assert.deepEqual(details, {
+      pid: 1353711,
+      hostname: "cortex-dev",
+    });
+  });
+
+  it("clears stale Chrome singleton files when the referenced process is gone", async () => {
+    const cleared: string[] = [];
+    const recovered = await maybeRecoverStaleChromeSingletonProfile(
+      "/tmp/sidemesh-browser-profiles/sidemesh",
+      new Error(
+        "The profile appears to be in use by another Google Chrome process (1353711) on another computer (cortex-dev).",
+      ),
+      {
+        currentHostname: "devbox",
+        getProcessCommand: async () => null,
+        removeArtifacts: async (profileDir) => {
+          cleared.push(profileDir);
+        },
+      },
+    );
+
+    assert.equal(recovered, true);
+    assert.deepEqual(cleared, ["/tmp/sidemesh-browser-profiles/sidemesh"]);
+  });
+
+  it("keeps singleton files when a live Chrome process is using the same profile", async () => {
+    let cleared = false;
+    const recovered = await maybeRecoverStaleChromeSingletonProfile(
+      "/tmp/sidemesh-browser-profiles/sidemesh",
+      new Error(
+        "The profile appears to be in use by another Google Chrome process (1353711) on another computer (cortex-dev).",
+      ),
+      {
+        currentHostname: "devbox",
+        getProcessCommand: async () =>
+          "google-chrome --headless=new --user-data-dir=/tmp/sidemesh-browser-profiles/sidemesh about:blank",
+        removeArtifacts: async () => {
+          cleared = true;
+        },
+      },
+    );
+
+    assert.equal(recovered, false);
+    assert.equal(cleared, false);
   });
 
   it("tracks page loading for the main frame and ignores subframes", () => {
