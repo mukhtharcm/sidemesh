@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { access, mkdir, mkdtemp, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { hostname as osHostname, tmpdir } from "node:os";
 import path from "node:path";
 import { spawn, type ChildProcessByStdio } from "node:child_process";
 import { EventEmitter, once } from "node:events";
@@ -17,6 +17,11 @@ const DEFAULT_QUALITY = 55;
 const CHROME_START_TIMEOUT_MS = 10_000;
 const CDP_COMMAND_TIMEOUT_MS = 15_000;
 const CHROME_SHUTDOWN_TIMEOUT_MS = 2_000;
+const CHROME_SINGLETON_ARTIFACTS = [
+  "SingletonCookie",
+  "SingletonLock",
+  "SingletonSocket",
+] as const;
 const MAX_TEXT_INPUT_CHARS = 20_000;
 const MAX_CLIENT_BUFFERED_AMOUNT = 8 * 1024 * 1024;
 const MAX_CONSOLE_BUFFER = 256;
@@ -121,6 +126,11 @@ export interface BrowserPreviewReuseCriteria {
   cwd: string | null;
   sessionId: string | null;
   profileMode: BrowserPreviewProfileMode;
+}
+
+export interface ChromeProfileSingletonErrorDetails {
+  pid: number | null;
+  hostname: string | null;
 }
 
 interface BrowserPreviewRecord {
@@ -786,10 +796,22 @@ export class BrowserPreviewRegistry {
       this.persistentProfileRoot,
       SIDEMESH_BROWSER_PROFILE_DIR,
     );
-    const { process: child, browserWsUrl } = await launchChrome(
-      chromePath,
-      userDataDir,
-    );
+    let launched: {
+      process: BrowserProcess;
+      browserWsUrl: string;
+    };
+    try {
+      launched = await launchChrome(chromePath, userDataDir);
+    } catch (error) {
+      // The persistent sidemesh profile can survive host renames or crashes
+      // with stale Chrome singleton files. Clear those artifacts only when the
+      // referenced process is not actively using this profile, then retry once.
+      if (!(await maybeRecoverStaleChromeSingletonProfile(userDataDir, error))) {
+        throw error;
+      }
+      launched = await launchChrome(chromePath, userDataDir);
+    }
+    const { process: child, browserWsUrl } = launched;
     let cdp: CdpConnection;
     try {
       cdp = await CdpConnection.connect(browserWsUrl);
@@ -3026,6 +3048,114 @@ async function launchChrome(
     await terminateBrowserProcess(child);
     throw error;
   }
+}
+
+export function parseChromeProfileSingletonError(
+  output: string,
+): ChromeProfileSingletonErrorDetails | null {
+  if (
+    !/profile appears to be in use by another (?:Google Chrome|Chromium) process/i
+      .test(output) &&
+    !/process_singleton_/i.test(output)
+  ) {
+    return null;
+  }
+  const match =
+    /(?:Google Chrome|Chromium) process \((\d+)\)(?: on another computer \(([^)]+)\))?/i
+      .exec(output);
+  return {
+    pid: match ? Number(match[1]) : null,
+    hostname: match?.[2]?.trim() || null,
+  };
+}
+
+export async function maybeRecoverStaleChromeSingletonProfile(
+  userDataDir: string,
+  error: unknown,
+  options?: {
+    currentHostname?: string;
+    getProcessCommand?: (pid: number) => Promise<string | null>;
+    removeArtifacts?: (profileDir: string) => Promise<void>;
+  },
+): Promise<boolean> {
+  const details = parseChromeProfileSingletonError(
+    error instanceof Error ? error.message : String(error),
+  );
+  if (!details) return false;
+
+  const getProcessCommand = options?.getProcessCommand ?? readProcessCommand;
+  if (details.pid !== null) {
+    const command = await getProcessCommand(details.pid);
+    if (command && chromeCommandUsesUserDataDir(command, userDataDir)) {
+      return false;
+    }
+    const currentHostname = options?.currentHostname ?? osHostname();
+    if (
+      command &&
+      (!details.hostname || details.hostname.trim() === currentHostname)
+    ) {
+      return false;
+    }
+  }
+
+  const removeArtifacts =
+    options?.removeArtifacts ?? removeChromeSingletonArtifacts;
+  await removeArtifacts(userDataDir);
+  return true;
+}
+
+async function readProcessCommand(pid: number): Promise<string | null> {
+  if (!Number.isInteger(pid) || pid < 1) return null;
+  return await new Promise((resolve) => {
+    let settled = false;
+    const child = spawn("ps", ["-p", String(pid), "-o", "command="], {
+      stdio: ["ignore", "pipe", "ignore"],
+    });
+    let output = "";
+    const finish = (value: string | null) => {
+      if (settled) return;
+      settled = true;
+      resolve(value);
+    };
+    child.stdout.on("data", (chunk: Buffer | string) => {
+      output += chunk.toString();
+    });
+    child.once("error", () => finish(null));
+    child.once("exit", (code) => {
+      if (code !== 0) {
+        finish(null);
+        return;
+      }
+      const command = output.trim();
+      finish(command.length > 0 ? command : null);
+    });
+  });
+}
+
+async function removeChromeSingletonArtifacts(userDataDir: string): Promise<void> {
+  await Promise.all(
+    CHROME_SINGLETON_ARTIFACTS.map((name) =>
+      rm(path.join(userDataDir, name), { force: true, recursive: true }).catch(
+        () => {},
+      )
+    ),
+  );
+}
+
+function chromeCommandUsesUserDataDir(
+  command: string,
+  userDataDir: string,
+): boolean {
+  if (!/chrome|chromium/i.test(command)) return false;
+  const normalizedDir = path.resolve(userDataDir);
+  const escapedDir = escapeRegExp(normalizedDir);
+  return new RegExp(
+    `--user-data-dir(?:=|\\s+)(?:'|")?${escapedDir}(?:'|")?(?:\\s|$)`,
+  ).test(command);
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 async function terminateBrowserProcess(child: BrowserProcess): Promise<void> {
