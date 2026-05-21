@@ -48,6 +48,10 @@ class SessionRowCard extends StatelessWidget {
     this.dense = false,
     this.query = '',
     this.showHost = true,
+    /// When set, replaces the default "host · workspace" secondary line in
+    /// the dense sidebar variant. Used by grouped views to show the git
+    /// branch name instead of the folder (which is already the group header).
+    this.secondaryLabel,
   });
 
   final HostProfile host;
@@ -57,6 +61,7 @@ class SessionRowCard extends StatelessWidget {
   final bool dense;
   final String query;
   final bool showHost;
+  final String? secondaryLabel;
   final VoidCallback onTap;
   final VoidCallback onToggleFavorite;
 
@@ -148,9 +153,13 @@ class SessionRowCard extends StatelessWidget {
                         children: [
                           Expanded(
                             child: Text(
-                              showHost
+                              // secondaryLabel overrides the default
+                              // "host · workspace" line when we're inside a
+                              // grouped view (e.g. show branch name instead).
+                              secondaryLabel ??
+                              (showHost
                                   ? '${host.label} · $workspaceLabel'
-                                  : workspaceLabel,
+                                  : workspaceLabel),
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
                               style: theme.textTheme.bodySmall?.copyWith(
