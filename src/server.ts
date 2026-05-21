@@ -68,6 +68,7 @@ import {
 } from "./approvals.js";
 import {
   buildGitDiff,
+  readGitCommonDir,
   readGitDiff,
   readGitStatus,
   sanitizeGitUrl,
@@ -1000,10 +1001,12 @@ export async function startServer(
     }
     try {
       const thread = await readSession(provider, sessionId, false);
-      const session = mapSession(
-        thread,
-        await loadCachedSessionRuntime(provider, thread, runtimeCache, "active"),
-        await sessionStatusOverrideForSnapshot(thread.id),
+      const session = applyGitCommonDirFromCache(
+        mapSession(
+          thread,
+          await loadCachedSessionRuntime(provider, thread, runtimeCache, "active"),
+          await sessionStatusOverrideForSnapshot(thread.id),
+        ),
       );
       broadcastRecentSessionsLive({ type: "upsert", session });
     } catch {
@@ -3754,6 +3757,69 @@ async function resolveTerminalCwd(
   );
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// gitCommonDir enrichment
+//
+// Providers (Codex, Copilot, etc.) report git context from their own agent
+// perspective. None of them run `git rev-parse --git-common-dir`, so
+// GitInfoSummary.gitCommonDir arrives as null from every provider.
+//
+// The daemon owns the host filesystem and already has git.ts. Rather than
+// asking every provider to add this, we enrich the session list here:
+//   1. Collect unique CWDs from the session list.
+//   2. Run readGitCommonDir() for any CWD not yet in the process-level cache.
+//      These run in parallel — typically a handful of fast local subprocesses.
+//   3. Patch each SessionSummary's gitInfo with the cached value.
+//
+// The cache is process-scoped and never expires. gitCommonDir is a stable
+// property of a path on disk — it doesn't change while the daemon is running.
+// If a repo is removed the CWD disappears from session lists, so the stale
+// cache entry becomes unreachable and harmless.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Process-level CWD → gitCommonDir cache. null means "not a git repo". */
+const _gitCommonDirCache = new Map<string, string | null>();
+
+/**
+ * Synchronously applies a cached gitCommonDir value to a single session.
+ * No-op if the cache has no entry for the session's CWD or if gitCommonDir
+ * is already set. Safe to call from any synchronous context after the cache
+ * has been warmed by enrichSessionsWithGitCommonDir.
+ */
+function applyGitCommonDirFromCache(session: SessionSummary): SessionSummary {
+  if (!session.cwd || session.gitInfo?.gitCommonDir) return session;
+  const commonDir = _gitCommonDirCache.get(session.cwd) ?? null;
+  if (!commonDir) return session;
+  return {
+    ...session,
+    gitInfo: session.gitInfo
+      ? { ...session.gitInfo, gitCommonDir: commonDir }
+      : { sha: null, branch: null, originUrl: null, gitCommonDir: commonDir },
+  };
+}
+
+async function enrichSessionsWithGitCommonDir(
+  sessions: SessionSummary[],
+): Promise<SessionSummary[]> {
+  const uniqueCwds = [
+    ...new Set(sessions.map((s) => s.cwd).filter((cwd) => cwd.length > 0)),
+  ];
+  const uncached = uniqueCwds.filter((cwd) => !_gitCommonDirCache.has(cwd));
+
+  // Populate cache for any CWD we haven't seen before. These are fast local
+  // subprocess calls; running them in parallel keeps latency low even with
+  // many distinct working directories.
+  await Promise.allSettled(
+    uncached.map(async (cwd) => {
+      const dir = await readGitCommonDir(cwd);
+      _gitCommonDirCache.set(cwd, dir);
+    }),
+  );
+
+  // Reuse the synchronous helper so enrichment logic lives in one place.
+  return sessions.map(applyGitCommonDirFromCache);
+}
+
 async function listSessions(
   provider: AgentProvider,
   runtimeCache: Map<string, SessionRuntimeCacheEntry>,
@@ -3771,7 +3837,7 @@ async function listSessions(
     const threads = await provider.listRecentUnindexedSessionThreads(
       Math.max(limit, RECENT_UNINDEXED_SESSION_SCAN_LIMIT),
     );
-    return mapWithConcurrency(
+    const sessions = await mapWithConcurrency(
       threads,
       RECENT_SESSION_RUNTIME_CONCURRENCY,
       async (thread) =>
@@ -3786,6 +3852,7 @@ async function listSessions(
           (await statusOverrideForSession?.(thread.id)) ?? null,
       ),
     );
+    return enrichSessionsWithGitCommonDir(sessions);
   }
   const listThreads = requireProviderMethod(
     provider,
@@ -3801,7 +3868,7 @@ async function listSessions(
     threads,
     limit,
   );
-  return mapWithConcurrency(
+  const sessions = await mapWithConcurrency(
     mergedThreads,
     RECENT_SESSION_RUNTIME_CONCURRENCY,
     async (thread) =>
@@ -3816,6 +3883,7 @@ async function listSessions(
         (await statusOverrideForSession?.(thread.id)) ?? null,
       ),
   );
+  return enrichSessionsWithGitCommonDir(sessions);
 }
 
 function canUseRecentSessionFallback(provider: AgentProvider): provider is AgentProvider & {
