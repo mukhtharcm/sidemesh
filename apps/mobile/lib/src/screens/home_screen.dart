@@ -93,7 +93,6 @@ class _SidemeshHomeScreenState extends State<SidemeshHomeScreen>
   int _activeCount = 0;
   int _inboxCount = 0;
   String _query = '';
-  SessionViewMode _recentViewMode = SessionViewMode.flat;
   RecentSessionFilters _recentFilters = const RecentSessionFilters();
   bool _handlingNotificationIntent = false;
   String? _dismissedRecommendedMobileClientVersion;
@@ -132,7 +131,6 @@ class _SidemeshHomeScreenState extends State<SidemeshHomeScreen>
       });
     });
     _startHeartbeat();
-    _loadRecentViewMode();
   }
 
   @override
@@ -236,30 +234,6 @@ class _SidemeshHomeScreenState extends State<SidemeshHomeScreen>
     } finally {
       _heartbeatInFlight = false;
     }
-  }
-
-  Future<void> _loadRecentViewMode() async {
-    final prefs = await SharedPreferences.getInstance();
-    final raw = prefs.getString('sidemesh.recent.viewMode');
-    if (!mounted) return;
-    setState(() {
-      _recentViewMode = switch (raw) {
-        'byCwd' => SessionViewMode.byCwd,
-        'byHost' => SessionViewMode.byHost,
-        _ => SessionViewMode.flat,
-      };
-    });
-  }
-
-  Future<void> _setRecentViewMode(SessionViewMode mode) async {
-    if (_recentViewMode == mode) return;
-    setState(() => _recentViewMode = mode);
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setString('sidemesh.recent.viewMode', switch (mode) {
-      SessionViewMode.byCwd => 'byCwd',
-      SessionViewMode.byHost => 'byHost',
-      SessionViewMode.flat => 'flat',
-    });
   }
 
   void _toggleRecentRunningOnly(bool enabled) {
@@ -381,6 +355,21 @@ class _SidemeshHomeScreenState extends State<SidemeshHomeScreen>
           api: _api,
           initialComposerSeed: composerSeed,
           onOpenSession: (next) => unawaited(_openSession(host, next)),
+          // Provide a session-list drawer so the user can switch sessions
+          // without navigating all the way back to the home screen.
+          sessionDrawer: (ctx) => RecentPane(
+            hosts: _hosts.where((h) => h.enabled).toList(),
+            api: _api,
+            selectedSessionId: session.id,
+            onOpenSession: (h, s) {
+              // Close the drawer then replace the current session.
+              Navigator.of(ctx).pop();
+              unawaited(_openSession(h, s));
+            },
+            onActiveCountChanged: (_) {},
+            dense: false,
+            hasSavedHosts: _hosts.isNotEmpty,
+          ),
         ),
       ),
     );
@@ -580,8 +569,6 @@ class _SidemeshHomeScreenState extends State<SidemeshHomeScreen>
               primaryAction: primaryAction,
               searchController: _searchController,
               searchVisible: _searchVisibleForTab(tab, enabledHosts.length),
-              viewMode: _tabIndex == 0 ? _recentViewMode : null,
-              onViewModeChanged: _tabIndex == 0 ? _setRecentViewMode : null,
               recentFilters: _tabIndex == 0 ? _recentFilters : null,
               onRunningOnlyChanged: _tabIndex == 0
                   ? _toggleRecentRunningOnly
@@ -630,8 +617,6 @@ class _SidemeshHomeScreenState extends State<SidemeshHomeScreen>
                             if (!mounted) return;
                             setState(() => _activeCount = count);
                           },
-                          viewMode: _recentViewMode,
-                          onViewModeChanged: _setRecentViewMode,
                           filters: _recentFilters,
                         ),
                         InboxPane(
@@ -707,25 +692,7 @@ class _SidemeshHomeScreenState extends State<SidemeshHomeScreen>
   }
 }
 
-enum SessionViewMode { flat, byCwd, byHost }
-
 enum _HomeHeaderMenuAction { refresh, settings }
-
-String _sessionViewModeLabel(SessionViewMode mode) {
-  return switch (mode) {
-    SessionViewMode.flat => 'List',
-    SessionViewMode.byCwd => 'Folders',
-    SessionViewMode.byHost => 'Hosts',
-  };
-}
-
-IconData _sessionViewModeIcon(SessionViewMode mode) {
-  return switch (mode) {
-    SessionViewMode.flat => Icons.view_list_rounded,
-    SessionViewMode.byCwd => Icons.folder_rounded,
-    SessionViewMode.byHost => Icons.hub_rounded,
-  };
-}
 
 class RecentSessionFilters {
   const RecentSessionFilters({
@@ -785,8 +752,6 @@ class _HomeStickyHeader extends StatelessWidget {
     required this.primaryAction,
     required this.searchController,
     required this.searchVisible,
-    required this.viewMode,
-    required this.onViewModeChanged,
     required this.recentFilters,
     required this.onRunningOnlyChanged,
     required this.onUnreadOnlyChanged,
@@ -799,8 +764,6 @@ class _HomeStickyHeader extends StatelessWidget {
   final _HomePrimaryAction primaryAction;
   final TextEditingController searchController;
   final bool searchVisible;
-  final SessionViewMode? viewMode;
-  final ValueChanged<SessionViewMode>? onViewModeChanged;
   final RecentSessionFilters? recentFilters;
   final ValueChanged<bool>? onRunningOnlyChanged;
   final ValueChanged<bool>? onUnreadOnlyChanged;
@@ -918,8 +881,6 @@ class _HomeStickyHeader extends StatelessWidget {
                 ? _HomeSearchField(
                     controller: searchController,
                     hintText: 'Search ${tab.title.toLowerCase()}',
-                    viewMode: viewMode,
-                    onViewModeChanged: onViewModeChanged,
                     recentFilters: recentFilters,
                     onRunningOnlyChanged: onRunningOnlyChanged,
                     onUnreadOnlyChanged: onUnreadOnlyChanged,
@@ -937,8 +898,6 @@ class _HomeSearchField extends StatelessWidget {
   const _HomeSearchField({
     required this.controller,
     required this.hintText,
-    this.viewMode,
-    this.onViewModeChanged,
     this.recentFilters,
     this.onRunningOnlyChanged,
     this.onUnreadOnlyChanged,
@@ -947,8 +906,6 @@ class _HomeSearchField extends StatelessWidget {
 
   final TextEditingController controller;
   final String hintText;
-  final SessionViewMode? viewMode;
-  final ValueChanged<SessionViewMode>? onViewModeChanged;
   final RecentSessionFilters? recentFilters;
   final ValueChanged<bool>? onRunningOnlyChanged;
   final ValueChanged<bool>? onUnreadOnlyChanged;
@@ -1012,77 +969,17 @@ class _HomeSearchField extends StatelessWidget {
                 ),
               ),
             ),
-            if (viewMode != null ||
-                (filters != null &&
+            if (filters != null &&
                     (onRunningOnlyChanged != null ||
                         onUnreadOnlyChanged != null ||
-                        onFavoritesOnlyChanged != null))) ...[
+                        onFavoritesOnlyChanged != null)) ...[
               const SizedBox(height: AppSpacing.sm),
               Wrap(
                 spacing: AppSpacing.sm,
                 runSpacing: AppSpacing.xs,
                 children: [
-                  if (viewMode != null && onViewModeChanged != null)
-                    PopupMenuButton<SessionViewMode>(
-                      tooltip: 'View mode',
-                      onSelected: onViewModeChanged,
-                      itemBuilder: (context) => [
-                        for (final mode in SessionViewMode.values)
-                          PopupMenuItem(
-                            value: mode,
-                            child: Row(
-                              children: [
-                                Icon(_sessionViewModeIcon(mode), size: 18),
-                                const SizedBox(width: 10),
-                                Text(_sessionViewModeLabel(mode)),
-                                if (viewMode == mode) ...[
-                                  const SizedBox(width: 8),
-                                  const Icon(Icons.check_rounded, size: 16),
-                                ],
-                              ],
-                            ),
-                          ),
-                      ],
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 12,
-                          vertical: 10,
-                        ),
-                        decoration: BoxDecoration(
-                          color: colors.surface,
-                          borderRadius: AppShapes.pill,
-                          border: Border.all(color: colors.border),
-                        ),
-                        child: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Icon(
-                              _sessionViewModeIcon(viewMode!),
-                              size: 16,
-                              color: colors.textSecondary,
-                            ),
-                            const SizedBox(width: 8),
-                            Text(
-                              _sessionViewModeLabel(viewMode!),
-                              style: Theme.of(context).textTheme.labelLarge
-                                  ?.copyWith(
-                                    color: colors.textPrimary,
-                                    fontWeight: AppWeights.emphasis,
-                                  ),
-                            ),
-                            const SizedBox(width: 4),
-                            Icon(
-                              Icons.expand_more_rounded,
-                              size: 16,
-                              color: colors.textTertiary,
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
-                  if (filters != null) ...[
-                    _HomeSearchFilterToken(
-                      icon: Icons.star_rounded,
+                  _HomeSearchFilterToken(
+                    icon: Icons.star_rounded,
                       label: 'Favorites',
                       selected: filters.favoritesOnly,
                       onSelected: onFavoritesOnlyChanged,
@@ -1099,7 +996,6 @@ class _HomeSearchField extends StatelessWidget {
                       selected: filters.unreadOnly,
                       onSelected: onUnreadOnlyChanged,
                     ),
-                  ],
                 ],
               ),
             ],
@@ -1517,9 +1413,7 @@ class RecentPane extends StatefulWidget {
     this.hasSavedHosts = false,
     this.screenAwakeSourceKey,
     this.screenAwakeController,
-    this.viewMode = SessionViewMode.flat,
     this.filters = const RecentSessionFilters(),
-    this.onViewModeChanged,
     this.onAddHost,
   });
 
@@ -1534,9 +1428,7 @@ class RecentPane extends StatefulWidget {
   final bool hasSavedHosts;
   final String? screenAwakeSourceKey;
   final ScreenAwakeController? screenAwakeController;
-  final SessionViewMode viewMode;
   final RecentSessionFilters filters;
-  final ValueChanged<SessionViewMode>? onViewModeChanged;
   final VoidCallback? onAddHost;
 
   @override
@@ -1573,14 +1465,25 @@ String _hostListSignature(HostProfile host) {
 
 @immutable
 class _SessionGroup {
-  const _SessionGroup({required this.title, required this.entries});
+  const _SessionGroup({required this.key, required this.title, required this.host, required this.entries});
+  final String key;
   final String title;
+  /// Host all sessions in this group belong to.
+  /// Groups are host-scoped because gitCommonDir is host-specific.
+  final HostProfile host;
   final List<RemoteSessionEntry> entries;
+
+  int get runningCount => entries.where((e) => e.session.isActive).length;
+  bool get hasRunning => runningCount > 0;
 }
 
 class _RecentPaneState extends State<RecentPane> {
   final SessionLocalStore _localStore = SessionLocalStore.instance;
   final RecentSessionsStore _store = RecentSessionsStore();
+
+  // Sidebar group collapse state — keys are group.key values.
+  Set<String> _collapsedGroups = <String>{};
+  static const _collapsePrefKey = 'sidemesh_sidebar_collapsed_groups_v1';
 
   // Search mode state
   List<RemoteSessionEntry>? _searchEntries;
@@ -1592,11 +1495,34 @@ class _RecentPaneState extends State<RecentPane> {
   @override
   void initState() {
     super.initState();
-
     _localStore.ensureLoaded();
     SessionReadStore.instance.ensureLoaded();
     _store.addListener(_handleStoreChanged);
     _store.configure(hosts: widget.hosts, api: widget.api);
+    unawaited(_loadCollapsedGroups());
+  }
+
+  Future<void> _loadCollapsedGroups() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final raw = prefs.getStringList(_collapsePrefKey) ?? const [];
+      if (!mounted) return;
+      setState(() => _collapsedGroups = raw.toSet());
+    } catch (_) {}
+  }
+
+  Future<void> _toggleGroupCollapse(String key) async {
+    final next = Set<String>.from(_collapsedGroups);
+    if (next.contains(key)) {
+      next.remove(key);
+    } else {
+      next.add(key);
+    }
+    setState(() => _collapsedGroups = next);
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setStringList(_collapsePrefKey, next.toList());
+    } catch (_) {}
   }
 
   String _cwdBasename(String cwd) {
@@ -1630,30 +1556,29 @@ class _RecentPaneState extends State<RecentPane> {
   }
 
   List<_SessionGroup> _groupEntries(List<RemoteSessionEntry> entries) {
-    if (widget.viewMode == SessionViewMode.flat) return const [];
     final groups = <String, List<RemoteSessionEntry>>{};
     for (final entry in entries) {
-      final key = switch (widget.viewMode) {
-        SessionViewMode.byCwd => _projectKey(entry),
-        SessionViewMode.byHost => entry.host.label,
-        SessionViewMode.flat => '',
-      };
+      final key = _projectKey(entry);
       (groups[key] ??= []).add(entry);
     }
     for (final list in groups.values) {
       list.sort((a, b) => b.session.updatedAt.compareTo(a.session.updatedAt));
     }
+    // Sort groups by most-recently-active session so the project you're
+    // currently working on stays at the top, not alphabetical order.
     final sortedKeys = groups.keys.toList()
       ..sort((a, b) {
         if (a == 'Unknown') return 1;
         if (b == 'Unknown') return -1;
-        return a.compareTo(b);
+        final aTime = groups[a]!.first.session.updatedAt;
+        final bTime = groups[b]!.first.session.updatedAt;
+        return bTime.compareTo(aTime);
       });
     return sortedKeys
         .map((k) => _SessionGroup(
-          title: widget.viewMode == SessionViewMode.byCwd
-              ? _projectLabel(k)
-              : k,
+          key: k,
+          title: _projectLabel(k),
+          host: groups[k]!.first.host,
           entries: groups[k]!,
         ))
         .toList();
@@ -1908,8 +1833,7 @@ class _RecentPaneState extends State<RecentPane> {
     }
     visible = visible.where(_matchesRecentFilters);
     final sorted = visible.toList();
-    // Preserve server relevance order for remote search results.
-    if (!isSearchResults && widget.viewMode == SessionViewMode.flat) {
+    if (!isSearchResults) {
       sorted.sort(
         (left, right) =>
             right.session.updatedAt.compareTo(left.session.updatedAt),
@@ -1974,7 +1898,10 @@ class _RecentPaneState extends State<RecentPane> {
           );
         }
         final sortedEntries = _sortEntries(_store.entries);
-        final groups = _groupEntries(sortedEntries);
+        final isSearchMode = widget.query.trim().isNotEmpty;
+        final groups = isSearchMode
+            ? const <_SessionGroup>[]
+            : _groupEntries(sortedEntries);
         final isGrouped = groups.isNotEmpty;
         final hasCachedEntries =
             _store.entries.isNotEmpty &&
@@ -2116,7 +2043,10 @@ class _RecentPaneState extends State<RecentPane> {
       itemCount:
           (isRefreshing ? 1 : 0) +
           (hasFailures ? 1 : 0) +
-          groups.fold<int>(0, (sum, g) => sum + g.entries.length + 1),
+          groups.fold<int>(0, (sum, g) {
+            final collapsed = _collapsedGroups.contains(g.key);
+            return sum + 1 + (collapsed ? 0 : g.entries.length);
+          }),
       itemBuilder: (context, index) {
         var offset = 0;
         if (isRefreshing) {
@@ -2146,32 +2076,31 @@ class _RecentPaneState extends State<RecentPane> {
         }
         var current = offset;
         for (final group in groups) {
+          final collapsed = _collapsedGroups.contains(group.key);
           final headerIndex = current;
           final entriesStart = headerIndex + 1;
-          final entriesEnd = entriesStart + group.entries.length;
+          final entriesEnd = entriesStart + (collapsed ? 0 : group.entries.length);
           if (index == headerIndex) {
             return Padding(
               padding: EdgeInsets.only(
                 top: widget.dense ? 8 : 14,
-                bottom: widget.dense ? 4 : 8,
+                bottom: widget.dense ? 2 : 6,
               ),
               child: _buildSessionSectionHeader(
                 context,
-                title: group.title,
-                icon: widget.viewMode == SessionViewMode.byCwd
-                    ? Icons.folder_rounded
-                    : Icons.hub_rounded,
-                count: group.entries.length,
+                group: group,
+                icon: Icons.folder_rounded,
+                collapsed: collapsed,
               ),
             );
           }
-          if (index >= entriesStart && index < entriesEnd) {
+          if (!collapsed && index >= entriesStart && index < entriesEnd) {
             final entry = group.entries[index - entriesStart];
             return Padding(
               padding: EdgeInsets.only(
                 bottom: widget.dense ? 2 : AppSpacing.sm,
               ),
-              child: _buildSessionRow(entry),
+              child: _buildSessionRow(entry, showBranchLabel: true),
             );
           }
           current = entriesEnd;
@@ -2183,49 +2112,95 @@ class _RecentPaneState extends State<RecentPane> {
 
   Widget _buildSessionSectionHeader(
     BuildContext context, {
-    required String title,
+    required _SessionGroup group,
     required IconData icon,
-    required int count,
+    required bool collapsed,
   }) {
     final colors = context.colors;
-    return Row(
-      children: [
-        Icon(icon, size: 14, color: colors.textSecondary),
-        const SizedBox(width: 6),
-        Expanded(
-          child: Text(
-            title,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: monoStyle(
-              color: colors.textSecondary,
-              fontSize: widget.dense ? 10 : 11,
-              fontWeight: AppWeights.emphasis,
-            ),
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: () => _toggleGroupCollapse(group.key),
+        borderRadius: BorderRadius.circular(AppRadii.control),
+        child: Padding(
+          padding: EdgeInsets.symmetric(
+            horizontal: widget.dense ? 4 : 0,
+            vertical: widget.dense ? 5 : 6,
+          ),
+          child: Row(
+            children: [
+              AnimatedRotation(
+                turns: collapsed ? -0.25 : 0,
+                duration: const Duration(milliseconds: 180),
+                curve: Curves.easeOutCubic,
+                child: Icon(
+                  Icons.expand_more_rounded,
+                  size: 15,
+                  color: colors.textSecondary,
+                ),
+              ),
+              const SizedBox(width: 5),
+              Icon(icon, size: 13, color: colors.textSecondary),
+              const SizedBox(width: 6),
+              Expanded(
+                child: Text(
+                  group.title,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: monoStyle(
+                    color: colors.textSecondary,
+                    fontSize: widget.dense ? 10 : 11,
+                    fontWeight: AppWeights.emphasis,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 4),
+              // Host label — tells you which machine this project is on.
+              Text(
+                group.host.label,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: monoStyle(
+                  color: colors.textTertiary,
+                  fontSize: widget.dense ? 9.5 : 10.5,
+                ),
+              ),
+              const SizedBox(width: 6),
+              // Live running pulse — only shown when sessions are active
+              if (group.hasRunning) ...[
+                LivePulse(color: colors.success),
+                const SizedBox(width: 6),
+              ],
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+                decoration: BoxDecoration(
+                  color: colors.surfaceElevated,
+                  borderRadius: BorderRadius.circular(6),
+                  border: Border.all(color: colors.border),
+                ),
+                child: Text(
+                  '${group.entries.length}',
+                  style: monoStyle(
+                    color: colors.textTertiary,
+                    fontSize: 10,
+                    fontWeight: AppWeights.emphasis,
+                  ),
+                ),
+              ),
+            ],
           ),
         ),
-        const SizedBox(width: 6),
-        Container(
-          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
-          decoration: BoxDecoration(
-            color: colors.surfaceElevated,
-            borderRadius: BorderRadius.circular(6),
-            border: Border.all(color: colors.border),
-          ),
-          child: Text(
-            '$count',
-            style: monoStyle(
-              color: colors.textTertiary,
-              fontSize: 10,
-              fontWeight: AppWeights.emphasis,
-            ),
-          ),
-        ),
-      ],
+      ),
     );
   }
 
-  Widget _buildSessionRow(RemoteSessionEntry entry) {
+  Widget _buildSessionRow(
+    RemoteSessionEntry entry, {
+    bool showBranchLabel = false,
+  }) {
+    final branch = entry.session.gitInfo?.branch;
+    final secondaryLabel =
+        showBranchLabel && branch != null && branch.isNotEmpty ? branch : null;
     return SessionRowCard(
       host: entry.host,
       session: entry.session,
@@ -2233,6 +2208,7 @@ class _RecentPaneState extends State<RecentPane> {
       selected: widget.selectedSessionId == entry.session.id,
       dense: widget.dense,
       query: widget.query,
+      secondaryLabel: secondaryLabel,
       onTap: () {
         _localStore.updateGhost(entry.host, entry.session);
         widget.onOpenSession(entry.host, entry.session);
