@@ -706,6 +706,50 @@ class GitInfoSummary {
   };
 }
 
+class SessionSubAgentInfo {
+  const SessionSubAgentInfo({
+    required this.parentSessionId,
+    required this.sourceKind,
+    this.agentName,
+    this.agentDisplayName,
+    this.agentRole,
+    this.agentNickname,
+    this.depth,
+  });
+
+  final String? parentSessionId;
+  final String sourceKind;
+  final String? agentName;
+  final String? agentDisplayName;
+  final String? agentRole;
+  final String? agentNickname;
+  final int? depth;
+
+  String? get label =>
+      agentDisplayName ?? agentName ?? agentRole ?? agentNickname;
+
+  factory SessionSubAgentInfo.fromJson(Map<String, dynamic> json) =>
+      SessionSubAgentInfo(
+        parentSessionId: _stringOrNull(json['parentSessionId']),
+        sourceKind: _stringValue(json['sourceKind']),
+        agentName: _stringOrNull(json['agentName']),
+        agentDisplayName: _stringOrNull(json['agentDisplayName']),
+        agentRole: _stringOrNull(json['agentRole']),
+        agentNickname: _stringOrNull(json['agentNickname']),
+        depth: _intOrNull(json['depth']),
+      );
+
+  Map<String, dynamic> toJson() => {
+    'parentSessionId': parentSessionId,
+    'sourceKind': sourceKind,
+    'agentName': agentName,
+    'agentDisplayName': agentDisplayName,
+    'agentRole': agentRole,
+    'agentNickname': agentNickname,
+    'depth': depth,
+  };
+}
+
 class SessionSummary {
   const SessionSummary({
     required this.id,
@@ -720,6 +764,7 @@ class SessionSummary {
     required this.runtime,
     required this.gitInfo,
     this.isSubAgent = false,
+    this.subAgent,
     this.matchSnippet,
     this.matchRank,
   });
@@ -736,6 +781,7 @@ class SessionSummary {
   final SessionRuntimeSummary? runtime;
   final GitInfoSummary? gitInfo;
   final bool isSubAgent;
+  final SessionSubAgentInfo? subAgent;
   final String? matchSnippet;
   final num? matchRank;
 
@@ -759,47 +805,68 @@ class SessionSummary {
     GitInfoSummary? gitInfo,
     bool clearGitInfo = false,
     bool? isSubAgent,
+    SessionSubAgentInfo? subAgent,
+    bool clearSubAgent = false,
     String? matchSnippet,
     num? matchRank,
-  }) => SessionSummary(
-    id: id,
-    title: title ?? this.title,
-    preview: preview ?? this.preview,
-    cwd: cwd ?? this.cwd,
-    createdAt: createdAt ?? this.createdAt,
-    updatedAt: updatedAt ?? this.updatedAt,
-    source: source ?? this.source,
-    provider: provider ?? this.provider,
-    status: status ?? this.status,
-    runtime: clearRuntime ? null : (runtime ?? this.runtime),
-    gitInfo: clearGitInfo ? null : (gitInfo ?? this.gitInfo),
-    isSubAgent: isSubAgent ?? this.isSubAgent,
-    matchSnippet: matchSnippet ?? this.matchSnippet,
-    matchRank: matchRank ?? this.matchRank,
-  );
+  }) {
+    final nextSubAgent = clearSubAgent ? null : (subAgent ?? this.subAgent);
+    final nextIsSubAgent =
+        isSubAgent ??
+        (nextSubAgent != null
+            ? true
+            : (clearSubAgent ? false : this.isSubAgent));
+    return SessionSummary(
+      id: id,
+      title: title ?? this.title,
+      preview: preview ?? this.preview,
+      cwd: cwd ?? this.cwd,
+      createdAt: createdAt ?? this.createdAt,
+      updatedAt: updatedAt ?? this.updatedAt,
+      source: source ?? this.source,
+      provider: provider ?? this.provider,
+      status: status ?? this.status,
+      runtime: clearRuntime ? null : (runtime ?? this.runtime),
+      gitInfo: clearGitInfo ? null : (gitInfo ?? this.gitInfo),
+      isSubAgent: nextIsSubAgent,
+      subAgent: nextSubAgent,
+      matchSnippet: matchSnippet ?? this.matchSnippet,
+      matchRank: matchRank ?? this.matchRank,
+    );
+  }
 
-  factory SessionSummary.fromJson(Map<String, dynamic> json) => SessionSummary(
-    id: _stringValue(json['id']),
-    title: _stringValue(json['title']),
-    preview: _stringValue(json['preview']),
-    cwd: _stringValue(json['cwd']),
-    createdAt: _dateValue(json['createdAt']),
-    updatedAt: _dateValue(json['updatedAt']),
-    source: _stringValue(json['source']),
-    provider: _stringOrNull(json['provider']),
-    status: _stringValue(json['status']),
-    runtime: json['runtime'] is Map<String, dynamic>
-        ? SessionRuntimeSummary.fromJson(
-            json['runtime'] as Map<String, dynamic>,
-          )
-        : null,
-    gitInfo: json['gitInfo'] is Map<String, dynamic>
-        ? GitInfoSummary.fromJson(json['gitInfo'] as Map<String, dynamic>)
-        : null,
-    isSubAgent: (json['isSubAgent'] as bool?) ?? false,
-    matchSnippet: json['matchSnippet'] as String?,
-    matchRank: json['matchRank'] as num?,
-  );
+  factory SessionSummary.fromJson(Map<String, dynamic> json) {
+    final subAgentJson =
+        json['subAgent'] is Map
+            ? (json['subAgent'] as Map).cast<String, dynamic>()
+            : null;
+    return SessionSummary(
+      id: _stringValue(json['id']),
+      title: _stringValue(json['title']),
+      preview: _stringValue(json['preview']),
+      cwd: _stringValue(json['cwd']),
+      createdAt: _dateValue(json['createdAt']),
+      updatedAt: _dateValue(json['updatedAt']),
+      source: _stringValue(json['source']),
+      provider: _stringOrNull(json['provider']),
+      status: _stringValue(json['status']),
+      runtime: json['runtime'] is Map<String, dynamic>
+          ? SessionRuntimeSummary.fromJson(
+              json['runtime'] as Map<String, dynamic>,
+            )
+          : null,
+      gitInfo: json['gitInfo'] is Map<String, dynamic>
+          ? GitInfoSummary.fromJson(json['gitInfo'] as Map<String, dynamic>)
+          : null,
+      isSubAgent: (json['isSubAgent'] as bool?) ?? (subAgentJson != null),
+      subAgent:
+          subAgentJson != null
+              ? SessionSubAgentInfo.fromJson(subAgentJson)
+              : null,
+      matchSnippet: json['matchSnippet'] as String?,
+      matchRank: json['matchRank'] as num?,
+    );
+  }
 
   Map<String, dynamic> toJson() => {
     'id': id,
@@ -814,6 +881,7 @@ class SessionSummary {
     'runtime': runtime?.toJson(),
     'gitInfo': gitInfo?.toJson(),
     'isSubAgent': isSubAgent,
+    'subAgent': subAgent?.toJson(),
     'matchSnippet': matchSnippet,
     'matchRank': matchRank,
   };

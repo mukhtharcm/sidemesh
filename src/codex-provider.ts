@@ -40,6 +40,7 @@ import {
   listRecentRolloutThreads,
   loadRolloutLog,
   loadSessionRuntime,
+  subAgentInfoFromCodexSource,
 } from "./codex-history.js";
 import type {
   LivePlanStep,
@@ -67,7 +68,13 @@ import type {
 import type { AgentSessionInputItem } from "./agent-provider.js";
 
 const PROVIDER_MODEL_LIST_TIMEOUT_MS = 2500;
-const CODEX_THREAD_SOURCES = ["cli", "vscode", "exec", "appServer"];
+const CODEX_THREAD_SOURCES = [
+  "cli",
+  "vscode",
+  "exec",
+  "appServer",
+  "subAgentThreadSpawn",
+] as const;
 
 interface ConfigModelProviderSummary {
   id: string;
@@ -2057,6 +2064,12 @@ function normalizeCodexThreadRecord(thread: ThreadRecord): ThreadRecord {
       ...thread.status,
       phase: normalized.status,
     },
+    subAgent:
+      thread.subAgent ??
+      subAgentInfoFromCodexSource(thread.source, {
+        agentRole: thread.agentRole ?? undefined,
+        agentNickname: thread.agentNickname ?? undefined,
+      }),
   };
 }
 

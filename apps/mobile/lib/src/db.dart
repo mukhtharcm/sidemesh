@@ -51,7 +51,7 @@ class SidemeshDb {
     final dbPath = await _resolveDbPath();
     return openDatabase(
       dbPath,
-      version: 1,
+      version: 2,
       onCreate: (db, version) async {
         await db.execute('''
           CREATE TABLE sessions (
@@ -66,6 +66,8 @@ class SidemeshDb {
             updated_at INTEGER NOT NULL,
             runtime_json TEXT,
             git_info_json TEXT,
+            is_sub_agent INTEGER NOT NULL DEFAULT 0,
+            sub_agent_json TEXT,
             is_favorite INTEGER NOT NULL DEFAULT 0,
             source TEXT NOT NULL DEFAULT 'recent',
             cached_at INTEGER NOT NULL,
@@ -81,6 +83,16 @@ class SidemeshDb {
         await db.execute(
           'CREATE INDEX idx_source ON sessions(source, host_id)',
         );
+      },
+      onUpgrade: (db, oldVersion, _) async {
+        if (oldVersion < 2) {
+          await db.execute(
+            'ALTER TABLE sessions ADD COLUMN is_sub_agent INTEGER NOT NULL DEFAULT 0',
+          );
+          await db.execute(
+            'ALTER TABLE sessions ADD COLUMN sub_agent_json TEXT',
+          );
+        }
       },
     );
   }

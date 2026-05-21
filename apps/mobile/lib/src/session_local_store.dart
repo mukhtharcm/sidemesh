@@ -148,8 +148,9 @@ class SessionLocalStore extends ChangeNotifier {
         '''
         INSERT INTO sessions (
           host_id, session_id, title, preview, cwd, status,
-          created_at, updated_at, is_favorite, source, cached_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, 'favorite', ?)
+          created_at, updated_at, is_sub_agent, sub_agent_json,
+          is_favorite, source, cached_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, NULL, 1, 'favorite', ?)
         ON CONFLICT(host_id, session_id) DO UPDATE SET
           is_favorite = 1
       ''',
@@ -206,8 +207,9 @@ class SessionLocalStore extends ChangeNotifier {
       INSERT INTO sessions (
         host_id, session_id, title, preview, cwd, provider, status,
         created_at, updated_at, runtime_json, git_info_json,
+        is_sub_agent, sub_agent_json,
         is_favorite, source, cached_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 'favorite', ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 'favorite', ?)
       ON CONFLICT(host_id, session_id) DO UPDATE SET
         title = excluded.title,
         preview = excluded.preview,
@@ -218,6 +220,8 @@ class SessionLocalStore extends ChangeNotifier {
         updated_at = excluded.updated_at,
         runtime_json = excluded.runtime_json,
         git_info_json = excluded.git_info_json,
+        is_sub_agent = excluded.is_sub_agent,
+        sub_agent_json = excluded.sub_agent_json,
         source = excluded.source,
         cached_at = excluded.cached_at
     ''',
@@ -233,6 +237,8 @@ class SessionLocalStore extends ChangeNotifier {
         session.updatedAt.millisecondsSinceEpoch,
         session.runtime != null ? jsonEncode(session.runtime!.toJson()) : null,
         session.gitInfo != null ? jsonEncode(session.gitInfo!.toJson()) : null,
+        session.isSubAgent ? 1 : 0,
+        _encodeSubAgentInfo(session.subAgent),
         now,
       ],
     );
@@ -255,8 +261,9 @@ class SessionLocalStore extends ChangeNotifier {
         INSERT INTO sessions (
           host_id, session_id, title, preview, cwd, provider, status,
           created_at, updated_at, runtime_json, git_info_json,
+          is_sub_agent, sub_agent_json,
           is_favorite, source, cached_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(host_id, session_id) DO UPDATE SET
           title = excluded.title,
           preview = excluded.preview,
@@ -267,6 +274,8 @@ class SessionLocalStore extends ChangeNotifier {
           updated_at = excluded.updated_at,
           runtime_json = excluded.runtime_json,
           git_info_json = excluded.git_info_json,
+          is_sub_agent = excluded.is_sub_agent,
+          sub_agent_json = excluded.sub_agent_json,
           source = excluded.source,
           cached_at = excluded.cached_at
       ''',
@@ -282,6 +291,8 @@ class SessionLocalStore extends ChangeNotifier {
           s.updatedAt.millisecondsSinceEpoch,
           s.runtime != null ? jsonEncode(s.runtime!.toJson()) : null,
           s.gitInfo != null ? jsonEncode(s.gitInfo!.toJson()) : null,
+          s.isSubAgent ? 1 : 0,
+          _encodeSubAgentInfo(s.subAgent),
           0,
           source,
           now,
@@ -386,6 +397,8 @@ class SessionLocalStore extends ChangeNotifier {
   SessionSummary _rowToSession(Map<String, Object?> row) {
     final runtimeJson = row['runtime_json'] as String?;
     final gitInfoJson = row['git_info_json'] as String?;
+    final subAgentJson = row['sub_agent_json'] as String?;
+    final isSubAgent = ((row['is_sub_agent'] as int?) ?? 0) != 0;
     return SessionSummary(
       id: row['session_id'] as String,
       title: row['title'] as String,
@@ -406,6 +419,8 @@ class SessionLocalStore extends ChangeNotifier {
               jsonDecode(gitInfoJson) as Map<String, dynamic>,
             )
           : null,
+      isSubAgent: isSubAgent || subAgentJson != null,
+      subAgent: _decodeSubAgentInfo(subAgentJson),
     );
   }
 
@@ -617,8 +632,9 @@ class SessionLocalStore extends ChangeNotifier {
           INSERT INTO sessions (
             host_id, session_id, title, preview, cwd, provider, status,
             created_at, updated_at, runtime_json, git_info_json,
+            is_sub_agent, sub_agent_json,
             is_favorite, source, cached_at
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 'recent', ?)
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 'recent', ?)
           ON CONFLICT(host_id, session_id) DO UPDATE SET
             title = excluded.title,
             preview = excluded.preview,
@@ -629,6 +645,8 @@ class SessionLocalStore extends ChangeNotifier {
             updated_at = excluded.updated_at,
             runtime_json = excluded.runtime_json,
             git_info_json = excluded.git_info_json,
+            is_sub_agent = excluded.is_sub_agent,
+            sub_agent_json = excluded.sub_agent_json,
             source = excluded.source,
             cached_at = excluded.cached_at
         ''',
@@ -644,6 +662,8 @@ class SessionLocalStore extends ChangeNotifier {
             s.updatedAt.millisecondsSinceEpoch,
             s.runtime != null ? jsonEncode(s.runtime!.toJson()) : null,
             s.gitInfo != null ? jsonEncode(s.gitInfo!.toJson()) : null,
+            s.isSubAgent ? 1 : 0,
+            _encodeSubAgentInfo(s.subAgent),
             now,
           ],
         );
@@ -665,8 +685,9 @@ class SessionLocalStore extends ChangeNotifier {
         '''
         INSERT OR IGNORE INTO sessions (
           host_id, session_id, title, preview, cwd, status,
-          created_at, updated_at, is_favorite, source, cached_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, 'favorite', ?)
+          created_at, updated_at, is_sub_agent, sub_agent_json,
+          is_favorite, source, cached_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, NULL, 1, 'favorite', ?)
       ''',
         [hostId, sessionId, 'Unknown', '', '', 'unknown', 0, 0, now],
       );
@@ -682,6 +703,28 @@ class SessionLocalStore extends ChangeNotifier {
         await prefs.remove(key);
       }
     }
+  }
+}
+
+String? _encodeSubAgentInfo(SessionSubAgentInfo? subAgent) {
+  if (subAgent == null) {
+    return null;
+  }
+  return jsonEncode(subAgent.toJson());
+}
+
+SessionSubAgentInfo? _decodeSubAgentInfo(String? raw) {
+  if (raw == null || raw.isEmpty) {
+    return null;
+  }
+  try {
+    final decoded = jsonDecode(raw);
+    if (decoded is! Map) {
+      return null;
+    }
+    return SessionSubAgentInfo.fromJson(decoded.cast<String, dynamic>());
+  } catch (_) {
+    return null;
   }
 }
 

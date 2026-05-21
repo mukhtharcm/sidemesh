@@ -17,6 +17,7 @@ import type {
   SessionActivity,
   SessionMessageAttachment,
   SessionMessage,
+  SessionSubAgentInfo,
   SessionRuntimeSummary,
   ThreadRecord,
 } from "./types.js";
@@ -377,6 +378,7 @@ async function readRolloutThreadSummary(rolloutPath: string): Promise<ThreadReco
 
   const createdAt = Math.floor(parseTimestamp(meta?.timestamp) / 1000);
   const updatedAt = Math.floor((latestTimestamp || parseTimestamp(meta?.timestamp)) / 1000);
+  const source = normalizeThreadSource(meta?.source);
   return {
     id,
     name: null,
@@ -384,10 +386,14 @@ async function readRolloutThreadSummary(rolloutPath: string): Promise<ThreadReco
     createdAt,
     updatedAt,
     cwd,
-    source: normalizeThreadSource(meta?.source),
+    source,
     path: rolloutPath,
     status: { type: inProgress ? "running" : "idle" },
     gitInfo: null,
+    subAgent: subAgentInfoFromCodexSource(source, {
+      agentRole: asOptionalString(meta?.agentRole),
+      agentNickname: asOptionalString(meta?.agentNickname),
+    }),
   };
 }
 
@@ -441,6 +447,7 @@ async function readLargeRolloutThreadSummary(
 
   const createdAt = Math.floor(parseTimestamp(meta?.timestamp) / 1000);
   const updatedAt = Math.floor((latestTimestamp || parseTimestamp(meta?.timestamp)) / 1000);
+  const source = normalizeThreadSource(meta?.source);
   return {
     id,
     name: null,
@@ -448,10 +455,14 @@ async function readLargeRolloutThreadSummary(
     createdAt,
     updatedAt,
     cwd,
-    source: normalizeThreadSource(meta?.source),
+    source,
     path: rolloutPath,
     status: { type: inProgress ? "running" : "idle" },
     gitInfo: null,
+    subAgent: subAgentInfoFromCodexSource(source, {
+      agentRole: asOptionalString(meta?.agentRole),
+      agentNickname: asOptionalString(meta?.agentNickname),
+    }),
   };
 }
 
@@ -555,6 +566,64 @@ function normalizeThreadSource(source: unknown): ThreadRecord["source"] {
     return source as ThreadRecord["source"];
   }
   return "unknown";
+}
+
+export function subAgentInfoFromCodexSource(
+  source: ThreadRecord["source"],
+  overrides: {
+    agentRole?: string;
+    agentNickname?: string;
+  } = {},
+): SessionSubAgentInfo | null {
+  if (!source || typeof source !== "object") {
+    return null;
+  }
+  const typed = source as Record<string, unknown>;
+  const rawSubAgent = typed.subAgent ?? typed.subagent;
+  if (typeof rawSubAgent === "string") {
+    return {
+      parentSessionId: null,
+      sourceKind: rawSubAgent,
+      ...(overrides.agentRole ? { agentRole: overrides.agentRole } : {}),
+      ...(overrides.agentNickname ? { agentNickname: overrides.agentNickname } : {}),
+    };
+  }
+  if (!rawSubAgent || typeof rawSubAgent !== "object") {
+    return null;
+  }
+  const subAgent = rawSubAgent as Record<string, unknown>;
+  const threadSpawn = subAgent.thread_spawn;
+  if (threadSpawn && typeof threadSpawn === "object") {
+    const typedThreadSpawn = threadSpawn as Record<string, unknown>;
+    return {
+      parentSessionId: asOptionalString(typedThreadSpawn.parent_thread_id) ?? null,
+      sourceKind: "thread_spawn",
+      agentRole:
+        overrides.agentRole ??
+        asOptionalString(typedThreadSpawn.agent_role) ??
+        null,
+      agentNickname:
+        overrides.agentNickname ??
+        asOptionalString(typedThreadSpawn.agent_nickname) ??
+        null,
+      depth: asOptionalNumber(typedThreadSpawn.depth) ?? null,
+    };
+  }
+  const other = asOptionalString(subAgent.other);
+  if (other) {
+    return {
+      parentSessionId: null,
+      sourceKind: other,
+      ...(overrides.agentRole ? { agentRole: overrides.agentRole } : {}),
+      ...(overrides.agentNickname ? { agentNickname: overrides.agentNickname } : {}),
+    };
+  }
+  return {
+    parentSessionId: null,
+    sourceKind: "subagent",
+    ...(overrides.agentRole ? { agentRole: overrides.agentRole } : {}),
+    ...(overrides.agentNickname ? { agentNickname: overrides.agentNickname } : {}),
+  };
 }
 
 async function walkDirectories(root: string, depth: number): Promise<string[]> {

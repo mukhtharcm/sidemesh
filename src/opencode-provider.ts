@@ -46,6 +46,7 @@ import type {
   SessionMessage,
   SessionMessageAttachment,
   SessionMessageContentBlock,
+  SessionSubAgentInfo,
   SessionRuntimeSummary,
   SkillCatalogEntry,
   SkillSummary,
@@ -1396,6 +1397,7 @@ export class OpenCodeAgentProvider
       updatedAt: session.time.updated,
       cwd: session.directory,
       source: "opencode",
+      subAgent: subAgentInfoForOpenCodeSession(session),
       path: session.path ?? null,
       status: {
         type: status.type,
@@ -2230,6 +2232,21 @@ function buildSessionRuntime(
         }
       : {}),
     updatedAt: session.time.updated,
+  };
+}
+
+function subAgentInfoForOpenCodeSession(
+  session: OpenCodeSessionInfo,
+): SessionSubAgentInfo | null {
+  if (!session.parentID) {
+    return null;
+  }
+  const agentName = session.agent?.trim() || null;
+  return {
+    parentSessionId: session.parentID,
+    sourceKind: "child_session",
+    agentName,
+    agentDisplayName: agentName ? prettifyModeName(agentName) : null,
   };
 }
 
