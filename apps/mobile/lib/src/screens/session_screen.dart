@@ -141,6 +141,19 @@ class _DockedBrowserPreview {
   }
 }
 
+String _formatSubAgentSourceKind(String kind) {
+  switch (kind) {
+    case 'child_session':
+    case 'thread_spawn':
+    case 'subagent':
+      return 'Sub-agent';
+    case 'memory_consolidation':
+      return 'Memory consolidation';
+    default:
+      return kind.replaceAll('_', ' ');
+  }
+}
+
 class _DesktopSessionTitle extends StatelessWidget {
   const _DesktopSessionTitle({
     required this.session,
@@ -5065,6 +5078,8 @@ class _SessionScreenState extends State<SessionScreen>
     final gitLabel = _supportsGitStatus
         ? _gitHeaderLabel(session, _gitStatus)
         : null;
+    final subAgentInfo = session.subAgent;
+    final subAgentLabel = subAgentInfo?.label;
     Widget sectionLabel(String title, String subtitle) {
       return Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -5143,6 +5158,12 @@ class _SessionScreenState extends State<SessionScreen>
                           icon: Icons.route_rounded,
                           tone: MeshPillTone.neutral,
                         ),
+                        if (subAgentLabel != null)
+                          MeshPill(
+                            label: subAgentLabel,
+                            icon: Icons.account_tree_outlined,
+                            tone: MeshPillTone.info,
+                          ),
                         if (gitLabel != null)
                           MeshPill(
                             label: gitLabel,
@@ -5173,6 +5194,20 @@ class _SessionScreenState extends State<SessionScreen>
                       value: _running ? 'Running' : 'Idle',
                     ),
                     _DetailRow(label: 'Started from', value: session.source),
+                    if (subAgentLabel != null)
+                      _DetailRow(label: 'Sub-agent', value: subAgentLabel),
+                    if (subAgentInfo?.parentSessionId?.isNotEmpty == true)
+                      _DetailRow(
+                        label: 'Parent session',
+                        value: subAgentInfo!.parentSessionId!,
+                      ),
+                    if (subAgentInfo != null)
+                      _DetailRow(
+                        label: 'Sub-agent source',
+                        value: _formatSubAgentSourceKind(
+                          subAgentInfo.sourceKind,
+                        ),
+                      ),
                     if (gitLabel != null)
                       _DetailRow(label: 'Git', value: gitLabel),
                   ],

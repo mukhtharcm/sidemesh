@@ -249,6 +249,7 @@ export interface SessionSummary {
   runtime: SessionRuntimeSummary | null;
   gitInfo: GitInfoSummary | null;
   isSubAgent?: boolean;
+  subAgent?: SessionSubAgentInfo | null;
   matchSnippet?: string | null;
   matchRank?: number | null;
 }
@@ -921,6 +922,16 @@ export interface JsonRpcMessage {
   error?: { code?: number; message?: string };
 }
 
+export interface SessionSubAgentInfo {
+  parentSessionId: string | null;
+  sourceKind: string;
+  agentName?: string | null;
+  agentDisplayName?: string | null;
+  agentRole?: string | null;
+  agentNickname?: string | null;
+  depth?: number | null;
+}
+
 export interface ThreadStatus {
   type: string;
   phase?: LiveThreadStatus;
@@ -934,10 +945,13 @@ export interface ThreadRecord {
   createdAt: number;
   updatedAt: number;
   cwd: string;
-  source: string | { custom?: string; subAgent?: unknown };
+  source: string | { custom?: string; subAgent?: unknown; subagent?: unknown };
   path: string | null;
   status: ThreadStatus;
   gitInfo?: GitInfoSummary | null;
+  agentRole?: string | null;
+  agentNickname?: string | null;
+  subAgent?: SessionSubAgentInfo | null;
   turns?: Array<TurnRecord>;
 }
 
