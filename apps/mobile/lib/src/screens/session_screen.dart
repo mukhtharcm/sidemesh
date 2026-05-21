@@ -7458,7 +7458,33 @@ class _SessionScreenState extends State<SessionScreen>
       drawer: (!widget.desktopMode && widget.sessionDrawer != null)
           ? Drawer(
               width: 300,
-              child: SafeArea(child: Builder(builder: widget.sessionDrawer!)),
+              child: SafeArea(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    // ← Back to all sessions
+                    Material(
+                      color: Colors.transparent,
+                      child: Builder(
+                        builder: (ctx) => ListTile(
+                          leading: const Icon(Icons.arrow_back_rounded),
+                          title: const Text('All sessions'),
+                          dense: true,
+                          onTap: () {
+                            Navigator.of(ctx).pop(); // close drawer
+                            Navigator.of(ctx).pop(); // back to home
+                          },
+                        ),
+                      ),
+                    ),
+                    const Divider(height: 1),
+                    // Session list
+                    Expanded(
+                      child: Builder(builder: widget.sessionDrawer!),
+                    ),
+                  ],
+                ),
+              ),
             )
           : null,
       appBar: AppBar(

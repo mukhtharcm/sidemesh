@@ -43,22 +43,8 @@ class DesktopShell extends StatefulWidget {
 
 enum _SidebarSection { recent, inbox, hosts }
 
-String _desktopSessionViewModeLabel(SessionViewMode mode) {
-  return switch (mode) {
-    SessionViewMode.flat => 'List',
-    SessionViewMode.byCwd => 'Folders',
-    SessionViewMode.byHost => 'Machines',
-  };
-}
-
-IconData _desktopSessionViewModeIcon(SessionViewMode mode) {
-  return switch (mode) {
-    SessionViewMode.flat => Icons.view_list_rounded,
-    SessionViewMode.byCwd => Icons.folder_rounded,
-    SessionViewMode.byHost => Icons.hub_rounded,
-  };
-}
-
+// Session view is always byCwd — these helpers are no longer needed.
+// Kept as stubs to avoid cascading call-site changes during this refactor.
 class _OnboardingEmptyState extends StatelessWidget {
   const _OnboardingEmptyState({required this.colors, required this.onAddHost});
 
@@ -249,7 +235,7 @@ class _DesktopShellState extends State<DesktopShell> {
   int _inboxCount = 0;
   int _sessionOpenSerial = 0;
   String _query = '';
-  SessionViewMode _recentViewMode = SessionViewMode.flat;
+  // View mode is always byCwd — kept as no-op for call-site compat.
   RecentSessionFilters _recentFilters = const RecentSessionFilters();
   double _sidebarWidth = _defaultSidebarWidth;
   Timer? _searchDebounce;
@@ -285,7 +271,7 @@ class _DesktopShellState extends State<DesktopShell> {
     );
     _loadHosts();
     _loadSidebarWidth();
-    _loadRecentViewMode();
+    // _loadRecentViewMode(); // view mode is always byCwd
     _loadInspectorWidth();
     _searchController.addListener(() {
       final next = _searchController.text;
@@ -314,28 +300,6 @@ class _DesktopShellState extends State<DesktopShell> {
     _searchFocus.dispose();
     _inspector.dispose();
     super.dispose();
-  }
-
-  Future<void> _loadRecentViewMode() async {
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      final raw = prefs.getString('sidemesh_recent_view_mode');
-      if (raw != null) {
-        _recentViewMode = SessionViewMode.values.firstWhere(
-          (v) => v.name == raw,
-          orElse: () => SessionViewMode.flat,
-        );
-      }
-    } catch (_) {}
-  }
-
-  Future<void> _setRecentViewMode(SessionViewMode mode) async {
-    if (_recentViewMode == mode) return;
-    setState(() => _recentViewMode = mode);
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.setString('sidemesh_recent_view_mode', mode.name);
-    } catch (_) {}
   }
 
   void _setRecentRunningOnly(bool enabled) {
@@ -1105,9 +1069,8 @@ class _DesktopShellState extends State<DesktopShell> {
                                       if (!mounted || n == _inboxCount) return;
                                       setState(() => _inboxCount = n);
                                     },
-                                    recentViewMode: _recentViewMode,
+                                    recentViewMode: SessionViewMode.byCwd,
                                     recentFilters: _recentFilters,
-                                    onRecentViewModeChanged: _setRecentViewMode,
                                     onRecentRunningOnlyChanged:
                                         _setRecentRunningOnly,
                                     onRecentUnreadOnlyChanged:
@@ -1495,7 +1458,6 @@ class _Sidebar extends StatelessWidget {
     required this.onInboxCountChanged,
     this.recentViewMode,
     this.recentFilters = const RecentSessionFilters(),
-    this.onRecentViewModeChanged,
     this.onRecentRunningOnlyChanged,
     this.onRecentUnreadOnlyChanged,
     this.onRecentFavoritesOnlyChanged,
@@ -1528,7 +1490,6 @@ class _Sidebar extends StatelessWidget {
   final ValueChanged<int> onInboxCountChanged;
   final SessionViewMode? recentViewMode;
   final RecentSessionFilters recentFilters;
-  final ValueChanged<SessionViewMode>? onRecentViewModeChanged;
   final ValueChanged<bool>? onRecentRunningOnlyChanged;
   final ValueChanged<bool>? onRecentUnreadOnlyChanged;
   final ValueChanged<bool>? onRecentFavoritesOnlyChanged;
@@ -1576,15 +1537,11 @@ class _Sidebar extends StatelessWidget {
                 onClear: onClearSearch,
               ),
             ),
-            if (section == _SidebarSection.recent &&
-                recentViewMode != null &&
-                onRecentViewModeChanged != null)
+            if (section == _SidebarSection.recent)
               Padding(
                 padding: const EdgeInsets.fromLTRB(16, 0, 16, 10),
                 child: _RecentControlsBar(
-                  value: recentViewMode!,
                   filters: recentFilters,
-                  onChanged: onRecentViewModeChanged!,
                   onRunningOnlyChanged: onRecentRunningOnlyChanged,
                   onUnreadOnlyChanged: onRecentUnreadOnlyChanged,
                   onFavoritesOnlyChanged: onRecentFavoritesOnlyChanged,
@@ -1630,7 +1587,6 @@ class _Sidebar extends StatelessWidget {
                       onToggleHostEnabled: onToggleHostEnabled,
                       recentViewMode: recentViewMode,
                       recentFilters: recentFilters,
-                      onRecentViewModeChanged: onRecentViewModeChanged,
                     ),
             ),
           ],
@@ -1782,17 +1738,13 @@ class _ListPaneActionButton extends StatelessWidget {
 
 class _RecentControlsBar extends StatelessWidget {
   const _RecentControlsBar({
-    required this.value,
     required this.filters,
-    required this.onChanged,
     required this.onRunningOnlyChanged,
     required this.onUnreadOnlyChanged,
     required this.onFavoritesOnlyChanged,
   });
 
-  final SessionViewMode value;
   final RecentSessionFilters filters;
-  final ValueChanged<SessionViewMode> onChanged;
   final ValueChanged<bool>? onRunningOnlyChanged;
   final ValueChanged<bool>? onUnreadOnlyChanged;
   final ValueChanged<bool>? onFavoritesOnlyChanged;
@@ -1804,33 +1756,6 @@ class _RecentControlsBar extends StatelessWidget {
       runSpacing: 6,
       crossAxisAlignment: WrapCrossAlignment.center,
       children: [
-        PopupMenuButton<SessionViewMode>(
-          tooltip: 'Session view',
-          onSelected: onChanged,
-          itemBuilder: (context) => [
-            for (final mode in SessionViewMode.values)
-              PopupMenuItem(
-                value: mode,
-                child: Row(
-                  children: [
-                    Icon(_desktopSessionViewModeIcon(mode), size: 17),
-                    const SizedBox(width: 10),
-                    Text(_desktopSessionViewModeLabel(mode)),
-                    if (value == mode) ...[
-                      const SizedBox(width: 8),
-                      const Icon(Icons.check_rounded, size: 16),
-                    ],
-                  ],
-                ),
-              ),
-          ],
-          child: _RecentFilterToken(
-            icon: _desktopSessionViewModeIcon(value),
-            label: _desktopSessionViewModeLabel(value),
-            selected: true,
-            trailingIcon: Icons.expand_more_rounded,
-          ),
-        ),
         _RecentFilterToken(
           icon: Icons.star_rounded,
           label: 'Favorites',
@@ -1865,14 +1790,12 @@ class _RecentFilterToken extends StatelessWidget {
     required this.icon,
     required this.label,
     required this.selected,
-    this.trailingIcon,
     this.onTap,
   });
 
   final IconData icon;
   final String label;
   final bool selected;
-  final IconData? trailingIcon;
   final VoidCallback? onTap;
 
   @override
@@ -1906,10 +1829,6 @@ class _RecentFilterToken extends StatelessWidget {
               fontWeight: selected ? AppWeights.emphasis : AppWeights.body,
             ),
           ),
-          if (trailingIcon != null) ...[
-            const SizedBox(width: 4),
-            Icon(trailingIcon, size: 15, color: colors.textTertiary),
-          ],
         ],
       ),
     );
@@ -1973,7 +1892,6 @@ class _SidebarPane extends StatelessWidget {
     required this.onInboxCountChanged,
     this.recentViewMode,
     this.recentFilters = const RecentSessionFilters(),
-    this.onRecentViewModeChanged,
   });
 
   final _SidebarSection section;
@@ -1994,7 +1912,6 @@ class _SidebarPane extends StatelessWidget {
   final ValueChanged<int> onInboxCountChanged;
   final SessionViewMode? recentViewMode;
   final RecentSessionFilters recentFilters;
-  final ValueChanged<SessionViewMode>? onRecentViewModeChanged;
 
   @override
   Widget build(BuildContext context) {
@@ -2013,9 +1930,8 @@ class _SidebarPane extends StatelessWidget {
           dense: true,
           hasSavedHosts: hosts.isNotEmpty,
           screenAwakeSourceKey: 'desktop-recent-sessions',
-          viewMode: recentViewMode ?? SessionViewMode.flat,
+          viewMode: SessionViewMode.byCwd,
           filters: recentFilters,
-          onViewModeChanged: onRecentViewModeChanged,
         );
       case _SidebarSection.inbox:
         return InboxPane(

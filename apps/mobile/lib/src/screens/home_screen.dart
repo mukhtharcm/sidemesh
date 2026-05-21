@@ -93,7 +93,7 @@ class _SidemeshHomeScreenState extends State<SidemeshHomeScreen>
   int _activeCount = 0;
   int _inboxCount = 0;
   String _query = '';
-  SessionViewMode _recentViewMode = SessionViewMode.flat;
+  // Session view is always byCwd - grouping by project
   RecentSessionFilters _recentFilters = const RecentSessionFilters();
   bool _handlingNotificationIntent = false;
   String? _dismissedRecommendedMobileClientVersion;
@@ -238,29 +238,10 @@ class _SidemeshHomeScreenState extends State<SidemeshHomeScreen>
     }
   }
 
-  Future<void> _loadRecentViewMode() async {
-    final prefs = await SharedPreferences.getInstance();
-    final raw = prefs.getString('sidemesh.recent.viewMode');
-    if (!mounted) return;
-    setState(() {
-      _recentViewMode = switch (raw) {
-        'byCwd' => SessionViewMode.byCwd,
-        'byHost' => SessionViewMode.byHost,
-        _ => SessionViewMode.flat,
-      };
-    });
-  }
+  // View mode is always byCwd — no loading/saving needed.
+  Future<void> _loadRecentViewMode() async {}
 
-  Future<void> _setRecentViewMode(SessionViewMode mode) async {
-    if (_recentViewMode == mode) return;
-    setState(() => _recentViewMode = mode);
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setString('sidemesh.recent.viewMode', switch (mode) {
-      SessionViewMode.byCwd => 'byCwd',
-      SessionViewMode.byHost => 'byHost',
-      SessionViewMode.flat => 'flat',
-    });
-  }
+  // No-op: view mode is always byCwd.
 
   void _toggleRecentRunningOnly(bool enabled) {
     if (_recentFilters.runningOnly == enabled) return;
@@ -595,8 +576,8 @@ class _SidemeshHomeScreenState extends State<SidemeshHomeScreen>
               primaryAction: primaryAction,
               searchController: _searchController,
               searchVisible: _searchVisibleForTab(tab, enabledHosts.length),
-              viewMode: _tabIndex == 0 ? _recentViewMode : null,
-              onViewModeChanged: _tabIndex == 0 ? _setRecentViewMode : null,
+              viewMode: _tabIndex == 0 ? SessionViewMode.byCwd : null,
+              onViewModeChanged: _tabIndex == 0 ? null : null,
               recentFilters: _tabIndex == 0 ? _recentFilters : null,
               onRunningOnlyChanged: _tabIndex == 0
                   ? _toggleRecentRunningOnly
@@ -645,8 +626,8 @@ class _SidemeshHomeScreenState extends State<SidemeshHomeScreen>
                             if (!mounted) return;
                             setState(() => _activeCount = count);
                           },
-                          viewMode: _recentViewMode,
-                          onViewModeChanged: _setRecentViewMode,
+                          viewMode: SessionViewMode.byCwd,
+                          onViewModeChanged: null,
                           filters: _recentFilters,
                         ),
                         InboxPane(
@@ -722,25 +703,9 @@ class _SidemeshHomeScreenState extends State<SidemeshHomeScreen>
   }
 }
 
-enum SessionViewMode { flat, byCwd, byHost }
+enum SessionViewMode { byCwd }
 
 enum _HomeHeaderMenuAction { refresh, settings }
-
-String _sessionViewModeLabel(SessionViewMode mode) {
-  return switch (mode) {
-    SessionViewMode.flat => 'List',
-    SessionViewMode.byCwd => 'Folders',
-    SessionViewMode.byHost => 'Hosts',
-  };
-}
-
-IconData _sessionViewModeIcon(SessionViewMode mode) {
-  return switch (mode) {
-    SessionViewMode.flat => Icons.view_list_rounded,
-    SessionViewMode.byCwd => Icons.folder_rounded,
-    SessionViewMode.byHost => Icons.hub_rounded,
-  };
-}
 
 class RecentSessionFilters {
   const RecentSessionFilters({
@@ -1027,77 +992,17 @@ class _HomeSearchField extends StatelessWidget {
                 ),
               ),
             ),
-            if (viewMode != null ||
-                (filters != null &&
+            if (filters != null &&
                     (onRunningOnlyChanged != null ||
                         onUnreadOnlyChanged != null ||
-                        onFavoritesOnlyChanged != null))) ...[
+                        onFavoritesOnlyChanged != null)) ...[
               const SizedBox(height: AppSpacing.sm),
               Wrap(
                 spacing: AppSpacing.sm,
                 runSpacing: AppSpacing.xs,
                 children: [
-                  if (viewMode != null && onViewModeChanged != null)
-                    PopupMenuButton<SessionViewMode>(
-                      tooltip: 'View mode',
-                      onSelected: onViewModeChanged,
-                      itemBuilder: (context) => [
-                        for (final mode in SessionViewMode.values)
-                          PopupMenuItem(
-                            value: mode,
-                            child: Row(
-                              children: [
-                                Icon(_sessionViewModeIcon(mode), size: 18),
-                                const SizedBox(width: 10),
-                                Text(_sessionViewModeLabel(mode)),
-                                if (viewMode == mode) ...[
-                                  const SizedBox(width: 8),
-                                  const Icon(Icons.check_rounded, size: 16),
-                                ],
-                              ],
-                            ),
-                          ),
-                      ],
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 12,
-                          vertical: 10,
-                        ),
-                        decoration: BoxDecoration(
-                          color: colors.surface,
-                          borderRadius: AppShapes.pill,
-                          border: Border.all(color: colors.border),
-                        ),
-                        child: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Icon(
-                              _sessionViewModeIcon(viewMode!),
-                              size: 16,
-                              color: colors.textSecondary,
-                            ),
-                            const SizedBox(width: 8),
-                            Text(
-                              _sessionViewModeLabel(viewMode!),
-                              style: Theme.of(context).textTheme.labelLarge
-                                  ?.copyWith(
-                                    color: colors.textPrimary,
-                                    fontWeight: AppWeights.emphasis,
-                                  ),
-                            ),
-                            const SizedBox(width: 4),
-                            Icon(
-                              Icons.expand_more_rounded,
-                              size: 16,
-                              color: colors.textTertiary,
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
-                  if (filters != null) ...[
-                    _HomeSearchFilterToken(
-                      icon: Icons.star_rounded,
+                  _HomeSearchFilterToken(
+                    icon: Icons.star_rounded,
                       label: 'Favorites',
                       selected: filters.favoritesOnly,
                       onSelected: onFavoritesOnlyChanged,
@@ -1114,7 +1019,6 @@ class _HomeSearchField extends StatelessWidget {
                       selected: filters.unreadOnly,
                       onSelected: onUnreadOnlyChanged,
                     ),
-                  ],
                 ],
               ),
             ],
@@ -1532,7 +1436,7 @@ class RecentPane extends StatefulWidget {
     this.hasSavedHosts = false,
     this.screenAwakeSourceKey,
     this.screenAwakeController,
-    this.viewMode = SessionViewMode.flat,
+    this.viewMode = SessionViewMode.byCwd,
     this.filters = const RecentSessionFilters(),
     this.onViewModeChanged,
     this.onAddHost,
@@ -1588,12 +1492,12 @@ String _hostListSignature(HostProfile host) {
 
 @immutable
 class _SessionGroup {
-  const _SessionGroup({required this.key, required this.title, required this.entries});
-  /// Stable key for collapse-state persistence.
-  /// For byCwd groups this is the gitCommonDir path; for byHost it is the
-  /// host label.
+  const _SessionGroup({required this.key, required this.title, required this.host, required this.entries});
   final String key;
   final String title;
+  /// Host all sessions in this group belong to. In byCwd mode every session
+  /// in a group shares the same host (gitCommonDir is host-specific).
+  final HostProfile host;
   final List<RemoteSessionEntry> entries;
 
   int get runningCount => entries.where((e) => e.session.isActive).length;
@@ -1679,14 +1583,11 @@ class _RecentPaneState extends State<RecentPane> {
   }
 
   List<_SessionGroup> _groupEntries(List<RemoteSessionEntry> entries) {
-    if (widget.viewMode == SessionViewMode.flat) return const [];
+    // byCwd is the only view mode — always group sessions by project.
+    if (widget.viewMode != SessionViewMode.byCwd) return const [];
     final groups = <String, List<RemoteSessionEntry>>{};
     for (final entry in entries) {
-      final key = switch (widget.viewMode) {
-        SessionViewMode.byCwd => _projectKey(entry),
-        SessionViewMode.byHost => entry.host.label,
-        SessionViewMode.flat => '',
-      };
+      final key = _projectKey(entry);
       (groups[key] ??= []).add(entry);
     }
     for (final list in groups.values) {
@@ -1704,6 +1605,7 @@ class _RecentPaneState extends State<RecentPane> {
           title: widget.viewMode == SessionViewMode.byCwd
               ? _projectLabel(k)
               : k,
+          host: groups[k]!.first.host,
           entries: groups[k]!,
         ))
         .toList();
@@ -1958,8 +1860,8 @@ class _RecentPaneState extends State<RecentPane> {
     }
     visible = visible.where(_matchesRecentFilters);
     final sorted = visible.toList();
-    // Preserve server relevance order for remote search results.
-    if (!isSearchResults && widget.viewMode == SessionViewMode.flat) {
+    // In byCwd mode sorting happens per-group inside _groupEntries.
+    if (!isSearchResults) {
       sorted.sort(
         (left, right) =>
             right.session.updatedAt.compareTo(left.session.updatedAt),
@@ -2283,6 +2185,17 @@ class _RecentPaneState extends State<RecentPane> {
                   ),
                 ),
               ),
+              const SizedBox(width: 4),
+              // Host label — tells you which machine this project is on.
+              Text(
+                group.host.label,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: monoStyle(
+                  color: colors.textTertiary,
+                  fontSize: widget.dense ? 9.5 : 10.5,
+                ),
+              ),
               const SizedBox(width: 6),
               // Live running pulse — only shown when sessions are active
               if (group.hasRunning) ...[
@@ -2314,19 +2227,13 @@ class _RecentPaneState extends State<RecentPane> {
 
   Widget _buildSessionRow(
     RemoteSessionEntry entry, {
-    SessionViewMode groupMode = SessionViewMode.flat,
+    SessionViewMode groupMode = SessionViewMode.byCwd,
   }) {
-    // In a CWD group the workspace label is already shown in the header;
-    // replace it with the git branch name so each row gives unique context.
+    // In a CWD group: show branch name only (host is on the group header).
     String? secondaryLabel;
     if (groupMode == SessionViewMode.byCwd) {
       final branch = entry.session.gitInfo?.branch;
-      if (branch != null && branch.isNotEmpty) {
-        secondaryLabel = branch;
-      } else {
-        // No branch info — fall back to host label only (drop workspace).
-        secondaryLabel = entry.host.label;
-      }
+      secondaryLabel = (branch != null && branch.isNotEmpty) ? branch : '';
     }
     return SessionRowCard(
       host: entry.host,
