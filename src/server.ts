@@ -48,6 +48,7 @@ import type {
   SessionResourcesResponse,
   SessionRuntimeSummary,
   SessionResource,
+  SessionSubAgentInfo,
   SessionSummary,
   ThreadRecord,
   TurnRecord,
@@ -4419,6 +4420,7 @@ function mapSession(
   statusOverride: LiveThreadStatus | null = null,
 ): SessionSummary {
   const provider = providerKindForThread(thread);
+  const subAgent = sessionSubAgentForThread(thread);
   return {
     id: thread.id,
     title: sanitizeTitle(thread.name || thread.preview),
@@ -4426,25 +4428,99 @@ function mapSession(
     cwd: thread.cwd,
     createdAt: threadTimestampMillis(thread.createdAt),
     updatedAt: threadTimestampMillis(thread.updatedAt),
-    source:
-      typeof thread.source === "string"
-        ? thread.source
-        : JSON.stringify(thread.source),
+    source: sourceLabelForThread(thread, subAgent),
     provider,
     status: resolvedSessionStatus(thread, statusOverride),
     rolloutPath: thread.path,
     runtime,
     gitInfo: mapGitInfo(thread.gitInfo),
-    isSubAgent: isSubAgentThreadSource(thread.source),
+    isSubAgent: subAgent != null,
+    subAgent,
   };
 }
 
-function isSubAgentThreadSource(source: ThreadRecord["source"]): boolean {
+function sessionSubAgentForThread(thread: ThreadRecord): SessionSubAgentInfo | null {
+  if (thread.subAgent) {
+    return thread.subAgent;
+  }
+  return subAgentInfoFromThreadSource(thread.source);
+}
+
+function subAgentInfoFromThreadSource(
+  source: ThreadRecord["source"],
+): SessionSubAgentInfo | null {
   if (!source || typeof source !== "object") {
-    return false;
+    return null;
   }
   const typed = source as Record<string, unknown>;
-  return typed.subAgent != null || typed.subagent != null;
+  const rawSubAgent = typed.subAgent ?? typed.subagent;
+  if (typeof rawSubAgent === "string") {
+    return {
+      parentSessionId: null,
+      sourceKind: rawSubAgent,
+    };
+  }
+  if (!rawSubAgent || typeof rawSubAgent !== "object") {
+    return null;
+  }
+  const subAgent = rawSubAgent as Record<string, unknown>;
+  const threadSpawn = subAgent.thread_spawn;
+  if (threadSpawn && typeof threadSpawn === "object") {
+    const typedThreadSpawn = threadSpawn as Record<string, unknown>;
+    return {
+      parentSessionId: asString(typedThreadSpawn.parent_thread_id) ?? null,
+      sourceKind: "thread_spawn",
+      agentRole: asString(typedThreadSpawn.agent_role) ?? null,
+      agentNickname: asString(typedThreadSpawn.agent_nickname) ?? null,
+      depth: asInteger(typedThreadSpawn.depth) ?? null,
+    };
+  }
+  const other = asString(subAgent.other);
+  if (other) {
+    return {
+      parentSessionId: null,
+      sourceKind: other,
+    };
+  }
+  return {
+    parentSessionId: null,
+    sourceKind: "subagent",
+  };
+}
+
+function sourceLabelForThread(
+  thread: ThreadRecord,
+  subAgent: SessionSubAgentInfo | null,
+): string {
+  if (typeof thread.source === "string") {
+    return thread.source;
+  }
+  if (subAgent) {
+    return formatSubAgentSourceKind(subAgent.sourceKind);
+  }
+  const typed = thread.source as Record<string, unknown>;
+  const custom = asString(typed.custom);
+  if (custom) {
+    return custom;
+  }
+  try {
+    return JSON.stringify(thread.source);
+  } catch {
+    return "unknown";
+  }
+}
+
+function formatSubAgentSourceKind(kind: string): string {
+  switch (kind) {
+    case "child_session":
+    case "thread_spawn":
+    case "subagent":
+      return "sub-agent";
+    case "memory_consolidation":
+      return "memory consolidation";
+    default:
+      return kind.replaceAll("_", " ");
+  }
 }
 
 function providerKindForThread(thread: ThreadRecord): string | null {

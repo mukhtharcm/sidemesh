@@ -466,6 +466,67 @@ describe("codex rich live event mappings", () => {
     assert.equal(read.status.phase, "errored");
   });
 
+  it("requests spawned sub-agent threads and preserves their lineage metadata", async () => {
+    const provider = new CodexAgentProvider("codex") as any;
+    const requests: Array<{ method: string; params: unknown }> = [];
+    provider.bridge = {
+      request: async (method: string, params: unknown) => {
+        requests.push({ method, params });
+        if (method === "thread/list") {
+          return {
+            data: [
+              {
+                ...createThread(),
+                id: "thread-child",
+                source: {
+                  subAgent: {
+                    thread_spawn: {
+                      parent_thread_id: "thread-parent",
+                      agent_role: "explorer",
+                      agent_nickname: "scout",
+                      depth: 2,
+                    },
+                  },
+                },
+                agentRole: "explorer",
+                agentNickname: "scout",
+              },
+            ],
+          };
+        }
+        throw new Error(`unexpected method ${method}`);
+      },
+    };
+
+    const listed = await provider.listSessionThreads({ limit: 10, archived: false });
+
+    assert.deepEqual(requests, [
+      {
+        method: "thread/list",
+        params: {
+          limit: 10,
+          sortKey: "updated_at",
+          sortDirection: "desc",
+          sourceKinds: [
+            "cli",
+            "vscode",
+            "exec",
+            "appServer",
+            "subAgentThreadSpawn",
+          ],
+          archived: false,
+        },
+      },
+    ]);
+    assert.deepEqual(listed[0]?.subAgent, {
+      parentSessionId: "thread-parent",
+      sourceKind: "thread_spawn",
+      agentRole: "explorer",
+      agentNickname: "scout",
+      depth: 2,
+    });
+  });
+
   it("normalizes Codex thread status, plan, reasoning, and warning notifications", () => {
     const provider = new CodexAgentProvider("codex") as any;
     const events: unknown[] = [];

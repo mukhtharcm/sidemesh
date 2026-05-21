@@ -3792,6 +3792,67 @@ describe("GET /api/sessions/:sessionId/status", () => {
     });
   });
 
+  it("returns structured sub-agent lineage for child sessions in recent rows", async () => {
+    const stateDir = await mkdtemp(nodePath.join(tmpdir(), "sidemesh-server-status-test-"));
+    const provider = new SearchFixtureProvider([
+      {
+        thread: {
+          id: "thread-child",
+          name: "Delegated explorer",
+          preview: "Delegated explorer",
+          createdAt: 1,
+          updatedAt: 2,
+          cwd: "/repo",
+          source: {
+            subAgent: {
+              thread_spawn: {
+                parent_thread_id: "thread-parent",
+                agent_role: "explorer",
+                agent_nickname: "scout",
+                depth: 1,
+              },
+            },
+          },
+          path: null,
+          status: { type: "idle" },
+          subAgent: {
+            parentSessionId: "thread-parent",
+            sourceKind: "thread_spawn",
+            agentRole: "explorer",
+            agentNickname: "scout",
+            depth: 1,
+          },
+        },
+        archived: false,
+        searchText: "delegated explorer",
+      },
+    ]);
+    const runtime = makeCustomSingleProviderRuntime(provider);
+    await withServerRuntime(makeConfig(stateDir), runtime, async (server, config) => {
+      const sessionsRes = await request({
+        hostname: "127.0.0.1",
+        port: server.port,
+        path: "/api/sessions?limit=10",
+        method: "GET",
+        headers: { Authorization: "Bearer " + config.token },
+      });
+      assert.equal(sessionsRes.statusCode, 200);
+      const listed = (sessionsRes.body as any[]).find(
+        (item) => item.id === "thread-child",
+      );
+      assert.ok(listed);
+      assert.equal(listed.source, "sub-agent");
+      assert.equal(listed.isSubAgent, true);
+      assert.deepEqual(listed.subAgent, {
+        parentSessionId: "thread-parent",
+        sourceKind: "thread_spawn",
+        agentRole: "explorer",
+        agentNickname: "scout",
+        depth: 1,
+      });
+    });
+  });
+
   it("does not let stale live idle status override an active turn", async () => {
     const stateDir = await mkdtemp(nodePath.join(tmpdir(), "sidemesh-server-status-test-"));
     const provider = new RestartableFakeProvider();
