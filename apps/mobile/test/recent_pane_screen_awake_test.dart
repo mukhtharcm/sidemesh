@@ -33,6 +33,7 @@ void main() {
   );
 
   setUp(() async {
+    await SidemeshDb.close();
     SessionLocalStore.instance.resetMigrationState();
     final db = await SidemeshDb.instance;
     await db.delete('sessions');
