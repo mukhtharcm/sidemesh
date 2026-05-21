@@ -2175,7 +2175,6 @@ String _capabilityFeatureLabel(String key) {
     'sandboxMode' => 'workspace access',
     'networkAccess' => 'network access',
     'webSearch' => 'web search',
-    'remoteGitDiff' => 'remote git diff',
     'gitStatus' => 'git status',
     'gitDiff' => 'git diff',
     'portForwarding' => 'port forwarding',

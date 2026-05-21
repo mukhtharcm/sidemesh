@@ -137,11 +137,6 @@ export interface AgentSessionResumeOptions {
   config?: Record<string, unknown>;
 }
 
-export interface AgentRemoteGitDiff {
-  diff: string;
-  sha: string | null;
-}
-
 export interface AgentModelListOptions {
   cwd: string | null;
   profile: string | null;
@@ -213,9 +208,6 @@ export interface AgentProviderCapabilities {
     sandboxMode: boolean;
     networkAccess: boolean;
     webSearch: boolean;
-  };
-  workspace: {
-    remoteGitDiff: boolean;
   };
   lifecycle: {
     restart: boolean;
@@ -381,10 +373,6 @@ export interface AgentApprovalProvider {
   ): boolean;
 }
 
-export interface AgentWorkspaceProvider {
-  readRemoteGitDiff(cwd: string): Promise<AgentRemoteGitDiff>;
-}
-
 export interface AgentConfigurationProvider {
   listSkills(options: AgentSkillListOptions): Promise<SkillCatalogEntry>;
   writeSkillConfig(request: AgentSkillConfigWriteRequest): Promise<unknown>;
@@ -402,7 +390,6 @@ export interface AgentProvider
     Partial<AgentSessionHistoryProvider>,
     Partial<AgentSessionLifecycleProvider>,
     Partial<AgentApprovalProvider>,
-    Partial<AgentWorkspaceProvider>,
     Partial<AgentConfigurationProvider>,
     Partial<AgentUsageProvider> {}
 

@@ -758,11 +758,6 @@ class _GitDetailsSheet extends StatelessWidget {
                     icon: const Icon(Icons.inventory_2_rounded, size: 18),
                     label: const Text('Staged diff'),
                   ),
-                  OutlinedButton.icon(
-                    onPressed: () => onShowDiff('remote'),
-                    icon: const Icon(Icons.cloud_rounded, size: 18),
-                    label: const Text('Remote diff'),
-                  ),
                 ],
               ),
               if (status != null && status!.files.isNotEmpty) ...[
@@ -1092,7 +1087,6 @@ String _gitDiffTitle(SessionGitDiff diff) {
   return switch (diff.kind) {
     'staged' => 'Staged diff',
     'unstaged' => 'Unstaged diff',
-    'remote' => 'Remote diff',
     _ => 'Working diff',
   };
 }
