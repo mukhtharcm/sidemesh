@@ -15,11 +15,9 @@ void main() {
       'providerConfig': {'kind': 'codex', 'command': 'codex'},
       'providerCapabilities': {
         'sessions': {'create': true},
-        'workspace': {'remoteGitDiff': true},
       },
       'defaultProviderCapabilities': {
         'sessions': {'create': true, 'searchSessions': true},
-        'workspace': {'remoteGitDiff': true},
       },
       'hostCapabilities': {
         'workspace': {'filesystem': true, 'gitStatus': true, 'gitDiff': true},
@@ -65,10 +63,6 @@ void main() {
     expect(
       node.providerCapabilities.supports('workspace', 'gitStatus'),
       isFalse,
-    );
-    expect(
-      node.providerCapabilities.supports('workspace', 'remoteGitDiff'),
-      isTrue,
     );
     expect(node.supportsHostCapability('workspace', 'gitStatus'), isTrue);
     expect(node.supportsHostCapability('workspace', 'gitDiff'), isTrue);
@@ -203,7 +197,6 @@ void main() {
       'providerConfig': {'kind': 'codex', 'command': 'codex'},
       'providerCapabilities': {
         'sessions': {'create': true, 'searchSessions': true},
-        'workspace': {'remoteGitDiff': true},
       },
       'hostCapabilities': {
         'workspace': {'filesystem': true},
@@ -224,10 +217,6 @@ void main() {
     expect(node.providerCapabilities.supports('sessions', 'create'), isTrue);
     expect(
       node.defaultProviderCapabilities.supports('sessions', 'searchSessions'),
-      isTrue,
-    );
-    expect(
-      node.defaultProviderCapabilities.supports('workspace', 'remoteGitDiff'),
       isTrue,
     );
     expect(node.supportsHostCapability('workspace', 'filesystem'), isTrue);
@@ -349,7 +338,6 @@ void main() {
             'skills': false,
           },
           'runtimeControls': {'model': false, 'approvalPolicy': false},
-          'workspace': {'remoteGitDiff': false},
         },
       ),
     );
@@ -377,7 +365,6 @@ void main() {
           'input': {'imageUrl': true, 'skills': true},
           'configuration': {'models': true, 'skills': true},
           'runtimeControls': {'model': true},
-          'workspace': {'remoteGitDiff': false},
         },
       ),
     );
@@ -386,10 +373,6 @@ void main() {
     expect(
       noFiles.providerCapabilities.supports('configuration', 'models'),
       isTrue,
-    );
-    expect(
-      noFiles.providerCapabilities.supports('workspace', 'remoteGitDiff'),
-      isFalse,
     );
   });
 

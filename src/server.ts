@@ -69,6 +69,7 @@ import {
 import {
   buildGitDiff,
   readGitCommonDir,
+  readGitIdentity,
   readGitDiff,
   readGitStatus,
   sanitizeGitUrl,
@@ -1001,7 +1002,7 @@ export async function startServer(
     }
     try {
       const thread = await readSession(provider, sessionId, false);
-      const session = applyGitCommonDirFromCache(
+      const session = applyGitEnrichmentFromCache(
         mapSession(
           thread,
           await loadCachedSessionRuntime(provider, thread, runtimeCache, "active"),
@@ -2448,34 +2449,6 @@ export async function startServer(
         return;
       }
       const session = await readSession(provider, sessionId, false);
-      if (kind === "remote") {
-        const sessionProvider =
-          providerEntryForKind(providerKindForThread(session)) ??
-          providerEntryForKind(null);
-        if (!sessionProvider) {
-          response.status(500).json({ error: "provider routing failed" });
-          return;
-        }
-        if (
-          !requireProviderCapability(
-            response,
-            sessionProvider.provider,
-            sessionProvider.provider.capabilities.workspace.remoteGitDiff,
-            "remote git diff",
-            "readRemoteGitDiff",
-          )
-        ) {
-          return;
-        }
-        const result = await sessionProvider.provider.readRemoteGitDiff!(
-          session.cwd,
-        );
-        response.json(
-          buildGitDiff("remote", result.diff, normalizeGitSha(result.sha)),
-        );
-        return;
-      }
-
       if (
         !requireHostCapability(
           response,
@@ -3781,21 +3754,44 @@ async function resolveTerminalCwd(
 const _gitCommonDirCache = new Map<string, string | null>();
 
 /**
- * Synchronously applies a cached gitCommonDir value to a single session.
- * No-op if the cache has no entry for the session's CWD or if gitCommonDir
- * is already set. Safe to call from any synchronous context after the cache
- * has been warmed by enrichSessionsWithGitCommonDir.
+ * Process-level CWD → lightweight git identity cache.
+ * Populated for CWDs where the provider returned null gitInfo so the host
+ * can backfill branch/sha/originUrl from the local filesystem.
  */
-function applyGitCommonDirFromCache(session: SessionSummary): SessionSummary {
-  if (!session.cwd || session.gitInfo?.gitCommonDir) return session;
+type GitIdentityEntry = Awaited<ReturnType<typeof readGitIdentity>>;
+const _gitIdentityCache = new Map<string, GitIdentityEntry>();
+
+/** Applies gitCommonDir and backfills branch/sha/originUrl where the provider left them null. */
+function applyGitEnrichmentFromCache(session: SessionSummary): SessionSummary {
+  if (!session.cwd) return session;
+
   const commonDir = _gitCommonDirCache.get(session.cwd) ?? null;
-  if (!commonDir) return session;
-  return {
-    ...session,
-    gitInfo: session.gitInfo
-      ? { ...session.gitInfo, gitCommonDir: commonDir }
-      : { sha: null, branch: null, originUrl: null, gitCommonDir: commonDir },
+  const identity = _gitIdentityCache.get(session.cwd) ?? null;
+
+  // Nothing to add — CWD not in a git repo or cache not warm yet.
+  if (!commonDir && !identity) return session;
+
+  const existing = session.gitInfo;
+
+  // Merge: provider values win; host fills whatever is missing.
+  const merged: GitInfoSummary = {
+    sha: existing?.sha ?? identity?.sha ?? null,
+    branch: existing?.branch ?? identity?.branch ?? null,
+    originUrl: existing?.originUrl ?? identity?.originUrl ?? null,
+    gitCommonDir: existing?.gitCommonDir ?? commonDir ?? null,
   };
+
+  // Skip if nothing changed.
+  if (
+    merged.sha === existing?.sha &&
+    merged.branch === existing?.branch &&
+    merged.originUrl === existing?.originUrl &&
+    merged.gitCommonDir === existing?.gitCommonDir
+  ) {
+    return session;
+  }
+
+  return { ...session, gitInfo: merged };
 }
 
 async function enrichSessionsWithGitCommonDir(
@@ -3804,20 +3800,27 @@ async function enrichSessionsWithGitCommonDir(
   const uniqueCwds = [
     ...new Set(sessions.map((s) => s.cwd).filter((cwd) => cwd.length > 0)),
   ];
-  const uncached = uniqueCwds.filter((cwd) => !_gitCommonDirCache.has(cwd));
+  const uncachedCommonDir = uniqueCwds.filter((cwd) => !_gitCommonDirCache.has(cwd));
+  const needsIdentity = uniqueCwds.filter(
+    (cwd) =>
+      !_gitIdentityCache.has(cwd) &&
+      sessions.some((s) => s.cwd === cwd && !s.gitInfo?.branch),
+  );
 
-  // Populate cache for any CWD we haven't seen before. These are fast local
-  // subprocess calls; running them in parallel keeps latency low even with
-  // many distinct working directories.
-  await Promise.allSettled(
-    uncached.map(async (cwd) => {
+  // Populate caches in parallel. gitCommonDir and identity are independent
+  // git calls so we batch all of them together.
+  await Promise.allSettled([
+    ...uncachedCommonDir.map(async (cwd) => {
       const dir = await readGitCommonDir(cwd);
       _gitCommonDirCache.set(cwd, dir);
     }),
-  );
+    ...needsIdentity.map(async (cwd) => {
+      const identity = await readGitIdentity(cwd);
+      _gitIdentityCache.set(cwd, identity);
+    }),
+  ]);
 
-  // Reuse the synchronous helper so enrichment logic lives in one place.
-  return sessions.map(applyGitCommonDirFromCache);
+  return sessions.map(applyGitEnrichmentFromCache);
 }
 
 async function listSessions(
@@ -4658,13 +4661,12 @@ function mapGitInfo(raw: unknown): GitInfoSummary | null {
 
 function parseGitDiffKind(
   value: unknown,
-): "working" | "staged" | "unstaged" | "remote" | null {
+): "working" | "staged" | "unstaged" | null {
   const kind = asString(value);
   switch (kind) {
     case "working":
     case "staged":
     case "unstaged":
-    case "remote":
       return kind;
     default:
       return null;

@@ -1025,9 +1025,6 @@ class _SessionScreenState extends State<SessionScreen>
       _supportsProviderCapability('runtimeControls', 'reasoningEffort');
 
   bool _supportsGitDiffKind(String kind) {
-    if (kind == 'remote') {
-      return _supportsProviderCapability('workspace', 'remoteGitDiff');
-    }
     return _supportsHostCapability('workspace', 'gitDiff');
   }
 

@@ -58,9 +58,6 @@ const EMPTY_CAPABILITIES: AgentProviderCapabilities = {
     networkAccess: false,
     webSearch: false,
   },
-  workspace: {
-    remoteGitDiff: false,
-  },
   lifecycle: {
     restart: false,
   },

@@ -305,7 +305,7 @@ export interface SessionGitStatus {
 }
 
 export interface SessionGitDiff {
-  kind: "working" | "staged" | "unstaged" | "remote";
+  kind: "working" | "staged" | "unstaged";
   diff: string;
   baseSha: string | null;
   truncated: boolean;

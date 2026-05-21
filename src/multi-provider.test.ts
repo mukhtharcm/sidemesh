@@ -343,9 +343,6 @@ class StubProvider
       networkAccess: true,
       webSearch: false,
     },
-    workspace: {
-      remoteGitDiff: false,
-    },
     lifecycle: {
       restart: true,
     },

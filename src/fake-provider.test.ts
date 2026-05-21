@@ -285,8 +285,6 @@ describe("fake test provider", () => {
     const noFilesEvents: AgentProviderLiveEvent[] = [];
     noFiles.on("liveEvent", (event) => noFilesEvents.push(event));
     await noFiles.start();
-
-    assert.equal(noFiles.capabilities.workspace.remoteGitDiff, false);
     assert.equal(noFiles.capabilities.configuration.models, true);
 
     const noFilesSession = await noFiles.createSession({
@@ -322,7 +320,6 @@ describe("fake test provider", () => {
     assert.equal(noModelControls.capabilities.runtimeControls.model, false);
     assert.equal(noModelControls.capabilities.runtimeControls.fastMode, false);
     assert.equal(noModelControls.capabilities.approvals.command, true);
-    assert.equal(noModelControls.capabilities.workspace.remoteGitDiff, true);
   });
 
   it("can simulate providers without approvals and minimal session controls", async () => {
@@ -337,7 +334,6 @@ describe("fake test provider", () => {
     assert.equal(noApprovals.capabilities.approvals.permissions, false);
     assert.equal(noApprovals.capabilities.runtimeControls.approvalPolicy, false);
     assert.equal(noApprovals.capabilities.configuration.models, true);
-    assert.equal(noApprovals.capabilities.workspace.remoteGitDiff, true);
 
     const minimal = new FakeAgentProvider({
       latencyMs: 0,
@@ -355,7 +351,6 @@ describe("fake test provider", () => {
     assert.equal(minimal.capabilities.input.text, true);
     assert.equal(minimal.capabilities.input.imageUrl, false);
     assert.equal(minimal.capabilities.configuration.models, false);
-    assert.equal(minimal.capabilities.workspace.remoteGitDiff, false);
   });
 
   it("emits rich runtime envelope events for UI testing", async () => {
