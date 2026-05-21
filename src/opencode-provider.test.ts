@@ -601,6 +601,35 @@ sleep 10
     });
   });
 
+  it("marks child sessions as sub-agent sessions when parentID is present", async () => {
+    const client = new FakeOpenCodeClient();
+    client.sessions.set("session-child", {
+      id: "session-child",
+      directory: "/repo/app",
+      parentID: "session-parent",
+      title: "Delegated explorer",
+      agent: "explore",
+      time: {
+        created: 1,
+        updated: 2,
+      },
+    });
+    client.statusesByDirectory.set("/repo/app", {
+      "session-child": { type: "idle" },
+    });
+    const provider = createProvider(client);
+    await provider.start();
+
+    const threads = await provider.listSessionThreads({ limit: 10, archived: false });
+
+    assert.deepEqual(threads[0]?.subAgent, {
+      parentSessionId: "session-parent",
+      sourceKind: "child_session",
+      agentName: "explore",
+      agentDisplayName: "Explore",
+    });
+  });
+
   it("serializes image inputs and model variants for prompt_async", async () => {
     const client = new FakeOpenCodeClient();
     const provider = createProvider(client);

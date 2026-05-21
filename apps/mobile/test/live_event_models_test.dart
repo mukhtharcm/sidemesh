@@ -235,4 +235,62 @@ void main() {
     expect(status.status, 'waiting_for_approval');
     expect(status.isRunning, isTrue);
   });
+
+  test('SessionSummary parses structured sub-agent lineage', () {
+    final summary = SessionSummary.fromJson({
+      'id': 'session-child',
+      'title': 'Delegated explorer',
+      'preview': 'Delegated explorer',
+      'cwd': '/repo',
+      'createdAt': 1,
+      'updatedAt': 2,
+      'source': 'sub-agent',
+      'status': 'idle',
+      'runtime': null,
+      'gitInfo': null,
+      'subAgent': {
+        'parentSessionId': 'session-parent',
+        'sourceKind': 'thread_spawn',
+        'agentRole': 'explorer',
+        'agentNickname': 'scout',
+        'depth': 1,
+      },
+    });
+
+    expect(summary.isSubAgent, isTrue);
+    expect(summary.subAgent?.parentSessionId, 'session-parent');
+    expect(summary.subAgent?.sourceKind, 'thread_spawn');
+    expect(summary.subAgent?.label, 'explorer');
+    expect(summary.toJson()['subAgent'], {
+      'parentSessionId': 'session-parent',
+      'sourceKind': 'thread_spawn',
+      'agentName': null,
+      'agentDisplayName': null,
+      'agentRole': 'explorer',
+      'agentNickname': 'scout',
+      'depth': 1,
+    });
+  });
+
+  test('SessionSummary.copyWith preserves legacy sub-agent badges', () {
+    const legacySummary = SessionSummary(
+      id: 'session-child',
+      title: 'Delegated explorer',
+      preview: 'Delegated explorer',
+      cwd: '/repo',
+      createdAt: DateTime.fromMillisecondsSinceEpoch(1),
+      updatedAt: DateTime.fromMillisecondsSinceEpoch(2),
+      source: 'sub-agent',
+      provider: null,
+      status: 'idle',
+      runtime: null,
+      gitInfo: null,
+      isSubAgent: true,
+    );
+
+    final updated = legacySummary.copyWith(status: 'running');
+
+    expect(updated.isSubAgent, isTrue);
+    expect(updated.subAgent, isNull);
+  });
 }
