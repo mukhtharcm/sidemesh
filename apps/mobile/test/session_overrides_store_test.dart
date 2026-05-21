@@ -10,7 +10,7 @@ void main() {
   });
 
   test('overlay preserves sub-agent lineage from a newer override', () {
-    const override = SessionSummary(
+    final override = SessionSummary(
       id: 'session-child',
       title: 'Delegated explorer',
       preview: 'Delegated explorer',
@@ -29,7 +29,7 @@ void main() {
         agentRole: 'explorer',
       ),
     );
-    const incoming = SessionSummary(
+    final incoming = SessionSummary(
       id: 'session-child',
       title: 'Old title',
       preview: 'Delegated explorer',
