@@ -43,8 +43,6 @@ class DesktopShell extends StatefulWidget {
 
 enum _SidebarSection { recent, inbox, hosts }
 
-// Session view is always byCwd — these helpers are no longer needed.
-// Kept as stubs to avoid cascading call-site changes during this refactor.
 class _OnboardingEmptyState extends StatelessWidget {
   const _OnboardingEmptyState({required this.colors, required this.onAddHost});
 
@@ -235,7 +233,6 @@ class _DesktopShellState extends State<DesktopShell> {
   int _inboxCount = 0;
   int _sessionOpenSerial = 0;
   String _query = '';
-  // View mode is always byCwd — kept as no-op for call-site compat.
   RecentSessionFilters _recentFilters = const RecentSessionFilters();
   double _sidebarWidth = _defaultSidebarWidth;
   Timer? _searchDebounce;
@@ -271,7 +268,6 @@ class _DesktopShellState extends State<DesktopShell> {
     );
     _loadHosts();
     _loadSidebarWidth();
-    // _loadRecentViewMode(); // view mode is always byCwd
     _loadInspectorWidth();
     _searchController.addListener(() {
       final next = _searchController.text;
@@ -1069,7 +1065,6 @@ class _DesktopShellState extends State<DesktopShell> {
                                       if (!mounted || n == _inboxCount) return;
                                       setState(() => _inboxCount = n);
                                     },
-                                    recentViewMode: SessionViewMode.byCwd,
                                     recentFilters: _recentFilters,
                                     onRecentRunningOnlyChanged:
                                         _setRecentRunningOnly,
@@ -1456,7 +1451,6 @@ class _Sidebar extends StatelessWidget {
     required this.onToggleHostEnabled,
     required this.onActiveCountChanged,
     required this.onInboxCountChanged,
-    this.recentViewMode,
     this.recentFilters = const RecentSessionFilters(),
     this.onRecentRunningOnlyChanged,
     this.onRecentUnreadOnlyChanged,
@@ -1488,7 +1482,6 @@ class _Sidebar extends StatelessWidget {
   final HostProfileActionCallback onToggleHostEnabled;
   final ValueChanged<int> onActiveCountChanged;
   final ValueChanged<int> onInboxCountChanged;
-  final SessionViewMode? recentViewMode;
   final RecentSessionFilters recentFilters;
   final ValueChanged<bool>? onRecentRunningOnlyChanged;
   final ValueChanged<bool>? onRecentUnreadOnlyChanged;
@@ -1585,7 +1578,6 @@ class _Sidebar extends StatelessWidget {
                       onActiveCountChanged: onActiveCountChanged,
                       onInboxCountChanged: onInboxCountChanged,
                       onToggleHostEnabled: onToggleHostEnabled,
-                      recentViewMode: recentViewMode,
                       recentFilters: recentFilters,
                     ),
             ),
@@ -1890,7 +1882,6 @@ class _SidebarPane extends StatelessWidget {
     required this.onToggleHostEnabled,
     required this.onActiveCountChanged,
     required this.onInboxCountChanged,
-    this.recentViewMode,
     this.recentFilters = const RecentSessionFilters(),
   });
 
@@ -1910,7 +1901,6 @@ class _SidebarPane extends StatelessWidget {
   final HostProfileActionCallback onToggleHostEnabled;
   final ValueChanged<int> onActiveCountChanged;
   final ValueChanged<int> onInboxCountChanged;
-  final SessionViewMode? recentViewMode;
   final RecentSessionFilters recentFilters;
 
   @override
@@ -1930,7 +1920,6 @@ class _SidebarPane extends StatelessWidget {
           dense: true,
           hasSavedHosts: hosts.isNotEmpty,
           screenAwakeSourceKey: 'desktop-recent-sessions',
-          viewMode: SessionViewMode.byCwd,
           filters: recentFilters,
         );
       case _SidebarSection.inbox:

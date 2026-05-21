@@ -93,7 +93,6 @@ class _SidemeshHomeScreenState extends State<SidemeshHomeScreen>
   int _activeCount = 0;
   int _inboxCount = 0;
   String _query = '';
-  // Session view is always byCwd - grouping by project
   RecentSessionFilters _recentFilters = const RecentSessionFilters();
   bool _handlingNotificationIntent = false;
   String? _dismissedRecommendedMobileClientVersion;
@@ -132,7 +131,6 @@ class _SidemeshHomeScreenState extends State<SidemeshHomeScreen>
       });
     });
     _startHeartbeat();
-    _loadRecentViewMode();
   }
 
   @override
@@ -237,11 +235,6 @@ class _SidemeshHomeScreenState extends State<SidemeshHomeScreen>
       _heartbeatInFlight = false;
     }
   }
-
-  // View mode is always byCwd — no loading/saving needed.
-  Future<void> _loadRecentViewMode() async {}
-
-  // No-op: view mode is always byCwd.
 
   void _toggleRecentRunningOnly(bool enabled) {
     if (_recentFilters.runningOnly == enabled) return;
@@ -576,8 +569,6 @@ class _SidemeshHomeScreenState extends State<SidemeshHomeScreen>
               primaryAction: primaryAction,
               searchController: _searchController,
               searchVisible: _searchVisibleForTab(tab, enabledHosts.length),
-              viewMode: _tabIndex == 0 ? SessionViewMode.byCwd : null,
-              onViewModeChanged: _tabIndex == 0 ? null : null,
               recentFilters: _tabIndex == 0 ? _recentFilters : null,
               onRunningOnlyChanged: _tabIndex == 0
                   ? _toggleRecentRunningOnly
@@ -626,8 +617,6 @@ class _SidemeshHomeScreenState extends State<SidemeshHomeScreen>
                             if (!mounted) return;
                             setState(() => _activeCount = count);
                           },
-                          viewMode: SessionViewMode.byCwd,
-                          onViewModeChanged: null,
                           filters: _recentFilters,
                         ),
                         InboxPane(
@@ -703,8 +692,6 @@ class _SidemeshHomeScreenState extends State<SidemeshHomeScreen>
   }
 }
 
-enum SessionViewMode { byCwd }
-
 enum _HomeHeaderMenuAction { refresh, settings }
 
 class RecentSessionFilters {
@@ -765,8 +752,6 @@ class _HomeStickyHeader extends StatelessWidget {
     required this.primaryAction,
     required this.searchController,
     required this.searchVisible,
-    required this.viewMode,
-    required this.onViewModeChanged,
     required this.recentFilters,
     required this.onRunningOnlyChanged,
     required this.onUnreadOnlyChanged,
@@ -779,8 +764,6 @@ class _HomeStickyHeader extends StatelessWidget {
   final _HomePrimaryAction primaryAction;
   final TextEditingController searchController;
   final bool searchVisible;
-  final SessionViewMode? viewMode;
-  final ValueChanged<SessionViewMode>? onViewModeChanged;
   final RecentSessionFilters? recentFilters;
   final ValueChanged<bool>? onRunningOnlyChanged;
   final ValueChanged<bool>? onUnreadOnlyChanged;
@@ -898,8 +881,6 @@ class _HomeStickyHeader extends StatelessWidget {
                 ? _HomeSearchField(
                     controller: searchController,
                     hintText: 'Search ${tab.title.toLowerCase()}',
-                    viewMode: viewMode,
-                    onViewModeChanged: onViewModeChanged,
                     recentFilters: recentFilters,
                     onRunningOnlyChanged: onRunningOnlyChanged,
                     onUnreadOnlyChanged: onUnreadOnlyChanged,
@@ -917,8 +898,6 @@ class _HomeSearchField extends StatelessWidget {
   const _HomeSearchField({
     required this.controller,
     required this.hintText,
-    this.viewMode,
-    this.onViewModeChanged,
     this.recentFilters,
     this.onRunningOnlyChanged,
     this.onUnreadOnlyChanged,
@@ -927,8 +906,6 @@ class _HomeSearchField extends StatelessWidget {
 
   final TextEditingController controller;
   final String hintText;
-  final SessionViewMode? viewMode;
-  final ValueChanged<SessionViewMode>? onViewModeChanged;
   final RecentSessionFilters? recentFilters;
   final ValueChanged<bool>? onRunningOnlyChanged;
   final ValueChanged<bool>? onUnreadOnlyChanged;
@@ -1436,9 +1413,7 @@ class RecentPane extends StatefulWidget {
     this.hasSavedHosts = false,
     this.screenAwakeSourceKey,
     this.screenAwakeController,
-    this.viewMode = SessionViewMode.byCwd,
     this.filters = const RecentSessionFilters(),
-    this.onViewModeChanged,
     this.onAddHost,
   });
 
@@ -1453,9 +1428,7 @@ class RecentPane extends StatefulWidget {
   final bool hasSavedHosts;
   final String? screenAwakeSourceKey;
   final ScreenAwakeController? screenAwakeController;
-  final SessionViewMode viewMode;
   final RecentSessionFilters filters;
-  final ValueChanged<SessionViewMode>? onViewModeChanged;
   final VoidCallback? onAddHost;
 
   @override
@@ -1495,8 +1468,8 @@ class _SessionGroup {
   const _SessionGroup({required this.key, required this.title, required this.host, required this.entries});
   final String key;
   final String title;
-  /// Host all sessions in this group belong to. In byCwd mode every session
-  /// in a group shares the same host (gitCommonDir is host-specific).
+  /// Host all sessions in this group belong to.
+  /// Groups are host-scoped because gitCommonDir is host-specific.
   final HostProfile host;
   final List<RemoteSessionEntry> entries;
 
@@ -1583,8 +1556,6 @@ class _RecentPaneState extends State<RecentPane> {
   }
 
   List<_SessionGroup> _groupEntries(List<RemoteSessionEntry> entries) {
-    // byCwd is the only view mode — always group sessions by project.
-    if (widget.viewMode != SessionViewMode.byCwd) return const [];
     final groups = <String, List<RemoteSessionEntry>>{};
     for (final entry in entries) {
       final key = _projectKey(entry);
@@ -1606,9 +1577,7 @@ class _RecentPaneState extends State<RecentPane> {
     return sortedKeys
         .map((k) => _SessionGroup(
           key: k,
-          title: widget.viewMode == SessionViewMode.byCwd
-              ? _projectLabel(k)
-              : k,
+          title: _projectLabel(k),
           host: groups[k]!.first.host,
           entries: groups[k]!,
         ))
@@ -1864,7 +1833,6 @@ class _RecentPaneState extends State<RecentPane> {
     }
     visible = visible.where(_matchesRecentFilters);
     final sorted = visible.toList();
-    // In byCwd mode sorting happens per-group inside _groupEntries.
     if (!isSearchResults) {
       sorted.sort(
         (left, right) =>
@@ -1930,7 +1898,10 @@ class _RecentPaneState extends State<RecentPane> {
           );
         }
         final sortedEntries = _sortEntries(_store.entries);
-        final groups = _groupEntries(sortedEntries);
+        final isSearchMode = widget.query.trim().isNotEmpty;
+        final groups = isSearchMode
+            ? const <_SessionGroup>[]
+            : _groupEntries(sortedEntries);
         final isGrouped = groups.isNotEmpty;
         final hasCachedEntries =
             _store.entries.isNotEmpty &&
@@ -2118,9 +2089,7 @@ class _RecentPaneState extends State<RecentPane> {
               child: _buildSessionSectionHeader(
                 context,
                 group: group,
-                icon: widget.viewMode == SessionViewMode.byCwd
-                    ? Icons.folder_rounded
-                    : Icons.hub_rounded,
+                icon: Icons.folder_rounded,
                 collapsed: collapsed,
               ),
             );
@@ -2131,11 +2100,7 @@ class _RecentPaneState extends State<RecentPane> {
               padding: EdgeInsets.only(
                 bottom: widget.dense ? 2 : AppSpacing.sm,
               ),
-              child: _buildSessionRow(
-                entry,
-                // In grouped CWD mode, show branch instead of workspace label
-                groupMode: widget.viewMode,
-              ),
+              child: _buildSessionRow(entry, showBranchLabel: true),
             );
           }
           current = entriesEnd;
@@ -2231,14 +2196,11 @@ class _RecentPaneState extends State<RecentPane> {
 
   Widget _buildSessionRow(
     RemoteSessionEntry entry, {
-    SessionViewMode groupMode = SessionViewMode.byCwd,
+    bool showBranchLabel = false,
   }) {
-    // In a CWD group: show branch name only (host is on the group header).
-    String? secondaryLabel;
-    if (groupMode == SessionViewMode.byCwd) {
-      final branch = entry.session.gitInfo?.branch;
-      secondaryLabel = (branch != null && branch.isNotEmpty) ? branch : '';
-    }
+    final branch = entry.session.gitInfo?.branch;
+    final secondaryLabel =
+        showBranchLabel && branch != null && branch.isNotEmpty ? branch : null;
     return SessionRowCard(
       host: entry.host,
       session: entry.session,
