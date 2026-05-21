@@ -338,41 +338,63 @@ class _SidemeshHomeScreenState extends State<SidemeshHomeScreen>
     await _refreshHosts();
   }
 
+  Route<void> _buildSessionRoute(
+    HostProfile host,
+    SessionSummary session, {
+    SessionComposerSeed? composerSeed,
+  }) {
+    return MaterialPageRoute<void>(
+      builder: (context) => SessionScreen(
+        host: host,
+        session: session,
+        api: _api,
+        initialComposerSeed: composerSeed,
+        onOpenSession: (next) => unawaited(_openSession(host, next)),
+        onReturnToSessionList: _returnToSessionList,
+        // Provide a session-list drawer so the user can switch sessions
+        // without navigating all the way back to the home screen.
+        sessionDrawer: (ctx) => RecentPane(
+          hosts: _hosts.where((h) => h.enabled).toList(),
+          api: _api,
+          selectedSessionId: session.id,
+          onOpenSession: (h, s) {
+            // Close the drawer then replace the current session.
+            Navigator.of(ctx).pop();
+            unawaited(_openSession(h, s, replaceCurrentRoute: true));
+          },
+          onActiveCountChanged: (_) {},
+          dense: false,
+          hasSavedHosts: _hosts.isNotEmpty,
+        ),
+      ),
+    );
+  }
+
+  void _returnToSessionList() {
+    Navigator.of(context).popUntil((route) => route.isFirst);
+  }
+
   Future<void> _openSession(
     HostProfile host,
     SessionSummary session, {
     SessionComposerSeed? composerSeed,
+    bool replaceCurrentRoute = false,
   }) async {
     if (!host.enabled) {
       showAppSnackBar(context, 'Enable ${host.label} before opening sessions.');
       return;
     }
-    await Navigator.of(context).push(
-      MaterialPageRoute<void>(
-        builder: (context) => SessionScreen(
-          host: host,
-          session: session,
-          api: _api,
-          initialComposerSeed: composerSeed,
-          onOpenSession: (next) => unawaited(_openSession(host, next)),
-          // Provide a session-list drawer so the user can switch sessions
-          // without navigating all the way back to the home screen.
-          sessionDrawer: (ctx) => RecentPane(
-            hosts: _hosts.where((h) => h.enabled).toList(),
-            api: _api,
-            selectedSessionId: session.id,
-            onOpenSession: (h, s) {
-              // Close the drawer then replace the current session.
-              Navigator.of(ctx).pop();
-              unawaited(_openSession(h, s));
-            },
-            onActiveCountChanged: (_) {},
-            dense: false,
-            hasSavedHosts: _hosts.isNotEmpty,
-          ),
-        ),
-      ),
+    final navigator = Navigator.of(context);
+    final route = _buildSessionRoute(
+      host,
+      session,
+      composerSeed: composerSeed,
     );
+    if (replaceCurrentRoute) {
+      await navigator.pushReplacement<void, void>(route);
+    } else {
+      await navigator.push(route);
+    }
     if (!mounted) {
       return;
     }

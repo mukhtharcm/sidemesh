@@ -93,6 +93,7 @@ class SessionScreen extends StatefulWidget {
     this.desktopMode = false,
     this.screenAwakeSourceKey,
     this.sessionDrawer,
+    this.onReturnToSessionList,
   });
 
   final HostProfile host;
@@ -107,6 +108,9 @@ class SessionScreen extends StatefulWidget {
   /// without navigating back to the home screen. The drawer is opened via a
   /// leading ☰ button in the AppBar.
   final WidgetBuilder? sessionDrawer;
+  /// Returns the user from the mobile session drawer to the owning session
+  /// list screen instead of stepping through previously opened session routes.
+  final VoidCallback? onReturnToSessionList;
   // Extra top padding for embedded desktop use (to avoid overlapping the
   // transparent macOS titlebar). When null, SafeArea handles insets.
   final double? topPadding;
@@ -5774,6 +5778,7 @@ class _SessionScreenState extends State<SessionScreen>
           onArchived: widget.onArchived,
           topPadding: widget.topPadding,
           desktopMode: widget.desktopMode,
+          onReturnToSessionList: widget.onReturnToSessionList,
         ),
       ),
     );
@@ -7504,7 +7509,13 @@ class _SessionScreenState extends State<SessionScreen>
                           dense: true,
                           onTap: () {
                             Navigator.of(ctx).pop(); // close drawer
-                            Navigator.of(ctx).pop(); // back to home
+                            final returnToSessionList =
+                                widget.onReturnToSessionList;
+                            if (returnToSessionList != null) {
+                              returnToSessionList();
+                              return;
+                            }
+                            Navigator.of(ctx).pop();
                           },
                         ),
                       ),
