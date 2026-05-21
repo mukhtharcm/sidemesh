@@ -1608,6 +1608,7 @@ class _RecentPaneState extends State<RecentPane> {
 
   @override
   void dispose() {
+    _searchDebounce?.cancel();
     _clearScreenAwakeSource(widget.screenAwakeSourceKey);
     _store.removeListener(_handleStoreChanged);
     _store.dispose();
