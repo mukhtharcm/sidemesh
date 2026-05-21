@@ -1593,11 +1593,15 @@ class _RecentPaneState extends State<RecentPane> {
     for (final list in groups.values) {
       list.sort((a, b) => b.session.updatedAt.compareTo(a.session.updatedAt));
     }
+    // Sort groups by most-recently-active session so the project you're
+    // currently working on stays at the top, not alphabetical order.
     final sortedKeys = groups.keys.toList()
       ..sort((a, b) {
         if (a == 'Unknown') return 1;
         if (b == 'Unknown') return -1;
-        return a.compareTo(b);
+        final aTime = groups[a]!.first.session.updatedAt;
+        final bTime = groups[b]!.first.session.updatedAt;
+        return bTime.compareTo(aTime);
       });
     return sortedKeys
         .map((k) => _SessionGroup(

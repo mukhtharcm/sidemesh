@@ -7468,7 +7468,7 @@ class _SessionScreenState extends State<SessionScreen>
                       child: Builder(
                         builder: (ctx) => ListTile(
                           leading: const Icon(Icons.arrow_back_rounded),
-                          title: const Text('All sessions'),
+                          title: const Text('Sessions'),
                           dense: true,
                           onTap: () {
                             Navigator.of(ctx).pop(); // close drawer
