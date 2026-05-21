@@ -24,6 +24,9 @@ class SessionLocalStore extends ChangeNotifier {
 
   bool _migrated = false;
   Future<void>? _migrationFuture;
+  Future<void> _operationQueue = Future<void>.value();
+  int _pendingOperationCount = 0;
+  Completer<void>? _idleCompleter;
 
   @visibleForTesting
   void resetMigrationState() {
@@ -32,6 +35,9 @@ class SessionLocalStore extends ChangeNotifier {
     _favoritesLoaded = false;
     _favoritesLoadFuture = null;
     _favoriteKeys.clear();
+    _operationQueue = Future<void>.value();
+    _pendingOperationCount = 0;
+    _idleCompleter = null;
   }
 
   final Set<String> _favoriteKeys = <String>{};
@@ -60,8 +66,35 @@ class SessionLocalStore extends ChangeNotifier {
 
   String _favoriteKey(String hostId, String sessionId) => '$hostId::$sessionId';
 
-  Future<void> ensureLoaded() async {
-    await _ensureFavoritesLoaded();
+  Future<T> _trackOperation<T>(Future<T> Function() action) {
+    _pendingOperationCount += 1;
+    _idleCompleter ??= Completer<void>();
+    final queued = _operationQueue
+        .catchError((error) {})
+        .then<T>((_) => action());
+    _operationQueue = queued.then<void>((_) {}, onError: (error, stackTrace) {});
+    return queued.whenComplete(() {
+      _pendingOperationCount -= 1;
+      if (_pendingOperationCount == 0) {
+        _idleCompleter?.complete();
+        _idleCompleter = null;
+      }
+    });
+  }
+
+  @visibleForTesting
+  Future<void> waitForIdle() async {
+    final completer = _idleCompleter;
+    if (_pendingOperationCount == 0 || completer == null) {
+      return;
+    }
+    await completer.future;
+  }
+
+  Future<void> ensureLoaded() {
+    return _trackOperation(() async {
+      await _ensureFavoritesLoaded();
+    });
   }
 
   Future<void> _ensureFavoritesLoaded() async {
@@ -103,37 +136,41 @@ class SessionLocalStore extends ChangeNotifier {
     return _favoriteKeys.contains(_favoriteKey(host.id, sessionId));
   }
 
-  Future<bool> toggleFavorite(HostProfile host, String sessionId) async {
-    await _ensureFavoritesLoaded();
-    final key = _favoriteKey(host.id, sessionId);
-    final current = _favoriteKeys.contains(key);
-    final next = !current;
-    if (next) {
-      _favoriteKeys.add(key);
-    } else {
-      _favoriteKeys.remove(key);
-    }
-    await _persistFavoriteFlag(host, sessionId, favorite: next);
-    notifyListeners();
-    return next;
+  Future<bool> toggleFavorite(HostProfile host, String sessionId) {
+    return _trackOperation(() async {
+      await _ensureFavoritesLoaded();
+      final key = _favoriteKey(host.id, sessionId);
+      final current = _favoriteKeys.contains(key);
+      final next = !current;
+      if (next) {
+        _favoriteKeys.add(key);
+      } else {
+        _favoriteKeys.remove(key);
+      }
+      await _persistFavoriteFlag(host, sessionId, favorite: next);
+      notifyListeners();
+      return next;
+    });
   }
 
   Future<void> setFavorite(
     HostProfile host,
     String sessionId, {
     required bool favorite,
-  }) async {
-    await _ensureFavoritesLoaded();
-    final key = _favoriteKey(host.id, sessionId);
-    final current = _favoriteKeys.contains(key);
-    if (current == favorite) return;
-    if (favorite) {
-      _favoriteKeys.add(key);
-    } else {
-      _favoriteKeys.remove(key);
-    }
-    await _persistFavoriteFlag(host, sessionId, favorite: favorite);
-    notifyListeners();
+  }) {
+    return _trackOperation(() async {
+      await _ensureFavoritesLoaded();
+      final key = _favoriteKey(host.id, sessionId);
+      final current = _favoriteKeys.contains(key);
+      if (current == favorite) return;
+      if (favorite) {
+        _favoriteKeys.add(key);
+      } else {
+        _favoriteKeys.remove(key);
+      }
+      await _persistFavoriteFlag(host, sessionId, favorite: favorite);
+      notifyListeners();
+    });
   }
 
   Future<void> _persistFavoriteFlag(
@@ -171,38 +208,43 @@ class SessionLocalStore extends ChangeNotifier {
     );
   }
 
-  Future<List<SessionSummary>> getFavoriteSessions(HostProfile host) async {
-    await _ensureFavoritesLoaded();
-    final db = await SidemeshDb.instance;
-    final rows = await db.rawQuery(
-      'SELECT * FROM sessions WHERE host_id = ? AND is_favorite = 1 ORDER BY updated_at DESC',
-      [host.id],
-    );
-    return rows.map(_rowToSession).toList(growable: false);
+  Future<List<SessionSummary>> getFavoriteSessions(HostProfile host) {
+    return _trackOperation(() async {
+      await _ensureFavoritesLoaded();
+      final db = await SidemeshDb.instance;
+      final rows = await db.rawQuery(
+        'SELECT * FROM sessions WHERE host_id = ? AND is_favorite = 1 ORDER BY updated_at DESC',
+        [host.id],
+      );
+      return rows.map(_rowToSession).toList(growable: false);
+    });
   }
 
   /// Returns ghost metadata for favorited sessions that are not in the recent list.
-  Future<List<SessionSummary>> ghostsForHost(HostProfile host) async {
-    await _ensureFavoritesLoaded();
-    final db = await SidemeshDb.instance;
-    final rows = await db.rawQuery(
-      """
-        SELECT * FROM sessions
-        WHERE host_id = ? AND is_favorite = 1 AND source = 'favorite'
-        ORDER BY updated_at DESC
-      """,
-      [host.id],
-    );
-    return rows.map(_rowToSession).toList(growable: false);
+  Future<List<SessionSummary>> ghostsForHost(HostProfile host) {
+    return _trackOperation(() async {
+      await _ensureFavoritesLoaded();
+      final db = await SidemeshDb.instance;
+      final rows = await db.rawQuery(
+        """
+          SELECT * FROM sessions
+          WHERE host_id = ? AND is_favorite = 1 AND source = 'favorite'
+          ORDER BY updated_at DESC
+        """,
+        [host.id],
+      );
+      return rows.map(_rowToSession).toList(growable: false);
+    });
   }
 
   /// Updates ghost metadata for a session when we receive fresh server data.
-  Future<void> updateGhost(HostProfile host, SessionSummary session) async {
-    await _ensureFavoritesLoaded();
-    if (!isFavorite(host, session.id)) return;
-    final db = await SidemeshDb.instance;
-    final now = DateTime.now().millisecondsSinceEpoch;
-    await db.rawInsert(
+  Future<void> updateGhost(HostProfile host, SessionSummary session) {
+    return _trackOperation(() async {
+      await _ensureFavoritesLoaded();
+      if (!isFavorite(host, session.id)) return;
+      final db = await SidemeshDb.instance;
+      final now = DateTime.now().millisecondsSinceEpoch;
+      await db.rawInsert(
       '''
       INSERT INTO sessions (
         host_id, session_id, title, preview, cwd, provider, status,
@@ -242,6 +284,7 @@ class SessionLocalStore extends ChangeNotifier {
         now,
       ],
     );
+    });
   }
 
   // ─── Session cache (SQLite) ───
@@ -250,11 +293,12 @@ class SessionLocalStore extends ChangeNotifier {
     HostProfile host,
     List<SessionSummary> sessions, {
     String source = 'recent',
-  }) async {
-    await _ensureMigrated();
-    final db = await SidemeshDb.instance;
-    final batch = db.batch();
-    final now = DateTime.now().millisecondsSinceEpoch;
+  }) {
+    return _trackOperation(() async {
+      await _ensureMigrated();
+      final db = await SidemeshDb.instance;
+      final batch = db.batch();
+      final now = DateTime.now().millisecondsSinceEpoch;
     for (final s in sessions) {
       batch.execute(
         '''
@@ -339,59 +383,70 @@ class SessionLocalStore extends ChangeNotifier {
       }
     }
     await batch.commit(noResult: true);
+    });
   }
 
   Future<List<SessionSummary>> getRecentSessions(
     HostProfile host, {
     int limit = 40,
-  }) async {
-    await _ensureMigrated();
-    final db = await SidemeshDb.instance;
-    final rows = await db.rawQuery(
-      "SELECT * FROM sessions WHERE host_id = ? AND source = 'recent' ORDER BY updated_at DESC LIMIT ?",
-      [host.id, limit],
-    );
-    return rows.map(_rowToSession).toList(growable: false);
+  }) {
+    return _trackOperation(() async {
+      await _ensureMigrated();
+      final db = await SidemeshDb.instance;
+      final rows = await db.rawQuery(
+        "SELECT * FROM sessions WHERE host_id = ? AND source = 'recent' ORDER BY updated_at DESC LIMIT ?",
+        [host.id, limit],
+      );
+      return rows.map(_rowToSession).toList(growable: false);
+    });
   }
 
-  Future<SessionSummary?> getSession(HostProfile host, String sessionId) async {
-    await _ensureMigrated();
-    final db = await SidemeshDb.instance;
-    final rows = await db.rawQuery(
-      'SELECT * FROM sessions WHERE host_id = ? AND session_id = ?',
-      [host.id, sessionId],
-    );
-    if (rows.isEmpty) return null;
-    return _rowToSession(rows.first);
+  Future<SessionSummary?> getSession(HostProfile host, String sessionId) {
+    return _trackOperation(() async {
+      await _ensureMigrated();
+      final db = await SidemeshDb.instance;
+      final rows = await db.rawQuery(
+        'SELECT * FROM sessions WHERE host_id = ? AND session_id = ?',
+        [host.id, sessionId],
+      );
+      if (rows.isEmpty) return null;
+      return _rowToSession(rows.first);
+    });
   }
 
-  Future<void> clearHost(HostProfile host) async {
-    await _ensureMigrated();
-    final db = await SidemeshDb.instance;
-    await db.delete('sessions', where: 'host_id = ?', whereArgs: [host.id]);
-    _favoriteKeys.removeWhere((key) => key.startsWith('${host.id}::'));
+  Future<void> clearHost(HostProfile host) {
+    return _trackOperation(() async {
+      await _ensureMigrated();
+      final db = await SidemeshDb.instance;
+      await db.delete('sessions', where: 'host_id = ?', whereArgs: [host.id]);
+      _favoriteKeys.removeWhere((key) => key.startsWith('${host.id}::'));
+    });
   }
 
-  Future<void> pruneOldSessions(HostProfile host, Duration ttl) async {
-    await _ensureMigrated();
-    final db = await SidemeshDb.instance;
-    final cutoff = DateTime.now().subtract(ttl).millisecondsSinceEpoch;
-    await db.delete(
-      'sessions',
-      where: 'host_id = ? AND is_favorite = 0 AND updated_at < ?',
-      whereArgs: [host.id, cutoff],
-    );
+  Future<void> pruneOldSessions(HostProfile host, Duration ttl) {
+    return _trackOperation(() async {
+      await _ensureMigrated();
+      final db = await SidemeshDb.instance;
+      final cutoff = DateTime.now().subtract(ttl).millisecondsSinceEpoch;
+      await db.delete(
+        'sessions',
+        where: 'host_id = ? AND is_favorite = 0 AND updated_at < ?',
+        whereArgs: [host.id, cutoff],
+      );
+    });
   }
 
-  Future<void> deleteSession(HostProfile host, String sessionId) async {
-    await _ensureMigrated();
-    final db = await SidemeshDb.instance;
-    await db.delete(
-      'sessions',
-      where: 'host_id = ? AND session_id = ?',
-      whereArgs: [host.id, sessionId],
-    );
-    _favoriteKeys.remove(_favoriteKey(host.id, sessionId));
+  Future<void> deleteSession(HostProfile host, String sessionId) {
+    return _trackOperation(() async {
+      await _ensureMigrated();
+      final db = await SidemeshDb.instance;
+      await db.delete(
+        'sessions',
+        where: 'host_id = ? AND session_id = ?',
+        whereArgs: [host.id, sessionId],
+      );
+      _favoriteKeys.remove(_favoriteKey(host.id, sessionId));
+    });
   }
 
   SessionSummary _rowToSession(Map<String, Object?> row) {

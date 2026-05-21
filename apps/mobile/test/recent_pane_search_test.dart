@@ -38,6 +38,7 @@ void main() {
   );
 
   setUp(() async {
+    await SidemeshDb.close();
     SessionLocalStore.instance.resetMigrationState();
     SessionReadStore.instance.resetForTest();
     final db = await SidemeshDb.instance;
