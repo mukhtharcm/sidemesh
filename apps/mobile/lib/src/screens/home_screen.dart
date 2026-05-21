@@ -381,6 +381,21 @@ class _SidemeshHomeScreenState extends State<SidemeshHomeScreen>
           api: _api,
           initialComposerSeed: composerSeed,
           onOpenSession: (next) => unawaited(_openSession(host, next)),
+          // Provide a session-list drawer so the user can switch sessions
+          // without navigating all the way back to the home screen.
+          sessionDrawer: (ctx) => RecentPane(
+            hosts: _hosts.where((h) => h.enabled).toList(),
+            api: _api,
+            selectedSessionId: session.id,
+            onOpenSession: (h, s) {
+              // Close the drawer then replace the current session.
+              Navigator.of(ctx).pop();
+              unawaited(_openSession(h, s));
+            },
+            onActiveCountChanged: (_) {},
+            dense: false,
+            hasSavedHosts: _hosts.isNotEmpty,
+          ),
         ),
       ),
     );
@@ -1573,14 +1588,25 @@ String _hostListSignature(HostProfile host) {
 
 @immutable
 class _SessionGroup {
-  const _SessionGroup({required this.title, required this.entries});
+  const _SessionGroup({required this.key, required this.title, required this.entries});
+  /// Stable key for collapse-state persistence.
+  /// For byCwd groups this is the gitCommonDir path; for byHost it is the
+  /// host label.
+  final String key;
   final String title;
   final List<RemoteSessionEntry> entries;
+
+  int get runningCount => entries.where((e) => e.session.isActive).length;
+  bool get hasRunning => runningCount > 0;
 }
 
 class _RecentPaneState extends State<RecentPane> {
   final SessionLocalStore _localStore = SessionLocalStore.instance;
   final RecentSessionsStore _store = RecentSessionsStore();
+
+  // Sidebar group collapse state — keys are group.key values.
+  Set<String> _collapsedGroups = <String>{};
+  static const _collapsePrefKey = 'sidemesh_sidebar_collapsed_groups_v1';
 
   // Search mode state
   List<RemoteSessionEntry>? _searchEntries;
@@ -1592,11 +1618,34 @@ class _RecentPaneState extends State<RecentPane> {
   @override
   void initState() {
     super.initState();
-
     _localStore.ensureLoaded();
     SessionReadStore.instance.ensureLoaded();
     _store.addListener(_handleStoreChanged);
     _store.configure(hosts: widget.hosts, api: widget.api);
+    unawaited(_loadCollapsedGroups());
+  }
+
+  Future<void> _loadCollapsedGroups() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final raw = prefs.getStringList(_collapsePrefKey) ?? const [];
+      if (!mounted) return;
+      setState(() => _collapsedGroups = raw.toSet());
+    } catch (_) {}
+  }
+
+  Future<void> _toggleGroupCollapse(String key) async {
+    final next = Set<String>.from(_collapsedGroups);
+    if (next.contains(key)) {
+      next.remove(key);
+    } else {
+      next.add(key);
+    }
+    setState(() => _collapsedGroups = next);
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setStringList(_collapsePrefKey, next.toList());
+    } catch (_) {}
   }
 
   String _cwdBasename(String cwd) {
@@ -1651,6 +1700,7 @@ class _RecentPaneState extends State<RecentPane> {
       });
     return sortedKeys
         .map((k) => _SessionGroup(
+          key: k,
           title: widget.viewMode == SessionViewMode.byCwd
               ? _projectLabel(k)
               : k,
@@ -2116,7 +2166,10 @@ class _RecentPaneState extends State<RecentPane> {
       itemCount:
           (isRefreshing ? 1 : 0) +
           (hasFailures ? 1 : 0) +
-          groups.fold<int>(0, (sum, g) => sum + g.entries.length + 1),
+          groups.fold<int>(0, (sum, g) {
+            final collapsed = _collapsedGroups.contains(g.key);
+            return sum + 1 + (collapsed ? 0 : g.entries.length);
+          }),
       itemBuilder: (context, index) {
         var offset = 0;
         if (isRefreshing) {
@@ -2146,32 +2199,37 @@ class _RecentPaneState extends State<RecentPane> {
         }
         var current = offset;
         for (final group in groups) {
+          final collapsed = _collapsedGroups.contains(group.key);
           final headerIndex = current;
           final entriesStart = headerIndex + 1;
-          final entriesEnd = entriesStart + group.entries.length;
+          final entriesEnd = entriesStart + (collapsed ? 0 : group.entries.length);
           if (index == headerIndex) {
             return Padding(
               padding: EdgeInsets.only(
                 top: widget.dense ? 8 : 14,
-                bottom: widget.dense ? 4 : 8,
+                bottom: widget.dense ? 2 : 6,
               ),
               child: _buildSessionSectionHeader(
                 context,
-                title: group.title,
+                group: group,
                 icon: widget.viewMode == SessionViewMode.byCwd
                     ? Icons.folder_rounded
                     : Icons.hub_rounded,
-                count: group.entries.length,
+                collapsed: collapsed,
               ),
             );
           }
-          if (index >= entriesStart && index < entriesEnd) {
+          if (!collapsed && index >= entriesStart && index < entriesEnd) {
             final entry = group.entries[index - entriesStart];
             return Padding(
               padding: EdgeInsets.only(
                 bottom: widget.dense ? 2 : AppSpacing.sm,
               ),
-              child: _buildSessionRow(entry),
+              child: _buildSessionRow(
+                entry,
+                // In grouped CWD mode, show branch instead of workspace label
+                groupMode: widget.viewMode,
+              ),
             );
           }
           current = entriesEnd;
@@ -2183,49 +2241,93 @@ class _RecentPaneState extends State<RecentPane> {
 
   Widget _buildSessionSectionHeader(
     BuildContext context, {
-    required String title,
+    required _SessionGroup group,
     required IconData icon,
-    required int count,
+    required bool collapsed,
   }) {
     final colors = context.colors;
-    return Row(
-      children: [
-        Icon(icon, size: 14, color: colors.textSecondary),
-        const SizedBox(width: 6),
-        Expanded(
-          child: Text(
-            title,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: monoStyle(
-              color: colors.textSecondary,
-              fontSize: widget.dense ? 10 : 11,
-              fontWeight: AppWeights.emphasis,
-            ),
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: () => _toggleGroupCollapse(group.key),
+        borderRadius: BorderRadius.circular(AppRadii.control),
+        child: Padding(
+          padding: EdgeInsets.symmetric(
+            horizontal: widget.dense ? 4 : 0,
+            vertical: widget.dense ? 5 : 6,
+          ),
+          child: Row(
+            children: [
+              AnimatedRotation(
+                turns: collapsed ? -0.25 : 0,
+                duration: const Duration(milliseconds: 180),
+                curve: Curves.easeOutCubic,
+                child: Icon(
+                  Icons.expand_more_rounded,
+                  size: 15,
+                  color: colors.textSecondary,
+                ),
+              ),
+              const SizedBox(width: 5),
+              Icon(icon, size: 13, color: colors.textSecondary),
+              const SizedBox(width: 6),
+              Expanded(
+                child: Text(
+                  group.title,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: monoStyle(
+                    color: colors.textSecondary,
+                    fontSize: widget.dense ? 10 : 11,
+                    fontWeight: AppWeights.emphasis,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 6),
+              // Live running pulse — only shown when sessions are active
+              if (group.hasRunning) ...[
+                LivePulse(color: colors.success),
+                const SizedBox(width: 6),
+              ],
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+                decoration: BoxDecoration(
+                  color: colors.surfaceElevated,
+                  borderRadius: BorderRadius.circular(6),
+                  border: Border.all(color: colors.border),
+                ),
+                child: Text(
+                  '${group.entries.length}',
+                  style: monoStyle(
+                    color: colors.textTertiary,
+                    fontSize: 10,
+                    fontWeight: AppWeights.emphasis,
+                  ),
+                ),
+              ),
+            ],
           ),
         ),
-        const SizedBox(width: 6),
-        Container(
-          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
-          decoration: BoxDecoration(
-            color: colors.surfaceElevated,
-            borderRadius: BorderRadius.circular(6),
-            border: Border.all(color: colors.border),
-          ),
-          child: Text(
-            '$count',
-            style: monoStyle(
-              color: colors.textTertiary,
-              fontSize: 10,
-              fontWeight: AppWeights.emphasis,
-            ),
-          ),
-        ),
-      ],
+      ),
     );
   }
 
-  Widget _buildSessionRow(RemoteSessionEntry entry) {
+  Widget _buildSessionRow(
+    RemoteSessionEntry entry, {
+    SessionViewMode groupMode = SessionViewMode.flat,
+  }) {
+    // In a CWD group the workspace label is already shown in the header;
+    // replace it with the git branch name so each row gives unique context.
+    String? secondaryLabel;
+    if (groupMode == SessionViewMode.byCwd) {
+      final branch = entry.session.gitInfo?.branch;
+      if (branch != null && branch.isNotEmpty) {
+        secondaryLabel = branch;
+      } else {
+        // No branch info — fall back to host label only (drop workspace).
+        secondaryLabel = entry.host.label;
+      }
+    }
     return SessionRowCard(
       host: entry.host,
       session: entry.session,
@@ -2233,6 +2335,7 @@ class _RecentPaneState extends State<RecentPane> {
       selected: widget.selectedSessionId == entry.session.id,
       dense: widget.dense,
       query: widget.query,
+      secondaryLabel: secondaryLabel,
       onTap: () {
         _localStore.updateGhost(entry.host, entry.session);
         widget.onOpenSession(entry.host, entry.session);

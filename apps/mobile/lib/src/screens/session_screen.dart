@@ -92,6 +92,7 @@ class SessionScreen extends StatefulWidget {
     this.topPadding,
     this.desktopMode = false,
     this.screenAwakeSourceKey,
+    this.sessionDrawer,
   });
 
   final HostProfile host;
@@ -102,6 +103,10 @@ class SessionScreen extends StatefulWidget {
   /// Called when the user dismisses this session from the desktop detail pane.
   final VoidCallback? onClose;
   final SessionComposerSeed? initialComposerSeed;
+  /// When provided (mobile only), a drawer that lets the user switch sessions
+  /// without navigating back to the home screen. The drawer is opened via a
+  /// leading ☰ button in the AppBar.
+  final WidgetBuilder? sessionDrawer;
   // Extra top padding for embedded desktop use (to avoid overlapping the
   // transparent macOS titlebar). When null, SafeArea handles insets.
   final double? topPadding;
@@ -7450,10 +7455,29 @@ class _SessionScreenState extends State<SessionScreen>
     );
     final scaffold = Scaffold(
       backgroundColor: colors.canvas,
+      drawer: (!widget.desktopMode && widget.sessionDrawer != null)
+          ? Drawer(
+              width: 300,
+              child: SafeArea(child: Builder(builder: widget.sessionDrawer!)),
+            )
+          : null,
       appBar: AppBar(
         backgroundColor: colors.canvas,
         elevation: 0,
         scrolledUnderElevation: 0,
+        // Override the default back button with a sessions-list drawer button
+        // on mobile when a drawer is provided.
+        leading: (!widget.desktopMode && widget.sessionDrawer != null)
+            ? Builder(
+                builder: (ctx) => Tooltip(
+                  message: 'Sessions',
+                  child: IconButton(
+                    icon: const Icon(Icons.menu_rounded),
+                    onPressed: () => Scaffold.of(ctx).openDrawer(),
+                  ),
+                ),
+              )
+            : null,
         titleSpacing: widget.desktopMode ? 16 : null,
         toolbarHeight: 52,
         bottom: appBarBottom,
