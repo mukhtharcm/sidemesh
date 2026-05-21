@@ -1,8 +1,9 @@
 import 'dart:async';
 import 'dart:convert';
 
-import 'package:flutter/material.dart';
+import 'package:flutter/material.dart' hide Icons;
 import 'package:web_socket_channel/web_socket_channel.dart';
+import '../widgets/phosphor_icons.dart';
 import 'package:xterm/xterm.dart' as xterm;
 
 import '../api_client.dart';

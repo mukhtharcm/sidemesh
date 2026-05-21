@@ -1,7 +1,8 @@
 import 'dart:math';
 
-import 'package:flutter/material.dart';
+import 'package:flutter/material.dart' hide Icons;
 import 'package:flutter/services.dart';
+import '../widgets/phosphor_icons.dart';
 
 import '../host_store.dart';
 import '../models.dart';

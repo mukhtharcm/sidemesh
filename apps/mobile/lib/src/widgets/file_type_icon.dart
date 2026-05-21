@@ -1,14 +1,10 @@
-import 'package:file_icon/file_icon.dart';
-import 'package:flutter/material.dart';
-import 'package:hugeicons/hugeicons.dart';
+import 'package:flutter/material.dart' hide Icons;
+import 'phosphor_icons.dart';
 
 /// Maps a filename to a themed file-type icon.
 ///
-/// Uses the [file_icon] Seti UI font set (252 extensions, same as VS Code's
-/// built-in sidebar) as the primary source.  A hand-curated override map
-/// covers newer extensions that [file_icon] doesn't know about, rendered with
-/// a matching [HugeIcons] glyph and the ambient [colorScheme] colours so they
-/// stay consistent with the rest of the UI.
+/// Uses a compact, curated Phosphor map instead of importing a second icon
+/// family just for the file browser.
 class FileTypeIcon extends StatelessWidget {
   const FileTypeIcon(this.filename, {super.key, this.size = 16});
 
@@ -18,9 +14,10 @@ class FileTypeIcon extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final ext = _extension(filename);
-    final override = _hugeIconForExtension(ext, size, context);
-    if (override != null) return override;
-    return FileIcon(filename, size: size);
+    final colors = Theme.of(context).colorScheme;
+    final icon = _iconForExtension(ext);
+    final color = _colorForExtension(ext, colors);
+    return Icon(icon, size: size, color: color);
   }
 }
 
@@ -34,69 +31,57 @@ String _extension(String filename) {
   return dot >= 0 ? name.substring(dot + 1).toLowerCase() : '';
 }
 
-/// Returns a [HugeIcon] for newer / niche extensions not in the Seti UI set,
-/// or [null] to fall through to [file_icon].
-Widget? _hugeIconForExtension(
-  String ext,
-  double size,
-  BuildContext context,
-) {
-  final cs = Theme.of(context).colorScheme;
+IconData _iconForExtension(String ext) => switch (ext) {
+  'jpg' || 'jpeg' || 'png' || 'gif' || 'webp' || 'svg' => Icons.image_rounded,
+  'mp3' || 'wav' || 'flac' || 'ogg' => Icons.audio_file_rounded,
+  'mp4' || 'mov' || 'webm' => Icons.perm_media_rounded,
+  'pdf' => Icons.picture_as_pdf_rounded,
+  'zip' || 'tar' || 'gz' || 'tgz' || 'rar' || '7z' => Icons.archive_rounded,
+  'db' || 'sqlite' || 'sql' || 'prisma' || 'surql' => Icons.storage_rounded,
+  'json' || 'yaml' || 'yml' || 'toml' || 'ini' || 'env' || 'lock' =>
+    Icons.tune_rounded,
+  'md' || 'mdx' || 'txt' => Icons.description_rounded,
+  'sh' || 'bash' || 'zsh' || 'fish' => Icons.terminal_rounded,
+  'dart' ||
+  'ts' ||
+  'tsx' ||
+  'js' ||
+  'jsx' ||
+  'html' ||
+  'css' ||
+  'scss' ||
+  'rs' ||
+  'go' ||
+  'py' ||
+  'rb' ||
+  'java' ||
+  'kt' ||
+  'swift' ||
+  'c' ||
+  'cc' ||
+  'cpp' ||
+  'h' ||
+  'hpp' ||
+  'zig' ||
+  'gleam' ||
+  'mojo' ||
+  'cairo' ||
+  'move' ||
+  'motoko' ||
+  'v' ||
+  'odin' ||
+  'astro' ||
+  'svelte' =>
+    Icons.code_rounded,
+  _ => Icons.insert_drive_file_rounded,
+};
 
-  Widget code() => HugeIcon(
-    icon: HugeIcons.strokeRoundedCode,
-    size: size,
-    color: cs.primary.withValues(alpha: 0.75),
-  );
-  Widget db() => HugeIcon(
-    icon: HugeIcons.strokeRoundedDatabase01,
-    size: size,
-    color: cs.secondary.withValues(alpha: 0.8),
-  );
-  Widget cfg() => HugeIcon(
-    icon: HugeIcons.strokeRoundedConfiguration01,
-    size: size,
-    color: cs.onSurface.withValues(alpha: 0.55),
-  );
-  Widget lock() => HugeIcon(
-    icon: HugeIcons.strokeRoundedLock,
-    size: size,
-    color: cs.onSurface.withValues(alpha: 0.45),
-  );
-
-  return switch (ext) {
-    // New compiled / systems languages
-    'zig' => code(),
-    'gleam' => code(),
-    'mojo' => code(),
-    'cairo' => code(),
-    'move' => code(),
-    'motoko' => code(),
-    'v' => code(),
-    'odin' => code(),
-
-    // New web / fullstack frameworks
-    'astro' => code(),
-    'svelte' => code(),
-    'mdx' => code(),
-
-    // Config / build formats
-    'nix' => cfg(),
-    'kdl' => cfg(),
-    'dhall' => cfg(),
-    'pkl' => cfg(),
-    'cue' => cfg(),
-    'hcl' => cfg(),
-    'tf' => cfg(),
-
-    // Database / query
-    'prisma' => db(),
-    'surql' => db(),
-    'flux' => db(),
-
-    // Lock files (package-lock.json, yarn.lock, etc.)
-    'lock' => lock(),
-
-    _ => null,
-  };
-}
+Color _colorForExtension(String ext, ColorScheme colors) => switch (ext) {
+  'jpg' || 'jpeg' || 'png' || 'gif' || 'webp' || 'svg' =>
+    colors.primary.withValues(alpha: 0.78),
+  'db' || 'sqlite' || 'sql' || 'prisma' || 'surql' =>
+    colors.secondary.withValues(alpha: 0.82),
+  'json' || 'yaml' || 'yml' || 'toml' || 'ini' || 'env' || 'lock' =>
+    colors.onSurface.withValues(alpha: 0.58),
+  _ => colors.onSurface.withValues(alpha: 0.64),
+};

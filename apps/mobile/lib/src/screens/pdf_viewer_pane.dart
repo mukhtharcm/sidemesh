@@ -1,8 +1,9 @@
 import 'dart:async';
 import 'dart:typed_data';
 
-import 'package:flutter/material.dart';
+import 'package:flutter/material.dart' hide Icons;
 import 'package:pdfrx/pdfrx.dart';
+import '../widgets/phosphor_icons.dart';
 
 import '../api_client.dart';
 import '../models.dart';

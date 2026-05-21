@@ -1,5 +1,6 @@
-import 'package:flutter/material.dart';
+import 'package:flutter/material.dart' hide Icons;
 import 'package:video_player/video_player.dart';
+import '../widgets/phosphor_icons.dart';
 
 import '../api_client.dart';
 import '../models.dart';

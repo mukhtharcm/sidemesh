@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart';
-import 'package:flutter/material.dart';
+import 'package:flutter/material.dart' hide Icons;
 import 'package:mobile_scanner/mobile_scanner.dart';
+import '../widgets/phosphor_icons.dart';
 
 import '../pairing.dart';
 import '../theme/app_colors.dart';

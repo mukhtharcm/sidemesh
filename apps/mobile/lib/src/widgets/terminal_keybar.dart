@@ -1,5 +1,6 @@
-import 'package:flutter/material.dart';
+import 'package:flutter/material.dart' hide Icons;
 import 'package:flutter/services.dart';
+import 'phosphor_icons.dart';
 import 'package:xterm/xterm.dart' as xterm;
 
 import '../terminal_key_models.dart';

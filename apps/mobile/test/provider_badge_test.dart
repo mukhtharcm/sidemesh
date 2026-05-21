@@ -1,4 +1,5 @@
-import 'package:flutter/material.dart';
+import 'package:flutter/material.dart' hide Icons;
+import 'package:flutter_svg/flutter_svg.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sidemesh_mobile/src/theme/app_palettes.dart';
 import 'package:sidemesh_mobile/src/theme/app_theme.dart';
@@ -16,7 +17,7 @@ void main() {
     );
 
     expect(find.text('GitHub Copilot'), findsOneWidget);
-    expect(find.byIcon(Icons.hub_rounded), findsOneWidget);
+    expect(find.byType(SvgPicture), findsOneWidget);
   });
 
   testWidgets('AgentProviderBadge renders nothing without a provider', (
@@ -30,6 +31,6 @@ void main() {
     );
 
     expect(find.byType(SizedBox), findsOneWidget);
-    expect(find.byIcon(Icons.hub_rounded), findsNothing);
+    expect(find.byType(SvgPicture), findsNothing);
   });
 }

@@ -2,10 +2,11 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
-import 'package:flutter/material.dart';
+import 'package:flutter/material.dart' hide Icons;
 import 'package:flutter/gestures.dart';
 import 'package:flutter/services.dart' hide Uint8List;
 import 'package:web_socket_channel/web_socket_channel.dart';
+import '../widgets/phosphor_icons.dart';
 
 import '../api_client.dart';
 import '../models.dart';

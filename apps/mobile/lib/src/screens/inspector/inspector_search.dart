@@ -1,6 +1,7 @@
 import 'dart:async';
 
-import 'package:flutter/material.dart';
+import 'package:flutter/material.dart' hide Icons;
+import '../../widgets/phosphor_icons.dart';
 
 import '../../models.dart';
 import '../../search_query.dart';

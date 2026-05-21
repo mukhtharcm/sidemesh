@@ -1,7 +1,8 @@
 import 'dart:async';
 import 'dart:collection';
 
-import 'package:flutter/material.dart';
+import 'package:flutter/material.dart' hide Icons;
+import 'phosphor_icons.dart';
 
 import '../theme/app_colors.dart';
 import '../theme/app_tokens.dart';

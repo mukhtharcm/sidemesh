@@ -1,7 +1,8 @@
-import 'package:flutter/material.dart';
+import 'package:flutter/material.dart' hide Icons;
 import 'package:flutter/services.dart';
 import 'package:flutter_highlight/themes/atom-one-dark.dart';
 import 'package:flutter_highlight/themes/github.dart';
+import 'phosphor_icons.dart';
 import 'package:highlight/highlight.dart' show highlight, Node;
 
 import '../theme/app_colors.dart';

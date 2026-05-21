@@ -3,8 +3,9 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 
-import 'package:flutter/material.dart';
+import 'package:flutter/material.dart' hide Icons;
 import 'package:url_launcher/url_launcher.dart';
+import '../../widgets/phosphor_icons.dart';
 
 import '../../api_client.dart';
 import '../../image_blob_cache_store.dart';

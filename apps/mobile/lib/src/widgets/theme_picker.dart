@@ -1,4 +1,5 @@
-import 'package:flutter/material.dart';
+import 'package:flutter/material.dart' hide Icons;
+import 'phosphor_icons.dart';
 
 import '../theme/app_palettes.dart';
 import '../theme/theme_controller.dart';

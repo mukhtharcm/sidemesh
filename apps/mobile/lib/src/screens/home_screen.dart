@@ -1,7 +1,7 @@
 import 'dart:async';
 import 'dart:math';
 
-import 'package:flutter/material.dart';
+import 'package:flutter/material.dart' hide Icons;
 import 'package:flutter/services.dart';
 
 import '../api_client.dart';
@@ -21,6 +21,7 @@ import '../screen_awake_controller.dart';
 import '../search_query.dart';
 import '../session_local_store.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import '../widgets/phosphor_icons.dart';
 import '../session_overrides_store.dart';
 import '../session_read_store.dart';
 import '../session_send_outbox_store.dart';
