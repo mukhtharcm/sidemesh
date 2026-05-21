@@ -6,6 +6,7 @@ import '../api_client.dart';
 import '../fs_models.dart';
 import '../models.dart';
 import '../theme/app_colors.dart';
+import '../widgets/file_type_icon.dart';
 import '../workspace_live_store.dart';
 import 'file_viewer_pane.dart';
 import 'file_viewer_screen.dart';
@@ -272,8 +273,11 @@ class _DirectoryNodeState extends State<_DirectoryNode> {
       children: [
         _Row(
           indent: indent,
-          icon: _expanded ? Icons.folder_open_rounded : Icons.folder_rounded,
-          iconColor: colors.accent,
+          iconWidget: Icon(
+            _expanded ? Icons.folder_open_rounded : Icons.folder_rounded,
+            size: 16,
+            color: colors.accent,
+          ),
           title: _baseName(widget.path),
           modified: widget.changedPaths.any((p) => p.startsWith(widget.path)),
           trailing: _loading
@@ -322,8 +326,7 @@ class _DirectoryNodeState extends State<_DirectoryNode> {
             }
             return _Row(
               indent: indent + 14.0,
-              icon: Icons.description_rounded,
-              iconColor: colors.textSecondary,
+              iconWidget: FileTypeIcon(entry.name, size: 16),
               title: entry.name,
               modified: widget.changedPaths.contains(entry.path),
               selected: widget.selectedPath == entry.path,
@@ -341,8 +344,7 @@ class _DirectoryNodeState extends State<_DirectoryNode> {
 class _Row extends StatelessWidget {
   const _Row({
     required this.indent,
-    required this.icon,
-    required this.iconColor,
+    required this.iconWidget,
     required this.title,
     required this.onTap,
     this.trailing,
@@ -351,8 +353,7 @@ class _Row extends StatelessWidget {
   });
 
   final double indent;
-  final IconData icon;
-  final Color iconColor;
+  final Widget iconWidget;
   final String title;
   final VoidCallback onTap;
   final Widget? trailing;
@@ -372,7 +373,7 @@ class _Row extends StatelessWidget {
           padding: EdgeInsets.fromLTRB(indent + 8, 6, 8, 6),
           child: Row(
             children: [
-              Icon(icon, size: 16, color: iconColor),
+              iconWidget,
               const SizedBox(width: 8),
               Expanded(
                 child: Text(
