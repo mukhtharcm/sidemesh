@@ -1,7 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 
-import 'package:flutter/material.dart';
+import 'package:flutter/material.dart' hide Icon, Icons, IconData;
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sidemesh_mobile/src/api_client.dart';
@@ -11,6 +11,7 @@ import 'package:sidemesh_mobile/src/theme/app_palettes.dart';
 import 'package:sidemesh_mobile/src/theme/app_theme.dart';
 import 'package:stream_channel/stream_channel.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
+import 'package:sidemesh_mobile/src/widgets/app_icons.dart';
 
 void main() {
   setUp(() {
@@ -43,7 +44,7 @@ void main() {
       });
       await _pumpFrames(tester);
 
-      await tester.tap(find.byIcon(Icons.construction_outlined));
+      await tester.tap(find.byWidgetPredicate((widget) => widget is Icon && widget.icon == Icons.construction_outlined));
       await _pumpFrames(tester);
 
       api.emit({
@@ -61,7 +62,7 @@ void main() {
       await _pumpFrames(tester);
       expect(find.text('first log'), findsOneWidget);
 
-      await tester.tap(find.byIcon(Icons.delete_outline_rounded));
+      await tester.tap(find.byWidgetPredicate((widget) => widget is Icon && widget.icon == Icons.delete_outline_rounded));
       await _pumpFrames(tester);
       expect(find.text('first log'), findsNothing);
 
@@ -147,7 +148,7 @@ void main() {
     });
     await _pumpFrames(tester);
 
-    await tester.tap(find.byIcon(Icons.construction_outlined));
+    await tester.tap(find.byWidgetPredicate((widget) => widget is Icon && widget.icon == Icons.construction_outlined));
     await _pumpFrames(tester);
     await tester.tap(find.text('Requests'));
     await _pumpFrames(tester);
@@ -217,7 +218,7 @@ void main() {
     expect(find.text('Response body'), findsOneWidget);
     expect(find.textContaining('network ok'), findsWidgets);
 
-    await tester.tap(find.byIcon(Icons.copy_all_rounded));
+    await tester.tap(find.byWidgetPredicate((widget) => widget is Icon && widget.icon == Icons.copy_all_rounded));
     await _pumpFrames(tester);
     await tester.tap(find.text('Copy as cURL'));
     await _pumpFrames(tester);
@@ -250,7 +251,7 @@ void main() {
     });
     await _pumpFrames(tester);
 
-    await tester.tap(find.byIcon(Icons.construction_outlined));
+    await tester.tap(find.byWidgetPredicate((widget) => widget is Icon && widget.icon == Icons.construction_outlined));
     await _pumpFrames(tester);
     await tester.tap(find.text('Requests'));
     await _pumpFrames(tester);
@@ -382,7 +383,7 @@ void main() {
     });
     await _pumpFrames(tester);
 
-    await tester.tap(find.byIcon(Icons.construction_outlined));
+    await tester.tap(find.byWidgetPredicate((widget) => widget is Icon && widget.icon == Icons.construction_outlined));
     await _pumpFrames(tester);
     await tester.tap(find.text('Site data'));
     await _pumpFrames(tester);
@@ -513,7 +514,7 @@ void main() {
     });
     await _pumpFrames(tester);
 
-    await tester.tap(find.byIcon(Icons.construction_outlined));
+    await tester.tap(find.byWidgetPredicate((widget) => widget is Icon && widget.icon == Icons.construction_outlined));
     await _pumpFrames(tester);
     await tester.tap(find.text('Site data'));
     await _pumpFrames(tester);
@@ -615,7 +616,7 @@ void main() {
       });
       await _pumpFrames(tester);
 
-      await tester.tap(find.byIcon(Icons.construction_outlined));
+      await tester.tap(find.byWidgetPredicate((widget) => widget is Icon && widget.icon == Icons.construction_outlined));
       await _pumpFrames(tester);
       await tester.tap(find.text('Page details'));
       await _pumpFrames(tester);
@@ -755,7 +756,7 @@ void main() {
       });
       await _pumpFrames(tester);
 
-      await tester.tap(find.byIcon(Icons.construction_outlined));
+      await tester.tap(find.byWidgetPredicate((widget) => widget is Icon && widget.icon == Icons.construction_outlined));
       await _pumpFrames(tester);
       await tester.tap(find.text('Page details'));
       await _pumpFrames(tester);
@@ -844,7 +845,7 @@ void main() {
     });
     await _pumpFrames(tester);
 
-    await tester.tap(find.byIcon(Icons.construction_outlined));
+    await tester.tap(find.byWidgetPredicate((widget) => widget is Icon && widget.icon == Icons.construction_outlined));
     await _pumpFrames(tester);
     await tester.tap(find.text('Requests'));
     await _pumpFrames(tester);
@@ -933,7 +934,7 @@ void main() {
       });
       await _pumpFrames(tester);
 
-      await tester.tap(find.byIcon(Icons.construction_outlined));
+      await tester.tap(find.byWidgetPredicate((widget) => widget is Icon && widget.icon == Icons.construction_outlined));
       await _pumpFrames(tester);
       await tester.tap(find.text('Requests'));
       await _pumpFrames(tester);
@@ -1011,7 +1012,7 @@ void main() {
       });
       await _pumpFrames(tester);
 
-      await tester.tap(find.byIcon(Icons.construction_outlined));
+      await tester.tap(find.byWidgetPredicate((widget) => widget is Icon && widget.icon == Icons.construction_outlined));
       await _pumpFrames(tester);
       await tester.tap(find.text('Requests'));
       await _pumpFrames(tester);
@@ -1039,7 +1040,7 @@ void main() {
       await _pumpFrames(tester);
       expect(find.text('main.js'), findsOneWidget);
 
-      await tester.tap(find.byIcon(Icons.delete_outline_rounded));
+      await tester.tap(find.byWidgetPredicate((widget) => widget is Icon && widget.icon == Icons.delete_outline_rounded));
       await _pumpFrames(tester);
       expect(find.text('main.js'), findsNothing);
 
@@ -1112,7 +1113,7 @@ void main() {
     });
     await _pumpFrames(tester);
 
-    await tester.tap(find.byIcon(Icons.construction_outlined));
+    await tester.tap(find.byWidgetPredicate((widget) => widget is Icon && widget.icon == Icons.construction_outlined));
     await _pumpFrames(tester);
     await tester.tap(find.text('Requests'));
     await _pumpFrames(tester);
@@ -1153,7 +1154,7 @@ void main() {
       });
       await _pumpFrames(tester);
 
-      await tester.tap(find.byIcon(Icons.construction_outlined));
+      await tester.tap(find.byWidgetPredicate((widget) => widget is Icon && widget.icon == Icons.construction_outlined));
       await _pumpFrames(tester);
       await tester.tap(find.text('Requests'));
       await _pumpFrames(tester);
@@ -1180,7 +1181,7 @@ void main() {
       });
       await _pumpFrames(tester);
 
-      await tester.tap(find.byIcon(Icons.pause_circle_outline_rounded));
+      await tester.tap(find.byWidgetPredicate((widget) => widget is Icon && widget.icon == Icons.pause_circle_outline_rounded));
       await _pumpFrames(tester);
       await tester.tap(find.text('main.js'));
       await _pumpFrames(tester);
@@ -1252,7 +1253,7 @@ void main() {
     });
     await _pumpFrames(tester);
 
-    await tester.tap(find.byIcon(Icons.construction_outlined));
+    await tester.tap(find.byWidgetPredicate((widget) => widget is Icon && widget.icon == Icons.construction_outlined));
     await _pumpFrames(tester);
     await tester.tap(find.text('Requests'));
     await _pumpFrames(tester);

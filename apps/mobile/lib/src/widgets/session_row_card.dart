@@ -1,4 +1,5 @@
-import 'package:flutter/material.dart';
+import 'package:flutter/material.dart' hide Icon, Icons, IconData;
+import './app_icons.dart';
 
 import '../models.dart';
 import '../relative_time_ticker.dart';

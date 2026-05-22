@@ -1,4 +1,5 @@
-import 'package:flutter/material.dart';
+import 'package:flutter/material.dart' hide Icon, Icons, IconData;
+import './app_icons.dart';
 
 import '../theme/app_colors.dart';
 import '../theme/color_contrast.dart';

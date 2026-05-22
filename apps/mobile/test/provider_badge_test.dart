@@ -1,8 +1,9 @@
-import 'package:flutter/material.dart';
+import 'package:flutter/material.dart' hide Icon, Icons, IconData;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sidemesh_mobile/src/theme/app_palettes.dart';
 import 'package:sidemesh_mobile/src/theme/app_theme.dart';
 import 'package:sidemesh_mobile/src/widgets/provider_badge.dart';
+import 'package:sidemesh_mobile/src/widgets/app_icons.dart';
 
 void main() {
   testWidgets('AgentProviderBadge renders known provider labels', (
@@ -16,7 +17,7 @@ void main() {
     );
 
     expect(find.text('GitHub Copilot'), findsOneWidget);
-    expect(find.byIcon(Icons.hub_rounded), findsOneWidget);
+    expect(find.byWidgetPredicate((widget) => widget is Icon && widget.icon == Icons.hub_rounded), findsOneWidget);
   });
 
   testWidgets('AgentProviderBadge renders nothing without a provider', (
@@ -30,6 +31,6 @@ void main() {
     );
 
     expect(find.byType(SizedBox), findsOneWidget);
-    expect(find.byIcon(Icons.hub_rounded), findsNothing);
+    expect(find.byWidgetPredicate((widget) => widget is Icon && widget.icon == Icons.hub_rounded), findsNothing);
   });
 }

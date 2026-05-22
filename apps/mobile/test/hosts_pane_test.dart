@@ -1,9 +1,10 @@
-import 'package:flutter/material.dart';
+import 'package:flutter/material.dart' hide Icon, Icons, IconData;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sidemesh_mobile/src/models.dart';
 import 'package:sidemesh_mobile/src/screens/home_screen.dart';
 import 'package:sidemesh_mobile/src/theme/app_palettes.dart';
 import 'package:sidemesh_mobile/src/theme/app_theme.dart';
+import 'package:sidemesh_mobile/src/widgets/app_icons.dart';
 
 void main() {
   testWidgets('HostsPane keeps mobile host row actions behind a menu', (
@@ -43,11 +44,11 @@ void main() {
 
     expect(find.text('Cortex dev workstation'), findsOneWidget);
     expect(find.text('cortex-dev.local:8899'), findsOneWidget);
-    expect(find.byIcon(Icons.more_horiz_rounded), findsOneWidget);
-    expect(find.byIcon(Icons.edit_rounded), findsNothing);
-    expect(find.byIcon(Icons.delete_outline), findsNothing);
+    expect(find.byWidgetPredicate((widget) => widget is Icon && widget.icon == Icons.more_horiz_rounded), findsOneWidget);
+    expect(find.byWidgetPredicate((widget) => widget is Icon && widget.icon == Icons.edit_rounded), findsNothing);
+    expect(find.byWidgetPredicate((widget) => widget is Icon && widget.icon == Icons.delete_outline), findsNothing);
 
-    await tester.tap(find.byIcon(Icons.more_horiz_rounded));
+    await tester.tap(find.byWidgetPredicate((widget) => widget is Icon && widget.icon == Icons.more_horiz_rounded));
     await tester.pumpAndSettle();
 
     expect(find.text('Edit host'), findsOneWidget);

@@ -1,7 +1,8 @@
 import 'dart:async';
 
-import 'package:flutter/material.dart';
+import 'package:flutter/material.dart' hide Icon, Icons, IconData;
 import 'package:flutter/services.dart';
+import '../widgets/app_icons.dart';
 
 import '../theme/app_colors.dart';
 import '../widgets/mesh_widgets.dart';

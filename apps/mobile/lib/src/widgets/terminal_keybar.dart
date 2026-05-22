@@ -1,6 +1,7 @@
-import 'package:flutter/material.dart';
+import 'package:flutter/material.dart' hide Icon, Icons, IconData;
 import 'package:flutter/services.dart';
 import 'package:xterm/xterm.dart' as xterm;
+import './app_icons.dart';
 
 import '../terminal_key_models.dart';
 import '../theme/app_colors.dart';

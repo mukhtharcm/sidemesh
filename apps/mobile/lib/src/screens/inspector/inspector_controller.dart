@@ -1,4 +1,5 @@
-import 'package:flutter/widgets.dart';
+import 'package:flutter/widgets.dart' hide IconData;
+import '../../widgets/app_icons.dart';
 
 /// Kinds of surfaces that can be hosted in the desktop inspector pane
 /// (aka pane 3). At most one surface is active at a time.
