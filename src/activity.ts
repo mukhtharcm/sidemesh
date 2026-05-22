@@ -8,6 +8,8 @@ import type {
   SessionActivity,
   SessionCommandActionSummary,
   SessionActivityChange,
+  SessionActorInfo,
+  SessionSubAgentRunInfo,
   ToolActivity,
   ToolActivitySemantic,
   ToolActivitySemanticAction,
@@ -234,6 +236,11 @@ export function mergeActivity(
       result: incoming.result ?? existingTool.result,
       isError: incoming.isError ?? existingTool.isError,
       semantic: mergeToolSemantic(existingTool.semantic, incoming.semantic),
+      actor: mergeActivityActor(existingTool.actor, incoming.actor),
+      subAgentRun: mergeSubAgentRunInfo(
+        existingTool.subAgentRun,
+        incoming.subAgentRun,
+      ),
     };
   }
 
@@ -305,6 +312,47 @@ export function normalizeStoredSessionActivity(
   return {
     ...activity,
     semantic: normalizeToolSemantic(activity),
+  };
+}
+
+function mergeActivityActor(
+  existing: SessionActorInfo | null | undefined,
+  incoming: SessionActorInfo | null | undefined,
+): SessionActorInfo | null | undefined {
+  if (!existing) {
+    return incoming;
+  }
+  if (!incoming) {
+    return existing;
+  }
+  return {
+    kind: incoming.kind ?? existing.kind,
+    providerKind: incoming.providerKind ?? existing.providerKind,
+    agentId: incoming.agentId ?? existing.agentId,
+    agentName: incoming.agentName ?? existing.agentName,
+    agentDisplayName: incoming.agentDisplayName ?? existing.agentDisplayName,
+    agentDescription: incoming.agentDescription ?? existing.agentDescription,
+    model: incoming.model ?? existing.model,
+    parentToolCallId: incoming.parentToolCallId ?? existing.parentToolCallId,
+  };
+}
+
+function mergeSubAgentRunInfo(
+  existing: SessionSubAgentRunInfo | null | undefined,
+  incoming: SessionSubAgentRunInfo | null | undefined,
+): SessionSubAgentRunInfo | null | undefined {
+  if (!existing) {
+    return incoming;
+  }
+  if (!incoming) {
+    return existing;
+  }
+  return {
+    parentToolCallId:
+      incoming.parentToolCallId ?? existing.parentToolCallId,
+    durationMs: incoming.durationMs ?? existing.durationMs,
+    totalTokens: incoming.totalTokens ?? existing.totalTokens,
+    totalToolCalls: incoming.totalToolCalls ?? existing.totalToolCalls,
   };
 }
 

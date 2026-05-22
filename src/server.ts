@@ -1090,6 +1090,7 @@ export async function startServer(
           delta: event.delta,
           turnId: event.turnId,
           itemId: event.itemId,
+          actor: event.actor ?? null,
         });
         return;
       case "assistant_message_completed": {
@@ -1108,6 +1109,7 @@ export async function startServer(
             createdAt: Date.now(),
             seq,
             phase: event.message.phase,
+            actor: event.message.actor ?? null,
           },
         });
         scheduleRecentSessionUpsert(event.sessionId);
