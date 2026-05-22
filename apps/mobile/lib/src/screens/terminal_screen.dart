@@ -1,9 +1,10 @@
 import 'dart:async';
 import 'dart:convert';
 
-import 'package:flutter/material.dart';
+import 'package:flutter/material.dart' hide Icon, Icons, IconData;
 import 'package:web_socket_channel/web_socket_channel.dart';
 import 'package:xterm/xterm.dart' as xterm;
+import '../widgets/app_icons.dart';
 
 import '../api_client.dart';
 import '../models.dart';

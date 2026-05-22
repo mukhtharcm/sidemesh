@@ -1,5 +1,6 @@
-import 'package:flutter/material.dart';
+import 'package:flutter/material.dart' hide Icon, Icons, IconData;
 import 'package:video_player/video_player.dart';
+import '../widgets/app_icons.dart';
 
 import '../api_client.dart';
 import '../models.dart';

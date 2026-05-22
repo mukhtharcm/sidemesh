@@ -1,4 +1,5 @@
-import 'package:flutter/material.dart';
+import 'package:flutter/material.dart' hide Icon, Icons, IconData;
+import '../../widgets/app_icons.dart';
 
 import '../../session_pins_store.dart';
 import '../../theme/app_colors.dart';

@@ -1,7 +1,7 @@
 import 'dart:typed_data';
 
 import 'package:archive/archive.dart';
-import 'package:flutter/material.dart';
+import 'package:flutter/material.dart' hide Icon, Icons, IconData;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:video_player/video_player.dart';
 import 'package:video_player_platform_interface/video_player_platform_interface.dart';
@@ -15,6 +15,7 @@ import 'package:sidemesh_mobile/src/screens/pdf_viewer_pane.dart';
 import 'package:sidemesh_mobile/src/theme/app_palettes.dart';
 import 'package:sidemesh_mobile/src/theme/app_theme.dart';
 import 'package:sidemesh_mobile/src/widgets/syntax_code_block.dart';
+import 'package:sidemesh_mobile/src/widgets/app_icons.dart';
 
 void main() {
   late VideoPlayerPlatform originalPlatform;
@@ -71,7 +72,7 @@ void main() {
       await tester.tap(
         find.descendant(
           of: find.byType(IconButton),
-          matching: find.byIcon(Icons.play_arrow_rounded),
+          matching: find.byWidgetPredicate((widget) => widget is Icon && widget.icon == Icons.play_arrow_rounded),
         ),
       );
       await tester.pump();
@@ -123,7 +124,7 @@ void main() {
       await tester.tap(
         find.descendant(
           of: find.byType(IconButton),
-          matching: find.byIcon(Icons.play_circle_fill_rounded),
+          matching: find.byWidgetPredicate((widget) => widget is Icon && widget.icon == Icons.play_circle_fill_rounded),
         ),
       );
       await tester.pump();
@@ -447,7 +448,7 @@ void main() {
 }
 
 Finder _appBarAction(IconData icon) {
-  return find.descendant(of: find.byType(AppBar), matching: find.byIcon(icon));
+  return find.descendant(of: find.byType(AppBar), matching: find.byWidgetPredicate((widget) => widget is Icon && widget.icon == icon));
 }
 
 Widget _buildTestApp(Widget home) {

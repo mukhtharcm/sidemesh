@@ -1,10 +1,11 @@
 import 'dart:async';
 import 'dart:io' show Platform;
 
-import 'package:flutter/material.dart';
+import 'package:flutter/material.dart' hide Icon, Icons, IconData;
 import 'package:flutter/services.dart';
 import 'package:macos_window_utils/macos_window_utils.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import '../widgets/app_icons.dart';
 
 import '../api_client.dart';
 import '../approval_inbox_store.dart';

@@ -1,6 +1,6 @@
 import 'dart:async';
 
-import 'package:flutter/material.dart';
+import 'package:flutter/material.dart' hide Icon, Icons, IconData;
 
 import '../api_client.dart' show ApiClient, friendlyError;
 import '../app_version_store.dart';
@@ -8,6 +8,7 @@ import '../mobile_client_version_policy.dart';
 import '../models.dart';
 import '../host_status_store.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import '../widgets/app_icons.dart';
 import '../session_local_store.dart';
 import '../session_overrides_store.dart';
 import '../session_read_store.dart';

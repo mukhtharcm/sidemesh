@@ -1,8 +1,9 @@
 import 'dart:async';
 
 import 'package:flutter/foundation.dart';
-import 'package:flutter/material.dart';
+import 'package:flutter/material.dart' hide Icon, Icons, IconData;
 import 'package:flutter/services.dart';
+import '../widgets/app_icons.dart';
 
 import '../app_update_settings_store.dart';
 import '../app_version_store.dart';

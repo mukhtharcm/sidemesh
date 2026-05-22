@@ -1,7 +1,8 @@
 import 'dart:convert';
 
-import 'package:flutter/material.dart';
+import 'package:flutter/material.dart' hide Icon, Icons, IconData;
 import 'package:yaml/yaml.dart';
+import '../widgets/app_icons.dart';
 
 import '../theme/app_colors.dart';
 import '../theme/app_theme.dart';

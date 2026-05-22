@@ -1,8 +1,9 @@
-import 'package:flutter/material.dart';
+import 'package:flutter/material.dart' hide Icon, Icons, IconData;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sidemesh_mobile/src/theme/app_palettes.dart';
 import 'package:sidemesh_mobile/src/theme/app_theme.dart';
 import 'package:sidemesh_mobile/src/widgets/mesh_widgets.dart';
+import 'package:sidemesh_mobile/src/widgets/app_icons.dart';
 
 void main() {
   testWidgets('MeshSurface forwards taps', (tester) async {
@@ -60,7 +61,7 @@ void main() {
     );
 
     expect(find.text('approval'), findsOneWidget);
-    expect(find.byIcon(Icons.verified_user_outlined), findsOneWidget);
+    expect(find.byWidgetPredicate((widget) => widget is Icon && widget.icon == Icons.verified_user_outlined), findsOneWidget);
   });
 
   testWidgets('MeshStatusBadge constrains long labels', (tester) async {
@@ -108,7 +109,7 @@ void main() {
     expect(find.text('Remote host'), findsOneWidget);
     expect(find.text('ssh://desk.local'), findsOneWidget);
     expect(find.text('online'), findsOneWidget);
-    expect(find.byIcon(Icons.chevron_right_rounded), findsOneWidget);
+    expect(find.byWidgetPredicate((widget) => widget is Icon && widget.icon == Icons.chevron_right_rounded), findsOneWidget);
   });
 
   testWidgets('MeshListRow can render unframed grouped rows', (tester) async {

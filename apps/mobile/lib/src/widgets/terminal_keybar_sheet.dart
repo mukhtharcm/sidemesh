@@ -1,7 +1,8 @@
 import 'dart:async';
 
-import 'package:flutter/material.dart';
+import 'package:flutter/material.dart' hide Icon, Icons, IconData;
 import 'package:flutter/services.dart';
+import './app_icons.dart';
 
 import '../terminal_key_models.dart';
 import '../terminal_keybar_store.dart';

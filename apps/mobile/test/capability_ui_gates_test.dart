@@ -1,7 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 
-import 'package:flutter/material.dart';
+import 'package:flutter/material.dart' hide Icon, Icons, IconData;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:sidemesh_mobile/src/api_client.dart';
@@ -21,6 +21,7 @@ import 'package:sidemesh_mobile/src/theme/app_palettes.dart';
 import 'package:sidemesh_mobile/src/theme/app_theme.dart';
 import 'package:stream_channel/stream_channel.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
+import 'package:sidemesh_mobile/src/widgets/app_icons.dart';
 
 import 'test_path_provider.dart';
 
@@ -190,7 +191,7 @@ void main() {
       expect(controller.current?.kind, InspectorSurfaceKind.fileBrowser);
       expect(find.byType(FileBrowserTree), findsOneWidget);
       expect(find.text('README.md'), findsOneWidget);
-      expect(find.byIcon(Icons.arrow_back_rounded), findsNothing);
+      expect(find.byWidgetPredicate((widget) => widget is Icon && widget.icon == Icons.arrow_back_rounded), findsNothing);
 
       await tester.pumpWidget(const SizedBox.shrink());
       await tester.pump();
