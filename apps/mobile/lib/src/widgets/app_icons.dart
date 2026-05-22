@@ -227,6 +227,8 @@ abstract final class Icons {
 class Icon extends widgets.StatelessWidget {
   const Icon(this.icon, {super.key, this.size, this.color});
 
+  static const double _visualScale = 0.78;
+
   final IconData? icon;
   final double? size;
   final widgets.Color? color;
@@ -237,6 +239,16 @@ class Icon extends widgets.StatelessWidget {
     if (icon == null) {
       return const widgets.SizedBox.shrink();
     }
-    return huge.HugeIcon(icon: icon, size: size, color: color);
+    final requestedSize = size ?? widgets.IconTheme.of(context).size ?? 24.0;
+    return widgets.SizedBox.square(
+      dimension: requestedSize,
+      child: widgets.Center(
+        child: huge.HugeIcon(
+          icon: icon,
+          size: requestedSize * _visualScale,
+          color: color,
+        ),
+      ),
+    );
   }
 }
