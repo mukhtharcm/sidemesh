@@ -1753,6 +1753,7 @@ class SessionMessage {
     required this.createdAt,
     required this.seq,
     this.phase,
+    this.actor,
   });
 
   final String id;
@@ -1763,6 +1764,7 @@ class SessionMessage {
   final DateTime createdAt;
   final int seq;
   final String? phase;
+  final SessionActorInfo? actor;
 
   bool get hasVisibleContent =>
       text.trim().isNotEmpty ||
@@ -1811,6 +1813,11 @@ class SessionMessage {
       createdAt: _dateValue(json['createdAt']),
       seq: _intOrNull(json['seq']) ?? 0,
       phase: json['phase'] as String?,
+      actor: json['actor'] is Map
+          ? SessionActorInfo.fromJson(
+              (json['actor'] as Map).cast<String, dynamic>(),
+            )
+          : null,
     );
   }
 
@@ -1823,6 +1830,83 @@ class SessionMessage {
     'createdAt': createdAt.millisecondsSinceEpoch,
     'seq': seq,
     'phase': phase,
+    'actor': actor?.toJson(),
+  };
+}
+
+class SessionActorInfo {
+  const SessionActorInfo({
+    required this.kind,
+    this.providerKind,
+    this.agentId,
+    this.agentName,
+    this.agentDisplayName,
+    this.agentDescription,
+    this.model,
+    this.parentToolCallId,
+  });
+
+  final String kind;
+  final String? providerKind;
+  final String? agentId;
+  final String? agentName;
+  final String? agentDisplayName;
+  final String? agentDescription;
+  final String? model;
+  final String? parentToolCallId;
+
+  String? get displayLabel => agentDisplayName ?? agentName;
+
+  factory SessionActorInfo.fromJson(Map<String, dynamic> json) =>
+      SessionActorInfo(
+        kind: _stringValue(json['kind']),
+        providerKind: _stringOrNull(json['providerKind']),
+        agentId: _stringOrNull(json['agentId']),
+        agentName: _stringOrNull(json['agentName']),
+        agentDisplayName: _stringOrNull(json['agentDisplayName']),
+        agentDescription: _stringOrNull(json['agentDescription']),
+        model: _stringOrNull(json['model']),
+        parentToolCallId: _stringOrNull(json['parentToolCallId']),
+      );
+
+  Map<String, dynamic> toJson() => {
+    'kind': kind,
+    'providerKind': providerKind,
+    'agentId': agentId,
+    'agentName': agentName,
+    'agentDisplayName': agentDisplayName,
+    'agentDescription': agentDescription,
+    'model': model,
+    'parentToolCallId': parentToolCallId,
+  };
+}
+
+class SessionSubAgentRunInfo {
+  const SessionSubAgentRunInfo({
+    this.parentToolCallId,
+    this.durationMs,
+    this.totalTokens,
+    this.totalToolCalls,
+  });
+
+  final String? parentToolCallId;
+  final int? durationMs;
+  final int? totalTokens;
+  final int? totalToolCalls;
+
+  factory SessionSubAgentRunInfo.fromJson(Map<String, dynamic> json) =>
+      SessionSubAgentRunInfo(
+        parentToolCallId: _stringOrNull(json['parentToolCallId']),
+        durationMs: _intOrNull(json['durationMs']),
+        totalTokens: _intOrNull(json['totalTokens']),
+        totalToolCalls: _intOrNull(json['totalToolCalls']),
+      );
+
+  Map<String, dynamic> toJson() => {
+    'parentToolCallId': parentToolCallId,
+    'durationMs': durationMs,
+    'totalTokens': totalTokens,
+    'totalToolCalls': totalToolCalls,
   };
 }
 
@@ -2213,6 +2297,8 @@ class SessionActivity {
     required this.pattern,
     required this.revisedPrompt,
     required this.savedPath,
+    this.actor,
+    this.subAgentRun,
   });
 
   final String id;
@@ -2245,6 +2331,8 @@ class SessionActivity {
   final String? pattern;
   final String? revisedPrompt;
   final String? savedPath;
+  final SessionActorInfo? actor;
+  final SessionSubAgentRunInfo? subAgentRun;
 
   bool get isCommand => type == 'command';
   bool get isTool => type == 'tool';
@@ -2280,6 +2368,7 @@ class SessionActivity {
       _firstSemanticTargetOfType(toolSemanticTargets, 'query')?.value;
   String? get toolMode =>
       _firstSemanticTargetOfType(toolSemanticTargets, 'mode')?.value;
+  String? get actorLabel => actor?.displayLabel;
 
   factory SessionActivity.fromJson(Map<String, dynamic> json) =>
       SessionActivity(
@@ -2327,6 +2416,16 @@ class SessionActivity {
         pattern: _stringOrNull(json['pattern']),
         revisedPrompt: _stringOrNull(json['revisedPrompt']),
         savedPath: _stringOrNull(json['savedPath']),
+        actor: json['actor'] is Map
+            ? SessionActorInfo.fromJson(
+                (json['actor'] as Map).cast<String, dynamic>(),
+              )
+            : null,
+        subAgentRun: json['subAgentRun'] is Map
+            ? SessionSubAgentRunInfo.fromJson(
+                (json['subAgentRun'] as Map).cast<String, dynamic>(),
+              )
+            : null,
       );
 
   Map<String, dynamic> toJson() => {
@@ -2360,6 +2459,8 @@ class SessionActivity {
     'pattern': pattern,
     'revisedPrompt': revisedPrompt,
     'savedPath': savedPath,
+    'actor': actor?.toJson(),
+    'subAgentRun': subAgentRun?.toJson(),
   };
 }
 
@@ -3058,6 +3159,7 @@ class LiveEvent {
     this.level,
     this.code,
     this.source,
+    this.actor,
     this.action,
     this.actionId,
     this.message,
@@ -3093,6 +3195,7 @@ class LiveEvent {
   final String? level;
   final String? code;
   final String? source;
+  final SessionActorInfo? actor;
   final PendingAction? action;
   final String? actionId;
   final String? message;
@@ -3139,6 +3242,9 @@ class LiveEvent {
     level: _stringOrNull(json['level']),
     code: _stringOrNull(json['code']),
     source: _stringOrNull(json['source']),
+    actor: json['actor'] is Map
+        ? SessionActorInfo.fromJson((json['actor'] as Map).cast<String, dynamic>())
+        : null,
     action: json['action'] == null
         ? null
         : PendingAction.fromJson(json['action'] as Map<String, dynamic>),
@@ -3185,6 +3291,7 @@ class LiveEvent {
     'level': level,
     'code': code,
     'source': source,
+    'actor': actor?.toJson(),
     'action': action?.toJson(),
     'actionId': actionId,
     'message': message,

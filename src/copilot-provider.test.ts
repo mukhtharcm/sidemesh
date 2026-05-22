@@ -227,6 +227,175 @@ describe("Copilot provider", () => {
     }
   });
 
+  it("rebuilds Copilot subagent attribution from SDK history without polluting parent runtime", async () => {
+    const dir = await mkdtemp(
+      nodePath.join(tmpdir(), "sidemesh-copilot-sdk-subagent-history-"),
+    );
+    try {
+      const sessionId = "22222222-3333-4444-8555-666666666666";
+      const sdk = new FakeCopilotSdkClient({
+        sessions: [
+          {
+            metadata: {
+              sessionId,
+              startTime: new Date("2026-04-02T00:00:00.000Z"),
+              modifiedTime: new Date("2026-04-02T00:06:00.000Z"),
+              summary: "SDK Copilot Subagent Session",
+              isRemote: false,
+              context: {
+                cwd: dir,
+                repository: "your-org/sidemesh",
+                branch: "main",
+              },
+            },
+            events: [
+              event("assistant.message", {
+                messageId: "root-message-1",
+                content: "Working on it",
+                model: "gpt-5.2",
+              }),
+              event("assistant.usage", {
+                model: "gpt-5.2",
+                inputTokens: 111,
+                outputTokens: 22,
+                reasoningTokens: 5,
+                duration: 600,
+                reasoningEffort: "medium",
+                copilotUsage: {
+                  totalNanoAiu: 12,
+                  tokenDetails: [],
+                },
+              }),
+              event(
+                "subagent.started",
+                {
+                  toolCallId: "task-1",
+                  agentName: "research",
+                  agentDisplayName: "Research Agent",
+                  agentDescription: "Checks upstream docs",
+                  model: "claude-haiku-4.5",
+                },
+                "subagent-start-1",
+                { agentId: "subagent-1" },
+              ),
+              event(
+                "assistant.message",
+                {
+                  messageId: "sub-message-1",
+                  content: "I checked the upstream docs.",
+                  model: "claude-haiku-4.5",
+                  parentToolCallId: "task-1",
+                },
+                "sub-message-event-1",
+                { agentId: "subagent-1" },
+              ),
+              event(
+                "tool.execution_start",
+                {
+                  toolCallId: "tool-1",
+                  toolName: "view",
+                  parentToolCallId: "task-1",
+                  arguments: { path: "README.md" },
+                },
+                "sub-tool-start-1",
+                { agentId: "subagent-1" },
+              ),
+              event(
+                "tool.execution_complete",
+                {
+                  toolCallId: "tool-1",
+                  toolName: "view",
+                  parentToolCallId: "task-1",
+                  model: "claude-haiku-4.5",
+                  success: true,
+                  result: { content: "README contents" },
+                },
+                "sub-tool-complete-1",
+                { agentId: "subagent-1" },
+              ),
+              event(
+                "subagent.completed",
+                {
+                  toolCallId: "task-1",
+                  agentName: "research",
+                  agentDisplayName: "Research Agent",
+                  model: "claude-haiku-4.5",
+                  totalTokens: 420,
+                  totalToolCalls: 3,
+                  durationMs: 2600,
+                },
+                "subagent-complete-1",
+                { agentId: "subagent-1" },
+              ),
+              event(
+                "assistant.usage",
+                {
+                  model: "claude-haiku-4.5",
+                  parentToolCallId: "task-1",
+                  inputTokens: 999,
+                  outputTokens: 444,
+                  reasoningTokens: 12,
+                  duration: 1200,
+                  reasoningEffort: "low",
+                  copilotUsage: {
+                    totalNanoAiu: 99,
+                    tokenDetails: [],
+                  },
+                },
+                "sub-usage-1",
+                { agentId: "subagent-1" },
+              ),
+            ],
+          },
+        ],
+      });
+      const provider = new CopilotAgentProvider({
+        stateDir: nodePath.join(dir, "state"),
+        sdkClientFactory: fakeSdkFactory(sdk),
+      });
+      await provider.start();
+
+      const sessions = await provider.listSessionThreads!({
+        limit: 10,
+        archived: false,
+      });
+      const log = await provider.readSessionLog!(sessions[0]!);
+
+      const subMessage = log.messages.find((message) => message.id === "sub-message-1");
+      assert.equal(subMessage?.actor?.kind, "subagent");
+      assert.equal(subMessage?.actor?.agentDisplayName, "Research Agent");
+      assert.equal(subMessage?.actor?.parentToolCallId, "task-1");
+
+      const subAgentActivity = log.activities.find((activity) => activity.id === "task-1");
+      assert.equal(subAgentActivity?.type, "tool");
+      if (subAgentActivity?.type === "tool") {
+        assert.equal(subAgentActivity.actor?.kind, "subagent");
+        assert.equal(subAgentActivity.subAgentRun?.totalTokens, 420);
+        assert.equal(subAgentActivity.subAgentRun?.totalToolCalls, 3);
+        assert.equal(subAgentActivity.subAgentRun?.durationMs, 2600);
+      }
+
+      const subToolActivity = log.activities.find((activity) => activity.id === "tool-1");
+      assert.equal(subToolActivity?.type, "tool");
+      if (subToolActivity?.type === "tool") {
+        assert.equal(subToolActivity.actor?.kind, "subagent");
+        assert.equal(subToolActivity.actor?.agentId, "subagent-1");
+      }
+
+      assert.equal(log.runtime?.model, "gpt-5.2");
+      assert.equal(log.runtime?.telemetry?.lastUsage?.model, "gpt-5.2");
+      assert.equal(log.runtime?.telemetry?.lastUsage?.inputTokens, 111);
+    } finally {
+      await settleProviderWrites();
+      await rm(dir, {
+        recursive: true,
+        force: true,
+        maxRetries: 5,
+        retryDelay: 50,
+      });
+    }
+  });
+
   it("emits runtime updates for usage telemetry during live turns", async () => {
     const dir = await mkdtemp(
       nodePath.join(tmpdir(), "sidemesh-copilot-runtime-telemetry-"),
@@ -2318,7 +2487,96 @@ class FakeCopilotSdkSession implements CopilotSdkSession {
           }),
         );
       }
-      if (options.prompt.includes("subagent")) {
+      if (options.prompt.includes("subagent rich")) {
+        this.emit(
+          event(
+            "subagent.started",
+            {
+              toolCallId: "subagent-rich-1",
+              agentName: "research-agent",
+              agentDisplayName: "Research Agent",
+              agentDescription: "Researches upstream behavior",
+              model: "claude-haiku-4.5",
+            },
+            "subagent-rich-start",
+            { agentId: "subagent-rich-agent" },
+          ),
+        );
+        this.emit(
+          event(
+            "assistant.message_delta",
+            {
+              messageId: "subagent-rich-message",
+              deltaContent: "Subagent ",
+              parentToolCallId: "subagent-rich-1",
+            },
+            "subagent-rich-delta-1",
+            { agentId: "subagent-rich-agent" },
+          ),
+        );
+        this.emit(
+          event(
+            "assistant.message",
+            {
+              messageId: "subagent-rich-message",
+              content: "Subagent checked the docs.",
+              model: "claude-haiku-4.5",
+              parentToolCallId: "subagent-rich-1",
+            },
+            "subagent-rich-message-event",
+            { agentId: "subagent-rich-agent" },
+          ),
+        );
+        this.emit(
+          event(
+            "tool.execution_start",
+            {
+              toolCallId: "subagent-rich-tool",
+              toolName: "view",
+              parentToolCallId: "subagent-rich-1",
+              arguments: { path: "README.md" },
+            },
+            "subagent-rich-tool-start",
+            { agentId: "subagent-rich-agent" },
+          ),
+        );
+        this.emit(
+          event(
+            "tool.execution_complete",
+            {
+              toolCallId: "subagent-rich-tool",
+              toolName: "view",
+              parentToolCallId: "subagent-rich-1",
+              model: "claude-haiku-4.5",
+              success: true,
+              result: { content: "README contents" },
+            },
+            "subagent-rich-tool-complete",
+            { agentId: "subagent-rich-agent" },
+          ),
+        );
+        this.emit(
+          event(
+            "subagent.completed",
+            {
+              toolCallId: "subagent-rich-1",
+              agentName: "research-agent",
+              agentDisplayName: "Research Agent",
+              model: "claude-haiku-4.5",
+              durationMs: 3400,
+              totalTokens: 561272,
+              totalToolCalls: 41,
+            },
+            "subagent-rich-complete",
+            { agentId: "subagent-rich-agent" },
+          ),
+        );
+      }
+      if (
+        options.prompt.includes("subagent") &&
+        !options.prompt.includes("subagent fail") &&
+        !options.prompt.includes("subagent rich")
+      ) {
         this.emit(
           event("subagent.started", {
             toolCallId: "subagent-1",
@@ -2463,6 +2721,28 @@ class FakeCopilotSdkSession implements CopilotSdkSession {
           },
         }),
       );
+      if (options.prompt.includes("subagent rich")) {
+        this.emit(
+          event(
+            "assistant.usage",
+            {
+              model: "claude-haiku-4.5",
+              parentToolCallId: "subagent-rich-1",
+              inputTokens: 999,
+              outputTokens: 444,
+              reasoningTokens: 12,
+              duration: 1200,
+              reasoningEffort: "low",
+              copilotUsage: {
+                totalNanoAiu: 99,
+                tokenDetails: [],
+              },
+            },
+            "subagent-rich-usage",
+            { agentId: "subagent-rich-agent" },
+          ),
+        );
+      }
       this.emit(event("assistant.turn_end", { turnId: "sdk-turn-1" }));
       this.emit(event("session.idle", {}));
     };
@@ -2603,8 +2883,10 @@ function event(
   type: string,
   data: unknown,
   id = `${type}-${Math.random().toString(16).slice(2)}`,
+  extra: Record<string, unknown> = {},
 ): CopilotSdkSessionEvent {
   return {
+    ...extra,
     id,
     parentId: null,
     timestamp: new Date().toISOString(),
@@ -2706,6 +2988,88 @@ describe("copilot rich event cleanup", () => {
       assert.ok(failed, "Expected subagent failed activity");
       assert.equal(failed?.result?.type, "error");
       assert.equal((failed?.result as any)?.summary, "Search timeout");
+    } finally {
+      await new Promise((r) => setTimeout(r, 50));
+      await rm(dir, {
+        recursive: true,
+        force: true,
+        maxRetries: 5,
+        retryDelay: 50,
+      });
+    }
+  });
+
+  it("preserves live subagent actor attribution and keeps parent runtime stable", async () => {
+    const dir = await mkdtemp(
+      nodePath.join(tmpdir(), "sidemesh-copilot-subagent-rich-live-"),
+    );
+    try {
+      const sdk = new FakeCopilotSdkClient();
+      const provider = new CopilotAgentProvider({
+        stateDir: nodePath.join(dir, "state"),
+        sdkClientFactory: fakeSdkFactory(sdk),
+      });
+      await provider.start();
+
+      const messages: any[] = [];
+      const activities: any[] = [];
+      const runtimes: any[] = [];
+      const deltas: any[] = [];
+      provider.on("liveEvent", (liveEvent) => {
+        if (liveEvent.type === "assistant_message_completed") {
+          messages.push(liveEvent.message);
+        }
+        if (liveEvent.type === "activity_updated") {
+          activities.push(liveEvent.activity);
+        }
+        if (liveEvent.type === "runtime_updated") {
+          runtimes.push(liveEvent.runtime);
+        }
+        if (liveEvent.type === "assistant_delta") {
+          deltas.push(liveEvent);
+        }
+      });
+
+      const completed = waitForTurnCompleted(provider);
+      await provider.createSession({
+        cwd: dir,
+        input: [
+          {
+            type: "text",
+            text: "hello subagent rich",
+            text_elements: [],
+          },
+        ],
+        overrides: emptyOverrides(),
+      });
+      await completed;
+
+      const liveDelta = deltas.find((entry) => entry.itemId === "subagent-rich-message");
+      assert.equal(liveDelta?.actor?.kind, "subagent");
+      assert.equal(liveDelta?.actor?.agentDisplayName, "Research Agent");
+
+      const liveMessage = messages.find((entry) => entry.id === "subagent-rich-message");
+      assert.equal(liveMessage?.actor?.kind, "subagent");
+      assert.equal(liveMessage?.actor?.parentToolCallId, "subagent-rich-1");
+
+      const subAgentActivity = activities.find(
+        (entry) => entry.id === "subagent-rich-1" && entry.status === "completed",
+      );
+      assert.ok(subAgentActivity, "Expected live subagent completion activity");
+      assert.equal(subAgentActivity?.actor?.kind, "subagent");
+      assert.equal(subAgentActivity?.subAgentRun?.totalTokens, 561272);
+      assert.equal(subAgentActivity?.subAgentRun?.totalToolCalls, 41);
+
+      const subToolActivity = activities.find(
+        (entry) => entry.id === "subagent-rich-tool" && entry.status === "completed",
+      );
+      assert.ok(subToolActivity, "Expected nested live subagent tool activity");
+      assert.equal(subToolActivity?.actor?.agentId, "subagent-rich-agent");
+
+      assert.ok(runtimes.length > 0, "Expected runtime updates");
+      assert.equal(runtimes.at(-1)?.model, "gpt-5.2");
+      assert.equal(runtimes.at(-1)?.telemetry?.lastUsage?.model, "gpt-5.2");
+      assert.equal(runtimes.at(-1)?.telemetry?.lastUsage?.inputTokens, 214);
     } finally {
       await new Promise((r) => setTimeout(r, 50));
       await rm(dir, {

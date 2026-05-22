@@ -115,6 +115,13 @@ void main() {
       attachments: const [],
       createdAt: DateTime(2026, 1, 1),
       seq: 1,
+      actor: const SessionActorInfo(
+        kind: 'subagent',
+        providerKind: 'copilot',
+        agentId: 'subagent-1',
+        agentDisplayName: 'Research Agent',
+        parentToolCallId: 'task-1',
+      ),
     );
     expect(msg.content.length, 2);
     expect((msg.content.first as ThinkingBlock).thinking, 'Step one. Step two.');
@@ -125,6 +132,9 @@ void main() {
     final parsed = SessionMessage.fromJson(json);
     expect(parsed.content.length, 2);
     expect((parsed.content.first as ThinkingBlock).thinking, 'Step one. Step two.');
+    expect(parsed.actor?.kind, 'subagent');
+    expect(parsed.actor?.agentDisplayName, 'Research Agent');
+    expect(parsed.actor?.parentToolCallId, 'task-1');
   });
 
   test('SessionMessage derives content from text when absent in fromJson', () {
@@ -207,6 +217,52 @@ void main() {
     expect(clearLog.latestPlanUpdate?.type, 'plan_updated');
     expect(clearLog.latestPlanUpdate?.seq, 8);
     expect(clearLog.latestPlanUpdate?.plan, isEmpty);
+  });
+
+  test('SessionActivity and LiveEvent preserve Copilot actor metadata', () {
+    final activity = SessionActivity.fromJson({
+      'id': 'subagent-1',
+      'type': 'tool',
+      'createdAt': DateTime(2026, 4, 28).millisecondsSinceEpoch,
+      'seq': 7,
+      'status': 'completed',
+      'toolName': 'research-agent',
+      'title': 'Research Agent',
+      'actor': {
+        'kind': 'subagent',
+        'providerKind': 'copilot',
+        'agentId': 'subagent-1',
+        'agentDisplayName': 'Research Agent',
+        'parentToolCallId': 'task-1',
+        'model': 'claude-haiku-4.5',
+      },
+      'subAgentRun': {
+        'parentToolCallId': 'task-1',
+        'durationMs': 3400,
+        'totalTokens': 561272,
+        'totalToolCalls': 41,
+      },
+    });
+    expect(activity.actor?.kind, 'subagent');
+    expect(activity.actor?.agentDisplayName, 'Research Agent');
+    expect(activity.subAgentRun?.durationMs, 3400);
+    expect(activity.subAgentRun?.totalTokens, 561272);
+    expect(activity.subAgentRun?.totalToolCalls, 41);
+
+    final liveEvent = LiveEvent.fromJson({
+      'type': 'assistant_delta',
+      'sessionId': 'session-1',
+      'itemId': 'message-1',
+      'delta': 'Researching...',
+      'actor': {
+        'kind': 'subagent',
+        'providerKind': 'copilot',
+        'agentId': 'subagent-1',
+        'agentDisplayName': 'Research Agent',
+      },
+    });
+    expect(liveEvent.actor?.kind, 'subagent');
+    expect(liveEvent.actor?.agentDisplayName, 'Research Agent');
   });
 
   test('Session status models treat waiting states as active', () {

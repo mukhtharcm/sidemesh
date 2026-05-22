@@ -17,6 +17,7 @@ import type {
   SessionActivity,
   SessionLogSnapshot,
   SessionMessage,
+  SessionActorInfo,
   SessionRuntimeSummary,
   SkillCatalogEntry,
   ThreadRecord,
@@ -47,6 +48,7 @@ export interface AgentMessageDraft {
   text: string;
   content?: SessionMessageContentBlock[];
   phase?: SessionMessage["phase"];
+  actor?: SessionActorInfo | null;
 }
 
 export interface AgentPendingAction extends PendingAction {
@@ -235,6 +237,7 @@ export type AgentProviderLiveEvent =
       delta: string;
       turnId?: string;
       itemId?: string;
+      actor?: SessionActorInfo | null;
     }
   | {
       type: "assistant_message_completed";
