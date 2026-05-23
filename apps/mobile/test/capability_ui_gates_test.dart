@@ -384,6 +384,59 @@ void main() {
   );
 
   testWidgets(
+    'session screen marks browser active when a tab is open in pane three',
+    (tester) async {
+      final controller = InspectorController();
+      final host = _host('browser-open-state');
+      final session = _session('browser-open-state-session');
+      final api = _CapabilityFakeApi(
+        _nodeForCapabilities(
+          _minimalCapabilities,
+          hostWorkspaceCapabilities: const {
+            'filesystem': true,
+            'gitStatus': false,
+            'gitDiff': false,
+            'browserPreview': true,
+          },
+        ),
+      );
+      controller.show(
+        InspectorSurface(
+          kind: InspectorSurfaceKind.browserPreview,
+          ownerKey: '${host.id}|${session.id}',
+          title: 'http://localhost:3000',
+          bodyBuilder: (_) => const SizedBox.shrink(),
+        ),
+      );
+      addTearDown(controller.dispose);
+      addTearDown(api.dispose);
+
+      await _pumpApp(
+        tester,
+        _InspectorHarness(
+          controller: controller,
+          child: SessionScreen(
+            host: host,
+            session: session,
+            api: api,
+            desktopMode: true,
+          ),
+        ),
+        size: const Size(1180, 900),
+      );
+      await _pumpFrames(tester);
+
+      await tester.tap(find.byTooltip('Session actions'));
+      await _pumpFrames(tester);
+
+      expect(
+        find.text('Choose another tab or return to the open browser.'),
+        findsOneWidget,
+      );
+    },
+  );
+
+  testWidgets(
     'session screen hides browser action for hosts without browser support',
     (tester) async {
       final api = _CapabilityFakeApi(

@@ -1191,7 +1191,8 @@ class _SessionScreenState extends State<SessionScreen>
     final unsupportedTerminal =
         current.kind == InspectorSurfaceKind.terminal && !_supportsTerminal;
     final unsupportedBrowser =
-        current.kind == InspectorSurfaceKind.browserTabs &&
+        (current.kind == InspectorSurfaceKind.browserTabs ||
+            current.kind == InspectorSurfaceKind.browserPreview) &&
         !_supportsBrowserPreview;
     if (unsupportedResources ||
         unsupportedFiles ||
@@ -1350,6 +1351,10 @@ class _SessionScreenState extends State<SessionScreen>
       }
     }
 
+    // If something else has already opened a surface for this owner
+    // (e.g. the shell's debug shortcut) don't stomp it.
+    if (cur != null && cur.ownerKey == ownerKey) return;
+
     if (kind == null) {
       closeOrphan();
       // No saved surface — open the hub so pane 3 is immediately useful
@@ -1358,9 +1363,6 @@ class _SessionScreenState extends State<SessionScreen>
       _openDefaultInspectorHub(controller, ownerKey);
       return;
     }
-    // If something else has already opened a surface for this owner
-    // (e.g. the shell's debug shortcut) don't stomp it.
-    if (cur != null && cur.ownerKey == ownerKey) return;
     switch (kind) {
       case InspectorSurfaceKind.search:
         controller.show(
@@ -1700,11 +1702,12 @@ class _SessionScreenState extends State<SessionScreen>
         cur.ownerKey == _inspectorOwnerKey();
   }
 
-  bool _isBrowserTabsInspectorOpen(InspectorController? scope) {
+  bool _isBrowserInspectorOpen(InspectorController? scope) {
     if (scope == null) return false;
     final cur = scope.current;
     return cur != null &&
-        cur.kind == InspectorSurfaceKind.browserTabs &&
+        (cur.kind == InspectorSurfaceKind.browserTabs ||
+            cur.kind == InspectorSurfaceKind.browserPreview) &&
         cur.ownerKey == _inspectorOwnerKey();
   }
 
@@ -7382,7 +7385,7 @@ class _SessionScreenState extends State<SessionScreen>
         inspectorScope != null && _isSearchInspectorOpen(inspectorScope);
     final resourcesOpenInInspector = _isResourcesInspectorOpen(inspectorScope);
     final terminalOpenInInspector = _isTerminalInspectorOpen(inspectorScope);
-    final browserOpenInInspector = _isBrowserTabsInspectorOpen(inspectorScope);
+    final browserOpenInInspector = _isBrowserInspectorOpen(inspectorScope);
     final browserOpen =
         browserOpenInInspector || _dockedBrowserPreview != null;
     // All layouts get the same compact info strip: status dot, host·folder,
