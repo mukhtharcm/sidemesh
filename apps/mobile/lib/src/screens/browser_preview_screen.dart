@@ -832,12 +832,12 @@ class _BrowserPreviewPaneState extends State<BrowserPreviewPane>
     );
     if (confirmed != true || !mounted) return;
     try {
-      final stopped = await widget.api.stopBrowserPreview(
+      await widget.api.stopBrowserPreview(
         widget.host,
         _preview.id,
       );
       if (!mounted) return;
-      widget.onStopped?.call(stopped);
+      widget.onStopped?.call(_preview);
       if (widget.onStopped == null) {
         Navigator.of(context).pop(true);
       }

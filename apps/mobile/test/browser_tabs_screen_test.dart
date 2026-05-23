@@ -197,7 +197,7 @@ class _BrowserTabsFakeApi extends ApiClient {
   }
 
   @override
-  Future<HostBrowserPreviewInfo> stopBrowserPreview(
+  Future<void> stopBrowserPreview(
     HostProfile host,
     String previewId,
   ) async {
@@ -205,26 +205,6 @@ class _BrowserTabsFakeApi extends ApiClient {
     if (index == -1) {
       throw StateError('missing tab');
     }
-    final tab = _tabs.removeAt(index);
-    return HostBrowserPreviewInfo(
-      id: tab.id,
-      label: tab.label,
-      url: tab.url,
-      targetHost: tab.targetHost,
-      targetPort: tab.targetPort,
-      scheme: tab.scheme,
-      cwd: tab.cwd,
-      sessionId: tab.sessionId,
-      profileMode: tab.profileMode,
-      status: 'stopped',
-      width: tab.width,
-      height: tab.height,
-      clients: tab.clients,
-      createdAt: tab.createdAt,
-      updatedAt: tab.updatedAt,
-      lastClientAt: tab.lastClientAt,
-      lastFrameAt: tab.lastFrameAt,
-      lastError: tab.lastError,
-    );
+    _tabs.removeAt(index);
   }
 }

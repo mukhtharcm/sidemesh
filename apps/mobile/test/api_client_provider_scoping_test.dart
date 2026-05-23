@@ -198,4 +198,19 @@ void main() {
     expect(body['sessionId'], 'session-1');
     expect(body['reuseExisting'], false);
   });
+
+  test('ApiClient accepts an empty close-tab response', () async {
+    late http.Request captured;
+    final api = ApiClient(
+      client: MockClient((request) async {
+        captured = request;
+        return http.Response('', 204);
+      }),
+    );
+
+    await api.stopBrowserPreview(host, 'tab-1');
+
+    expect(captured.method, 'DELETE');
+    expect(captured.url.path, '/api/browser-previews/tab-1');
+  });
 }
