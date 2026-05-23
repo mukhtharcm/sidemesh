@@ -111,7 +111,7 @@ class _BrowserPreviewPaneState extends State<BrowserPreviewPane>
   int _frameWidth = 390;
   int _frameHeight = 844;
   Size? _lastPreviewBoxSize;
-  String? _status = 'Connecting to preview...';
+  String? _status = 'Connecting to browser...';
   String? _error;
   bool _inputRailConfigured = false;
   bool _inputRailOpen = false;
@@ -250,11 +250,11 @@ class _BrowserPreviewPaneState extends State<BrowserPreviewPane>
         _firstFrameTimer?.cancel();
         if (_remoteClosed) {
           setState(() {
-            _status = 'Preview closed.';
+            _status = 'Browser closed.';
           });
           return;
         }
-        _scheduleStreamReconnect('Preview connection ended.');
+        _scheduleStreamReconnect('Browser connection ended.');
       },
       cancelOnError: true,
     );
@@ -272,8 +272,8 @@ class _BrowserPreviewPaneState extends State<BrowserPreviewPane>
     if (!mounted) return;
     setState(() {
       _status = manual
-          ? 'Preview paused. The browser is still open.'
-          : 'Preview paused while the app was in the background.';
+          ? 'Browser paused. The tab is still open.'
+          : 'Browser paused while the app was in the background.';
     });
   }
 
@@ -402,7 +402,7 @@ class _BrowserPreviewPaneState extends State<BrowserPreviewPane>
         widget.onStopped?.call(preview);
       }
       setState(() {
-        _status = 'Preview closed.';
+        _status = 'Browser closed.';
         _error = null;
       });
       return;
@@ -711,7 +711,7 @@ class _BrowserPreviewPaneState extends State<BrowserPreviewPane>
 
   void _showNetworkDetail(_NetworkEntry entry) {
     const disconnectedDetailMessage =
-        'Preview is paused. Resume it to open request details.';
+        'Browser is paused. Resume it to open request details.';
     final cachedDetail = _networkDetails[entry.requestId];
     final shouldRequestDetail =
         _channel != null &&
@@ -825,19 +825,19 @@ class _BrowserPreviewPaneState extends State<BrowserPreviewPane>
     final confirmed = await showMeshConfirmDialog(
       context,
       icon: Icons.close_fullscreen_rounded,
-      title: 'Close this preview?',
+      title: 'Close this tab?',
       description:
-          'This closes the browser window on the connected machine. You can start another preview any time.',
-      confirmLabel: 'Close preview',
+          'This closes the browser tab on the connected machine. You can open another tab any time.',
+      confirmLabel: 'Close tab',
     );
     if (confirmed != true || !mounted) return;
     try {
-      final stopped = await widget.api.stopBrowserPreview(
+      await widget.api.stopBrowserPreview(
         widget.host,
         _preview.id,
       );
       if (!mounted) return;
-      widget.onStopped?.call(stopped);
+      widget.onStopped?.call(_preview);
       if (widget.onStopped == null) {
         Navigator.of(context).pop(true);
       }
@@ -845,7 +845,7 @@ class _BrowserPreviewPaneState extends State<BrowserPreviewPane>
       if (!mounted) return;
       showAppSnackBar(
         context,
-        'Could not close preview: ${friendlyError(error)}',
+        'Could not close tab: ${friendlyError(error)}',
       );
     }
   }
@@ -958,7 +958,7 @@ class _BrowserPreviewPaneState extends State<BrowserPreviewPane>
     if (_channel == null) {
       setState(() {
         _inspectorLoading = false;
-        _inspectorError = 'Preview is paused. Resume it to load page details.';
+        _inspectorError = 'Browser is paused. Resume it to load page details.';
       });
       return;
     }
@@ -966,7 +966,7 @@ class _BrowserPreviewPaneState extends State<BrowserPreviewPane>
     if (!sent) {
       setState(() {
         _inspectorLoading = false;
-        _inspectorError = 'Preview is paused. Resume it to load page details.';
+        _inspectorError = 'Browser is paused. Resume it to load page details.';
       });
       return;
     }
@@ -982,7 +982,7 @@ class _BrowserPreviewPaneState extends State<BrowserPreviewPane>
     if (_channel == null) {
       setState(() {
         _storageLoading = false;
-        _storageError = 'Preview is paused. Resume it to load site data.';
+        _storageError = 'Browser is paused. Resume it to load site data.';
       });
       return;
     }
@@ -990,7 +990,7 @@ class _BrowserPreviewPaneState extends State<BrowserPreviewPane>
     if (!sent) {
       setState(() {
         _storageLoading = false;
-        _storageError = 'Preview is paused. Resume it to load site data.';
+        _storageError = 'Browser is paused. Resume it to load site data.';
       });
       return;
     }
@@ -1004,7 +1004,7 @@ class _BrowserPreviewPaneState extends State<BrowserPreviewPane>
     if (_channel == null) {
       setState(() {
         _storageLoading = false;
-        _storageError = 'Preview is paused. Resume it to edit site data.';
+        _storageError = 'Browser is paused. Resume it to edit site data.';
       });
       return;
     }
@@ -1012,7 +1012,7 @@ class _BrowserPreviewPaneState extends State<BrowserPreviewPane>
     if (!sent) {
       setState(() {
         _storageLoading = false;
-        _storageError = 'Preview is paused. Resume it to edit site data.';
+        _storageError = 'Browser is paused. Resume it to edit site data.';
       });
       return;
     }
@@ -1026,7 +1026,7 @@ class _BrowserPreviewPaneState extends State<BrowserPreviewPane>
     if (_channel == null) {
       setState(() {
         _inspectorLoading = false;
-        _inspectorError = 'Preview is paused. Resume it to load page details.';
+        _inspectorError = 'Browser is paused. Resume it to load page details.';
       });
       return;
     }
@@ -1034,7 +1034,7 @@ class _BrowserPreviewPaneState extends State<BrowserPreviewPane>
     if (!sent) {
       setState(() {
         _inspectorLoading = false;
-        _inspectorError = 'Preview is paused. Resume it to load page details.';
+        _inspectorError = 'Browser is paused. Resume it to load page details.';
       });
       return;
     }
@@ -1049,7 +1049,7 @@ class _BrowserPreviewPaneState extends State<BrowserPreviewPane>
     if (_channel == null) {
       setState(() {
         _inspectorLoading = false;
-        _inspectorError = 'Preview is paused. Resume it to load page details.';
+        _inspectorError = 'Browser is paused. Resume it to load page details.';
       });
       return;
     }
@@ -1061,7 +1061,7 @@ class _BrowserPreviewPaneState extends State<BrowserPreviewPane>
     if (!sent) {
       setState(() {
         _inspectorLoading = false;
-        _inspectorError = 'Preview is paused. Resume it to load page details.';
+        _inspectorError = 'Browser is paused. Resume it to load page details.';
       });
       return;
     }
@@ -1531,7 +1531,7 @@ class _BrowserPreviewPaneState extends State<BrowserPreviewPane>
             OutlinedButton.icon(
               onPressed: _retryPreviewStream,
               icon: const Icon(Icons.refresh_rounded),
-              label: const Text('Reconnect preview'),
+              label: const Text('Reconnect'),
             ),
           ],
         ),
@@ -1797,7 +1797,7 @@ class _BrowserChromeBar extends StatelessWidget {
             if (onBack != null) ...[
               _ChromeButton(
                 icon: Icons.close_rounded,
-                tooltip: 'Close preview',
+                tooltip: 'Close browser',
                 onTap: onBack!,
               ),
               const SizedBox(width: 4),
@@ -1917,7 +1917,7 @@ class _BrowserChromeBar extends StatelessWidget {
                 icon: streamPaused
                     ? Icons.play_circle_outline_rounded
                     : Icons.pause_circle_outline_rounded,
-                tooltip: streamPaused ? 'Resume preview' : 'Pause preview',
+                tooltip: streamPaused ? 'Resume' : 'Pause',
                 color: streamPaused ? colors.success : null,
                 onTap: onTogglePause,
               ),
@@ -1943,7 +1943,7 @@ class _BrowserChromeBar extends StatelessWidget {
             if (onStop != null)
               _ChromeButton(
                 icon: Icons.stop_circle_rounded,
-                tooltip: 'Close preview',
+                tooltip: 'Close tab',
                 color: colors.danger,
                 onTap: onStop!,
               ),
@@ -2085,7 +2085,7 @@ class _BrowserBottomToolbar extends StatelessWidget {
                 icon: streamPaused
                     ? Icons.play_circle_outline_rounded
                     : Icons.pause_circle_outline_rounded,
-                tooltip: streamPaused ? 'Resume preview' : 'Pause preview',
+                tooltip: streamPaused ? 'Resume' : 'Pause',
                 color: streamPaused ? colors.success : null,
                 onTap: onTogglePause,
               ),
@@ -2470,7 +2470,7 @@ class _InspectorSelectionOverlay extends StatelessWidget {
                 border: Border.all(color: colors.border),
               ),
               child: Text(
-                'Tap the preview to select something on the page',
+                'Tap the page to select something',
                 style: const TextStyle(
                   color: Colors.white,
                   fontSize: 12,
@@ -2582,7 +2582,7 @@ class _InspectorTab extends StatelessWidget {
               border: Border.all(color: colors.accent.withValues(alpha: 0.28)),
             ),
             child: Text(
-              'Tap anywhere in the preview above to select something on the page.',
+              'Tap anywhere on the page above to select something.',
               style: TextStyle(color: colors.textSecondary, fontSize: 11),
             ),
           ),
@@ -5815,8 +5815,8 @@ class _PausedPreviewOverlay extends StatelessWidget {
                 const SizedBox(height: 10),
                 Text(
                   manualPause
-                      ? 'Preview paused'
-                      : 'Preview paused in background',
+                      ? 'Browser paused'
+                      : 'Browser paused in background',
                   style: Theme.of(context).textTheme.titleMedium?.copyWith(
                     color: colors.textPrimary,
                     fontWeight: FontWeight.w800,
@@ -5834,7 +5834,7 @@ class _PausedPreviewOverlay extends StatelessWidget {
                 FilledButton.icon(
                   onPressed: onResume,
                   icon: const Icon(Icons.play_arrow_rounded),
-                  label: const Text('Resume preview'),
+                  label: const Text('Resume'),
                 ),
               ],
             ),
@@ -5928,7 +5928,7 @@ class _InputRail extends StatelessWidget {
                 Align(
                   alignment: Alignment.centerLeft,
                   child: Text(
-                    'Desktop mode: click the preview and type normally. Use this box for paste-heavy input.',
+                    'Desktop mode: click the page and type normally. Use this box for paste-heavy input.',
                     style: TextStyle(color: colors.textSecondary, height: 1.35),
                   ),
                 ),

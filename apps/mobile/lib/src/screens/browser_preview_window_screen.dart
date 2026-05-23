@@ -41,7 +41,7 @@ class _BrowserPreviewWindowScreenState
     final hostId = widget.arguments.hostId;
     if ((hostId ?? '').isEmpty) {
       setState(() {
-        _error = 'This window is missing the machine for this preview.';
+        _error = 'This window is missing the machine for this browser tab.';
         _loading = false;
       });
       return;
@@ -78,7 +78,7 @@ class _BrowserPreviewWindowScreenState
     } catch (error) {
       if (!mounted) return;
       setState(() {
-        _error = 'Could not load the machine for this preview: $error';
+        _error = 'Could not load the machine for this browser tab: $error';
         _loading = false;
       });
     }
@@ -100,8 +100,8 @@ class _BrowserPreviewWindowScreenState
         appBar: AppBar(title: Text(_preview.label)),
         body: MeshEmptyState(
           icon: Icons.open_in_browser_rounded,
-          title: 'Preview unavailable',
-          body: _error ?? 'This preview could not be reopened here.',
+          title: 'Browser unavailable',
+          body: _error ?? 'This tab could not be reopened here.',
         ),
       );
     }

@@ -26,22 +26,22 @@ import '../pending_send_recovery.dart';
 import '../provider_labels.dart';
 import '../search_query.dart';
 import 'browser_preview_screen.dart';
+import 'browser_tabs_screen.dart';
 import 'create_session_sheet.dart';
 import 'file_browser_screen.dart';
 import 'file_viewer_screen.dart';
 import 'image_viewer_screen.dart';
 import 'terminal_screen.dart';
+import 'inspector/inspector_browser_tabs.dart';
 import 'inspector/inspector_browser_preview.dart';
 import 'inspector/inspector_controller.dart';
 import 'inspector/inspector_file_browser.dart';
 import 'inspector/inspector_persistence.dart';
 import 'inspector/inspector_pinned.dart';
-import 'inspector/inspector_ports.dart';
 import 'inspector/inspector_resources.dart';
 import 'inspector/inspector_search.dart';
 import 'inspector/inspector_session_hub.dart';
 import 'inspector/inspector_terminal.dart';
-import 'port_forward_screen.dart';
 import '../session_message_seed_store.dart';
 import '../session_overrides_store.dart';
 import '../session_pins_store.dart';
@@ -472,7 +472,7 @@ class _SessionBrowserPreviewDock extends StatelessWidget {
             const SizedBox(width: 8),
             _BrowserDockCloseButton(
               icon: Icons.close_rounded,
-              tooltip: 'Hide preview',
+              tooltip: 'Hide browser',
               onTap: onClose,
             ),
           ],
@@ -499,7 +499,7 @@ class _SessionBrowserPreviewDock extends StatelessWidget {
                       Row(
                         children: [
                           Text(
-                            'Browser preview',
+                            'Browser',
                             style: Theme.of(context).textTheme.labelMedium
                                 ?.copyWith(
                                   color: colors.textSecondary,
@@ -852,7 +852,6 @@ class _SessionScreenState extends State<SessionScreen>
   LiveEvent? _latestQueueUpdate;
   LiveEvent? _latestAutoRetryUpdate;
   _DockedBrowserPreview? _dockedBrowserPreview;
-  String? _activeInspectorBrowserPreviewId;
   int _messageLimit = _initialMessageLimit;
   int _activityLimit = _initialActivityLimit;
   bool _running = false;
@@ -1007,15 +1006,8 @@ class _SessionScreenState extends State<SessionScreen>
   bool get _supportsTerminal =>
       _supportsHostCapability('workspace', 'terminal');
 
-  bool get _supportsPortForwarding =>
-      _supportsHostCapability('workspace', 'portForwarding');
-
   bool get _supportsBrowserPreview =>
       _supportsHostCapability('workspace', 'browserPreview');
-
-  // TCP / local tunnel UI is intentionally hidden for now. Keep the server
-  // capability intact, but only surface the browser-preview path in the app.
-  bool get _supportsConnections => _supportsBrowserPreview;
 
   bool get _supportsProviderRestart =>
       _supportsProviderCapability('lifecycle', 'restart');
@@ -1198,12 +1190,14 @@ class _SessionScreenState extends State<SessionScreen>
         !_supportsFilesystem;
     final unsupportedTerminal =
         current.kind == InspectorSurfaceKind.terminal && !_supportsTerminal;
-    final unsupportedPorts =
-        current.kind == InspectorSurfaceKind.ports && !_supportsConnections;
+    final unsupportedBrowser =
+        (current.kind == InspectorSurfaceKind.browserTabs ||
+            current.kind == InspectorSurfaceKind.browserPreview) &&
+        !_supportsBrowserPreview;
     if (unsupportedResources ||
         unsupportedFiles ||
         unsupportedTerminal ||
-        unsupportedPorts) {
+        unsupportedBrowser) {
       controller.closeForOwner(current.ownerKey);
     }
   }
@@ -1357,6 +1351,10 @@ class _SessionScreenState extends State<SessionScreen>
       }
     }
 
+    // If something else has already opened a surface for this owner
+    // (e.g. the shell's debug shortcut) don't stomp it.
+    if (cur != null && cur.ownerKey == ownerKey) return;
+
     if (kind == null) {
       closeOrphan();
       // No saved surface — open the hub so pane 3 is immediately useful
@@ -1365,9 +1363,6 @@ class _SessionScreenState extends State<SessionScreen>
       _openDefaultInspectorHub(controller, ownerKey);
       return;
     }
-    // If something else has already opened a surface for this owner
-    // (e.g. the shell's debug shortcut) don't stomp it.
-    if (cur != null && cur.ownerKey == ownerKey) return;
     switch (kind) {
       case InspectorSurfaceKind.search:
         controller.show(
@@ -1428,17 +1423,15 @@ class _SessionScreenState extends State<SessionScreen>
           ),
         );
         break;
-      case InspectorSurfaceKind.ports:
-        if (!_supportsConnections) return;
+      case InspectorSurfaceKind.browserTabs:
+        if (!_supportsBrowserPreview) return;
         controller.show(
-          buildInspectorPortsSurface(
+          buildInspectorBrowserTabsSurface(
             ownerKey: ownerKey,
             host: widget.host,
             api: widget.api,
             session: _session ?? widget.session,
-            supportsBrowserPreview: _supportsBrowserPreview,
-            supportsPortForwarding: _supportsPortForwarding,
-            onBrowserPreviewOpened: (preview) {
+            onBrowserOpened: (preview) {
               unawaited(_showDockedBrowserPreview(preview: preview));
             },
           ),
@@ -1510,15 +1503,15 @@ class _SessionScreenState extends State<SessionScreen>
           }
           unawaited(_openTerminal());
         },
-        onOpenPorts: () {
-          if (!_supportsConnections) {
+        onOpenBrowser: () {
+          if (!_supportsBrowserPreview) {
             showAppSnackBar(
               context,
-              'Browser previews are not available on this host.',
+              'Browser is not available on this host.',
             );
             return;
           }
-          unawaited(_openConnections());
+          unawaited(_openBrowserTabs());
         },
         onOpenResources: _openResourcesPanel,
       ),
@@ -1709,11 +1702,12 @@ class _SessionScreenState extends State<SessionScreen>
         cur.ownerKey == _inspectorOwnerKey();
   }
 
-  bool _isPortsInspectorOpen(InspectorController? scope) {
+  bool _isBrowserInspectorOpen(InspectorController? scope) {
     if (scope == null) return false;
     final cur = scope.current;
     return cur != null &&
-        cur.kind == InspectorSurfaceKind.ports &&
+        (cur.kind == InspectorSurfaceKind.browserTabs ||
+            cur.kind == InspectorSurfaceKind.browserPreview) &&
         cur.ownerKey == _inspectorOwnerKey();
   }
 
@@ -5816,36 +5810,11 @@ class _SessionScreenState extends State<SessionScreen>
     );
   }
 
-  List<BrowserPreviewTargetCandidate> get _browserPreviewCandidates {
-    return collectBrowserPreviewCandidates(_activities);
-  }
-
-  Future<void> _openBrowserPreviewLauncher({bool openInWindow = false}) async {
-    if (!_supportsBrowserPreview) {
-      showAppSnackBar(context, 'This host does not expose browser previews.');
-      return;
-    }
-    final suggestions = _browserPreviewCandidates;
-    final selected = await showModalBottomSheet<BrowserPreviewTargetCandidate>(
-      context: context,
-      isScrollControlled: true,
-      useSafeArea: true,
-      backgroundColor: Colors.transparent,
-      builder: (sheetContext) =>
-          _PreviewTargetPickerSheet(suggestions: suggestions),
-    );
-    if (!mounted || selected == null) {
-      return;
-    }
-    await _openBrowserPreviewTarget(selected, openInWindow: openInWindow);
-  }
-
   Future<void> _openBrowserPreviewTarget(
-    BrowserPreviewTargetCandidate candidate, {
-    bool openInWindow = false,
-  }) async {
+    BrowserPreviewTargetCandidate candidate,
+  ) async {
     if (!_supportsBrowserPreview) {
-      showAppSnackBar(context, 'This host does not expose browser previews.');
+      showAppSnackBar(context, 'This host does not expose the browser.');
       return;
     }
     final session = _session ?? widget.session;
@@ -5876,42 +5845,36 @@ class _SessionScreenState extends State<SessionScreen>
             profileMode: profileMode,
           );
       if (!mounted) return;
-      if (openInWindow) {
-        await _openBrowserPreviewWindow(preview);
-      } else {
-        await _showDockedBrowserPreview(preview: preview);
-        if (!mounted) return;
-        showAppSnackBar(
-          context,
-          'Opened browser for ${candidate.endpointLabel}.',
-        );
-      }
+      await _showDockedBrowserPreview(preview: preview);
+      if (!mounted) return;
+      showAppSnackBar(
+        context,
+        'Opened browser for ${candidate.endpointLabel}.',
+      );
     } catch (error) {
       if (!mounted) return;
       showAppSnackBar(
         context,
-        'Could not start browser preview: ${friendlyError(error)}',
+        'Could not open browser: ${friendlyError(error)}',
       );
     }
   }
 
-  Future<void> _openConnections() async {
-    if (!_supportsConnections) {
-      showAppSnackBar(context, 'This host does not expose browser previews.');
+  Future<void> _openBrowserTabs() async {
+    if (!_supportsBrowserPreview) {
+      showAppSnackBar(context, 'This host does not expose the browser.');
       return;
     }
     final session = _session ?? widget.session;
     final scope = InspectorScope.maybeOf(context);
     if (widget.desktopMode && scope != null) {
       scope.show(
-        buildInspectorPortsSurface(
+        buildInspectorBrowserTabsSurface(
           ownerKey: _inspectorOwnerKey(),
           host: widget.host,
           api: widget.api,
           session: session,
-          supportsBrowserPreview: _supportsBrowserPreview,
-          supportsPortForwarding: _supportsPortForwarding,
-          onBrowserPreviewOpened: (preview) {
+          onBrowserOpened: (preview) {
             unawaited(_showDockedBrowserPreview(preview: preview));
           },
         ),
@@ -5920,15 +5883,12 @@ class _SessionScreenState extends State<SessionScreen>
     }
     await Navigator.of(context).push(
       MaterialPageRoute<void>(
-        builder: (_) => PortForwardScreen(
+        builder: (_) => BrowserTabsScreen(
           host: widget.host,
           api: widget.api,
           cwd: session.cwd,
           sessionId: session.id,
-          sessionTitle: session.title,
-          supportsBrowserPreview: _supportsBrowserPreview,
-          supportsPortForwarding: _supportsPortForwarding,
-          onBrowserPreviewOpened: (preview) {
+          onBrowserOpened: (preview) {
             unawaited(_showDockedBrowserPreview(preview: preview));
             Navigator.of(context).maybePop();
           },
@@ -5941,19 +5901,8 @@ class _SessionScreenState extends State<SessionScreen>
     required HostBrowserPreviewInfo preview,
   }) async {
     if (!mounted || _disposed) return;
-    final manager = SidemeshBrowserPreviewWindowManager.instance;
-    if (manager.isSupported) {
-      final focused = await manager.focusBrowserPreviewWindowIfOpen(
-        host: widget.host,
-        preview: preview,
-      );
-      if (!mounted || _disposed || focused) {
-        return;
-      }
-    }
     final scope = InspectorScope.maybeOf(context);
     if (widget.desktopMode && scope != null) {
-      _activeInspectorBrowserPreviewId = preview.id;
       scope.show(
         buildInspectorBrowserPreviewSurface(
           ownerKey: _inspectorOwnerKey(),
@@ -5969,12 +5918,11 @@ class _SessionScreenState extends State<SessionScreen>
       return;
     }
     setState(() {
-      _activeInspectorBrowserPreviewId = null;
       _dockedBrowserPreview = _DockedBrowserPreview(preview: preview);
     });
   }
 
-  void _detachCurrentBrowserPreviewSurface(HostBrowserPreviewInfo preview) {
+  Future<void> _openBrowserPreviewWindow(HostBrowserPreviewInfo preview) async {
     final current = _dockedBrowserPreview;
     if (current?.preview.id == preview.id) {
       setState(() => _dockedBrowserPreview = null);
@@ -5982,15 +5930,9 @@ class _SessionScreenState extends State<SessionScreen>
     final scope = InspectorScope.maybeOf(context);
     final active = scope?.current;
     if (active?.kind == InspectorSurfaceKind.browserPreview &&
-        active?.ownerKey == _inspectorOwnerKey() &&
-        _activeInspectorBrowserPreviewId == preview.id) {
-      _activeInspectorBrowserPreviewId = null;
+        active?.ownerKey == _inspectorOwnerKey()) {
       scope?.close();
     }
-  }
-
-  Future<void> _openBrowserPreviewWindow(HostBrowserPreviewInfo preview) async {
-    _detachCurrentBrowserPreviewSurface(preview);
     final opened = await SidemeshBrowserPreviewWindowManager.instance
         .openOrFocusBrowserPreviewWindow(host: widget.host, preview: preview);
     if (!mounted || _disposed) {
@@ -6000,7 +5942,7 @@ class _SessionScreenState extends State<SessionScreen>
       context,
       opened
           ? 'Opened ${preview.label} in a new window.'
-          : 'Browser preview windows are only available on the macOS desktop app.',
+          : 'Browser windows are only available on the desktop app.',
     );
   }
 
@@ -6057,7 +5999,7 @@ class _SessionScreenState extends State<SessionScreen>
       if (!mounted || _disposed) return;
       showAppSnackBar(
         context,
-        'Could not stop browser preview: ${friendlyError(error)}',
+        'Could not close browser: ${friendlyError(error)}',
       );
     }
   }
@@ -6716,7 +6658,7 @@ class _SessionScreenState extends State<SessionScreen>
       context,
       opened
           ? 'Opened ${session.title} in a new window.'
-          : 'Session pop-out windows are only available on the macOS desktop app.',
+          : 'Session pop-out windows are only available on the desktop app.',
     );
   }
 
@@ -6745,17 +6687,7 @@ class _SessionScreenState extends State<SessionScreen>
         break;
       case 'preview':
         if (_supportsBrowserPreview) {
-          unawaited(_openBrowserPreviewLauncher());
-        }
-        break;
-      case 'preview_window':
-        if (_supportsBrowserPreview) {
-          unawaited(_openBrowserPreviewLauncher(openInWindow: true));
-        }
-        break;
-      case 'connections':
-        if (_supportsConnections) {
-          unawaited(_openConnections());
+          unawaited(_openBrowserTabs());
         }
         break;
       case 'search':
@@ -6800,7 +6732,7 @@ class _SessionScreenState extends State<SessionScreen>
     required bool gitAvailable,
     required bool gitDirty,
     required bool terminalOpen,
-    required bool portsOpen,
+    required bool browserOpen,
     required bool searchOpen,
     required bool resourcesOpen,
     bool includeStop = true,
@@ -6824,7 +6756,80 @@ class _SessionScreenState extends State<SessionScreen>
             ),
           ],
         ),
-      // ── Session management ──────────────────────────────────────────────
+      _SessionActionGroup(
+        label: 'Open',
+        actions: [
+          if (_supportsBrowserPreview)
+            _SessionActionSpec(
+              value: 'preview',
+              label: 'Browser',
+              detail: browserOpen
+                  ? 'Choose another tab or return to the open browser.'
+                  : 'Open a tab or enter a URL.',
+              icon: Icons.open_in_browser_rounded,
+              tone: browserOpen
+                  ? _SessionActionTone.accent
+                  : _SessionActionTone.neutral,
+              active: browserOpen,
+            ),
+          if (_supportsTerminal)
+            _SessionActionSpec(
+              value: 'terminal',
+              label: terminalOpen ? 'Terminal is open' : 'Terminal',
+              detail: terminalOpen
+                  ? 'Jump back to the active terminal.'
+                  : 'Open a shell for this workspace.',
+              icon: Icons.terminal_rounded,
+              tone: terminalOpen
+                  ? _SessionActionTone.accent
+                  : _SessionActionTone.neutral,
+              active: terminalOpen,
+            ),
+          if (_supportsFilesystem)
+            const _SessionActionSpec(
+              value: 'browse',
+              label: 'Files',
+              detail: 'Browse this workspace.',
+              icon: Icons.folder_rounded,
+            ),
+          if (_supportsSessionResources)
+            _SessionActionSpec(
+              value: 'resources',
+              label: resourcesOpen ? 'Resources are open' : 'Resources',
+              detail: 'View generated images and session assets.',
+              icon: Icons.perm_media_rounded,
+              tone: resourcesOpen
+                  ? _SessionActionTone.accent
+                  : _SessionActionTone.neutral,
+              active: resourcesOpen,
+            ),
+          _SessionActionSpec(
+            value: 'search',
+            label: searchOpen ? 'Close search' : 'Search transcript',
+            detail: searchOpen
+                ? 'Hide the current search panel.'
+                : 'Find text in loaded messages.',
+            icon: searchOpen ? Icons.search_off_rounded : Icons.search_rounded,
+            tone: searchOpen
+                ? _SessionActionTone.accent
+                : _SessionActionTone.neutral,
+            active: searchOpen,
+          ),
+          if (gitAvailable)
+            _SessionActionSpec(
+              value: 'git',
+              label: 'Git',
+              detail: gitDirty
+                  ? 'Working tree has changes.'
+                  : 'Branch, upstream, and diff shortcuts.',
+              icon: Icons.account_tree_rounded,
+              tone: gitDirty
+                  ? _SessionActionTone.warning
+                  : _SessionActionTone.neutral,
+              active: gitDirty,
+            ),
+        ],
+      ),
       _SessionActionGroup(
         label: 'Session',
         actions: [
@@ -6890,7 +6895,7 @@ class _SessionScreenState extends State<SessionScreen>
             const _SessionActionSpec(
               value: 'popout',
               label: 'Open in new window',
-              detail: 'Detach this session into its own macOS window.',
+              detail: 'Detach this session into its own desktop window.',
               icon: Icons.open_in_new_rounded,
             ),
         ],
@@ -6926,95 +6931,6 @@ class _SessionScreenState extends State<SessionScreen>
               ),
           ],
         ),
-      // ── Tools — all workspace and session tool launchers ───────────────────
-      _SessionActionGroup(
-        label: 'Tools',
-        actions: [
-          if (_supportsTerminal)
-            _SessionActionSpec(
-              value: 'terminal',
-              label: terminalOpen ? 'Terminal is open' : 'Open terminal',
-              detail: terminalOpen
-                  ? 'Jump back to the active terminal surface.'
-                  : 'Open a shell for this workspace.',
-              icon: Icons.terminal_rounded,
-              tone: terminalOpen
-                  ? _SessionActionTone.accent
-                  : _SessionActionTone.neutral,
-              active: terminalOpen,
-            ),
-          if (_supportsFilesystem)
-            const _SessionActionSpec(
-              value: 'browse',
-              label: 'Browse files',
-              detail: 'Open the workspace file browser.',
-              icon: Icons.folder_rounded,
-            ),
-          if (_supportsBrowserPreview)
-            const _SessionActionSpec(
-              value: 'preview',
-              label: 'Open browser',
-              detail: 'Open a local app or URL from this host.',
-              icon: Icons.open_in_browser_rounded,
-              tone: _SessionActionTone.accent,
-            ),
-          if (_supportsBrowserPreview &&
-              SidemeshBrowserPreviewWindowManager.instance.isSupported)
-            const _SessionActionSpec(
-              value: 'preview_window',
-              label: 'Open browser in new window',
-              detail: 'Detach the browser into its own macOS window.',
-              icon: Icons.open_in_new_rounded,
-            ),
-          if (_supportsConnections)
-            _SessionActionSpec(
-              value: 'connections',
-              label: portsOpen ? 'Browsers are open' : 'Manage browsers',
-              detail: 'Inspect active browsers for this session.',
-              icon: Icons.open_in_browser_rounded,
-              tone: portsOpen
-                  ? _SessionActionTone.accent
-                  : _SessionActionTone.neutral,
-              active: portsOpen,
-            ),
-          if (_supportsSessionResources)
-            _SessionActionSpec(
-              value: 'resources',
-              label: resourcesOpen ? 'Resources are open' : 'Open resources',
-              detail: 'View generated images and session assets.',
-              icon: Icons.perm_media_rounded,
-              tone: resourcesOpen
-                  ? _SessionActionTone.accent
-                  : _SessionActionTone.neutral,
-              active: resourcesOpen,
-            ),
-          _SessionActionSpec(
-            value: 'search',
-            label: searchOpen ? 'Close search' : 'Search transcript',
-            detail: searchOpen
-                ? 'Hide the current search panel.'
-                : 'Find text in loaded messages.',
-            icon: searchOpen ? Icons.search_off_rounded : Icons.search_rounded,
-            tone: searchOpen
-                ? _SessionActionTone.accent
-                : _SessionActionTone.neutral,
-            active: searchOpen,
-          ),
-          if (gitAvailable)
-            _SessionActionSpec(
-              value: 'git',
-              label: 'Git details',
-              detail: gitDirty
-                  ? 'Working tree has changes.'
-                  : 'Branch, upstream, and diff shortcuts.',
-              icon: Icons.account_tree_rounded,
-              tone: gitDirty
-                  ? _SessionActionTone.warning
-                  : _SessionActionTone.neutral,
-              active: gitDirty,
-            ),
-        ],
-      ),
     ];
   }
 
@@ -7024,7 +6940,7 @@ class _SessionScreenState extends State<SessionScreen>
     required bool gitAvailable,
     required bool gitDirty,
     required bool terminalOpen,
-    required bool portsOpen,
+    required bool browserOpen,
     required bool searchOpen,
     required bool resourcesOpen,
     BuildContext? anchorContext,
@@ -7038,7 +6954,7 @@ class _SessionScreenState extends State<SessionScreen>
       gitAvailable: gitAvailable,
       gitDirty: gitDirty,
       terminalOpen: terminalOpen,
-      portsOpen: portsOpen,
+      browserOpen: browserOpen,
       searchOpen: searchOpen,
       resourcesOpen: resourcesOpen,
       includeStop: includeStop,
@@ -7469,7 +7385,9 @@ class _SessionScreenState extends State<SessionScreen>
         inspectorScope != null && _isSearchInspectorOpen(inspectorScope);
     final resourcesOpenInInspector = _isResourcesInspectorOpen(inspectorScope);
     final terminalOpenInInspector = _isTerminalInspectorOpen(inspectorScope);
-    final portsOpenInInspector = _isPortsInspectorOpen(inspectorScope);
+    final browserOpenInInspector = _isBrowserInspectorOpen(inspectorScope);
+    final browserOpen =
+        browserOpenInInspector || _dockedBrowserPreview != null;
     // All layouts get the same compact info strip: status dot, host·folder,
     // provider badge, git chip, context %, pinned count, ℹ️ tap for details.
     // Desktop uses it as a subtitle since the title row has no room for meta.
@@ -7716,7 +7634,7 @@ class _SessionScreenState extends State<SessionScreen>
                             gitAvailable: gitAvailable,
                             gitDirty: gitDirty,
                             terminalOpen: terminalOpenInInspector,
-                            portsOpen: portsOpenInInspector,
+                            browserOpen: browserOpen,
                             searchOpen: searchOpenInInspector,
                             resourcesOpen: resourcesOpenInInspector,
                           ),
@@ -7742,7 +7660,7 @@ class _SessionScreenState extends State<SessionScreen>
                           gitAvailable: menuGitAvailable,
                           gitDirty: gitDirty,
                           terminalOpen: terminalOpenInInspector,
-                          portsOpen: portsOpenInInspector,
+                          browserOpen: browserOpen,
                           searchOpen: searchOpenInInspector,
                           resourcesOpen: resourcesOpenInInspector,
                           anchorContext: buttonContext,
@@ -7771,7 +7689,7 @@ class _SessionScreenState extends State<SessionScreen>
                       gitAvailable: menuGitAvailable,
                       gitDirty: gitDirty,
                       terminalOpen: terminalOpenInInspector,
-                      portsOpen: portsOpenInInspector,
+                      browserOpen: browserOpen,
                       searchOpen: searchOpenInInspector,
                       resourcesOpen: resourcesOpenInInspector,
                     ),

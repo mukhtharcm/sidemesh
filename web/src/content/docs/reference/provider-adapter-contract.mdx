@@ -68,7 +68,7 @@ Providers must emit `liveEvent` events for streaming UI updates:
 ## HTTP behavior
 
 - Unsupported provider-owned routes return `501`
-- Daemon-owned features (git status, terminals, port forwarding) are exposed through `hostCapabilities`
+- Daemon-owned features (git status, terminals, browser) are exposed through `hostCapabilities`
 - `/api/node` returns active provider, version, capabilities, and host capabilities
 - `/api/providers` returns supported provider definitions
 

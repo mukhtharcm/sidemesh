@@ -321,61 +321,6 @@ class ApiClient {
     return HostTerminalInfo.fromJson(_decodeObject(response));
   }
 
-  Future<List<HostPortForwardInfo>> fetchPortForwards(HostProfile host) async {
-    final response = await _get(
-      host,
-      '/api/ports',
-      timeout: _quickReadTimeout,
-      operation: 'load forwarded ports',
-    );
-    final decoded = _decodeObject(response);
-    return ((decoded['ports'] as List?) ?? const [])
-        .whereType<Map>()
-        .map(
-          (item) => HostPortForwardInfo.fromJson(item.cast<String, dynamic>()),
-        )
-        .toList();
-  }
-
-  Future<HostPortForwardInfo> createPortForward(
-    HostProfile host, {
-    required int targetPort,
-    String targetHost = '127.0.0.1',
-    String scheme = 'http',
-    String? label,
-    String? cwd,
-    String? sessionId,
-  }) async {
-    final response = await _post(
-      host,
-      '/api/ports',
-      body: {
-        'targetPort': targetPort,
-        'targetHost': targetHost,
-        'scheme': scheme,
-        if ((label ?? '').isNotEmpty) 'label': label,
-        if ((cwd ?? '').isNotEmpty) 'cwd': cwd,
-        if ((sessionId ?? '').isNotEmpty) 'sessionId': sessionId,
-      },
-      timeout: _standardReadTimeout,
-      operation: 'forward port',
-    );
-    return HostPortForwardInfo.fromJson(_decodeObject(response));
-  }
-
-  Future<HostPortForwardInfo> stopPortForward(
-    HostProfile host,
-    String portForwardId,
-  ) async {
-    final response = await _delete(
-      host,
-      '/api/ports/$portForwardId',
-      timeout: _quickReadTimeout,
-      operation: 'stop port forward',
-    );
-    return HostPortForwardInfo.fromJson(_decodeObject(response));
-  }
-
   Future<List<HostBrowserPreviewInfo>> fetchBrowserPreviews(
     HostProfile host,
   ) async {
@@ -383,7 +328,7 @@ class ApiClient {
       host,
       '/api/browser-previews',
       timeout: _quickReadTimeout,
-      operation: 'load browser previews',
+      operation: 'load browser tabs',
     );
     final decoded = _decodeObject(response);
     return ((decoded['previews'] as List?) ?? const [])
@@ -407,6 +352,7 @@ class ApiClient {
     int? width,
     int? height,
     String profileMode = 'temporary',
+    bool reuseExisting = true,
   }) async {
     final normalizedTargetUrl = (targetUrl ?? '').trim();
     if (targetPort == null && normalizedTargetUrl.isEmpty) {
@@ -421,6 +367,7 @@ class ApiClient {
       if ((label ?? '').isNotEmpty) 'label': label,
       if ((cwd ?? '').isNotEmpty) 'cwd': cwd,
       if ((sessionId ?? '').isNotEmpty) 'sessionId': sessionId,
+      if (!reuseExisting) 'reuseExisting': false,
     };
     if (width != null) {
       body['width'] = width;
@@ -433,12 +380,12 @@ class ApiClient {
       '/api/browser-previews',
       body: body,
       timeout: _standardReadTimeout,
-      operation: 'start browser preview',
+      operation: 'open browser',
     );
     return HostBrowserPreviewInfo.fromJson(_decodeObject(response));
   }
 
-  Future<HostBrowserPreviewInfo> stopBrowserPreview(
+  Future<void> stopBrowserPreview(
     HostProfile host,
     String previewId,
   ) async {
@@ -446,9 +393,9 @@ class ApiClient {
       host,
       '/api/browser-previews/$previewId',
       timeout: _quickReadTimeout,
-      operation: 'stop browser preview',
+      operation: 'close browser tab',
     );
-    return HostBrowserPreviewInfo.fromJson(_decodeObject(response));
+    _throwIfBadStatus(response);
   }
 
   Future<SessionLog> fetchLog(
@@ -778,25 +725,6 @@ class ApiClient {
     );
   }
 
-  WebSocketChannel openPortForwardTunnel(
-    HostProfile host,
-    String portForwardId,
-  ) {
-    _ensureHostEnabled(host);
-    final baseUri = Uri.parse(host.baseUrl);
-    final wsUri = baseUri.replace(
-      scheme: baseUri.scheme == 'https' ? 'wss' : 'ws',
-      path: '/api/ports/$portForwardId/connect',
-    );
-
-    return IOWebSocketChannel.connect(
-      wsUri,
-      headers: {'Authorization': 'Bearer ${host.token}'},
-      connectTimeout: _webSocketConnectTimeout,
-      pingInterval: _interactiveWebSocketPingInterval,
-    );
-  }
-
   WebSocketChannel openBrowserPreviewLive(HostProfile host, String previewId) {
     _ensureHostEnabled(host);
     final baseUri = Uri.parse(host.baseUrl);
@@ -1057,7 +985,7 @@ class ApiClient {
     return _withTimeout(
       _client.get(
         _uri(host, path, queryParameters: queryParameters),
-        headers: _headers(host),
+        headers: authHeaders(host),
       ),
       timeout: resolvedTimeout,
       operation: operation ?? 'load data',
@@ -1074,7 +1002,7 @@ class ApiClient {
     _ensureHostEnabled(host);
     final request = _client.post(
       _uri(host, path),
-      headers: _headers(host),
+      headers: _jsonHeaders(host),
       body: jsonEncode(body),
     );
     if (timeout == null) {
@@ -1094,7 +1022,10 @@ class ApiClient {
     String? operation,
   }) {
     _ensureHostEnabled(host);
-    final request = _client.delete(_uri(host, path), headers: _headers(host));
+    final request = _client.delete(
+      _uri(host, path),
+      headers: authHeaders(host),
+    );
     if (timeout == null) {
       return request;
     }
@@ -1125,8 +1056,8 @@ class ApiClient {
     return base.replace(path: path, queryParameters: queryParameters);
   }
 
-  Map<String, String> _headers(HostProfile host) => {
-    'Authorization': 'Bearer ${host.token}',
+  Map<String, String> _jsonHeaders(HostProfile host) => {
+    ...authHeaders(host),
     'Content-Type': 'application/json',
   };
 

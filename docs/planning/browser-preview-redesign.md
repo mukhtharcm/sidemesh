@@ -1,8 +1,8 @@
-# Browser Preview Redesign + DevTools — Implementation Plan
+# Browser Redesign + DevTools — Implementation Plan
 
 ## Goal
 
-Transform the browser preview from a "tucked-aside video stream" into a **first-class remote browser experience** with integrated DevTools.
+Transform the browser from a tucked-aside video stream into a **first-class remote browser experience** with integrated DevTools.
 
 ## Motivation
 
@@ -12,14 +12,14 @@ Current problems:
 - No URL editing, no page title, no favicon
 - Floating buttons feel disconnected
 - No DevTools — console logs, network, storage are invisible
-- Desktop has no inspector surface for browser preview
+- Desktop has no inspector surface for browser
 
 ## Design Principles
 
 1. **It is a browser, not a stream** — edge-to-edge viewport, proper chrome
 2. **Tools are first-class** — DevTools toggle is always visible
 3. **Desktop parity** — inspector surface, not just modals
-4. **Per-preview scoping** — each preview gets its own DevTools context
+4. **Per-tab scoping** — each tab gets its own DevTools context
 
 ## Implementation Phases
 
@@ -37,7 +37,7 @@ Current problems:
 - Navigation errors: `{type: "navError", url, error}`
 
 #### 1.3 Input pipeline improvements
-- Add `tapDown` / `tapUp` message types (backward-compatible with `tap`)
+- Add `tapDown` / `tapUp` message types
 - Add `touchStart` / `touchMove` / `touchEnd` for mobile fidelity
 - Add `hover` (throttled to 60Hz)
 - Add `navigate` message for URL editing from client
@@ -75,7 +75,7 @@ Current problems:
 
 #### 3.1 Add `browserPreview` to `InspectorSurfaceKind`
 #### 3.2 Create `buildInspectorBrowserPreviewSurface` helper
-#### 3.3 Route desktop browser preview opens to inspector scope
+#### 3.3 Route desktop browser opens to inspector scope
 
 ### Phase 4: Gestures & Input
 
@@ -106,7 +106,7 @@ Current problems:
 - [ ] URL bar shows actual URL and is editable
 - [ ] Viewport is edge-to-edge with no card wrapper
 - [ ] Bottom toolbar replaces floating controls
-- [ ] Desktop shows browser preview in inspector pane
+- [ ] Desktop shows browser in inspector pane
 - [ ] `npm run typecheck` passes
 - [ ] `flutter analyze` passes
 - [ ] All existing tests pass
@@ -114,9 +114,9 @@ Current problems:
 ## Risks
 
 1. **CDP event spam**: Console ring buffer mitigates
-2. **WebSocket bloat**: New message types are additive; old clients ignore unknown types
+2. **WebSocket bloat**: Keep message payloads small and scoped to the active tab
 3. **Flutter Image.memory WebP**: Already supports it
-4. **Desktop shell layout**: Browser preview inspector may need min-width constraints
+4. **Desktop shell layout**: Browser inspector may need min-width constraints
 
 ## Dependencies
 

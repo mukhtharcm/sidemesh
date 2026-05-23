@@ -51,8 +51,7 @@ src/
   server.ts                    # Express HTTP + WebSocket server
   fs-routes.ts                 # Host filesystem API
   terminal.ts                  # Host integrated terminal
-  port-forward.ts              # Host port forwarding
-  browser-preview.ts           # Host browser preview
+  browser-preview.ts           # Host browser tabs
   approvals.ts                 # Approval model normalization
   config.ts / config-store.ts  # Config loading and persistence
   cli.ts                       # CLI entry point
@@ -161,8 +160,7 @@ Every provider implements the interface in `src/agent-provider.ts`.
 | Local filesystem browse/read/write | Host | `src/fs-routes.ts` |
 | Local git status / working diff | Host | `src/git.ts` |
 | Integrated terminal | Host | `src/terminal.ts` |
-| Port forwarding | Host | `src/port-forward.ts` |
-| Browser preview | Host | `src/browser-preview.ts` |
+| Browser tabs | Host | `src/browser-preview.ts` |
 
 **Rule of thumb**: default to **host-owned** unless it fundamentally requires a
 specific agent provider.
@@ -255,8 +253,6 @@ specific agent provider.
   a `status` field (default 403) that HTTP handlers can throw directly.
 - **Terminal security**: `SIDEMESH_TOKEN` is deleted from env before spawning
   the shell; `SIDEMESH_TERMINAL_SESSION=1` is injected.
-- **Port forwarding lockdown**: Targets must resolve to loopback by default.
-  Enable `allowNonLoopbackTargets` in config to relax.
 
 ## Common Workflows
 

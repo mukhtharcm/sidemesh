@@ -127,14 +127,6 @@ export function renderServiceEnv(config: NodeConfig): string {
     envLine("SIDEMESH_STATE_DIR", config.stateDir),
     envLine("SIDEMESH_TERMINAL", config.terminal.enabled ? "1" : "0"),
     envLine(
-      "SIDEMESH_PORT_FORWARDING",
-      config.portForwarding.enabled ? "1" : "0",
-    ),
-    envLine(
-      "SIDEMESH_PORT_FORWARDING_ALLOW_NON_LOOPBACK",
-      config.portForwarding.allowNonLoopbackTargets ? "1" : "0",
-    ),
-    envLine(
       "SIDEMESH_BROWSER_PREVIEW",
       config.browserPreview.enabled ? "1" : "0",
     ),

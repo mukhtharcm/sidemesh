@@ -85,7 +85,6 @@ function makeConfig(
     minimumMobileClientVersion: options.minimumMobileClientVersion ?? null,
     stateDir,
     terminal: { enabled: false, shell: null, requirePty: false },
-    portForwarding: { enabled: false, allowNonLoopbackTargets: false },
     browserPreview: { enabled: false, chromePath: null, maxPreviews: 8, idleTtlMs: 3_600_000, frameIntervalMs: 900, quality: 55 },
     configPath: nodePath.join(stateDir, "config.json"),
     configExists: false,

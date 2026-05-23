@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:desktop_multi_window/desktop_multi_window.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -31,7 +32,7 @@ void main() {
   );
   const preview = HostBrowserPreviewInfo(
     id: 'preview-1',
-    label: 'Preview localhost:3000',
+    label: 'Browser localhost:3000',
     url: 'http://127.0.0.1:3000/',
     targetHost: '127.0.0.1',
     targetPort: 3000,
@@ -96,6 +97,59 @@ void main() {
         '{"kind":"session","hostId":"","session":{}}',
       ).kind,
       SidemeshWindowKind.main,
+    );
+  });
+
+  test('pop-out windows are supported on desktop platforms', () {
+    expect(
+      supportsSessionPopoutWindowsForPlatform(
+        targetPlatform: TargetPlatform.macOS,
+        isMacOS: true,
+        isLinux: false,
+        isWindows: false,
+        isWeb: false,
+      ),
+      isTrue,
+    );
+    expect(
+      supportsSessionPopoutWindowsForPlatform(
+        targetPlatform: TargetPlatform.linux,
+        isMacOS: false,
+        isLinux: true,
+        isWindows: false,
+        isWeb: false,
+      ),
+      isTrue,
+    );
+    expect(
+      supportsSessionPopoutWindowsForPlatform(
+        targetPlatform: TargetPlatform.windows,
+        isMacOS: false,
+        isLinux: false,
+        isWindows: true,
+        isWeb: false,
+      ),
+      isTrue,
+    );
+    expect(
+      supportsSessionPopoutWindowsForPlatform(
+        targetPlatform: TargetPlatform.android,
+        isMacOS: false,
+        isLinux: false,
+        isWindows: false,
+        isWeb: false,
+      ),
+      isFalse,
+    );
+    expect(
+      supportsSessionPopoutWindowsForPlatform(
+        targetPlatform: TargetPlatform.linux,
+        isMacOS: false,
+        isLinux: true,
+        isWindows: false,
+        isWeb: true,
+      ),
+      isFalse,
     );
   });
 
