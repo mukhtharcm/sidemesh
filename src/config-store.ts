@@ -79,11 +79,6 @@ const terminalConfigSchema = z.object({
   requirePty: z.boolean().default(false),
 });
 
-const portForwardingConfigSchema = z.object({
-  enabled: z.boolean().default(false),
-  allowNonLoopbackTargets: z.boolean().default(false),
-});
-
 const browserPreviewConfigSchema = z.object({
   enabled: z.boolean().default(false),
   chromePath: z.string().trim().min(1).nullable().default(null),
@@ -132,7 +127,6 @@ const persistedNodeConfigSchema = z.object({
   minimumMobileClientVersion: mobileClientVersionSchema.nullable().optional(),
   stateDir: z.string().trim().min(1).optional(),
   terminal: terminalConfigSchema.optional(),
-  portForwarding: portForwardingConfigSchema.optional(),
   browserPreview: browserPreviewConfigSchema.optional(),
   defaultProviderKind: z
     .enum(["codex", "pi", "copilot", "opencode", "acpx", "fake"])
@@ -229,7 +223,6 @@ export function persistedConfigFromNodeConfig(
     minimumMobileClientVersion: config.minimumMobileClientVersion,
     stateDir: config.stateDir,
     terminal: config.terminal,
-    portForwarding: config.portForwarding,
     browserPreview: config.browserPreview,
     defaultProviderKind: config.defaultProviderKind,
     providers: config.providers.map((provider) =>

@@ -800,7 +800,7 @@ void main() {
       );
       await _pumpFrames(tester);
       expect(
-        find.text('Tap the preview to select something on the page'),
+        find.text('Tap the page to select something'),
         findsOneWidget,
       );
 
@@ -1192,7 +1192,7 @@ void main() {
         isEmpty,
       );
       expect(
-        find.textContaining('Preview is paused. Resume it'),
+        find.textContaining('Browser is paused. Resume it'),
         findsOneWidget,
       );
     },

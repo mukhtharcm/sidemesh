@@ -78,8 +78,7 @@ the Flutter client.
 - Host filesystem API: `src/fs-routes.ts`
 - Host Git API: `src/git.ts`
 - Host terminal API: `src/terminal.ts`
-- Host port forwarding: `src/port-forward.ts`
-- Host browser preview: `src/browser-preview.ts`
+- Host browser: `src/browser-preview.ts`
 - Codex adapter: `src/codex-provider.ts`
 - Copilot adapter: `src/copilot-provider.ts`
 - Pi adapter: `src/pi-provider.ts`
@@ -554,7 +553,7 @@ Landed status:
 Expose capability data in layers:
 
 - `hostCapabilities`: daemon-owned features such as local filesystem, local Git,
-  terminal, port forwarding, and browser preview.
+  terminal, and browser.
 - `defaultProviderCapabilities`: capabilities for the configured default
   provider.
 - `providers[]`: each configured provider with its own capability map.
@@ -935,8 +934,7 @@ Specific doc updates:
   - local filesystem
   - local Git status and working diff
   - integrated terminal
-  - port forwarding
-  - browser preview
+  - browser
 - Clarify provider-owned features:
   - session history
   - session lifecycle

@@ -80,10 +80,6 @@ describe("loadConfig", () => {
       shell: null,
       requirePty: false,
     });
-    assert.deepEqual(config.portForwarding, {
-      enabled: false,
-      allowNonLoopbackTargets: false,
-    });
     assert.deepEqual(config.browserPreview, {
       enabled: false,
       chromePath: null,
@@ -318,40 +314,7 @@ describe("loadConfig", () => {
     });
   });
 
-  it("loads port forwarding settings from persisted config and env overrides", async () => {
-    await writeFile(
-      configPath,
-      JSON.stringify({
-        version: 1,
-        token: "file-token",
-        portForwarding: {
-          enabled: true,
-          allowNonLoopbackTargets: false,
-        },
-        providers: [{ kind: "codex", bin: "codex" }],
-      }),
-    );
-
-    const persisted = await loadConfig({ configPath, env: {} });
-    assert.deepEqual(persisted.portForwarding, {
-      enabled: true,
-      allowNonLoopbackTargets: false,
-    });
-
-    const overridden = await loadConfig({
-      configPath,
-      env: {
-        SIDEMESH_PORT_FORWARDING: "0",
-        SIDEMESH_PORT_FORWARDING_ALLOW_NON_LOOPBACK: "1",
-      },
-    });
-    assert.deepEqual(overridden.portForwarding, {
-      enabled: false,
-      allowNonLoopbackTargets: true,
-    });
-  });
-
-  it("loads browser preview settings from persisted config and env overrides", async () => {
+  it("loads browser settings from persisted config and env overrides", async () => {
     await writeFile(
       configPath,
       JSON.stringify({

@@ -31,7 +31,7 @@ void main() {
   );
   const preview = HostBrowserPreviewInfo(
     id: 'preview-1',
-    label: 'Preview localhost:3000',
+    label: 'Browser localhost:3000',
     url: 'http://127.0.0.1:3000/',
     targetHost: '127.0.0.1',
     targetPort: 3000,

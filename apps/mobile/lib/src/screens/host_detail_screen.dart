@@ -2177,7 +2177,6 @@ String _capabilityFeatureLabel(String key) {
     'webSearch' => 'web search',
     'gitStatus' => 'git status',
     'gitDiff' => 'git diff',
-    'portForwarding' => 'port forwarding',
     'approveForSession' => 'remember approval',
     'userInput' => 'ask for input',
     'elicitation' => 'forms',
@@ -2486,7 +2485,7 @@ class _HostManagementCardState extends State<_HostManagementCard> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(
-                'Open terminals, forwarded ports, and browser previews disconnect while the update starts.',
+                'Open terminals and browser tabs disconnect while the update starts.',
                 style: Theme.of(dialogContext).textTheme.bodySmall?.copyWith(
                   color: dialogContext.colors.textSecondary,
                   height: 1.4,
@@ -2682,7 +2681,7 @@ class _HostManagementCardState extends State<_HostManagementCard> {
                 _ManagementRow(
                   icon: Icons.refresh_rounded,
                   label: 'Restart $_providerDisplayName',
-                  detail: 'Leaves terminals and forwarded ports running.',
+                  detail: 'Leaves terminals running.',
                   busy: _restartingProvider,
                   onTap: _restartProvider,
                 ),

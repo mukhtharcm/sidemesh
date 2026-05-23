@@ -18,7 +18,6 @@ import type {
   AgentProviderConfig,
   AgentProviderKind,
   HostBrowserPreviewConfig,
-  HostPortForwardingConfig,
   HostTerminalConfig,
   NodeConfig,
   UpdateChannel,
@@ -33,7 +32,7 @@ export interface SetupOptions {
   advanced?: boolean;
 }
 
-type HostFeature = "terminal" | "portForwarding" | "browserPreview";
+type HostFeature = "terminal" | "browserPreview";
 
 export async function runSetup(options: SetupOptions = {}): Promise<NodeConfig> {
   const persisted = await readResolvedPersistedConfig({
@@ -188,7 +187,6 @@ export async function runSetup(options: SetupOptions = {}): Promise<NodeConfig> 
   // users understand what each feature does before opting in.
   const currentlyEnabled: HostFeature[] = [];
   if (existing?.terminal?.enabled) currentlyEnabled.push("terminal");
-  if (existing?.portForwarding?.enabled) currentlyEnabled.push("portForwarding");
   if (existing?.browserPreview?.enabled) currentlyEnabled.push("browserPreview");
 
   const selectedFeatures = await multiselect<HostFeature>({
@@ -202,14 +200,9 @@ export async function runSetup(options: SetupOptions = {}): Promise<NodeConfig> 
         hint: "Expose an interactive shell to authenticated clients",
       },
       {
-        value: "portForwarding",
-        label: "Port forwarding",
-        hint: "Let clients preview local services running on this host's ports",
-      },
-      {
         value: "browserPreview",
-        label: "Remote browser preview",
-        hint: "Stream screenshots of localhost web apps to clients (requires Chromium)",
+        label: "Browser",
+        hint: "Open web apps and URLs in a browser from Sidemesh (requires Chromium)",
       },
     ],
   });
@@ -221,10 +214,6 @@ export async function runSetup(options: SetupOptions = {}): Promise<NodeConfig> 
   const terminal = features.includes("terminal")
     ? await promptTerminalDetails(existing)
     : defaultTerminalConfig(existing);
-
-  const portForwarding = features.includes("portForwarding")
-    ? await promptPortForwardingDetails(existing)
-    : defaultPortForwardingConfig(existing);
 
   const browserPreview = features.includes("browserPreview")
     ? await promptBrowserPreviewDetails(existing)
@@ -275,7 +264,6 @@ export async function runSetup(options: SetupOptions = {}): Promise<NodeConfig> 
     updateChannel,
     stateDir: stateDir.trim(),
     terminal,
-    portForwarding,
     browserPreview,
     configPath: persisted.path,
     configExists: true,
@@ -332,40 +320,7 @@ async function promptTerminalDetails(
   };
 }
 
-// ── Port forwarding ───────────────────────────────────────────────────────────
-
-function defaultPortForwardingConfig(
-  existing: Awaited<ReturnType<typeof readResolvedPersistedConfig>>["value"],
-): HostPortForwardingConfig {
-  return {
-    enabled: false,
-    allowNonLoopbackTargets:
-      existing?.portForwarding?.allowNonLoopbackTargets ?? false,
-  };
-}
-
-async function promptPortForwardingDetails(
-  existing: Awaited<ReturnType<typeof readResolvedPersistedConfig>>["value"],
-): Promise<HostPortForwardingConfig> {
-  note(
-    "Port forwarding lets authenticated Sidemesh clients preview services running on this host. By default it can only reach this host's localhost ports.",
-    "Port forwarding",
-  );
-  const current = existing?.portForwarding;
-  const allowNonLoopbackTargets = await confirm({
-    message: "Allow forwarding to non-localhost targets from this host?",
-    initialValue: current?.allowNonLoopbackTargets ?? false,
-  });
-  if (isCancel(allowNonLoopbackTargets)) {
-    throw new Error("Setup cancelled.");
-  }
-  return {
-    enabled: true,
-    allowNonLoopbackTargets,
-  };
-}
-
-// ── Browser preview ───────────────────────────────────────────────────────────
+// ── Browser ───────────────────────────────────────────────────────────────────
 
 function defaultBrowserPreviewConfig(
   existing: Awaited<ReturnType<typeof readResolvedPersistedConfig>>["value"],
@@ -385,8 +340,8 @@ async function promptBrowserPreviewDetails(
   existing: Awaited<ReturnType<typeof readResolvedPersistedConfig>>["value"],
 ): Promise<HostBrowserPreviewConfig> {
   note(
-    "Remote browser preview starts Chromium on this host and streams page pixels to authenticated Sidemesh clients. Keep it disabled unless this host should render localhost web apps.",
-    "Remote browser preview",
+    "The Sidemesh browser starts Chromium on this host and lets authenticated clients open localhost apps and URLs.",
+    "Browser",
   );
   const current = existing?.browserPreview;
   const chromePath = await promptText({
@@ -400,7 +355,7 @@ async function promptBrowserPreviewDetails(
     quality: current?.quality ?? 55,
   };
   const tuneResources = await confirm({
-    message: "Tune browser preview resource limits?",
+    message: "Tune browser resource limits?",
     initialValue:
       defaults.maxPreviews !== 8 ||
       defaults.idleTtlMs !== 60 * 60 * 1000 ||
@@ -411,8 +366,8 @@ async function promptBrowserPreviewDetails(
     throw new Error("Setup cancelled.");
   }
   const maxPreviews = tuneResources
-    ? await promptInteger({
-        message: "Max simultaneous browser previews",
+      ? await promptInteger({
+        message: "Max simultaneous browser tabs",
         defaultValue: defaults.maxPreviews,
         min: 1,
         max: 32,

@@ -186,11 +186,6 @@ export interface HostTerminalConfig {
   requirePty: boolean;
 }
 
-export interface HostPortForwardingConfig {
-  enabled: boolean;
-  allowNonLoopbackTargets: boolean;
-}
-
 export interface HostBrowserPreviewConfig {
   enabled: boolean;
   chromePath: string | null;
@@ -206,7 +201,6 @@ export interface HostCapabilities {
     gitStatus: boolean;
     gitDiff: boolean;
     terminal: boolean;
-    portForwarding: boolean;
     browserPreview: boolean;
   };
   sessions: {
@@ -229,7 +223,6 @@ export interface NodeConfig {
   minimumMobileClientVersion?: string | null;
   stateDir: string;
   terminal: HostTerminalConfig;
-  portForwarding: HostPortForwardingConfig;
   browserPreview: HostBrowserPreviewConfig;
   configPath: string;
   configExists: boolean;
