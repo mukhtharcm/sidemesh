@@ -2,13 +2,17 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:url_launcher/url_launcher.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
 import 'package:xterm/xterm.dart' as xterm;
 
 import '../api_client.dart';
 import '../models.dart';
+import '../terminal_input_encoder.dart';
 import '../terminal_input_filter.dart';
 import '../terminal_key_models.dart';
+import '../terminal_link_detector.dart';
 import '../theme/app_colors.dart';
 import '../theme/color_contrast.dart';
 import '../theme/app_tokens.dart';
@@ -102,6 +106,7 @@ class _TerminalPaneState extends State<TerminalPane> {
   late final String _reconnectSlotId =
       'terminal-live:${identityHashCode(this)}';
   late final xterm.Terminal _terminal;
+  late final xterm.TerminalController _terminalController;
   final FocusNode _focusNode = FocusNode();
   WebSocketChannel? _channel;
   StreamSubscription<dynamic>? _subscription;
@@ -113,14 +118,20 @@ class _TerminalPaneState extends State<TerminalPane> {
   int _lastSeq = -1;
   int? _cols;
   int? _rows;
+  String? _selectionText;
+  TerminalUrlMatch? _selectionUrl;
+  bool _syncingSelection = false;
 
   @override
   void initState() {
     super.initState();
+    _terminalController = xterm.TerminalController();
+    _terminalController.addListener(_handleSelectionChanged);
     _terminal = xterm.Terminal(
       maxLines: 5000,
       onOutput: _sendInput,
       onResize: _handleResize,
+      wordSeparators: _terminalWordSeparators,
     );
     _terminal.write('Starting terminal...\r\n');
     HostReconnectScheduler.instance.registerSlot(
@@ -172,6 +183,8 @@ class _TerminalPaneState extends State<TerminalPane> {
     );
     unawaited(_subscription?.cancel() ?? Future<void>.value());
     unawaited(_channel?.sink.close() ?? Future<void>.value());
+    _terminalController.removeListener(_handleSelectionChanged);
+    _terminalController.dispose();
     _focusNode.dispose();
     super.dispose();
   }
@@ -386,6 +399,11 @@ class _TerminalPaneState extends State<TerminalPane> {
 
   void _onKeyBarAction(TerminalKeyAction action) {
     if (_terminalInfo?.isRunning != true) return;
+    final encoded = encodeTerminalKeyAction(action);
+    if (encoded != null) {
+      _sendInput(encoded);
+      return;
+    }
     if (action.key != null) {
       _terminal.keyInput(
         action.key!,
@@ -396,6 +414,49 @@ class _TerminalPaneState extends State<TerminalPane> {
     } else if (action.rawText != null && action.rawText!.isNotEmpty) {
       _terminal.textInput(action.rawText!);
     }
+  }
+
+  void _handleSelectionChanged() {
+    if (_syncingSelection) {
+      return;
+    }
+    final selection = _terminalController.selection;
+    if (selection == null) {
+      if (_selectionText != null || _selectionUrl != null) {
+        setState(() {
+          _selectionText = null;
+          _selectionUrl = null;
+        });
+      }
+      return;
+    }
+
+    if (!_terminal.isUsingAltBuffer) {
+      final expanded = terminalUrlRangeContainingSelection(
+        _terminal,
+        selection,
+      );
+      if (expanded != null && expanded != selection.normalized) {
+        _syncingSelection = true;
+        _terminalController.setSelection(
+          _terminal.buffer.createAnchorFromOffset(expanded.begin),
+          _terminal.buffer.createAnchorFromOffset(expanded.end),
+        );
+        _syncingSelection = false;
+      }
+    }
+
+    final activeSelection = _terminalController.selection;
+    final selectionText = activeSelection == null
+        ? null
+        : _terminal.buffer.getText(activeSelection);
+    final selectionUrl = selectionText == null || selectionText.isEmpty
+        ? null
+        : firstTerminalUrl(selectionText);
+    setState(() {
+      _selectionText = selectionText;
+      _selectionUrl = selectionUrl;
+    });
   }
 
   void _adoptReplacementTerminal(HostTerminalInfo replacement) {
@@ -466,10 +527,71 @@ class _TerminalPaneState extends State<TerminalPane> {
     await _startTerminal(reuseExisting: false, replaceExisting: true);
   }
 
+  Future<void> _handleTerminalTapUp(
+    TapUpDetails details,
+    xterm.CellOffset offset,
+  ) async {
+    if (_terminalController.selection != null || _terminal.isUsingAltBuffer) {
+      return;
+    }
+    final link = terminalUrlAtCell(_terminal, offset);
+    if (link == null) {
+      return;
+    }
+    await _openTerminalLink(link.href);
+  }
+
+  Future<void> _copySelection() async {
+    final text = _selectionText;
+    if (text == null || text.isEmpty) {
+      return;
+    }
+    await Clipboard.setData(ClipboardData(text: text));
+    if (!mounted) return;
+    showAppSnackBar(context, 'Copied terminal selection');
+  }
+
+  Future<void> _openSelectedLink() async {
+    final href = _selectionUrl?.href;
+    if (href == null) {
+      return;
+    }
+    await _openTerminalLink(href);
+  }
+
+  Future<void> _openTerminalLink(String href) async {
+    final uri = Uri.tryParse(href);
+    if (uri == null) {
+      return;
+    }
+    final ok = await launchUrl(uri, mode: LaunchMode.externalApplication);
+    if (!ok && mounted) {
+      showAppSnackBar(context, 'Could not open link');
+    }
+  }
+
+  void _clearSelection() {
+    _terminalController.clearSelection();
+  }
+
+  void _selectAll() {
+    if (_terminal.buffer.height <= 0) {
+      return;
+    }
+    final lastRow = _terminal.buffer.height - 1;
+    final lastLine = _terminal.buffer.lines[lastRow];
+    final endX = lastLine.getTrimmedLength().clamp(0, _terminal.viewWidth);
+    _terminalController.setSelection(
+      _terminal.buffer.createAnchor(0, 0),
+      _terminal.buffer.createAnchor(endX, lastRow),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final terminal = _terminalInfo;
     final colors = context.colors;
+    final hasSelection = _selectionText != null && _selectionText!.isNotEmpty;
     return Column(
       children: [
         _TerminalStatusStrip(
@@ -502,11 +624,13 @@ class _TerminalPaneState extends State<TerminalPane> {
               clipBehavior: Clip.antiAlias,
               child: xterm.TerminalView(
                 _terminal,
+                controller: _terminalController,
                 focusNode: _focusNode,
                 autofocus: true,
                 keyboardType: TextInputType.text,
                 deleteDetection: true,
                 theme: _terminalTheme(colors),
+                onTapUp: _handleTerminalTapUp,
                 textStyle: xterm.TerminalStyle(
                   fontSize: widget.compact ? 12 : 13,
                   height: 1.22,
@@ -515,6 +639,16 @@ class _TerminalPaneState extends State<TerminalPane> {
               ),
             ),
           ),
+        ),
+        _TerminalSelectionBar(
+          compact: widget.compact,
+          hasSelection: hasSelection,
+          selectionLength: _selectionText?.length ?? 0,
+          selectedUrl: _selectionUrl?.displayText,
+          onCopy: _copySelection,
+          onOpenLink: _selectionUrl == null ? null : _openSelectedLink,
+          onSelectAll: _selectAll,
+          onClear: _clearSelection,
         ),
         TerminalKeyBar(compact: widget.compact, onAction: _onKeyBarAction),
       ],
@@ -580,6 +714,163 @@ xterm.TerminalTheme _terminalTheme(AppColors colors) {
 
 Color _brightTerminalColor(Color color) =>
     Color.lerp(color, const Color(0xFFD8D8D8), 0.18)!;
+
+const Set<int> _terminalWordSeparators = {0, 32, 34, 39, 42, 43, 92};
+
+class _TerminalSelectionBar extends StatelessWidget {
+  const _TerminalSelectionBar({
+    required this.compact,
+    required this.hasSelection,
+    required this.selectionLength,
+    required this.selectedUrl,
+    required this.onCopy,
+    required this.onOpenLink,
+    required this.onSelectAll,
+    required this.onClear,
+  });
+
+  final bool compact;
+  final bool hasSelection;
+  final int selectionLength;
+  final String? selectedUrl;
+  final VoidCallback onCopy;
+  final VoidCallback? onOpenLink;
+  final VoidCallback onSelectAll;
+  final VoidCallback onClear;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    return SafeArea(
+      top: false,
+      child: Container(
+        height: compact ? 54 : 60,
+        padding: EdgeInsets.symmetric(
+          horizontal: compact ? 8 : 10,
+          vertical: compact ? 6 : 8,
+        ),
+        decoration: BoxDecoration(
+          color: colors.surface,
+          border: Border(top: BorderSide(color: colors.border)),
+        ),
+        child: Row(
+          children: [
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Text(
+                    hasSelection
+                        ? selectedUrl == null
+                              ? '$selectionLength characters selected'
+                              : 'Link selected'
+                        : 'Terminal tools',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                      color: colors.textPrimary,
+                      fontWeight: AppWeights.emphasis,
+                    ),
+                  ),
+                  Text(
+                    hasSelection
+                        ? selectedUrl ?? 'Copy text, then clear or select all.'
+                        : 'Long press text to select, tap URLs to open.',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      color: colors.textSecondary,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(width: 10),
+            if (hasSelection) ...[
+              _TerminalBarButton(
+                label: 'Copy',
+                icon: Icons.copy_all_rounded,
+                compact: compact,
+                onTap: onCopy,
+              ),
+              if (onOpenLink != null) ...[
+                const SizedBox(width: 8),
+                _TerminalBarButton(
+                  label: 'Open',
+                  icon: Icons.open_in_new_rounded,
+                  compact: compact,
+                  onTap: onOpenLink!,
+                  tone: MeshSurfaceTone.accent,
+                ),
+              ],
+              const SizedBox(width: 8),
+            ],
+            _TerminalBarButton(
+              label: 'All',
+              icon: Icons.select_all_rounded,
+              compact: compact,
+              onTap: onSelectAll,
+            ),
+            if (hasSelection) ...[
+              const SizedBox(width: 8),
+              _TerminalBarButton(
+                label: 'Done',
+                icon: Icons.close_rounded,
+                compact: compact,
+                onTap: onClear,
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _TerminalBarButton extends StatelessWidget {
+  const _TerminalBarButton({
+    required this.label,
+    required this.icon,
+    required this.compact,
+    required this.onTap,
+    this.tone = MeshSurfaceTone.muted,
+  });
+
+  final String label;
+  final IconData icon;
+  final bool compact;
+  final VoidCallback onTap;
+  final MeshSurfaceTone tone;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    return MeshSurface(
+      onTap: onTap,
+      tone: tone,
+      radius: AppRadii.control,
+      padding: EdgeInsets.symmetric(
+        horizontal: compact ? 10 : 12,
+        vertical: compact ? 8 : 10,
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: compact ? 16 : 18, color: colors.textSecondary),
+          const SizedBox(width: 6),
+          Text(
+            label,
+            style: Theme.of(context).textTheme.labelMedium?.copyWith(
+              color: colors.textPrimary,
+              fontWeight: AppWeights.emphasis,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
 
 class _TerminalStatusStrip extends StatelessWidget {
   const _TerminalStatusStrip({

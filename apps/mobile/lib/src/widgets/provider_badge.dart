@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_svg/flutter_svg.dart';
+import 'package:hugeicons/hugeicons.dart';
 
 import '../models.dart';
 import '../provider_labels.dart';
@@ -43,7 +45,7 @@ class AgentProviderBadge extends StatelessWidget {
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(Icons.hub_rounded, size: iconSize, color: fg),
+          _providerIcon(providerKind, iconSize, fg),
           SizedBox(width: compact ? 4 : 5),
           ConstrainedBox(
             constraints: BoxConstraints(maxWidth: compact ? 92 : 160),
@@ -62,4 +64,42 @@ class AgentProviderBadge extends StatelessWidget {
       ),
     );
   }
+}
+
+// ---------------------------------------------------------------------------
+// Provider icon resolver
+// ---------------------------------------------------------------------------
+
+/// Returns the appropriate brand icon for a given [providerKind].
+///
+/// Known providers use SVG brand assets from [assets/icons/brands/] so they
+/// are rendered with a precise, colourable shape.  Unknown or test providers
+/// fall back to matching [HugeIcons] glyphs.
+Widget _providerIcon(String? providerKind, double size, Color color) {
+  Widget svg(String name) => SvgPicture.asset(
+    'assets/icons/brands/$name.svg',
+    width: size,
+    height: size,
+    colorFilter: ColorFilter.mode(color, BlendMode.srcIn),
+  );
+
+  Widget huge(List<List<dynamic>> icon) =>
+      HugeIcon(icon: icon, size: size, color: color);
+
+  return switch ((providerKind ?? '').toLowerCase()) {
+    // OpenAI / Codex
+    'codex' => svg('openai'),
+    // GitHub Copilot
+    'copilot' => svg('githubcopilot'),
+    // Anthropic products (claude, etc.)
+    'anthropic' || 'claude' => svg('anthropic'),
+    // Pi (Inflection AI assistant)
+    'pi' => huge(HugeIcons.strokeRoundedAiBrain01),
+    // Hugging Face hosted models
+    'huggingface' || 'hf' => svg('huggingface'),
+    // Deterministic test harness
+    'fake' => huge(HugeIcons.strokeRoundedTestTube01),
+    // Generic fallback
+    _ => huge(HugeIcons.strokeRoundedRobot01),
+  };
 }
