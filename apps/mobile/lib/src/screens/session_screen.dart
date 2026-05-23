@@ -5906,6 +5906,10 @@ class _SessionScreenState extends State<SessionScreen>
           host: widget.host,
           api: widget.api,
           preview: preview,
+          onOpenInWindow:
+              SidemeshBrowserPreviewWindowManager.instance.isSupported
+              ? () => unawaited(_openBrowserPreviewWindow(preview))
+              : null,
         ),
       );
       return;
@@ -5913,6 +5917,30 @@ class _SessionScreenState extends State<SessionScreen>
     setState(() {
       _dockedBrowserPreview = _DockedBrowserPreview(preview: preview);
     });
+  }
+
+  Future<void> _openBrowserPreviewWindow(HostBrowserPreviewInfo preview) async {
+    final current = _dockedBrowserPreview;
+    if (current?.preview.id == preview.id) {
+      setState(() => _dockedBrowserPreview = null);
+    }
+    final scope = InspectorScope.maybeOf(context);
+    final active = scope?.current;
+    if (active?.kind == InspectorSurfaceKind.browserPreview &&
+        active?.ownerKey == _inspectorOwnerKey()) {
+      scope?.close();
+    }
+    final opened = await SidemeshBrowserPreviewWindowManager.instance
+        .openOrFocusBrowserPreviewWindow(host: widget.host, preview: preview);
+    if (!mounted || _disposed) {
+      return;
+    }
+    showAppSnackBar(
+      context,
+      opened
+          ? 'Opened ${preview.label} in a new window.'
+          : 'Browser windows are only available on the desktop app.',
+    );
   }
 
   void _minimizeDockedBrowserPreview() {
@@ -6627,7 +6655,7 @@ class _SessionScreenState extends State<SessionScreen>
       context,
       opened
           ? 'Opened ${session.title} in a new window.'
-          : 'Session pop-out windows are only available on the macOS desktop app.',
+          : 'Session pop-out windows are only available on the desktop app.',
     );
   }
 
@@ -6864,7 +6892,7 @@ class _SessionScreenState extends State<SessionScreen>
             const _SessionActionSpec(
               value: 'popout',
               label: 'Open in new window',
-              detail: 'Detach this session into its own macOS window.',
+              detail: 'Detach this session into its own desktop window.',
               icon: Icons.open_in_new_rounded,
             ),
         ],

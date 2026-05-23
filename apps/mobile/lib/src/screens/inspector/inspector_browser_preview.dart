@@ -10,12 +10,23 @@ InspectorSurface buildInspectorBrowserPreviewSurface({
   required HostProfile host,
   required ApiClient api,
   required HostBrowserPreviewInfo preview,
+  VoidCallback? onOpenInWindow,
 }) {
   return InspectorSurface(
     kind: InspectorSurfaceKind.browserPreview,
     ownerKey: ownerKey,
     title: preview.url,
     icon: Icons.open_in_browser_rounded,
+    actionsBuilder: onOpenInWindow == null
+        ? null
+        : (context) => <Widget>[
+            IconButton(
+              tooltip: 'Open in new window',
+              onPressed: onOpenInWindow,
+              icon: const Icon(Icons.open_in_new_rounded, size: 18),
+              visualDensity: VisualDensity.compact,
+            ),
+          ],
     bodyBuilder: (context) => BrowserPreviewPane(
       host: host,
       api: api,
