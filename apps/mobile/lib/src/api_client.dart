@@ -985,7 +985,7 @@ class ApiClient {
     return _withTimeout(
       _client.get(
         _uri(host, path, queryParameters: queryParameters),
-        headers: _headers(host),
+        headers: authHeaders(host),
       ),
       timeout: resolvedTimeout,
       operation: operation ?? 'load data',
@@ -1002,7 +1002,7 @@ class ApiClient {
     _ensureHostEnabled(host);
     final request = _client.post(
       _uri(host, path),
-      headers: _headers(host),
+      headers: _jsonHeaders(host),
       body: jsonEncode(body),
     );
     if (timeout == null) {
@@ -1022,7 +1022,10 @@ class ApiClient {
     String? operation,
   }) {
     _ensureHostEnabled(host);
-    final request = _client.delete(_uri(host, path), headers: _headers(host));
+    final request = _client.delete(
+      _uri(host, path),
+      headers: authHeaders(host),
+    );
     if (timeout == null) {
       return request;
     }
@@ -1053,8 +1056,8 @@ class ApiClient {
     return base.replace(path: path, queryParameters: queryParameters);
   }
 
-  Map<String, String> _headers(HostProfile host) => {
-    'Authorization': 'Bearer ${host.token}',
+  Map<String, String> _jsonHeaders(HostProfile host) => {
+    ...authHeaders(host),
     'Content-Type': 'application/json',
   };
 

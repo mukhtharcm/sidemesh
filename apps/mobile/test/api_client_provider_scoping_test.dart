@@ -212,5 +212,7 @@ void main() {
 
     expect(captured.method, 'DELETE');
     expect(captured.url.path, '/api/browser-previews/tab-1');
+    expect(captured.headers['content-type'], isNull);
+    expect(captured.headers['authorization'], 'Bearer secret');
   });
 }
