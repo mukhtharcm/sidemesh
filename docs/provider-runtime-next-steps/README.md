@@ -102,7 +102,7 @@ Use these as starting points for implementation:
 - Preserve `/api/node.providerCapabilities` until the mobile compatibility
   cleanup is explicitly completed.
 - Keep host-owned workspace features host-owned: filesystem browse/read/write,
-  git, terminal, port forwarding, and browser preview.
+  git, terminal, and browser.
 - For TypeScript changes, run `npm run typecheck` before tests.
 - For Flutter changes, run `cd apps/mobile && flutter analyze`.
 

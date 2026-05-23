@@ -20,7 +20,6 @@ implementation plan.
 | [p2-10](p2-10-session-rename-discoverability.md) | P2 | Session rename is completely hidden | open |
 | [p2-11](p2-11-launch-defaults-location.md) | P2 | Launch defaults are in the wrong place | open |
 | [p2-12](p2-12-mark-unread-explanation.md) | P2 | "Mark unread" purpose is unexplained | open |
-| [p2-13](p2-13-port-forward-vs-browser.md) | P2 | Open vs. Remote browser preview distinction unclear | open |
 | [p2-14](p2-14-storage-danger-styling.md) | P2 | Destructive storage actions have no danger styling | open |
 | [p3-15](p3-15-search-bar-threshold.md) | P3 | Search bar visible even with very few sessions | open |
 | [p3-16](p3-16-qr-pair-success-state.md) | P3 | No success state after QR pairing | open |

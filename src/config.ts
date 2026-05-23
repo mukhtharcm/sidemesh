@@ -7,7 +7,6 @@ import type {
   AgentProviderConfigSummary,
   AgentProviderKind,
   HostBrowserPreviewConfig,
-  HostPortForwardingConfig,
   HostTerminalConfig,
   NodeConfig,
   UpdateChannel,
@@ -71,7 +70,6 @@ export async function loadConfig(
     stateDir,
   );
   const terminal = resolveTerminalConfig(persisted.value, env);
-  const portForwarding = resolvePortForwardingConfig(persisted.value, env);
   const browserPreview = resolveBrowserPreviewConfig(persisted.value, env);
   const updateChannel = parseUpdateChannel(
     env.SIDEMESH_UPDATE_CHANNEL,
@@ -119,7 +117,6 @@ export async function loadConfig(
     minimumMobileClientVersion,
     stateDir,
     terminal,
-    portForwarding,
     browserPreview,
     configPath,
     configExists: persisted.exists,
@@ -328,26 +325,6 @@ function resolveTerminalConfig(
         ? envShell || null
         : terminal?.shell ?? null,
     requirePty: envRequirePty ?? terminal?.requirePty ?? false,
-  };
-}
-
-function resolvePortForwardingConfig(
-  persisted: PersistedNodeConfig | null,
-  env: Environment,
-): HostPortForwardingConfig {
-  const portForwarding = persisted?.portForwarding;
-  const envEnabled = parseOptionalBoolean(
-    env.SIDEMESH_PORT_FORWARDING ?? env.SIDEMESH_ENABLE_PORT_FORWARDING,
-  );
-  const envAllowNonLoopbackTargets = parseOptionalBoolean(
-    env.SIDEMESH_PORT_FORWARDING_ALLOW_NON_LOOPBACK,
-  );
-  return {
-    enabled: envEnabled ?? portForwarding?.enabled ?? false,
-    allowNonLoopbackTargets:
-      envAllowNonLoopbackTargets ??
-      portForwarding?.allowNonLoopbackTargets ??
-      false,
   };
 }
 

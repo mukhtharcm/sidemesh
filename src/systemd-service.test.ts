@@ -26,7 +26,6 @@ describe("systemd service rendering", () => {
       updateChannel: "stable",
       stateDir: "/root/.sidemesh",
       terminal: { enabled: true, shell: "/bin/zsh", requirePty: false },
-      portForwarding: { enabled: true, allowNonLoopbackTargets: false },
       browserPreview: {
         enabled: true,
         chromePath: "/usr/bin/chromium",
@@ -66,7 +65,6 @@ describe("systemd service rendering", () => {
     const env = renderServiceEnv(config);
     assert.match(env, /SIDEMESH_TOKEN=test-token/);
     assert.match(env, /SIDEMESH_TERMINAL=1/);
-    assert.match(env, /SIDEMESH_PORT_FORWARDING=1/);
     assert.match(env, /SIDEMESH_BROWSER_PREVIEW=1/);
     assert.match(env, /SIDEMESH_BROWSER_PREVIEW_MAX_PREVIEWS=2/);
     assert.match(env, /SIDEMESH_BROWSER_PREVIEW_IDLE_TTL_MS=120000/);
@@ -122,7 +120,6 @@ describe("systemd service rendering", () => {
       updateChannel: "stable",
       stateDir: "/root/.sidemesh",
       terminal: { enabled: true, shell: "/bin/zsh", requirePty: false },
-      portForwarding: { enabled: true, allowNonLoopbackTargets: false },
       browserPreview: {
         enabled: true,
         chromePath: "/usr/bin/chromium",

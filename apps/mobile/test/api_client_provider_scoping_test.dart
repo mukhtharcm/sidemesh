@@ -189,11 +189,30 @@ void main() {
       targetUrl: ' http://tenant.localhost:5173/app ',
       sessionId: 'session-1',
       profileMode: 'sidemesh',
+      reuseExisting: false,
     );
 
     expect(body['targetHost'], 'tenant.localhost');
     expect(body['targetPort'], 5173);
     expect(body['targetUrl'], 'http://tenant.localhost:5173/app');
     expect(body['sessionId'], 'session-1');
+    expect(body['reuseExisting'], false);
+  });
+
+  test('ApiClient accepts an empty close-tab response', () async {
+    late http.Request captured;
+    final api = ApiClient(
+      client: MockClient((request) async {
+        captured = request;
+        return http.Response('', 204);
+      }),
+    );
+
+    await api.stopBrowserPreview(host, 'tab-1');
+
+    expect(captured.method, 'DELETE');
+    expect(captured.url.path, '/api/browser-previews/tab-1');
+    expect(captured.headers['content-type'], isNull);
+    expect(captured.headers['authorization'], 'Bearer secret');
   });
 }

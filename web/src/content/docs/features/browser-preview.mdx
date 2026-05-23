@@ -1,9 +1,9 @@
 ---
-title: Browser Preview
-description: Stream browser screenshots to the client.
+title: Browser
+description: Open browser tabs from the client.
 ---
 
-Browser preview launches a headless Chromium instance on the host, captures screenshots, and streams them to the client as a live image feed.
+The browser launches Chromium on the host, captures screenshots, and streams them to the client as a live image feed.
 
 It also includes a lightweight remote DevTools surface inside the client for browser storage, network traffic, console output, and DOM inspection.
 
@@ -16,7 +16,7 @@ It also includes a lightweight remote DevTools surface inside the client for bro
 
 ## Supported interactions
 
-The browser preview supports remote interaction through CDP:
+The browser supports remote interaction through CDP:
 
 | Action | How it works |
 |--------|-------------|
@@ -31,7 +31,7 @@ The browser preview supports remote interaction through CDP:
 
 - Low-bandwidth environments where downloading full page payloads is slow
 - Heavy pages with lots of JS, images, and fonts where you only need a visual
-- Quick checks without setting up a full tunnel
+- Quick checks without setting up anything else
 - Verifying what a headless browser renders on the host
 - Inspecting cookies, local storage, session storage, and IndexedDB schema from a mobile device
 - Inspecting DOM structure, attributes, and selected element styles from a mobile device
@@ -39,7 +39,7 @@ The browser preview supports remote interaction through CDP:
 
 ## Built-in DevTools
 
-Browser preview now exposes a compact remote DevTools panel in the client:
+The browser exposes a compact remote DevTools panel in the client:
 
 | Panel | What you can do |
 |-------|------------------|
@@ -54,8 +54,4 @@ Browser preview now exposes a compact remote DevTools panel in the client:
 - Frame updates are periodic, not real-time (default every 900ms)
 - The browser runs on the host, so it sees the host's network and user-agent
 - Built-in DevTools are lighter than full Chrome DevTools and still omit advanced features like full CSS rule tracing, layout tooling, and a complete network waterfall
-- Only supports HTTP/HTTPS targets (not raw TCP)
-
-## Comparison with port forwarding
-
-Browser preview is for visual verification and light interaction when bandwidth or setup is constrained. Port forwarding is for full-fidelity browsing in your native mobile browser. See [Browser vs Port Forwarding](/comparisons/browser-vs-port-forwarding/) for a detailed comparison.
+- Only supports HTTP/HTTPS targets

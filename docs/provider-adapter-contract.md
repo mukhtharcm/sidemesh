@@ -88,7 +88,7 @@ Workspace:
 - `readRemoteGitDiff`
 
 Local git status, local working/staged/unstaged diffs, integrated terminals, and
-port forwarding are daemon-owned host features. Providers only own
+browser tabs are daemon-owned host features. Providers only own
 `readRemoteGitDiff`, because that may require agent/provider-specific context.
 Local filesystem browse/read/write/watch is also daemon-owned and implemented
 in `src/fs-routes.ts`; do not add local filesystem methods to
@@ -121,7 +121,7 @@ types instead of leaking provider-specific wire payloads to the Flutter app.
 Server routes check both capability flags and method presence. A provider that
 does not support a provider-owned route should produce a `501` instead of
 forcing every adapter to implement Codex-only methods. Daemon-owned features
-such as local git status, terminals, and port forwarding are exposed through
+such as local git status, terminals, and browser tabs are exposed through
 `hostCapabilities`.
 
 Compatibility shims are acceptable only when a provider already exposes a

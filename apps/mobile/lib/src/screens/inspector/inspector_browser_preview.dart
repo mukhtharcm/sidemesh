@@ -21,7 +21,7 @@ InspectorSurface buildInspectorBrowserPreviewSurface({
         ? null
         : (context) => <Widget>[
             IconButton(
-              tooltip: 'Open in separate window',
+              tooltip: 'Open in new window',
               onPressed: onOpenInWindow,
               icon: const Icon(Icons.open_in_new_rounded, size: 18),
               visualDensity: VisualDensity.compact,

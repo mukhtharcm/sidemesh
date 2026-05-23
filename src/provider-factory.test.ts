@@ -68,7 +68,6 @@ function makeMultiProviderConfig(): NodeConfig {
     updateChannel: "stable",
     stateDir: "/tmp/sidemesh-runtime-test",
     terminal: { enabled: false, shell: null, requirePty: false },
-    portForwarding: { enabled: false, allowNonLoopbackTargets: false },
     browserPreview: {
       enabled: false,
       chromePath: null,

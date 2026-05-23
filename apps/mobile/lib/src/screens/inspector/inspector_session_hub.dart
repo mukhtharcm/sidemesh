@@ -22,7 +22,7 @@ InspectorSurface buildInspectorSessionHubSurface({
   required VoidCallback onOpenPinned,
   required VoidCallback onOpenFiles,
   required VoidCallback onOpenTerminal,
-  required VoidCallback onOpenPorts,
+  required VoidCallback onOpenBrowser,
   required VoidCallback onOpenResources,
 }) {
   return InspectorSurface(
@@ -35,7 +35,7 @@ InspectorSurface buildInspectorSessionHubSurface({
       onOpenPinned: onOpenPinned,
       onOpenFiles: onOpenFiles,
       onOpenTerminal: onOpenTerminal,
-      onOpenPorts: onOpenPorts,
+      onOpenBrowser: onOpenBrowser,
       onOpenResources: onOpenResources,
     ),
   );
@@ -47,7 +47,7 @@ class _SessionHubBody extends StatelessWidget {
     required this.onOpenPinned,
     required this.onOpenFiles,
     required this.onOpenTerminal,
-    required this.onOpenPorts,
+    required this.onOpenBrowser,
     required this.onOpenResources,
   });
 
@@ -55,7 +55,7 @@ class _SessionHubBody extends StatelessWidget {
   final VoidCallback onOpenPinned;
   final VoidCallback onOpenFiles;
   final VoidCallback onOpenTerminal;
-  final VoidCallback onOpenPorts;
+  final VoidCallback onOpenBrowser;
   final VoidCallback onOpenResources;
 
   @override
@@ -75,9 +75,9 @@ class _SessionHubBody extends StatelessWidget {
       ),
       _HubTool(
         icon: Icons.open_in_browser_rounded,
-        label: 'Previews',
-        description: 'Open sites running on this machine.',
-        onTap: onOpenPorts,
+        label: 'Browser',
+        description: 'Open a tab for this session.',
+        onTap: onOpenBrowser,
       ),
     ];
     final sessionTools = [

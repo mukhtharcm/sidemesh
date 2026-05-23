@@ -22,7 +22,7 @@ Already implemented:
 - Session live events carry sequence IDs and the client can request delta replay
   with `/api/sessions/:sessionId/events?since=<seq>`.
 - Terminal output has replay buffers and reconnects with `since`.
-- Browser preview can reuse persistent browser profiles and pause hidden views.
+- Browser can reuse persistent browser profiles and pause hidden views.
 - Services have memory caps and terminal child processes now seed sane
   interactive env values such as `HOME`, `USER`, `LOGNAME`, and `SHELL`.
 
@@ -71,7 +71,7 @@ Still missing from this priority:
   app still behaves like green/red/probing dots.
 - Terminal panes do not yet show `last output`, `last connected`, or
   `reconnecting` status.
-- Browser preview panes do not yet show `last frame`, `paused`, or reconnect
+- Browser panes do not yet show `last frame`, `paused`, or reconnect
   age.
 - We do not measure latency or RTT yet.
 - We do not yet have a centralized `ConnectionQualityStore`; the first slice
@@ -152,9 +152,9 @@ Features:
 
 - Toggle in settings: `Low Data Mode`.
 - When enabled:
-  - Pause browser preview auto-refresh; require manual tap to resume.
+  - Pause browser auto-refresh; require manual tap to resume.
   - Reduce background polling frequency for Recent/Inbox.
-  - Do not auto-attach terminals or browser previews when opening a session.
+  - Do not auto-attach terminals or browser tabs when opening a session.
   - Compress large file reads if the host supports it.
 - Show a persistent banner when Low Data Mode is active.
 
@@ -203,13 +203,13 @@ Still missing:
 - Do not enable websocket compression blindly; measure CPU/memory impact on
   small VPSes first.
 
-## Priority 6: Adaptive Browser Preview
+## Priority 6: Adaptive Browser
 
 Goal: keep browser streaming usable without killing the VPS or the network.
 
 Current risk:
 
-- Pixel streaming is inherently expensive compared with HTML port forwarding.
+- Pixel streaming is inherently expensive and needs adaptive controls.
 - Low-quality networks need adaptive behavior, not a fixed frame cadence.
 
 Not yet started.
@@ -232,7 +232,7 @@ Improvements:
 Do not do:
 
 - Do not stream full-resolution frames continuously on mobile by default.
-- Do not enable remote browser preview automatically for every port forward.
+- Do not open browser tabs automatically for every discovered localhost URL.
 
 ## Priority 7: Offline-Safe User Input
 
@@ -278,7 +278,7 @@ Completed:
     actions, live activity, session seq cursors, input dedupe
   - `sockets`: session rooms, live sockets, approval sockets, recent session
     sockets
-  - `features`: active terminals, port forwards, browser previews
+  - `features`: active terminals and browser tabs
 - `/api/debug/codex-rpc-audit` exposes Codex RPC audit snapshot.
 
 Still missing:
@@ -294,8 +294,8 @@ Still missing:
   - recent websocket reconnects
   - session replay fallbacks
   - terminal dropped clients
-  - browser preview frame drops
-  - port forward reconnects
+  - browser frame drops
+  - browser reconnects
 - Do not log secrets:
   - Never log bearer tokens.
   - Never log full terminal input.
@@ -306,10 +306,10 @@ Still missing:
 
 1. ✅ Add connection freshness model and "last connected N seconds ago" UI.
 2. ✅ Add server-side per-session replay index for true cheap delta replay.
-3. ⬜ Add Low Data Mode with browser preview and background refresh throttles.
+3. ⬜ Add Low Data Mode with browser and background refresh throttles.
 4. ✅ Add centralized per-host reconnect scheduling with jitter.
 5. ✅ Add targeted HTTP compression for large JSON endpoints.
-6. ⬜ Add browser preview adaptive quality/fps.
+6. ⬜ Add browser adaptive quality/fps.
 7. ⬜ Harden offline send queue UI (visible timeline rendering + cancel).
 8. ✅ Add diagnostics surface (`/api/diagnostics`); still needs per-host timeline.
 
@@ -328,7 +328,7 @@ Sidemesh should pass these manual scenarios:
   does not block the whole list.
 - Watch the same terminal from two clients, disconnect one, reconnect it:
   terminal resumes from replay or clearly asks for a fresh attach.
-- Start browser preview on mobile, background app, return:
-  preview is paused or reconnected intentionally, not silently dead.
+- Start browser on mobile, background app, return:
+  browser is paused or reconnected intentionally, not silently dead.
 - Run on a small VPS:
   memory stays bounded under terminal/browser/session reconnect churn.

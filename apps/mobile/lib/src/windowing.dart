@@ -10,9 +10,34 @@ import 'models.dart';
 import 'screen_awake_controller.dart';
 
 bool get supportsSessionPopoutWindows =>
-    !kIsWeb &&
-    defaultTargetPlatform == TargetPlatform.macOS &&
-    Platform.isMacOS;
+    supportsSessionPopoutWindowsForPlatform(
+      targetPlatform: defaultTargetPlatform,
+      isMacOS: !kIsWeb && Platform.isMacOS,
+      isLinux: !kIsWeb && Platform.isLinux,
+      isWindows: !kIsWeb && Platform.isWindows,
+      isWeb: kIsWeb,
+    );
+
+@visibleForTesting
+bool supportsSessionPopoutWindowsForPlatform({
+  required TargetPlatform targetPlatform,
+  required bool isMacOS,
+  required bool isLinux,
+  required bool isWindows,
+  required bool isWeb,
+}) {
+  if (isWeb) {
+    return false;
+  }
+  return switch (targetPlatform) {
+    TargetPlatform.macOS => isMacOS,
+    TargetPlatform.linux => isLinux,
+    TargetPlatform.windows => isWindows,
+    TargetPlatform.android ||
+    TargetPlatform.fuchsia ||
+    TargetPlatform.iOS => false,
+  };
+}
 
 enum SidemeshWindowKind { main, session, browserPreview }
 
