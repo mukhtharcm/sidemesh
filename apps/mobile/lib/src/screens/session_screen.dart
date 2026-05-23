@@ -5809,9 +5809,8 @@ class _SessionScreenState extends State<SessionScreen>
   }
 
   Future<void> _openBrowserPreviewTarget(
-    BrowserPreviewTargetCandidate candidate, {
-    bool openInWindow = false,
-  }) async {
+    BrowserPreviewTargetCandidate candidate,
+  ) async {
     if (!_supportsBrowserPreview) {
       showAppSnackBar(context, 'This host does not expose the browser.');
       return;
@@ -5844,16 +5843,12 @@ class _SessionScreenState extends State<SessionScreen>
             profileMode: profileMode,
           );
       if (!mounted) return;
-      if (openInWindow) {
-        await _openBrowserPreviewWindow(preview);
-      } else {
-        await _showDockedBrowserPreview(preview: preview);
-        if (!mounted) return;
-        showAppSnackBar(
-          context,
-          'Opened browser for ${candidate.endpointLabel}.',
-        );
-      }
+      await _showDockedBrowserPreview(preview: preview);
+      if (!mounted) return;
+      showAppSnackBar(
+        context,
+        'Opened browser for ${candidate.endpointLabel}.',
+      );
     } catch (error) {
       if (!mounted) return;
       showAppSnackBar(
@@ -5863,7 +5858,7 @@ class _SessionScreenState extends State<SessionScreen>
     }
   }
 
-  Future<void> _openBrowserTabs({bool openInWindow = false}) async {
+  Future<void> _openBrowserTabs() async {
     if (!_supportsBrowserPreview) {
       showAppSnackBar(context, 'This host does not expose the browser.');
       return;
@@ -5878,11 +5873,7 @@ class _SessionScreenState extends State<SessionScreen>
           api: widget.api,
           session: session,
           onBrowserOpened: (preview) {
-            if (openInWindow) {
-              unawaited(_openBrowserPreviewWindow(preview));
-            } else {
-              unawaited(_showDockedBrowserPreview(preview: preview));
-            }
+            unawaited(_showDockedBrowserPreview(preview: preview));
           },
         ),
       );
@@ -5896,11 +5887,7 @@ class _SessionScreenState extends State<SessionScreen>
           cwd: session.cwd,
           sessionId: session.id,
           onBrowserOpened: (preview) {
-            if (openInWindow) {
-              unawaited(_openBrowserPreviewWindow(preview));
-            } else {
-              unawaited(_showDockedBrowserPreview(preview: preview));
-            }
+            unawaited(_showDockedBrowserPreview(preview: preview));
             Navigator.of(context).maybePop();
           },
         ),
@@ -6719,11 +6706,6 @@ class _SessionScreenState extends State<SessionScreen>
           unawaited(_openBrowserTabs());
         }
         break;
-      case 'preview_window':
-        if (_supportsBrowserPreview) {
-          unawaited(_openBrowserTabs(openInWindow: true));
-        }
-        break;
       case 'search':
         _toggleSearchPanel();
         break;
@@ -6790,7 +6772,80 @@ class _SessionScreenState extends State<SessionScreen>
             ),
           ],
         ),
-      // ── Session management ──────────────────────────────────────────────
+      _SessionActionGroup(
+        label: 'Open',
+        actions: [
+          if (_supportsBrowserPreview)
+            _SessionActionSpec(
+              value: 'preview',
+              label: 'Browser',
+              detail: browserOpen
+                  ? 'Choose another tab or return to the open browser.'
+                  : 'Open a tab or enter a URL.',
+              icon: Icons.open_in_browser_rounded,
+              tone: browserOpen
+                  ? _SessionActionTone.accent
+                  : _SessionActionTone.neutral,
+              active: browserOpen,
+            ),
+          if (_supportsTerminal)
+            _SessionActionSpec(
+              value: 'terminal',
+              label: terminalOpen ? 'Terminal is open' : 'Terminal',
+              detail: terminalOpen
+                  ? 'Jump back to the active terminal.'
+                  : 'Open a shell for this workspace.',
+              icon: Icons.terminal_rounded,
+              tone: terminalOpen
+                  ? _SessionActionTone.accent
+                  : _SessionActionTone.neutral,
+              active: terminalOpen,
+            ),
+          if (_supportsFilesystem)
+            const _SessionActionSpec(
+              value: 'browse',
+              label: 'Files',
+              detail: 'Browse this workspace.',
+              icon: Icons.folder_rounded,
+            ),
+          if (_supportsSessionResources)
+            _SessionActionSpec(
+              value: 'resources',
+              label: resourcesOpen ? 'Resources are open' : 'Resources',
+              detail: 'View generated images and session assets.',
+              icon: Icons.perm_media_rounded,
+              tone: resourcesOpen
+                  ? _SessionActionTone.accent
+                  : _SessionActionTone.neutral,
+              active: resourcesOpen,
+            ),
+          _SessionActionSpec(
+            value: 'search',
+            label: searchOpen ? 'Close search' : 'Search transcript',
+            detail: searchOpen
+                ? 'Hide the current search panel.'
+                : 'Find text in loaded messages.',
+            icon: searchOpen ? Icons.search_off_rounded : Icons.search_rounded,
+            tone: searchOpen
+                ? _SessionActionTone.accent
+                : _SessionActionTone.neutral,
+            active: searchOpen,
+          ),
+          if (gitAvailable)
+            _SessionActionSpec(
+              value: 'git',
+              label: 'Git',
+              detail: gitDirty
+                  ? 'Working tree has changes.'
+                  : 'Branch, upstream, and diff shortcuts.',
+              icon: Icons.account_tree_rounded,
+              tone: gitDirty
+                  ? _SessionActionTone.warning
+                  : _SessionActionTone.neutral,
+              active: gitDirty,
+            ),
+        ],
+      ),
       _SessionActionGroup(
         label: 'Session',
         actions: [
@@ -6892,87 +6947,6 @@ class _SessionScreenState extends State<SessionScreen>
               ),
           ],
         ),
-      // ── Tools — all workspace and session tool launchers ───────────────────
-      _SessionActionGroup(
-        label: 'Tools',
-        actions: [
-          if (_supportsTerminal)
-            _SessionActionSpec(
-              value: 'terminal',
-              label: terminalOpen ? 'Terminal is open' : 'Open terminal',
-              detail: terminalOpen
-                  ? 'Jump back to the active terminal surface.'
-                  : 'Open a shell for this workspace.',
-              icon: Icons.terminal_rounded,
-              tone: terminalOpen
-                  ? _SessionActionTone.accent
-                  : _SessionActionTone.neutral,
-              active: terminalOpen,
-            ),
-          if (_supportsFilesystem)
-            const _SessionActionSpec(
-              value: 'browse',
-              label: 'Browse files',
-              detail: 'Open the workspace file browser.',
-              icon: Icons.folder_rounded,
-            ),
-          if (_supportsBrowserPreview)
-            _SessionActionSpec(
-              value: 'preview',
-              label: browserOpen ? 'Browser is open' : 'Open browser',
-              detail: browserOpen
-                  ? 'Jump back to your browser tabs.'
-                  : 'Open a local app or URL from this host.',
-              icon: Icons.open_in_browser_rounded,
-              tone: _SessionActionTone.accent,
-              active: browserOpen,
-            ),
-          if (_supportsBrowserPreview &&
-              SidemeshBrowserPreviewWindowManager.instance.isSupported)
-            const _SessionActionSpec(
-              value: 'preview_window',
-              label: 'Open browser in new window',
-              detail: 'Detach the browser into its own macOS window.',
-              icon: Icons.open_in_new_rounded,
-            ),
-          if (_supportsSessionResources)
-            _SessionActionSpec(
-              value: 'resources',
-              label: resourcesOpen ? 'Resources are open' : 'Open resources',
-              detail: 'View generated images and session assets.',
-              icon: Icons.perm_media_rounded,
-              tone: resourcesOpen
-                  ? _SessionActionTone.accent
-                  : _SessionActionTone.neutral,
-              active: resourcesOpen,
-            ),
-          _SessionActionSpec(
-            value: 'search',
-            label: searchOpen ? 'Close search' : 'Search transcript',
-            detail: searchOpen
-                ? 'Hide the current search panel.'
-                : 'Find text in loaded messages.',
-            icon: searchOpen ? Icons.search_off_rounded : Icons.search_rounded,
-            tone: searchOpen
-                ? _SessionActionTone.accent
-                : _SessionActionTone.neutral,
-            active: searchOpen,
-          ),
-          if (gitAvailable)
-            _SessionActionSpec(
-              value: 'git',
-              label: 'Git details',
-              detail: gitDirty
-                  ? 'Working tree has changes.'
-                  : 'Branch, upstream, and diff shortcuts.',
-              icon: Icons.account_tree_rounded,
-              tone: gitDirty
-                  ? _SessionActionTone.warning
-                  : _SessionActionTone.neutral,
-              active: gitDirty,
-            ),
-        ],
-      ),
     ];
   }
 
@@ -7428,6 +7402,8 @@ class _SessionScreenState extends State<SessionScreen>
     final resourcesOpenInInspector = _isResourcesInspectorOpen(inspectorScope);
     final terminalOpenInInspector = _isTerminalInspectorOpen(inspectorScope);
     final browserOpenInInspector = _isBrowserTabsInspectorOpen(inspectorScope);
+    final browserOpen =
+        browserOpenInInspector || _dockedBrowserPreview != null;
     // All layouts get the same compact info strip: status dot, host·folder,
     // provider badge, git chip, context %, pinned count, ℹ️ tap for details.
     // Desktop uses it as a subtitle since the title row has no room for meta.
@@ -7674,7 +7650,7 @@ class _SessionScreenState extends State<SessionScreen>
                             gitAvailable: gitAvailable,
                             gitDirty: gitDirty,
                             terminalOpen: terminalOpenInInspector,
-                            browserOpen: browserOpenInInspector,
+                            browserOpen: browserOpen,
                             searchOpen: searchOpenInInspector,
                             resourcesOpen: resourcesOpenInInspector,
                           ),
@@ -7700,7 +7676,7 @@ class _SessionScreenState extends State<SessionScreen>
                           gitAvailable: menuGitAvailable,
                           gitDirty: gitDirty,
                           terminalOpen: terminalOpenInInspector,
-                          browserOpen: browserOpenInInspector,
+                          browserOpen: browserOpen,
                           searchOpen: searchOpenInInspector,
                           resourcesOpen: resourcesOpenInInspector,
                           anchorContext: buttonContext,
@@ -7729,7 +7705,7 @@ class _SessionScreenState extends State<SessionScreen>
                       gitAvailable: menuGitAvailable,
                       gitDirty: gitDirty,
                       terminalOpen: terminalOpenInInspector,
-                      browserOpen: browserOpenInInspector,
+                      browserOpen: browserOpen,
                       searchOpen: searchOpenInInspector,
                       resourcesOpen: resourcesOpenInInspector,
                     ),

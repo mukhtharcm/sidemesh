@@ -61,9 +61,8 @@ void main() {
     await tester.tap(find.byTooltip('Session actions'));
     await _pumpFrames(tester);
 
-    expect(find.text('Browse files'), findsOneWidget);
-    expect(find.text('Open browser'), findsNothing);
-    expect(find.text('Manage browsers'), findsNothing);
+    expect(find.text('Files'), findsOneWidget);
+    expect(find.text('Browser'), findsNothing);
     expect(find.text('Rename'), findsNothing);
     expect(find.text('Archive'), findsNothing);
 
@@ -184,7 +183,7 @@ void main() {
 
       await tester.tap(find.byTooltip('Session actions'));
       await _pumpFrames(tester);
-      await tester.tap(find.text('Browse files'));
+      await tester.tap(find.text('Files'));
       await _pumpFrames(tester);
 
       expect(controller.current?.kind, InspectorSurfaceKind.fileBrowser);
@@ -380,8 +379,7 @@ void main() {
       await tester.tap(find.byTooltip('Session actions'));
       await _pumpFrames(tester);
 
-      expect(find.text('Open browser'), findsOneWidget);
-      expect(find.text('Manage browsers'), findsNothing);
+      expect(find.text('Browser'), findsOneWidget);
     },
   );
 
@@ -416,8 +414,7 @@ void main() {
       await tester.tap(find.byTooltip('Session actions'));
       await _pumpFrames(tester);
 
-      expect(find.text('Open browser'), findsNothing);
-      expect(find.text('Manage browsers'), findsNothing);
+      expect(find.text('Browser'), findsNothing);
     },
   );
 
