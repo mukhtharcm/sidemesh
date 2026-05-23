@@ -18,8 +18,7 @@ export function startupSummaryLines(options: {
     }`,
     `[sidemesh] providers: ${options.providerDisplayName} (${options.providerKinds.join(", ")})`,
     `[sidemesh] terminal: ${options.config.terminal.enabled ? "enabled" : "disabled"}`,
-    `[sidemesh] port forwarding: ${options.config.portForwarding.enabled ? "enabled" : "disabled"}`,
-    `[sidemesh] browser preview: ${
+    `[sidemesh] browser: ${
       options.config.browserPreview.enabled
         ? `enabled (${options.config.browserPreview.maxPreviews} max, ${options.config.browserPreview.frameIntervalMs}ms frames, q${options.config.browserPreview.quality})`
         : "disabled"

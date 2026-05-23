@@ -91,7 +91,6 @@ import {
   TerminalRegistry,
   normalizeTerminalShell,
 } from "./terminal.js";
-import { PortForwardError, PortForwardRegistry } from "./port-forward.js";
 import {
   BrowserPreviewError,
   BrowserPreviewRegistry,
@@ -143,7 +142,6 @@ const HOST_CAPABILITIES: HostCapabilities = {
     gitStatus: true,
     gitDiff: true,
     terminal: false,
-    portForwarding: false,
     browserPreview: false,
   },
   sessions: {
@@ -241,7 +239,6 @@ export async function startServer(
     workspace: {
       ...HOST_CAPABILITIES.workspace,
       terminal: config.terminal.enabled,
-      portForwarding: config.portForwarding.enabled,
       browserPreview: config.browserPreview.enabled,
     },
   };
@@ -387,10 +384,6 @@ export async function startServer(
     requirePty: config.terminal.requirePty,
     resolveCwd: (cwd, request) =>
       resolveTerminalCwd(provider, runtimeCache, cwd, request.sessionId),
-  });
-  const portForwardRegistry = new PortForwardRegistry({
-    enabled: hostCapabilities.workspace.portForwarding,
-    allowNonLoopbackTargets: config.portForwarding.allowNonLoopbackTargets,
   });
   const browserPreviewRegistry = new BrowserPreviewRegistry({
     enabled: hostCapabilities.workspace.browserPreview,
@@ -1533,7 +1526,6 @@ export async function startServer(
       },
       features: {
         terminals: terminalRegistry.list().length,
-        portForwards: portForwardRegistry.list().length,
         browserPreviews: browserPreviewRegistry.list().length,
       },
     });
@@ -1881,67 +1873,12 @@ export async function startServer(
     }),
   );
 
-  app.get("/api/ports", jsonRoute((_request, response) => {
-    if (
-      !requireHostCapability(
-        response,
-        hostCapabilities.workspace.portForwarding,
-        "port forwarding",
-      )
-    ) {
-      return;
-    }
-    response.json({ ports: portForwardRegistry.list() });
-  }));
-
-  app.post(
-    "/api/ports",
-    asyncRoute(async (request, response) => {
-      if (
-        !requireHostCapability(
-          response,
-          hostCapabilities.workspace.portForwarding,
-          "port forwarding",
-        )
-      ) {
-        return;
-      }
-      const portForward = portForwardRegistry.create({
-        targetPort: asInteger(request.body?.targetPort),
-        targetHost: asString(request.body?.targetHost),
-        scheme: asString(request.body?.scheme),
-        label: asString(request.body?.label),
-        cwd: asString(request.body?.cwd),
-        sessionId: asString(request.body?.sessionId),
-      });
-      response.status(201).json(portForward);
-    }),
-  );
-
-  app.delete(
-    "/api/ports/:portForwardId",
-    asyncRoute(async (request, response) => {
-      if (
-        !requireHostCapability(
-          response,
-          hostCapabilities.workspace.portForwarding,
-          "port forwarding",
-        )
-      ) {
-        return;
-      }
-      response.json(
-        portForwardRegistry.stop(pathParam(request.params.portForwardId)),
-      );
-    }),
-  );
-
   app.get("/api/browser-previews", jsonRoute((_request, response) => {
     if (
       !requireHostCapability(
         response,
         hostCapabilities.workspace.browserPreview,
-        "browser preview",
+        "browser",
       )
     ) {
       return;
@@ -1956,7 +1893,7 @@ export async function startServer(
         !requireHostCapability(
           response,
           hostCapabilities.workspace.browserPreview,
-          "browser preview",
+          "browser",
         )
       ) {
         return;
@@ -1972,6 +1909,7 @@ export async function startServer(
         width: asInteger(request.body?.width),
         height: asInteger(request.body?.height),
         profileMode: asString(request.body?.profileMode),
+        reuseExisting: asBoolean(request.body?.reuseExisting),
       });
       response.status(201).json(preview);
     }),
@@ -1984,7 +1922,7 @@ export async function startServer(
         !requireHostCapability(
           response,
           hostCapabilities.workspace.browserPreview,
-          "browser preview",
+          "browser",
         )
       ) {
         return;
@@ -3192,7 +3130,6 @@ export async function startServer(
     const terminalLiveMatch = /^\/api\/terminals\/([^/]+)\/live$/.exec(
       pathOnly,
     );
-    const portForwardMatch = /^\/api\/ports\/([^/]+)\/connect$/.exec(pathOnly);
     const browserPreviewMatch =
       /^\/api\/browser-previews\/([^/]+)\/live$/.exec(pathOnly);
     if (
@@ -3201,7 +3138,6 @@ export async function startServer(
       pathOnly !== "/api/fs/live" &&
       pathOnly !== "/api/actions/live" &&
       !terminalLiveMatch &&
-      !portForwardMatch &&
       !browserPreviewMatch
     ) {
       socket.destroy();
@@ -3223,14 +3159,6 @@ export async function startServer(
       const since = asInteger(params.get("since")) ?? -1;
       wsServer.handleUpgrade(request, socket, head, (ws) => {
         terminalRegistry.attach(ws, terminalId, since);
-      });
-      return;
-    }
-
-    if (portForwardMatch) {
-      const portForwardId = decodeURIComponent(portForwardMatch[1] || "");
-      wsServer.handleUpgrade(request, socket, head, (ws) => {
-        portForwardRegistry.attach(ws, portForwardId);
       });
       return;
     }
@@ -3356,7 +3284,6 @@ export async function startServer(
     if (
       error instanceof TerminalError ||
       error instanceof WorkspaceAccessError ||
-      error instanceof PortForwardError ||
       error instanceof BrowserPreviewError
     ) {
       return c.json({ error: message }, error.status as ContentfulStatusCode);
@@ -3495,7 +3422,6 @@ export async function startServer(
     close: async () => {
       clearInterval(healthMonitor);
       terminalRegistry.dispose();
-      portForwardRegistry.dispose();
       await browserPreviewRegistry.dispose();
       for (const socket of approvalSockets) socket.close();
       for (const socket of recentSessionsSockets) socket.close();
@@ -4765,6 +4691,10 @@ function asInteger(value: unknown): number | null {
     return Number.isFinite(parsed) ? parsed : null;
   }
   return null;
+}
+
+function asBoolean(value: unknown): boolean | null {
+  return typeof value === "boolean" ? value : null;
 }
 
 function parseTimestamp(value: unknown): number | null {

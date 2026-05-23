@@ -2,8 +2,8 @@
 
 Sidemesh is a trusted-network control plane for coding-agent sessions. Run the
 daemon on your development machine, connect from the Flutter app, and manage
-sessions, approvals, files, git, terminals, port forwards, and browser
-previews from mobile or desktop.
+sessions, approvals, files, git, terminals, and browser tabs from mobile or
+desktop.
 
 This repository contains:
 
@@ -147,8 +147,8 @@ Current auth is a shared bearer token:
 - `GET /healthz` is intentionally unauthenticated for local health checks
 - per-device token revocation is not implemented yet
 
-Host-side features such as integrated terminals, port forwarding, and browser
-preview should stay disabled unless you intentionally need them.
+Host-side features such as integrated terminals and browser tabs should stay
+disabled unless you intentionally need them.
 
 ## More documentation
 

@@ -10,10 +10,10 @@ const homepageOgImageUrl = new URL("/assets/og-card-v1.png", Astro.site);
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Sidemesh — Your agent workstation, from anywhere</title>
-<meta name="description" content="Run coding agents on your own Mac, VPS, or workstation. Control sessions, approvals, files, terminals, port forwarding, and browser previews from your phone or desktop." />
+<meta name="description" content="Run coding agents on your own Mac, VPS, or workstation. Control sessions, approvals, files, terminals, and browser tabs from your phone or desktop." />
 <meta name="theme-color" content="#0d0f14" />
 <meta property="og:title" content="Sidemesh — Your agent workstation, from anywhere" />
-<meta property="og:description" content="Sidemesh pairs a small daemon on your own machines with an iOS app for sessions, approvals, files, terminals, ports, and browser previews." />
+<meta property="og:description" content="Sidemesh pairs a small daemon on your own machines with an iOS app for sessions, approvals, files, terminals, and browser tabs." />
 <meta property="og:type" content="website" />
 <meta property="og:image" content={homepageOgImageUrl.toString()} />
 <meta property="og:image:width" content="1200" />
@@ -1291,7 +1291,7 @@ const homepageOgImageUrl = new URL("/assets/og-card-v1.png", Astro.site);
           <p class="lede">
             Sidemesh runs beside your coding agents on the machines you trust,
             then gives you the remote surface around them: sessions, approvals,
-            files, terminals, ports, and previews from your phone or desktop.
+            files, terminals, and browser tabs from your phone or desktop.
           </p>
           <div class="hero-actions">
             <a
@@ -1343,7 +1343,7 @@ const homepageOgImageUrl = new URL("/assets/og-card-v1.png", Astro.site);
                 <div class="action-row"><span class="row-icon">↻</span><span class="row-copy"><strong>Reload</strong><span>Refresh this transcript.</span></span></div>
                 <div class="action-row"><span class="row-icon">＋</span><span class="row-copy"><strong>New session</strong><span>Start beside this directory.</span></span></div>
                 <div class="action-row"><span class="row-icon">›_</span><span class="row-copy"><strong>Open terminal</strong><span>Open a shell for this workspace.</span></span></div>
-                <div class="action-row"><span class="row-icon">⤳</span><span class="row-copy"><strong>Forward port</strong><span>Preview localhost from this host.</span></span></div>
+                <div class="action-row"><span class="row-icon">◉</span><span class="row-copy"><strong>Open browser</strong><span>Browse from this host.</span></span></div>
                 <div class="action-row"><span class="row-icon">⌕</span><span class="row-copy"><strong>Search transcript</strong><span>Find loaded messages.</span></span></div>
               </div>
             </div>
@@ -1362,7 +1362,7 @@ const homepageOgImageUrl = new URL("/assets/og-card-v1.png", Astro.site);
           <p>
             Chat is only one part of supervising an agent. Sidemesh keeps the rest of
             the workstation close too: approvals, files, git context, terminals,
-            ports, and previews.
+            and browser tabs.
           </p>
         </div>
 
@@ -1414,25 +1414,12 @@ const homepageOgImageUrl = new URL("/assets/og-card-v1.png", Astro.site);
           <article class="feature-card">
             <div class="feature-icon" aria-hidden="true">
               <svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
-                <circle cx="4.5" cy="9" r="2.5"/>
-                <circle cx="13.5" cy="9" r="2.5"/>
-                <path d="M7 9h4"/>
-                <path d="M10.5 7.5l2.5 1.5-2.5 1.5"/>
-              </svg>
-            </div>
-            <h3>Port forwarding</h3>
-            <p>Reach dev servers running on the remote machine from your phone or desktop — without exposing the host to the public internet.</p>
-          </article>
-
-          <article class="feature-card">
-            <div class="feature-icon" aria-hidden="true">
-              <svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
                 <rect x="1" y="3" width="16" height="13" rx="2"/>
                 <path d="M1 7h16M5 5h.01M7.5 5h.01M10 5h.01"/>
               </svg>
             </div>
-            <h3>Browser preview</h3>
-            <p>Stream a live browser running on the host when visual state matters. No tunnel, no staging server, no extra tooling needed.</p>
+            <h3>Browser</h3>
+            <p>Open local apps and URLs in a browser running on the host. Tabs stay with the session so you can reopen them from phone or desktop.</p>
           </article>
 
         </div>
@@ -1479,7 +1466,7 @@ const homepageOgImageUrl = new URL("/assets/og-card-v1.png", Astro.site);
             <div class="showcase-copy">
               <span class="eyebrow">Session control</span>
               <h3>Unblock work from the phone in your hand.</h3>
-              <p>Open the current session, review the transcript, jump into actions, search, ports, resources, git details, or a terminal exactly when the work needs you.</p>
+              <p>Open the current session, review the transcript, jump into actions, search, browser tabs, resources, git details, or a terminal exactly when the work needs you.</p>
             </div>
             <div class="surface-grid" aria-label="Session transcript and action preview">
               <div class="surface-card">
@@ -1494,7 +1481,7 @@ const homepageOgImageUrl = new URL("/assets/og-card-v1.png", Astro.site);
               <div class="surface-card">
                 <div class="surface-head"><span>actions</span><span>quick moves</span></div>
                 <div class="surface-list">
-                  <span>Open terminal</span><span>Forward port</span><span>Search transcript</span><span>Open resources</span><span>Git details</span>
+                  <span>Open terminal</span><span>Open browser</span><span>Search transcript</span><span>Open resources</span><span>Git details</span>
                 </div>
               </div>
             </div>
@@ -1537,7 +1524,7 @@ const homepageOgImageUrl = new URL("/assets/og-card-v1.png", Astro.site);
             <h3>Drop into the right tool for the job.</h3>
             <p>
               Reply in chat, clear an approval, browse files, attach a terminal,
-              forward a port, or stream the browser — from anywhere, in one app.
+              or open the browser from anywhere, in one app.
             </p>
           </article>
         </div>
@@ -1621,8 +1608,8 @@ const homepageOgImageUrl = new URL("/assets/og-card-v1.png", Astro.site);
           <span class="eyebrow">Security model</span>
           <h2>Powerful host access belongs on a private route.</h2>
           <p>
-            Sidemesh can reach transcripts, approvals, files, terminals, forwarded
-            ports, and browser sessions. That is what makes it useful — and why
+            Sidemesh can reach transcripts, approvals, files, terminals, and
+            browser sessions. That is what makes it useful — and why
             you should run it over Tailscale, WireGuard, or a trusted LAN.
           </p>
           <p>
@@ -1680,11 +1667,11 @@ const homepageOgImageUrl = new URL("/assets/og-card-v1.png", Astro.site);
           </div>
           <div class="faq-item">
             <strong>Should I expose the daemon to the internet?</strong>
-            <p>No. Use a private route first. The daemon is intentionally close to powerful host capabilities — terminal, files, approvals, ports. Treat that boundary seriously.</p>
+            <p>No. Use a private route first. The daemon is intentionally close to powerful host capabilities: terminal, files, approvals, and browser. Treat that boundary seriously.</p>
           </div>
           <div class="faq-item">
             <strong>How is this different from SSH?</strong>
-            <p>SSH gives you a shell. Sidemesh gives you the agent-aware view: running sessions, pending approvals, transcripts, files, git context, ports, previews, and terminal access when you need it.</p>
+            <p>SSH gives you a shell. Sidemesh gives you the agent-aware view: running sessions, pending approvals, transcripts, files, git context, browser tabs, and terminal access when you need it.</p>
           </div>
         </div>
       </div>

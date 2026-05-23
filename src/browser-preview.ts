@@ -96,6 +96,7 @@ export interface CreateBrowserPreviewRequest {
   width?: number | null;
   height?: number | null;
   profileMode?: string | null;
+  reuseExisting?: boolean | null;
 }
 
 export interface BrowserPreviewInfo {
@@ -439,14 +440,16 @@ export class BrowserPreviewRegistry {
     const cwd = request.cwd?.trim() || null;
     const sessionId = request.sessionId?.trim() || null;
     const profileMode = normalizeProfileMode(request.profileMode);
-    let reusable = this.findReusablePreview({
-      targetHost: target.targetHost,
-      targetPort: target.targetPort,
-      scheme: target.scheme,
-      cwd,
-      sessionId,
-      profileMode,
-    });
+    let reusable = request.reuseExisting === false
+      ? null
+      : this.findReusablePreview({
+          targetHost: target.targetHost,
+          targetPort: target.targetPort,
+          scheme: target.scheme,
+          cwd,
+          sessionId,
+          profileMode,
+        });
     if (reusable && this.isPreviewUnhealthy(reusable)) {
       await this.stopRecord(reusable, "failed");
       reusable = null;
@@ -540,7 +543,7 @@ export class BrowserPreviewRegistry {
     if (!this.enabled) {
       sendJson(socket, {
         type: "error",
-        message: "browser preview is disabled",
+        message: "browser is disabled",
       });
       socket.close();
       return;
@@ -551,7 +554,7 @@ export class BrowserPreviewRegistry {
       preview.status === "stopped" ||
       preview.status === "failed"
     ) {
-      sendJson(socket, { type: "error", message: "browser preview not found" });
+      sendJson(socket, { type: "error", message: "browser tab not found" });
       socket.close();
       return;
     }
@@ -676,7 +679,7 @@ export class BrowserPreviewRegistry {
         await cdp.send("Network.enable", {}, sessionId);
         this.registerNetworkHandlers(preview, sessionId);
       } catch (error) {
-        // Keep the browser preview running even if Network CDP support is
+        // Keep the browser running even if Network CDP support is
         // unavailable on this Chromium build.
         preview.networkUnavailableMessage = error instanceof Error && error.message
           ? `Network inspection is unavailable: ${error.message}`
@@ -1681,7 +1684,7 @@ export class BrowserPreviewRegistry {
     }
     if (!preview.cdp || !preview.sessionIdCdp || preview.status !== "running") {
       if (canBrowserPreviewRequestHaveBody(entry.method)) {
-        detail.requestBodyError = "Browser preview is no longer running.";
+        detail.requestBodyError = "Browser is no longer running.";
       }
       if (!entry.finished) {
         detail.bodyError = "Response body is not available until the request finishes.";
@@ -1690,7 +1693,7 @@ export class BrowserPreviewRegistry {
       } else if (entry.isRedirectResponse) {
         detail.bodyError = "Response body is not available for redirect responses.";
       } else {
-        detail.bodyError = "Browser preview is no longer running.";
+        detail.bodyError = "Browser is no longer running.";
       }
       sendJson(socket, {
         type: "networkDetail",
@@ -1861,7 +1864,7 @@ export class BrowserPreviewRegistry {
     const sessionId = preview.sessionIdCdp;
     if (!cdp || !sessionId || preview.status !== "running") {
       throw new BrowserPreviewError(
-        "Browser preview is no longer running.",
+        "Browser is no longer running.",
         409,
       );
     }
@@ -1946,7 +1949,7 @@ export class BrowserPreviewRegistry {
     const sessionId = preview.sessionIdCdp;
     if (!cdp || !sessionId || preview.status !== "running") {
       throw new BrowserPreviewError(
-        "Browser preview is no longer running.",
+        "Browser is no longer running.",
         409,
       );
     }
@@ -2094,7 +2097,7 @@ export class BrowserPreviewRegistry {
     const value = stringValue(record.value);
     if (!cdp || !sessionId || preview.status !== "running") {
       throw new BrowserPreviewError(
-        "Browser preview is no longer running.",
+        "Browser is no longer running.",
         409,
       );
     }
@@ -2133,7 +2136,7 @@ export class BrowserPreviewRegistry {
     const key = stringValue(record.key);
     if (!cdp || !sessionId || preview.status !== "running") {
       throw new BrowserPreviewError(
-        "Browser preview is no longer running.",
+        "Browser is no longer running.",
         409,
       );
     }
@@ -2170,7 +2173,7 @@ export class BrowserPreviewRegistry {
     const area = storageAreaFromMessage(record.area);
     if (!cdp || !sessionId || preview.status !== "running") {
       throw new BrowserPreviewError(
-        "Browser preview is no longer running.",
+        "Browser is no longer running.",
         409,
       );
     }
@@ -2204,7 +2207,7 @@ export class BrowserPreviewRegistry {
     const path = stringValue(record.path) || "/";
     if (!cdp || !sessionId || preview.status !== "running") {
       throw new BrowserPreviewError(
-        "Browser preview is no longer running.",
+        "Browser is no longer running.",
         409,
       );
     }
@@ -2231,7 +2234,7 @@ export class BrowserPreviewRegistry {
     const sessionId = preview.sessionIdCdp;
     if (!cdp || !sessionId || preview.status !== "running") {
       throw new BrowserPreviewError(
-        "Browser preview is no longer running.",
+        "Browser is no longer running.",
         409,
       );
     }
@@ -2576,7 +2579,7 @@ export class BrowserPreviewRegistry {
     for (const client of preview.clients) {
       if (client.readyState !== client.OPEN) continue;
       if (client.bufferedAmount > MAX_CLIENT_BUFFERED_AMOUNT) {
-        client.close(1013, "browser preview client is too far behind");
+        client.close(1013, "browser client is too far behind");
         continue;
       }
       sendJson(client, payload);
@@ -2669,7 +2672,7 @@ export class BrowserPreviewRegistry {
   private requirePreview(id: string): BrowserPreviewRecord {
     const preview = this.previews.get(id);
     if (!preview) {
-      throw new BrowserPreviewError("browser preview not found", 404);
+      throw new BrowserPreviewError("browser tab not found", 404);
     }
     return preview;
   }
@@ -2704,13 +2707,13 @@ export class BrowserPreviewRegistry {
 
   private assertEnabled(): void {
     if (!this.enabled) {
-      throw new BrowserPreviewError("browser preview is disabled", 403);
+      throw new BrowserPreviewError("browser is disabled", 403);
     }
   }
 
   private enforcePreviewLimit(): void {
     if (this.previews.size < this.maxPreviews) return;
-    throw new BrowserPreviewError("browser preview limit reached", 429);
+    throw new BrowserPreviewError("browser tab limit reached", 429);
   }
 
   private info(preview: BrowserPreviewRecord): BrowserPreviewInfo {
@@ -2952,7 +2955,7 @@ async function navigateToReachableTarget(
     }
   }
   throw new BrowserPreviewError(
-    `Could not open browser preview target. Tried ${failures.join("; ")}`,
+    `Could not open browser target. Tried ${failures.join("; ")}`,
     502,
   );
 }
@@ -3659,7 +3662,7 @@ export function normalizeBrowserPreviewTargetUrl(
   try {
     parsed = new URL(value);
   } catch {
-    throw new BrowserPreviewError("browser preview targetUrl must be a URL", 400);
+    throw new BrowserPreviewError("browser targetUrl must be a URL", 400);
   }
   const scheme = normalizeScheme(parsed.protocol.replace(/:$/, ""));
   const targetPort = normalizeUrlPort(parsed, scheme);
@@ -3685,7 +3688,7 @@ function normalizeTargetHost(value: string | null | undefined): string {
     !isLocalhostSubdomain(targetHost)
   ) {
     throw new BrowserPreviewError(
-      "browser previews can only open localhost targets",
+      "browser can only open localhost targets",
       400,
     );
   }
@@ -3713,7 +3716,7 @@ function normalizeUrlTargetHost(hostname: string): string {
     return hostnameWithoutBrackets;
   }
   if (!hostnameWithoutBrackets) {
-    throw new BrowserPreviewError("browser preview targetUrl must include a host", 400);
+    throw new BrowserPreviewError("browser targetUrl must include a host", 400);
   }
   return hostnameWithoutBrackets;
 }
@@ -3748,7 +3751,7 @@ function normalizeInitialTargetUrl(parsed: URL, targetHost: string): string {
 function normalizeScheme(value: string | null | undefined): BrowserPreviewScheme {
   const scheme = value?.trim().toLowerCase() || "http";
   if (scheme === "http" || scheme === "https") return scheme;
-  throw new BrowserPreviewError("browser preview scheme must be http or https");
+  throw new BrowserPreviewError("browser scheme must be http or https");
 }
 
 function normalizeProfileMode(
@@ -3757,7 +3760,7 @@ function normalizeProfileMode(
   const mode = value?.trim().toLowerCase() || "temporary";
   if (mode === "temporary" || mode === "sidemesh") return mode;
   throw new BrowserPreviewError(
-    "browser preview profileMode must be temporary or sidemesh",
+    "browser profileMode must be temporary or sidemesh",
   );
 }
 

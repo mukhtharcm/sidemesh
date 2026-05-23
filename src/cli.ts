@@ -446,7 +446,7 @@ export async function main(argv = process.argv): Promise<void> {
           port: config.port,
           stateDir: config.stateDir,
           terminal: config.terminal,
-          portForwarding: config.portForwarding,
+          browser: config.browserPreview,
           defaultProvider: config.defaultProviderKind,
           providers: config.providers.map((provider) => provider.kind),
           tokenSource: config.tokenSource,
@@ -471,13 +471,7 @@ export async function main(argv = process.argv): Promise<void> {
           }`,
         );
         console.log(
-          `Port forwarding: ${
-            payload.portForwarding.enabled ? "enabled" : "disabled"
-          }${
-            payload.portForwarding.allowNonLoopbackTargets
-              ? " (non-localhost targets allowed)"
-              : ""
-          }`,
+          `Browser: ${payload.browser.enabled ? "enabled" : "disabled"}`,
         );
         console.log(`Default provider: ${payload.defaultProvider}`);
         console.log(`Providers: ${payload.providers.join(", ")}`);

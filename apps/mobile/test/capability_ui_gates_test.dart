@@ -350,7 +350,7 @@ void main() {
   });
 
   testWidgets(
-    'session screen surfaces browser preview actions for preview-capable hosts',
+    'session screen surfaces browser action for browser-capable hosts',
     (tester) async {
       final api = _CapabilityFakeApi(
         _nodeForCapabilities(
@@ -360,7 +360,6 @@ void main() {
             'gitStatus': false,
             'gitDiff': false,
             'browserPreview': true,
-            'portForwarding': false,
           },
         ),
       );
@@ -382,12 +381,12 @@ void main() {
       await _pumpFrames(tester);
 
       expect(find.text('Open browser'), findsOneWidget);
-      expect(find.text('Manage browsers'), findsOneWidget);
+      expect(find.text('Manage browsers'), findsNothing);
     },
   );
 
   testWidgets(
-    'session screen hides browser preview actions for tunnel-only hosts',
+    'session screen hides browser action for hosts without browser support',
     (tester) async {
       final api = _CapabilityFakeApi(
         _nodeForCapabilities(
@@ -397,7 +396,6 @@ void main() {
             'gitStatus': false,
             'gitDiff': false,
             'browserPreview': false,
-            'portForwarding': true,
           },
         ),
       );

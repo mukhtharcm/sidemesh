@@ -58,16 +58,13 @@ export default defineConfig({
             { label: 'Filesystem', slug: 'features/filesystem' },
             { label: 'Git', slug: 'features/git' },
             { label: 'Terminal', slug: 'features/terminal' },
-            { label: 'Port Forwarding', slug: 'features/port-forwarding' },
-            { label: 'Browser Preview', slug: 'features/browser-preview' },
+            { label: 'Browser', slug: 'features/browser-preview' },
           ],
         },
         {
           label: 'Comparisons',
           items: [
             { label: 'Overview', slug: 'comparisons' },
-            { label: 'Terminal vs Port Forwarding', slug: 'comparisons/terminal-vs-port-forwarding' },
-            { label: 'Browser vs Port Forwarding', slug: 'comparisons/browser-vs-port-forwarding' },
             { label: 'When to Use What', slug: 'comparisons/when-to-use-what' },
           ],
         },

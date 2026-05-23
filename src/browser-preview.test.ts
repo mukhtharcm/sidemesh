@@ -15,8 +15,8 @@ import {
   parseChromeProfileSingletonError,
 } from "./browser-preview.js";
 
-describe("browser preview", () => {
-  it("keeps browser previews opt-in", async () => {
+describe("browser", () => {
+  it("keeps browser opt-in", async () => {
     const registry = new BrowserPreviewRegistry({ enabled: false });
 
     await assert.rejects(
@@ -24,7 +24,7 @@ describe("browser preview", () => {
       (error) =>
         error instanceof BrowserPreviewError &&
         error.status === 403 &&
-        error.message === "browser preview is disabled",
+        error.message === "browser is disabled",
     );
   });
 
@@ -33,11 +33,11 @@ describe("browser preview", () => {
 
     await assert.rejects(
       () => registry.create({ targetHost: "192.168.1.10", targetPort: 3000 }),
-      /browser previews can only open localhost targets/,
+      /browser can only open localhost targets/,
     );
     await assert.rejects(
       () => registry.create({ targetHost: "127.0.0.1", targetPort: 3000, scheme: "tcp" }),
-      /browser preview scheme must be http or https/,
+      /browser scheme must be http or https/,
     );
     await assert.rejects(
       () => registry.create({ targetHost: "127.0.0.1", targetPort: 0 }),
@@ -50,7 +50,7 @@ describe("browser preview", () => {
           targetPort: 3000,
           profileMode: "default-profile",
         }),
-      /browser preview profileMode must be temporary or sidemesh/,
+      /browser profileMode must be temporary or sidemesh/,
     );
   });
 
@@ -115,11 +115,11 @@ describe("browser preview", () => {
   it("rejects unsafe browser URL schemes before launching Chromium", () => {
     assert.throws(
       () => normalizeBrowserPreviewTargetUrl("file:///etc/passwd"),
-      /browser preview scheme must be http or https/,
+      /browser scheme must be http or https/,
     );
     assert.throws(
       () => normalizeBrowserPreviewTargetUrl("javascript:alert\\(1\\)"),
-      /browser preview scheme must be http or https/,
+      /browser scheme must be http or https/,
     );
   });
 

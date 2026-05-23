@@ -189,11 +189,13 @@ void main() {
       targetUrl: ' http://tenant.localhost:5173/app ',
       sessionId: 'session-1',
       profileMode: 'sidemesh',
+      reuseExisting: false,
     );
 
     expect(body['targetHost'], 'tenant.localhost');
     expect(body['targetPort'], 5173);
     expect(body['targetUrl'], 'http://tenant.localhost:5173/app');
     expect(body['sessionId'], 'session-1');
+    expect(body['reuseExisting'], false);
   });
 }

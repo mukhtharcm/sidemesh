@@ -32,7 +32,6 @@ function createConfig(dir: string): NodeConfig {
     updateChannel: "stable",
     stateDir: nodePath.join(dir, "state"),
     terminal: { enabled: false, shell: null, requirePty: false },
-    portForwarding: { enabled: false, allowNonLoopbackTargets: false },
     browserPreview: {
       enabled: false,
       chromePath: null,

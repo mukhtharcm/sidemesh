@@ -15,7 +15,7 @@ enum InspectorSurfaceKind {
   fileBrowser,
   pinned,
   terminal,
-  ports,
+  browserTabs,
   gitDetails,
   sessionDetails,
   /// Default surface shown when no specific surface has been saved for a
