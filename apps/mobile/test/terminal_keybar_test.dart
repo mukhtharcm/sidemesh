@@ -6,9 +6,7 @@ import 'package:sidemesh_mobile/src/theme/app_theme.dart';
 import 'package:sidemesh_mobile/src/widgets/terminal_keybar.dart';
 
 void main() {
-  testWidgets('renders essential row with modifiers and more button', (
-    tester,
-  ) async {
+  testWidgets('renders explicit shortcut row and more button', (tester) async {
     TerminalKeyAction? firedAction;
 
     await tester.pumpWidget(
@@ -20,7 +18,10 @@ void main() {
       ),
     );
 
-    // Essential keys should always be visible.
+    expect(find.text('Ctrl+C'), findsOneWidget);
+    expect(find.text('Ctrl+D'), findsOneWidget);
+    expect(find.text('Ctrl+Z'), findsOneWidget);
+    expect(find.text('Ctrl+L'), findsOneWidget);
     expect(find.text('Esc'), findsOneWidget);
     expect(find.text('Tab'), findsOneWidget);
     expect(find.text('←'), findsOneWidget);
@@ -28,23 +29,17 @@ void main() {
     expect(find.text('↓'), findsOneWidget);
     expect(find.text('→'), findsOneWidget);
 
-    // Modifier pills should appear.
-    expect(find.text('Ctrl'), findsOneWidget);
-    expect(find.text('Alt'), findsOneWidget);
-    expect(find.text('Shift'), findsOneWidget);
-
-    // More button (icon) should appear.
-    expect(find.byIcon(Icons.more_horiz_rounded), findsOneWidget);
-
-    // Tapping a key should fire the callback.
-    await tester.tap(find.text('Esc'));
+    await tester.tap(find.text('Ctrl+C'));
     await tester.pump();
     expect(firedAction, isNotNull);
-    expect(firedAction!.label, 'Esc');
-    expect(firedAction!.key, isNotNull);
+    expect(firedAction!.label, 'Ctrl+C');
+    expect(firedAction!.ctrl, true);
+
+    await tester.scrollUntilVisible(find.text('More'), 120);
+    expect(find.text('More'), findsOneWidget);
   });
 
-  testWidgets('modifier is one-shot and auto-clears after key tap', (
+  testWidgets('plain keys and ctrl shortcuts fire without modifier state', (
     tester,
   ) async {
     TerminalKeyAction? firedAction;
@@ -58,26 +53,20 @@ void main() {
       ),
     );
 
-    // Tap the Ctrl modifier pill.
-    await tester.tap(find.text('Ctrl'));
-    await tester.pumpAndSettle();
-
-    // Tap a plain key.
     await tester.tap(find.text('Tab'));
     await tester.pumpAndSettle();
 
     expect(firedAction, isNotNull);
     expect(firedAction!.label, 'Tab');
-    expect(firedAction!.ctrl, true);
+    expect(firedAction!.ctrl, false);
 
-    // After the key was sent the modifier should have auto-cleared.
     firedAction = null;
-    await tester.tap(find.text('Esc'));
+    await tester.tap(find.text('Ctrl+D'));
     await tester.pumpAndSettle();
 
     expect(firedAction, isNotNull);
-    expect(firedAction!.label, 'Esc');
-    expect(firedAction!.ctrl, false);
+    expect(firedAction!.label, 'Ctrl+D');
+    expect(firedAction!.ctrl, true);
   });
 
   testWidgets('more button opens the key sheet', (tester) async {
@@ -88,7 +77,8 @@ void main() {
       ),
     );
 
-    await tester.tap(find.byIcon(Icons.more_horiz_rounded));
+    await tester.scrollUntilVisible(find.text('More'), 120);
+    await tester.tap(find.text('More'));
     await tester.pumpAndSettle();
 
     // The sheet should show category labels and additional keys.

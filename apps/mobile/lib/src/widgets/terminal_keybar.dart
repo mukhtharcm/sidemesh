@@ -22,11 +22,11 @@ class TerminalKeyBar extends StatefulWidget {
 }
 
 class _TerminalKeyBarState extends State<TerminalKeyBar> {
-  bool _ctrl = false;
-  bool _alt = false;
-  bool _shift = false;
-
-  static const _essentials = <TerminalKeyAction>[
+  static const _primaryActions = <TerminalKeyAction>[
+    TerminalKeyAction(label: 'Ctrl+C', key: xterm.TerminalKey.keyC, ctrl: true),
+    TerminalKeyAction(label: 'Ctrl+D', key: xterm.TerminalKey.keyD, ctrl: true),
+    TerminalKeyAction(label: 'Ctrl+Z', key: xterm.TerminalKey.keyZ, ctrl: true),
+    TerminalKeyAction(label: 'Ctrl+L', key: xterm.TerminalKey.keyL, ctrl: true),
     TerminalKeyAction(label: 'Esc', key: xterm.TerminalKey.escape),
     TerminalKeyAction(label: 'Tab', key: xterm.TerminalKey.tab),
     TerminalKeyAction(label: '←', key: xterm.TerminalKey.arrowLeft),
@@ -38,7 +38,6 @@ class _TerminalKeyBarState extends State<TerminalKeyBar> {
   @override
   Widget build(BuildContext context) {
     final colors = context.colors;
-    final activeModifier = _ctrl || _alt || _shift;
 
     return SafeArea(
       top: false,
@@ -54,53 +53,25 @@ class _TerminalKeyBarState extends State<TerminalKeyBar> {
         ),
         child: ListView.separated(
           scrollDirection: Axis.horizontal,
-          itemCount: _essentials.length + 4, // + Ctrl + Alt + Shift + More
+          itemCount: _primaryActions.length + 1,
           itemBuilder: (context, index) {
-            // Essentials first
-            if (index < _essentials.length) {
+            if (index < _primaryActions.length) {
               return _KeyButton(
-                label: _essentials[index].label,
-                onTap: () => _onAction(_essentials[index]),
+                label: _primaryActions[index].label,
+                onTap: () => _fireAction(_primaryActions[index]),
                 compact: widget.compact,
-                highlighted: activeModifier,
+                highlighted: _primaryActions[index].hasModifiers,
               );
             }
 
-            // Then modifiers and More
-            final modIndex = index - _essentials.length;
-            switch (modIndex) {
-              case 0:
-                return _ModifierPill(
-                  label: 'Ctrl',
-                  active: _ctrl,
-                  compact: widget.compact,
-                  onTap: () => setState(() => _ctrl = !_ctrl),
-                );
-              case 1:
-                return _ModifierPill(
-                  label: 'Alt',
-                  active: _alt,
-                  compact: widget.compact,
-                  onTap: () => setState(() => _alt = !_alt),
-                );
-              case 2:
-                return _ModifierPill(
-                  label: 'Shift',
-                  active: _shift,
-                  compact: widget.compact,
-                  onTap: () => setState(() => _shift = !_shift),
-                );
-              case 3:
-                return _MoreButton(
-                  compact: widget.compact,
-                  onTap: () => showTerminalKeyBarSheet(
-                    context: context,
-                    onAction: widget.onAction,
-                    compact: widget.compact,
-                  ),
-                );
-            }
-            return const SizedBox.shrink();
+            return _MoreButton(
+              compact: widget.compact,
+              onTap: () => showTerminalKeyBarSheet(
+                context: context,
+                onAction: widget.onAction,
+                compact: widget.compact,
+              ),
+            );
           },
           separatorBuilder: (_, _) => SizedBox(width: widget.compact ? 5 : 6),
         ),
@@ -108,31 +79,13 @@ class _TerminalKeyBarState extends State<TerminalKeyBar> {
     );
   }
 
-  void _onAction(TerminalKeyAction base) {
-    if (!mounted) return;
-    final effective = TerminalKeyAction(
-      label: base.label,
-      key: base.key,
-      ctrl: base.ctrl || _ctrl,
-      alt: base.alt || _alt,
-      shift: base.shift || _shift,
-      rawText: base.rawText,
-    );
-    if (effective.key == null &&
-        (effective.rawText == null || effective.rawText!.isEmpty)) {
+  void _fireAction(TerminalKeyAction action) {
+    if (action.key == null &&
+        (action.rawText == null || action.rawText!.isEmpty)) {
       return;
     }
     HapticFeedback.selectionClick();
-    widget.onAction(effective);
-
-    // One-shot: auto-clear modifiers after a key is sent.
-    if (_ctrl || _alt || _shift) {
-      setState(() {
-        _ctrl = false;
-        _alt = false;
-        _shift = false;
-      });
-    }
+    widget.onAction(action);
   }
 }
 
@@ -172,50 +125,6 @@ class _KeyButton extends StatelessWidget {
             color: colors.textPrimary,
             fontSize: compact ? 12 : 13,
             fontWeight: AppWeights.emphasis,
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class _ModifierPill extends StatelessWidget {
-  const _ModifierPill({
-    required this.label,
-    required this.active,
-    required this.compact,
-    required this.onTap,
-  });
-
-  final String label;
-  final bool active;
-  final bool compact;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    final colors = context.colors;
-    return InkWell(
-      onTap: onTap,
-      borderRadius: AppShapes.pill,
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 120),
-        padding: EdgeInsets.symmetric(
-          horizontal: compact ? 9 : 12,
-          vertical: compact ? 5 : 6,
-        ),
-        decoration: BoxDecoration(
-          color: active ? colors.accentMuted : colors.surface,
-          border: Border.all(color: active ? colors.accent : colors.border),
-          borderRadius: AppShapes.pill,
-        ),
-        alignment: Alignment.center,
-        child: Text(
-          label,
-          style: Theme.of(context).textTheme.labelSmall?.copyWith(
-            color: active ? colors.accent : colors.textSecondary,
-            fontWeight: AppWeights.emphasis,
-            fontSize: compact ? 11 : 12,
           ),
         ),
       ),
