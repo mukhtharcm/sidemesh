@@ -385,7 +385,7 @@ class ApiClient {
     return HostBrowserPreviewInfo.fromJson(_decodeObject(response));
   }
 
-  Future<HostBrowserPreviewInfo> stopBrowserPreview(
+  Future<void> stopBrowserPreview(
     HostProfile host,
     String previewId,
   ) async {
@@ -395,7 +395,7 @@ class ApiClient {
       timeout: _quickReadTimeout,
       operation: 'close browser tab',
     );
-    return HostBrowserPreviewInfo.fromJson(_decodeObject(response));
+    _throwIfBadStatus(response);
   }
 
   Future<SessionLog> fetchLog(

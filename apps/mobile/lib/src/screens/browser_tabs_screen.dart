@@ -204,14 +204,14 @@ class _BrowserTabsPaneState extends State<BrowserTabsPane> {
 
   Future<void> _closeTab(HostBrowserPreviewInfo tab) async {
     try {
-      final stopped = await widget.api.stopBrowserPreview(widget.host, tab.id);
+      await widget.api.stopBrowserPreview(widget.host, tab.id);
       if (!mounted) return;
       setState(() {
-        if (_inlineTab?.id == stopped.id) {
+        if (_inlineTab?.id == tab.id) {
           _inlineTab = null;
         }
         _tabs = _tabs
-            .where((item) => item.id != stopped.id)
+            .where((item) => item.id != tab.id)
             .toList(growable: false);
       });
     } catch (error) {
