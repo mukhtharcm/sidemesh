@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_svg/flutter_svg.dart';
-import 'package:hugeicons/hugeicons.dart';
 
 import '../models.dart';
 import '../provider_labels.dart';
@@ -73,8 +72,9 @@ class AgentProviderBadge extends StatelessWidget {
 /// Returns the appropriate brand icon for a given [providerKind].
 ///
 /// Known providers use SVG brand assets from [assets/icons/brands/] so they
-/// are rendered with a precise, colourable shape.  Unknown or test providers
-/// fall back to matching [HugeIcons] glyphs.
+/// are rendered with a precise, colourable shape. Unknown or test providers
+/// fall back to small Material glyphs so we avoid carrying a separate icon
+/// package just for a few non-brand cases.
 Widget _providerIcon(String? providerKind, double size, Color color) {
   Widget svg(String name) => SvgPicture.asset(
     'assets/icons/brands/$name.svg',
@@ -82,9 +82,6 @@ Widget _providerIcon(String? providerKind, double size, Color color) {
     height: size,
     colorFilter: ColorFilter.mode(color, BlendMode.srcIn),
   );
-
-  Widget huge(List<List<dynamic>> icon) =>
-      HugeIcon(icon: icon, size: size, color: color);
 
   return switch ((providerKind ?? '').toLowerCase()) {
     // OpenAI / Codex
@@ -94,12 +91,12 @@ Widget _providerIcon(String? providerKind, double size, Color color) {
     // Anthropic products (claude, etc.)
     'anthropic' || 'claude' => svg('anthropic'),
     // Pi (Inflection AI assistant)
-    'pi' => huge(HugeIcons.strokeRoundedAiBrain01),
+    'pi' => Icon(Icons.psychology_rounded, size: size, color: color),
     // Hugging Face hosted models
     'huggingface' || 'hf' => svg('huggingface'),
     // Deterministic test harness
-    'fake' => huge(HugeIcons.strokeRoundedTestTube01),
+    'fake' => Icon(Icons.science_rounded, size: size, color: color),
     // Generic fallback
-    _ => huge(HugeIcons.strokeRoundedRobot01),
+    _ => Icon(Icons.smart_toy_rounded, size: size, color: color),
   };
 }
