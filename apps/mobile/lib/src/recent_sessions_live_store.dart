@@ -428,7 +428,13 @@ class RecentSessionsStore extends ChangeNotifier {
 
   List<SessionSummary> _sortedSessionWindow(Iterable<SessionSummary> sessions) {
     final sorted = sessions.toList(growable: false)
-      ..sort((left, right) => right.updatedAt.compareTo(left.updatedAt));
+      ..sort((left, right) {
+        final updatedCompare = right.updatedAt.compareTo(left.updatedAt);
+        if (updatedCompare != 0) {
+          return updatedCompare;
+        }
+        return left.id.compareTo(right.id);
+      });
     return sorted.take(_maxSessionsPerHost).toList(growable: false);
   }
 }

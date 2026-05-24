@@ -994,17 +994,30 @@ export async function startServer(
       return;
     }
     try {
-      const thread = await readSession(provider, sessionId, false);
-      const session = applyGitEnrichmentFromCache(
-        mapSession(
-          thread,
-          await loadCachedSessionRuntime(provider, thread, runtimeCache, "active"),
-          await sessionStatusOverrideForSnapshot(thread.id),
-        ),
-      );
-      broadcastRecentSessionsLive({ type: "upsert", session });
+      const sessions = await loadRecentSessions(RECENT_LIVE_LIMIT, "active");
+      const session = sessions.find((entry) => entry.id === sessionId);
+      if (session) {
+        broadcastRecentSessionsLive({ type: "upsert", session });
+        return;
+      }
+      // Keep clients aligned to the same bounded recent window as the
+      // snapshot route. If a session no longer belongs in that window,
+      // remove any stale row instead of reintroducing it via a fallback read.
+      broadcastRecentSessionsLive({ type: "remove", sessionId });
     } catch {
-      // The session may have been archived/removed before we could refresh it.
+      try {
+        const thread = await readSession(provider, sessionId, false);
+        const session = await buildRecentSessionSummary(
+          provider,
+          runtimeCache,
+          thread,
+          "active",
+          sessionStatusOverrideForSnapshot,
+        );
+        broadcastRecentSessionsLive({ type: "upsert", session });
+      } catch {
+        // The session may have been archived/removed before we could refresh it.
+      }
     }
   }
 
@@ -2653,7 +2666,7 @@ export async function startServer(
         session,
         activeTurnId: started.activeTurnId,
       });
-      broadcastRecentSessionsLive({ type: "upsert", session });
+      scheduleRecentSessionUpsert(started.thread.id, 0);
       void indexSessionForSearch(searchIndex, providerRuntime, started.thread.id).catch(() => {});
     }),
   );
@@ -2943,7 +2956,7 @@ export async function startServer(
       const result = await provider.compactSession!(sessionId);
       clearSessionLogCache(logCache, sessionId);
       response.json({ compacted: true, result: result ?? null });
-      void broadcastRecentSessionUpsert(sessionId);
+      scheduleRecentSessionUpsert(sessionId, 0);
     }),
   );
 
@@ -3006,7 +3019,7 @@ export async function startServer(
         await sessionStatusOverrideForSnapshot(thread.id),
       );
       response.json({ session });
-      broadcastRecentSessionsLive({ type: "upsert", session });
+      scheduleRecentSessionUpsert(sessionId, 0);
       void indexSessionForSearch(searchIndex, providerRuntime, sessionId).catch(() => {});
     }),
   );
@@ -3067,7 +3080,7 @@ export async function startServer(
       }
       await provider.unarchiveSession!(sessionId);
       response.json({ unarchived: true });
-      void broadcastRecentSessionUpsert(sessionId);
+      scheduleRecentSessionUpsert(sessionId, 0);
       void indexSessionForSearch(searchIndex, providerRuntime, sessionId, false).catch(() => {});
     }),
   );
@@ -3749,6 +3762,58 @@ async function enrichSessionsWithGitCommonDir(
   return sessions.map(applyGitEnrichmentFromCache);
 }
 
+// Canonical recent-session projection used by /api/sessions and the recent
+// live socket so all delivery paths share the same runtime, status, and git
+// enrichment behavior.
+async function buildRecentSessionSummary(
+  provider: AgentProvider,
+  runtimeCache: Map<string, SessionRuntimeCacheEntry>,
+  thread: ThreadRecord,
+  runtimeMode: SessionRuntimeListMode = "active",
+  statusOverrideForSession?: (
+    sessionId: string,
+  ) => LiveThreadStatus | null | Promise<LiveThreadStatus | null>,
+): Promise<SessionSummary> {
+  const [session] = await buildRecentSessionSummaries(
+    provider,
+    runtimeCache,
+    [thread],
+    runtimeMode,
+    statusOverrideForSession,
+  );
+  return session;
+}
+
+async function buildRecentSessionSummaries(
+  provider: AgentProvider,
+  runtimeCache: Map<string, SessionRuntimeCacheEntry>,
+  threads: ThreadRecord[],
+  runtimeMode: SessionRuntimeListMode = "active",
+  statusOverrideForSession?: (
+    sessionId: string,
+  ) => LiveThreadStatus | null | Promise<LiveThreadStatus | null>,
+): Promise<SessionSummary[]> {
+  if (threads.length === 0) {
+    return [];
+  }
+  const sessions = await mapWithConcurrency(
+    threads,
+    RECENT_SESSION_RUNTIME_CONCURRENCY,
+    async (thread) =>
+      mapSession(
+        thread,
+        await loadCachedSessionRuntime(
+          provider,
+          thread,
+          runtimeCache,
+          runtimeMode,
+        ),
+        (await statusOverrideForSession?.(thread.id)) ?? null,
+      ),
+  );
+  return enrichSessionsWithGitCommonDir(sessions);
+}
+
 async function listSessions(
   provider: AgentProvider,
   runtimeCache: Map<string, SessionRuntimeCacheEntry>,
@@ -3766,22 +3831,13 @@ async function listSessions(
     const threads = await provider.listRecentUnindexedSessionThreads(
       Math.max(limit, RECENT_UNINDEXED_SESSION_SCAN_LIMIT),
     );
-    const sessions = await mapWithConcurrency(
+    return buildRecentSessionSummaries(
+      provider,
+      runtimeCache,
       threads,
-      RECENT_SESSION_RUNTIME_CONCURRENCY,
-      async (thread) =>
-        mapSession(
-          thread,
-          await loadCachedSessionRuntime(
-            provider,
-            thread,
-            runtimeCache,
-            runtimeMode,
-          ),
-          (await statusOverrideForSession?.(thread.id)) ?? null,
-      ),
+      runtimeMode,
+      statusOverrideForSession,
     );
-    return enrichSessionsWithGitCommonDir(sessions);
   }
   const listThreads = requireProviderMethod(
     provider,
@@ -3797,22 +3853,13 @@ async function listSessions(
     threads,
     limit,
   );
-  const sessions = await mapWithConcurrency(
+  return buildRecentSessionSummaries(
+    provider,
+    runtimeCache,
     mergedThreads,
-    RECENT_SESSION_RUNTIME_CONCURRENCY,
-    async (thread) =>
-      mapSession(
-        thread,
-        await loadCachedSessionRuntime(
-          provider,
-          thread,
-          runtimeCache,
-          runtimeMode,
-        ),
-        (await statusOverrideForSession?.(thread.id)) ?? null,
-      ),
+    runtimeMode,
+    statusOverrideForSession,
   );
-  return enrichSessionsWithGitCommonDir(sessions);
 }
 
 function canUseRecentSessionFallback(provider: AgentProvider): provider is AgentProvider & {
