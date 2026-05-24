@@ -1,0 +1,15 @@
+diff --git a/src/build/GhosttyLibVt.zig b/src/build/GhosttyLibVt.zig
+index 408f1ebc8..ee26165fd 100644
+--- a/src/build/GhosttyLibVt.zig
++++ b/src/build/GhosttyLibVt.zig
+@@ -87,6 +87,10 @@ fn initLib(
+         .root_module = zig.vt_c,
+         .version = std.SemanticVersion{ .major = 0, .minor = 1, .patch = 0 },
+     });
++    // The VT library relies on libc symbols like getauxval on Android.
++    // Link libc explicitly so the shared object carries the correct runtime
++    // dependency instead of leaving those symbols unresolved at dlopen time.
++    lib.linkLibC();
+     lib.installHeadersDirectory(
+         b.path("include/ghostty"),
+         "ghostty",

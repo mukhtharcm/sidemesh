@@ -1,0 +1,17 @@
+name: ghostty_vt_example
+description: >
+  A pure Dart CLI example demonstrating paste-safety checking,
+  OSC/SGR parsing, and key encoding via the ghostty_vte package.
+publish_to: none
+
+environment:
+  sdk: ^3.10.4
+
+resolution: workspace
+
+dependencies:
+  ghostty_vte:
+    path: ../
+
+dev_dependencies:
+  lints: ^6.0.0
