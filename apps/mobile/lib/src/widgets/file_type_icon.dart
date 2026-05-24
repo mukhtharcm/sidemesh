@@ -18,6 +18,16 @@ class FileTypeIcon extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final lower = filename.toLowerCase();
+    final namedAsset = _svgFallbackForFilename(lower);
+    if (namedAsset != null) {
+      return _SvgFileTypeIcon(
+        asset: namedAsset.assetPath,
+        size: size,
+        color: namedAsset.color,
+        preserveOriginalColors: namedAsset.preserveOriginalColors,
+      );
+    }
+
     final ext = _extension(lower);
     final asset = _svgFallbackForExtension(ext);
     if (asset != null) {
@@ -25,6 +35,7 @@ class FileTypeIcon extends StatelessWidget {
         asset: asset.assetPath,
         size: size,
         color: asset.color,
+        preserveOriginalColors: asset.preserveOriginalColors,
       );
     }
 
@@ -42,6 +53,33 @@ String _extension(String filename) {
   final name = filename.split('/').last;
   final dot = name.lastIndexOf('.');
   return dot >= 0 ? name.substring(dot + 1) : '';
+}
+
+_SvgFileTypeAsset? _svgFallbackForFilename(String filename) {
+  return switch (filename) {
+    'pnpm-lock.yaml' || 'pnpm-lock.yml' => const _SvgFileTypeAsset(
+      'assets/icons/filetypes/pnpm.svg',
+      preserveOriginalColors: true,
+    ),
+    'yarn.lock' => const _SvgFileTypeAsset(
+      'assets/icons/filetypes/yarn.svg',
+      preserveOriginalColors: true,
+    ),
+    'bun.lock' || 'bun.lockb' => const _SvgFileTypeAsset(
+      'assets/icons/filetypes/bun.svg',
+      preserveOriginalColors: true,
+    ),
+    'package-lock.json' || 'npm-shrinkwrap.json' => const _SvgFileTypeAsset(
+      'assets/icons/filetypes/npm.svg',
+      preserveOriginalColors: true,
+    ),
+    'cargo.lock' => const _SvgFileTypeAsset('assets/icons/filetypes/rust.svg'),
+    'flake.lock' => const _SvgFileTypeAsset(
+      'assets/icons/filetypes/nixos.svg',
+      color: Color(0xFF5277C3),
+    ),
+    _ => null,
+  };
 }
 
 _SvgFileTypeAsset? _svgFallbackForExtension(String ext) {
@@ -77,11 +115,9 @@ _SvgFileTypeAsset? _svgFallbackForExtension(String ext) {
 
 _MaterialFileTypeAsset? _materialFallbackForFilename(String filename) {
   return switch (filename) {
-    'pnpm-lock.yaml' ||
-    'package-lock.json' ||
-    'cargo.lock' ||
     'composer.lock' ||
-    'bun.lock' => _MaterialFileTypeAsset.lock,
+    'poetry.lock' ||
+    'uv.lock' => _MaterialFileTypeAsset.lock,
     _ => null,
   };
 }
@@ -111,11 +147,13 @@ final class _SvgFileTypeIcon extends StatelessWidget {
     required this.asset,
     required this.size,
     this.color,
+    this.preserveOriginalColors = false,
   });
 
   final String asset;
   final double size;
   final Color? color;
+  final bool preserveOriginalColors;
 
   @override
   Widget build(BuildContext context) {
@@ -126,16 +164,24 @@ final class _SvgFileTypeIcon extends StatelessWidget {
       asset,
       width: size,
       height: size,
-      colorFilter: ColorFilter.mode(effectiveColor, BlendMode.srcIn),
+      colorFilter:
+          preserveOriginalColors
+              ? null
+              : ColorFilter.mode(effectiveColor, BlendMode.srcIn),
     );
   }
 }
 
 final class _SvgFileTypeAsset {
-  const _SvgFileTypeAsset(this.assetPath, {this.color});
+  const _SvgFileTypeAsset(
+    this.assetPath, {
+    this.color,
+    this.preserveOriginalColors = false,
+  });
 
   final String assetPath;
   final Color? color;
+  final bool preserveOriginalColors;
 }
 
 final class _MaterialFileTypeAsset {
