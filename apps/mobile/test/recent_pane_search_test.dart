@@ -312,6 +312,60 @@ void main() {
     expect(find.text('Unread Session'), findsOneWidget);
     expect(find.text('Read Session'), findsNothing);
   });
+
+  testWidgets(
+    'groups worktrees by gitCommonDir and orders rows by the newest session in that group',
+    (tester) async {
+      final now = DateTime(2026, 1, 1, 12);
+      const repoGitInfo = GitInfoSummary(gitCommonDir: '/workspace/repo/.git');
+      const otherGitInfo = GitInfoSummary(gitCommonDir: '/workspace/other/.git');
+      final api = _FakeSearchApiClient(
+        sessions: <SessionSummary>[
+          _session(
+            id: 'main-worktree',
+            title: 'Main Worktree',
+            updatedAt: now,
+            cwd: '/workspace/repo-main',
+            gitInfo: repoGitInfo,
+          ),
+          _session(
+            id: 'feature-worktree',
+            title: 'Feature Worktree',
+            updatedAt: now.subtract(const Duration(minutes: 1)),
+            cwd: '/workspace/repo-feature',
+            gitInfo: repoGitInfo,
+          ),
+          _session(
+            id: 'other-project',
+            title: 'Other Project',
+            updatedAt: now.subtract(const Duration(seconds: 30)),
+            cwd: '/workspace/other',
+            gitInfo: otherGitInfo,
+          ),
+        ],
+        searchResults: const <String, List<SessionSummary>>{},
+      );
+
+      await _pumpRecentPane(
+        tester,
+        api: api,
+        hosts: const <HostProfile>[host],
+        query: '',
+      );
+      await tester.pump();
+      await tester.pump();
+
+      expect(find.text('repo'), findsWidgets);
+      expect(find.text('other'), findsWidgets);
+
+      final main = tester.getTopLeft(find.text('Main Worktree')).dy;
+      final feature = tester.getTopLeft(find.text('Feature Worktree')).dy;
+      final other = tester.getTopLeft(find.text('Other Project')).dy;
+      expect(main, lessThan(feature));
+      expect(feature, lessThan(other));
+    },
+  );
+
 }
 
 Future<void> _pumpRecentPane(
@@ -356,20 +410,22 @@ SessionSummary _session({
   required String title,
   required DateTime updatedAt,
   String status = 'loaded',
+  String cwd = '/repo',
+  GitInfoSummary? gitInfo,
   num? matchRank,
 }) {
   return SessionSummary(
     id: id,
     title: title,
     preview: '$title preview',
-    cwd: '/repo',
+    cwd: cwd,
     createdAt: updatedAt,
     updatedAt: updatedAt,
     source: 'codex',
     provider: 'codex',
     status: status,
     runtime: null,
-    gitInfo: null,
+    gitInfo: gitInfo,
     matchRank: matchRank,
   );
 }

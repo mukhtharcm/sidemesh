@@ -1491,7 +1491,7 @@ class _SessionGroup {
   final String key;
   final String title;
   /// Host all sessions in this group belong to.
-  /// Groups are host-scoped because gitCommonDir is host-specific.
+  /// Groups are keyed by host-scoped gitCommonDir when available.
   final HostProfile host;
   final List<RemoteSessionEntry> entries;
 
@@ -1553,53 +1553,85 @@ class _RecentPaneState extends State<RecentPane> {
     return parts.lastWhere((p) => p.isNotEmpty, orElse: () => 'Unknown');
   }
 
-  /// Returns a stable project key for grouping sessions.
-  ///
-  /// Prefers [GitInfoSummary.gitCommonDir] (the absolute path to the shared
-  /// .git directory) so that sessions running in automatically-created
-  /// worktrees collapse under the same project as the main repo. Falls back
-  /// to the CWD basename for sessions that aren't inside a git repository.
-  String _projectKey(RemoteSessionEntry entry) {
+  String _projectPath(RemoteSessionEntry entry) {
     final commonDir = entry.session.gitInfo?.gitCommonDir;
-    if (commonDir != null && commonDir.isNotEmpty) return commonDir;
-    return _cwdBasename(entry.session.cwd);
+    if (commonDir != null && commonDir.isNotEmpty) {
+      return commonDir;
+    }
+    return entry.session.cwd;
   }
 
-  /// Human-readable label for a project group key produced by [_projectKey].
+  /// Returns a stable host-scoped project key for grouping sessions.
   ///
-  /// For git repos the key is the .git path, e.g. "/dev/sidemesh/.git"; we
-  /// strip "/.git" and take the basename to show just "sidemesh".
-  String _projectLabel(String key) {
-    // Strip trailing /.git if present (main worktree path)
-    final stripped = key.endsWith('/.git') ? key.substring(0, key.length - 5) : key;
-    final parts = stripped.split('/');
-    final name = parts.lastWhere((p) => p.isNotEmpty, orElse: () => key);
-    return name.isEmpty ? key : name;
+  /// Prefer gitCommonDir so multiple worktrees from the same repository stay
+  /// in one group. Prefix the host id so identical repo paths on different
+  /// hosts never collapse into one group.
+  String _projectKey(RemoteSessionEntry entry) {
+    return '${entry.host.id}\u001f${_projectPath(entry)}';
+  }
+
+  /// Human-readable label for a project group key.
+  String _projectLabel(RemoteSessionEntry entry) {
+    final path = _projectPath(entry);
+    final stripped = path.endsWith('/.git')
+        ? path.substring(0, path.length - 5)
+        : path;
+    return _cwdBasename(stripped);
+  }
+
+  int _compareRecentEntries(
+    RemoteSessionEntry left,
+    RemoteSessionEntry right,
+  ) {
+    final updatedCompare = right.session.updatedAt.compareTo(
+      left.session.updatedAt,
+    );
+    if (updatedCompare != 0) {
+      return updatedCompare;
+    }
+    final hostCompare = left.host.id.compareTo(right.host.id);
+    if (hostCompare != 0) {
+      return hostCompare;
+    }
+    return left.session.id.compareTo(right.session.id);
   }
 
   List<_SessionGroup> _groupEntries(List<RemoteSessionEntry> entries) {
     final groups = <String, List<RemoteSessionEntry>>{};
+    final firstIndexByKey = <String, int>{};
     for (final entry in entries) {
       final key = _projectKey(entry);
+      firstIndexByKey.putIfAbsent(key, () => firstIndexByKey.length);
       (groups[key] ??= []).add(entry);
     }
     for (final list in groups.values) {
-      list.sort((a, b) => b.session.updatedAt.compareTo(a.session.updatedAt));
+      list.sort(_compareRecentEntries);
     }
     // Sort groups by most-recently-active session so the project you're
     // currently working on stays at the top, not alphabetical order.
     final sortedKeys = groups.keys.toList()
       ..sort((a, b) {
-        if (a == 'Unknown') return 1;
-        if (b == 'Unknown') return -1;
         final aTime = groups[a]!.first.session.updatedAt;
         final bTime = groups[b]!.first.session.updatedAt;
-        return bTime.compareTo(aTime);
+        final timeCompare = bTime.compareTo(aTime);
+        if (timeCompare != 0) {
+          return timeCompare;
+        }
+        final aUnknown = _projectLabel(groups[a]!.first) == 'Unknown';
+        final bUnknown = _projectLabel(groups[b]!.first) == 'Unknown';
+        if (aUnknown != bUnknown) {
+          return aUnknown ? 1 : -1;
+        }
+        final indexCompare = firstIndexByKey[a]!.compareTo(firstIndexByKey[b]!);
+        if (indexCompare != 0) {
+          return indexCompare;
+        }
+        return a.compareTo(b);
       });
     return sortedKeys
         .map((k) => _SessionGroup(
           key: k,
-          title: _projectLabel(k),
+          title: _projectLabel(groups[k]!.first),
           host: groups[k]!.first.host,
           entries: groups[k]!,
         ))
@@ -1857,10 +1889,7 @@ class _RecentPaneState extends State<RecentPane> {
     visible = visible.where(_matchesRecentFilters);
     final sorted = visible.toList();
     if (!isSearchResults) {
-      sorted.sort(
-        (left, right) =>
-            right.session.updatedAt.compareTo(left.session.updatedAt),
-      );
+      sorted.sort(_compareRecentEntries);
     }
     return sorted;
   }
