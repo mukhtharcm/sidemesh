@@ -994,17 +994,35 @@ export async function startServer(
       return;
     }
     try {
-      const thread = await readSession(provider, sessionId, false);
-      const session = applyGitEnrichmentFromCache(
-        mapSession(
-          thread,
-          await loadCachedSessionRuntime(provider, thread, runtimeCache, "active"),
-          await sessionStatusOverrideForSnapshot(thread.id),
-        ),
-      );
-      broadcastRecentSessionsLive({ type: "upsert", session });
+      const sessions = await loadRecentSessions(RECENT_LIVE_LIMIT, "active");
+      const session = sessions.find((entry) => entry.id === sessionId);
+      if (session) {
+        broadcastRecentSessionsLive({ type: "upsert", session });
+        return;
+      }
+      // Keep clients aligned to the same bounded recent window as the
+      // snapshot route. If a session no longer belongs in that window,
+      // remove any stale row instead of reintroducing it via a fallback read.
+      broadcastRecentSessionsLive({ type: "remove", sessionId });
     } catch {
-      // The session may have been archived/removed before we could refresh it.
+      try {
+        const thread = await readSession(provider, sessionId, false);
+        const session = applyGitEnrichmentFromCache(
+          mapSession(
+            thread,
+            await loadCachedSessionRuntime(
+              provider,
+              thread,
+              runtimeCache,
+              "active",
+            ),
+            await sessionStatusOverrideForSnapshot(thread.id),
+          ),
+        );
+        broadcastRecentSessionsLive({ type: "upsert", session });
+      } catch {
+        // The session may have been archived/removed before we could refresh it.
+      }
     }
   }
 
