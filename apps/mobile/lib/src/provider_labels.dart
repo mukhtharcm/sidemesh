@@ -18,6 +18,8 @@ String? agentProviderDisplayLabel(String? providerKind, {NodeInfo? nodeInfo}) {
     'codex' => 'Codex',
     'pi' => 'Pi',
     'copilot' => 'GitHub Copilot',
+    'opencode' => 'OpenCode',
+    'acpx' => 'ACP via acpx',
     'fake' => 'Fake',
     _ => _titleCaseProviderKind(kind),
   };

@@ -1,1 +1,21 @@
-<svg role="img" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><title>Zig</title><path d="m23.53 1.02-7.686 3.45h-7.06l-2.98 3.452h7.173L.47 22.98l7.681-3.607h7.065v-.002l2.978-3.45-7.148-.001 12.482-14.9zM0 4.47v14.901h1.883l2.98-3.45H3.451v-8h.942l2.824-3.45H0zm22.117 0-2.98 3.608h1.412v7.844h-.942l-2.98 3.45H24V4.47h-1.883z"/></svg>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 153 140">
+  <g fill="#F7A41D">
+    <g>
+      <polygon points="46,22 28,44 19,30"/>
+      <polygon points="46,22 33,33 28,44 22,44 22,95 31,95 20,100 12,117 0,117 0,22" shape-rendering="crispEdges"/>
+      <polygon points="31,95 12,117 4,106"/>
+    </g>
+    <g>
+      <polygon points="56,22 62,36 37,44"/>
+      <polygon points="56,22 111,22 111,44 37,44 56,32" shape-rendering="crispEdges"/>
+      <polygon points="116,95 97,117 90,104"/>
+      <polygon points="116,95 100,104 97,117 42,117 42,95" shape-rendering="crispEdges"/>
+      <polygon points="150,0 52,117 3,140 101,22"/>
+    </g>
+    <g>
+      <polygon points="141,22 140,40 122,45"/>
+      <polygon points="153,22 153,117 106,117 120,105 125,95 131,95 131,45 122,45 132,36 141,22" shape-rendering="crispEdges"/>
+      <polygon points="125,95 130,110 106,117"/>
+    </g>
+  </g>
+</svg>
