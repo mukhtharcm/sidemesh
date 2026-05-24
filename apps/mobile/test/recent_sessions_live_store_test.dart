@@ -427,6 +427,37 @@ void main() {
     );
     expect(rows.single['count'], 40);
   });
+
+  test('equal updatedAt sessions keep a deterministic id order', () async {
+    final now = DateTime.now();
+    final api = _FakeApiClient()
+      ..sessionsByHostId[host.id] = const <SessionSummary>[];
+    final store = RecentSessionsStore(
+      pollInterval: const Duration(hours: 1),
+      initialHttpFallbackDelay: const Duration(milliseconds: 100),
+    );
+    addTearDown(store.dispose);
+
+    store.configure(hosts: const [host], api: api);
+    await _settle();
+
+    final channel = api.liveChannelFor(host);
+    channel.addIncoming(
+      jsonEncode({
+        'type': 'snapshot',
+        'sessions': [
+          _session('session-b', title: 'Session B', updatedAt: now).toJson(),
+          _session('session-a', title: 'Session A', updatedAt: now).toJson(),
+        ],
+      }),
+    );
+    await _settle();
+
+    expect(
+      store.entries.map((entry) => entry.session.id).toList(growable: false),
+      ['session-a', 'session-b'],
+    );
+  });
 }
 
 class _FakeApiClient extends ApiClient {
