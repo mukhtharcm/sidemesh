@@ -2,15 +2,16 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
+import 'package:ghostty_vte_flutter/ghostty_vte_flutter.dart';
+import 'package:url_launcher/url_launcher.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
 import 'package:xterm/xterm.dart' as xterm;
 
 import '../api_client.dart';
 import '../models.dart';
-import '../terminal_input_filter.dart';
 import '../terminal_key_models.dart';
+import '../terminal_modifier_state.dart';
 import '../theme/app_colors.dart';
-import '../theme/color_contrast.dart';
 import '../theme/app_tokens.dart';
 import '../widgets/app_snackbar.dart';
 import '../widgets/mesh_widgets.dart';
@@ -101,7 +102,7 @@ class TerminalPane extends StatefulWidget {
 class _TerminalPaneState extends State<TerminalPane> {
   late final String _reconnectSlotId =
       'terminal-live:${identityHashCode(this)}';
-  late final xterm.Terminal _terminal;
+  late GhosttyTerminalController _controller;
   final FocusNode _focusNode = FocusNode();
   WebSocketChannel? _channel;
   StreamSubscription<dynamic>? _subscription;
@@ -113,16 +114,13 @@ class _TerminalPaneState extends State<TerminalPane> {
   int _lastSeq = -1;
   int? _cols;
   int? _rows;
+  TerminalModifierState _modifierState = TerminalModifierState.none;
 
   @override
   void initState() {
     super.initState();
-    _terminal = xterm.Terminal(
-      maxLines: 5000,
-      onOutput: _sendInput,
-      onResize: _handleResize,
-    );
-    _terminal.write('Starting terminal...\r\n');
+    _controller = _buildController();
+    _controller.appendDebugOutput('Starting terminal...\r\n');
     HostReconnectScheduler.instance.registerSlot(
       widget.host.id,
       _reconnectSlotId,
@@ -160,7 +158,7 @@ class _TerminalPaneState extends State<TerminalPane> {
     _channel = null;
     _terminalInfo = null;
     _lastSeq = -1;
-    _terminal.write('\r\nStarting terminal...\r\n');
+    _resetController(banner: '\r\nStarting terminal...\r\n');
     unawaited(_startTerminal(reuseExisting: widget.reuseExisting));
   }
 
@@ -172,8 +170,41 @@ class _TerminalPaneState extends State<TerminalPane> {
     );
     unawaited(_subscription?.cancel() ?? Future<void>.value());
     unawaited(_channel?.sink.close() ?? Future<void>.value());
+    _controller.dispose();
     _focusNode.dispose();
     super.dispose();
+  }
+
+  GhosttyTerminalController _buildController() {
+    return GhosttyTerminalController(
+      maxLines: 5000,
+      maxScrollback: 5000,
+      preferPty: false,
+    );
+  }
+
+  void _resetController({String? banner}) {
+    _controller.dispose();
+    _controller = _buildController();
+    final terminal = _terminalInfo;
+    if (terminal != null) {
+      _attachControllerTransport(terminal);
+    }
+    if (banner != null && banner.isNotEmpty) {
+      _controller.appendDebugOutput(banner);
+    }
+  }
+
+  void _attachControllerTransport(HostTerminalInfo terminal) {
+    _controller.attachExternalTransport(
+      writeBytes: _writeTerminalBytes,
+      onResize: _handleGhosttyResize,
+      launch: GhosttyTerminalShellLaunch(
+        label: terminal.title.isNotEmpty ? terminal.title : 'Remote terminal',
+        shell: terminal.shell,
+      ),
+    );
+    _controller.setSessionRunning(terminal.isRunning);
   }
 
   Future<void> _startTerminal({
@@ -192,8 +223,8 @@ class _TerminalPaneState extends State<TerminalPane> {
             cwd: widget.cwd,
             sessionId: widget.sessionId,
             title: widget.title,
-            cols: _terminal.viewWidth,
-            rows: _terminal.viewHeight,
+            cols: _cols ?? _controller.cols,
+            rows: _rows ?? _controller.rows,
             replaceExisting: replaceExisting,
           );
       if (!mounted) return;
@@ -201,6 +232,7 @@ class _TerminalPaneState extends State<TerminalPane> {
         _terminalInfo = terminal;
         _starting = false;
       });
+      _attachControllerTransport(terminal);
       _connectLive();
     } catch (error) {
       if (!mounted) return;
@@ -209,7 +241,9 @@ class _TerminalPaneState extends State<TerminalPane> {
         _starting = false;
         _error = message;
       });
-      _terminal.write('\r\nCould not start terminal: $message\r\n');
+      _controller.appendDebugOutput(
+        '\r\nCould not start terminal: $message\r\n',
+      );
     }
   }
 
@@ -320,7 +354,7 @@ class _TerminalPaneState extends State<TerminalPane> {
         }
         final data = frame['data'];
         if (data is String && data.isNotEmpty) {
-          _terminal.write(data);
+          _controller.appendOutputBytes(utf8.encode(data));
         }
         HostStatusStore.instance.markEvent(widget.host.id);
         return;
@@ -351,7 +385,8 @@ class _TerminalPaneState extends State<TerminalPane> {
             );
           }
         });
-        _terminal.write('\r\nTerminal stopped.\r\n');
+        _controller.setSessionRunning(false);
+        _controller.appendDebugOutput('\r\nTerminal stopped.\r\n');
         return;
       case 'replace':
         final seq = _intOrNull(frame['seq']);
@@ -368,34 +403,64 @@ class _TerminalPaneState extends State<TerminalPane> {
       case 'error':
         final message = frame['message']?.toString() ?? 'Something went wrong';
         setState(() => _error = message);
-        _terminal.write('\r\nSomething went wrong: $message\r\n');
+        _controller.appendDebugOutput('\r\nSomething went wrong: $message\r\n');
         return;
     }
   }
 
-  void _sendInput(String data) {
-    if (data.isEmpty || _terminalInfo?.isRunning != true) return;
-    final input = _terminal.isUsingAltBuffer
-        ? data
-        : stripGeneratedTerminalResponses(data);
-    if (input.isEmpty) return;
+  bool _writeTerminalBytes(List<int> bytes) {
+    if (bytes.isEmpty || _terminalInfo?.isRunning != true) return false;
     final channel = _channel;
-    if (channel == null) return;
-    channel.sink.add(jsonEncode({'type': 'input', 'data': input}));
+    if (channel == null) return false;
+    channel.sink.add(
+      jsonEncode({
+        'type': 'input',
+        'data': utf8.decode(bytes, allowMalformed: true),
+      }),
+    );
+    return true;
   }
 
   void _onKeyBarAction(TerminalKeyAction action) {
     if (_terminalInfo?.isRunning != true) return;
-    if (action.key != null) {
-      _terminal.keyInput(
-        action.key!,
-        ctrl: action.ctrl,
-        alt: action.alt,
-        shift: action.shift,
-      );
-    } else if (action.rawText != null && action.rawText!.isNotEmpty) {
-      _terminal.textInput(action.rawText!);
+    if (action.rawText != null && action.rawText!.isNotEmpty) {
+      _controller.write(action.rawText!);
+      return;
     }
+    final key = action.key;
+    if (key == null) {
+      return;
+    }
+    final rawText = _plainTextForTerminalKey(key);
+    if (!action.hasModifiers && rawText != null) {
+      _controller.write(rawText);
+      return;
+    }
+    final ghosttyKey = _ghosttyKeyForTerminalKey(key);
+    if (ghosttyKey != null) {
+      _controller.sendKey(
+        key: ghosttyKey,
+        mods: _ghosttyModsForAction(action),
+        utf8Text: rawText ?? '',
+        unshiftedCodepoint: rawText == null || rawText.isEmpty
+            ? 0
+            : rawText.runes.first,
+      );
+    }
+  }
+
+  void _setModifierState(TerminalModifierState state) {
+    if (_modifierState == state || !mounted) {
+      return;
+    }
+    setState(() => _modifierState = state);
+  }
+
+  void _clearModifiers() {
+    if (!_modifierState.hasModifiers) {
+      return;
+    }
+    _setModifierState(TerminalModifierState.none);
   }
 
   void _adoptReplacementTerminal(HostTerminalInfo replacement) {
@@ -412,13 +477,19 @@ class _TerminalPaneState extends State<TerminalPane> {
       _lastSeq = -1;
       _error = null;
     });
-    _terminal.write(
+    _attachControllerTransport(replacement);
+    _controller.appendDebugOutput(
       '\r\nThis terminal moved to another device. Reconnecting...\r\n',
     );
     _connectLive();
   }
 
-  void _handleResize(int cols, int rows, int pixelWidth, int pixelHeight) {
+  void _handleGhosttyResize(
+    int cols,
+    int rows,
+    int cellWidthPx,
+    int cellHeightPx,
+  ) {
     if (_cols == cols && _rows == rows) return;
     _cols = cols;
     _rows = rows;
@@ -462,7 +533,7 @@ class _TerminalPaneState extends State<TerminalPane> {
       _lastSeq = -1;
       _error = null;
     });
-    _terminal.write('\r\nStarting a new terminal...\r\n');
+    _resetController(banner: '\r\nStarting a new terminal...\r\n');
     await _startTerminal(reuseExisting: false, replaceExisting: true);
   }
 
@@ -500,23 +571,46 @@ class _TerminalPaneState extends State<TerminalPane> {
                 ],
               ),
               clipBehavior: Clip.antiAlias,
-              child: xterm.TerminalView(
-                _terminal,
+              child: GhosttyTerminalView(
+                controller: _controller,
                 focusNode: _focusNode,
                 autofocus: true,
-                keyboardType: TextInputType.text,
-                deleteDetection: true,
-                theme: _terminalTheme(colors),
-                textStyle: xterm.TerminalStyle(
-                  fontSize: widget.compact ? 12 : 13,
-                  height: 1.22,
-                ),
+                showHeader: false,
+                backgroundColor: colors.codeBackground,
+                foregroundColor: colors.codeForeground,
+                chromeColor: colors.surfaceElevated,
+                fontSize: widget.compact ? 12 : 13,
+                lineHeight: 1.22,
+                fontFamily: 'JetBrainsMono',
+                fontFamilyFallback: const ['SpaceGrotesk'],
                 padding: EdgeInsets.all(widget.compact ? 10 : 12),
+                selectionColor: colors.accentMuted.withValues(alpha: 0.7),
+                hyperlinkColor: colors.accent,
+                scrollbarThumbColor: colors.textTertiary.withValues(alpha: 0.6),
+                scrollbarTrackColor: colors.canvas.withValues(alpha: 0.14),
+                onOpenHyperlink: (uri) async {
+                  await launchUrl(Uri.parse(uri));
+                },
               ),
             ),
           ),
         ),
-        TerminalKeyBar(compact: widget.compact, onAction: _onKeyBarAction),
+        GhosttyTerminalSoftInputBridge(
+          focusNode: _focusNode,
+          controller: _controller,
+          modifiers: GhosttyTerminalSoftInputModifiers(
+            ctrl: _modifierState.ctrl,
+            alt: _modifierState.alt,
+            shift: _modifierState.shift,
+          ),
+          onModifiersConsumed: _clearModifiers,
+        ),
+        TerminalKeyBar(
+          compact: widget.compact,
+          modifierState: _modifierState,
+          onModifierStateChanged: _setModifierState,
+          onAction: _onKeyBarAction,
+        ),
       ],
     );
   }
@@ -542,44 +636,6 @@ HostTerminalInfo _stoppedTerminal(HostTerminalInfo terminal) {
     clients: terminal.clients,
   );
 }
-
-xterm.TerminalTheme _terminalTheme(AppColors colors) {
-  Color terminalColor(Color color) =>
-      readableTerminalColorOn(colors, preferred: color);
-
-  return xterm.TerminalTheme(
-    cursor: visibleUiColorOn(
-      colors,
-      background: colors.codeBackground,
-      preferred: colors.accent,
-    ),
-    selection: colors.accentMuted.withValues(alpha: 0.7),
-    foreground: colors.codeForeground,
-    background: colors.codeBackground,
-    black: colors.textTertiary,
-    red: terminalColor(colors.danger),
-    green: terminalColor(colors.success),
-    yellow: terminalColor(colors.warning),
-    blue: terminalColor(colors.accent),
-    magenta: terminalColor(colors.info),
-    cyan: terminalColor(colors.info),
-    white: colors.codeForeground,
-    brightBlack: terminalColor(colors.textSecondary),
-    brightRed: terminalColor(_brightTerminalColor(colors.danger)),
-    brightGreen: terminalColor(_brightTerminalColor(colors.success)),
-    brightYellow: terminalColor(_brightTerminalColor(colors.warning)),
-    brightBlue: terminalColor(_brightTerminalColor(colors.accent)),
-    brightMagenta: terminalColor(_brightTerminalColor(colors.info)),
-    brightCyan: terminalColor(_brightTerminalColor(colors.info)),
-    brightWhite: colors.textPrimary,
-    searchHitBackground: colors.warningMuted,
-    searchHitBackgroundCurrent: colors.accentMuted,
-    searchHitForeground: colors.textPrimary,
-  );
-}
-
-Color _brightTerminalColor(Color color) =>
-    Color.lerp(color, const Color(0xFFD8D8D8), 0.18)!;
 
 class _TerminalStatusStrip extends StatelessWidget {
   const _TerminalStatusStrip({
@@ -747,6 +803,278 @@ String _terminalSummaryLabel(HostTerminalInfo terminal) {
   final title = terminal.title.trim();
   if (title.isNotEmpty) return title;
   return 'Shell';
+}
+
+GhosttyKey? _ghosttyKeyForTerminalKey(xterm.TerminalKey key) {
+  switch (key) {
+    case xterm.TerminalKey.keyA:
+      return GhosttyKey.GHOSTTY_KEY_A;
+    case xterm.TerminalKey.keyB:
+      return GhosttyKey.GHOSTTY_KEY_B;
+    case xterm.TerminalKey.keyC:
+      return GhosttyKey.GHOSTTY_KEY_C;
+    case xterm.TerminalKey.keyD:
+      return GhosttyKey.GHOSTTY_KEY_D;
+    case xterm.TerminalKey.keyE:
+      return GhosttyKey.GHOSTTY_KEY_E;
+    case xterm.TerminalKey.keyF:
+      return GhosttyKey.GHOSTTY_KEY_F;
+    case xterm.TerminalKey.keyG:
+      return GhosttyKey.GHOSTTY_KEY_G;
+    case xterm.TerminalKey.keyH:
+      return GhosttyKey.GHOSTTY_KEY_H;
+    case xterm.TerminalKey.keyI:
+      return GhosttyKey.GHOSTTY_KEY_I;
+    case xterm.TerminalKey.keyJ:
+      return GhosttyKey.GHOSTTY_KEY_J;
+    case xterm.TerminalKey.keyK:
+      return GhosttyKey.GHOSTTY_KEY_K;
+    case xterm.TerminalKey.keyL:
+      return GhosttyKey.GHOSTTY_KEY_L;
+    case xterm.TerminalKey.keyM:
+      return GhosttyKey.GHOSTTY_KEY_M;
+    case xterm.TerminalKey.keyN:
+      return GhosttyKey.GHOSTTY_KEY_N;
+    case xterm.TerminalKey.keyO:
+      return GhosttyKey.GHOSTTY_KEY_O;
+    case xterm.TerminalKey.keyP:
+      return GhosttyKey.GHOSTTY_KEY_P;
+    case xterm.TerminalKey.keyQ:
+      return GhosttyKey.GHOSTTY_KEY_Q;
+    case xterm.TerminalKey.keyR:
+      return GhosttyKey.GHOSTTY_KEY_R;
+    case xterm.TerminalKey.keyS:
+      return GhosttyKey.GHOSTTY_KEY_S;
+    case xterm.TerminalKey.keyT:
+      return GhosttyKey.GHOSTTY_KEY_T;
+    case xterm.TerminalKey.keyU:
+      return GhosttyKey.GHOSTTY_KEY_U;
+    case xterm.TerminalKey.keyV:
+      return GhosttyKey.GHOSTTY_KEY_V;
+    case xterm.TerminalKey.keyW:
+      return GhosttyKey.GHOSTTY_KEY_W;
+    case xterm.TerminalKey.keyX:
+      return GhosttyKey.GHOSTTY_KEY_X;
+    case xterm.TerminalKey.keyY:
+      return GhosttyKey.GHOSTTY_KEY_Y;
+    case xterm.TerminalKey.keyZ:
+      return GhosttyKey.GHOSTTY_KEY_Z;
+    case xterm.TerminalKey.digit0:
+      return GhosttyKey.GHOSTTY_KEY_DIGIT_0;
+    case xterm.TerminalKey.digit1:
+      return GhosttyKey.GHOSTTY_KEY_DIGIT_1;
+    case xterm.TerminalKey.digit2:
+      return GhosttyKey.GHOSTTY_KEY_DIGIT_2;
+    case xterm.TerminalKey.digit3:
+      return GhosttyKey.GHOSTTY_KEY_DIGIT_3;
+    case xterm.TerminalKey.digit4:
+      return GhosttyKey.GHOSTTY_KEY_DIGIT_4;
+    case xterm.TerminalKey.digit5:
+      return GhosttyKey.GHOSTTY_KEY_DIGIT_5;
+    case xterm.TerminalKey.digit6:
+      return GhosttyKey.GHOSTTY_KEY_DIGIT_6;
+    case xterm.TerminalKey.digit7:
+      return GhosttyKey.GHOSTTY_KEY_DIGIT_7;
+    case xterm.TerminalKey.digit8:
+      return GhosttyKey.GHOSTTY_KEY_DIGIT_8;
+    case xterm.TerminalKey.digit9:
+      return GhosttyKey.GHOSTTY_KEY_DIGIT_9;
+    case xterm.TerminalKey.enter:
+      return GhosttyKey.GHOSTTY_KEY_ENTER;
+    case xterm.TerminalKey.escape:
+      return GhosttyKey.GHOSTTY_KEY_ESCAPE;
+    case xterm.TerminalKey.backspace:
+      return GhosttyKey.GHOSTTY_KEY_BACKSPACE;
+    case xterm.TerminalKey.tab:
+      return GhosttyKey.GHOSTTY_KEY_TAB;
+    case xterm.TerminalKey.space:
+      return GhosttyKey.GHOSTTY_KEY_SPACE;
+    case xterm.TerminalKey.minus:
+      return GhosttyKey.GHOSTTY_KEY_MINUS;
+    case xterm.TerminalKey.equal:
+      return GhosttyKey.GHOSTTY_KEY_EQUAL;
+    case xterm.TerminalKey.bracketLeft:
+      return GhosttyKey.GHOSTTY_KEY_BRACKET_LEFT;
+    case xterm.TerminalKey.bracketRight:
+      return GhosttyKey.GHOSTTY_KEY_BRACKET_RIGHT;
+    case xterm.TerminalKey.backslash:
+      return GhosttyKey.GHOSTTY_KEY_BACKSLASH;
+    case xterm.TerminalKey.semicolon:
+      return GhosttyKey.GHOSTTY_KEY_SEMICOLON;
+    case xterm.TerminalKey.quote:
+      return GhosttyKey.GHOSTTY_KEY_QUOTE;
+    case xterm.TerminalKey.backquote:
+      return GhosttyKey.GHOSTTY_KEY_BACKQUOTE;
+    case xterm.TerminalKey.comma:
+      return GhosttyKey.GHOSTTY_KEY_COMMA;
+    case xterm.TerminalKey.period:
+      return GhosttyKey.GHOSTTY_KEY_PERIOD;
+    case xterm.TerminalKey.slash:
+      return GhosttyKey.GHOSTTY_KEY_SLASH;
+    case xterm.TerminalKey.insert:
+      return GhosttyKey.GHOSTTY_KEY_INSERT;
+    case xterm.TerminalKey.home:
+      return GhosttyKey.GHOSTTY_KEY_HOME;
+    case xterm.TerminalKey.pageUp:
+      return GhosttyKey.GHOSTTY_KEY_PAGE_UP;
+    case xterm.TerminalKey.delete:
+      return GhosttyKey.GHOSTTY_KEY_DELETE;
+    case xterm.TerminalKey.end:
+      return GhosttyKey.GHOSTTY_KEY_END;
+    case xterm.TerminalKey.pageDown:
+      return GhosttyKey.GHOSTTY_KEY_PAGE_DOWN;
+    case xterm.TerminalKey.arrowRight:
+      return GhosttyKey.GHOSTTY_KEY_ARROW_RIGHT;
+    case xterm.TerminalKey.arrowLeft:
+      return GhosttyKey.GHOSTTY_KEY_ARROW_LEFT;
+    case xterm.TerminalKey.arrowDown:
+      return GhosttyKey.GHOSTTY_KEY_ARROW_DOWN;
+    case xterm.TerminalKey.arrowUp:
+      return GhosttyKey.GHOSTTY_KEY_ARROW_UP;
+    case xterm.TerminalKey.f1:
+      return GhosttyKey.GHOSTTY_KEY_F1;
+    case xterm.TerminalKey.f2:
+      return GhosttyKey.GHOSTTY_KEY_F2;
+    case xterm.TerminalKey.f3:
+      return GhosttyKey.GHOSTTY_KEY_F3;
+    case xterm.TerminalKey.f4:
+      return GhosttyKey.GHOSTTY_KEY_F4;
+    case xterm.TerminalKey.f5:
+      return GhosttyKey.GHOSTTY_KEY_F5;
+    case xterm.TerminalKey.f6:
+      return GhosttyKey.GHOSTTY_KEY_F6;
+    case xterm.TerminalKey.f7:
+      return GhosttyKey.GHOSTTY_KEY_F7;
+    case xterm.TerminalKey.f8:
+      return GhosttyKey.GHOSTTY_KEY_F8;
+    case xterm.TerminalKey.f9:
+      return GhosttyKey.GHOSTTY_KEY_F9;
+    case xterm.TerminalKey.f10:
+      return GhosttyKey.GHOSTTY_KEY_F10;
+    case xterm.TerminalKey.f11:
+      return GhosttyKey.GHOSTTY_KEY_F11;
+    case xterm.TerminalKey.f12:
+      return GhosttyKey.GHOSTTY_KEY_F12;
+    default:
+      return null;
+  }
+}
+
+String? _plainTextForTerminalKey(xterm.TerminalKey key) {
+  switch (key) {
+    case xterm.TerminalKey.keyA:
+      return 'a';
+    case xterm.TerminalKey.keyB:
+      return 'b';
+    case xterm.TerminalKey.keyC:
+      return 'c';
+    case xterm.TerminalKey.keyD:
+      return 'd';
+    case xterm.TerminalKey.keyE:
+      return 'e';
+    case xterm.TerminalKey.keyF:
+      return 'f';
+    case xterm.TerminalKey.keyG:
+      return 'g';
+    case xterm.TerminalKey.keyH:
+      return 'h';
+    case xterm.TerminalKey.keyI:
+      return 'i';
+    case xterm.TerminalKey.keyJ:
+      return 'j';
+    case xterm.TerminalKey.keyK:
+      return 'k';
+    case xterm.TerminalKey.keyL:
+      return 'l';
+    case xterm.TerminalKey.keyM:
+      return 'm';
+    case xterm.TerminalKey.keyN:
+      return 'n';
+    case xterm.TerminalKey.keyO:
+      return 'o';
+    case xterm.TerminalKey.keyP:
+      return 'p';
+    case xterm.TerminalKey.keyQ:
+      return 'q';
+    case xterm.TerminalKey.keyR:
+      return 'r';
+    case xterm.TerminalKey.keyS:
+      return 's';
+    case xterm.TerminalKey.keyT:
+      return 't';
+    case xterm.TerminalKey.keyU:
+      return 'u';
+    case xterm.TerminalKey.keyV:
+      return 'v';
+    case xterm.TerminalKey.keyW:
+      return 'w';
+    case xterm.TerminalKey.keyX:
+      return 'x';
+    case xterm.TerminalKey.keyY:
+      return 'y';
+    case xterm.TerminalKey.keyZ:
+      return 'z';
+    case xterm.TerminalKey.digit0:
+      return '0';
+    case xterm.TerminalKey.digit1:
+      return '1';
+    case xterm.TerminalKey.digit2:
+      return '2';
+    case xterm.TerminalKey.digit3:
+      return '3';
+    case xterm.TerminalKey.digit4:
+      return '4';
+    case xterm.TerminalKey.digit5:
+      return '5';
+    case xterm.TerminalKey.digit6:
+      return '6';
+    case xterm.TerminalKey.digit7:
+      return '7';
+    case xterm.TerminalKey.digit8:
+      return '8';
+    case xterm.TerminalKey.digit9:
+      return '9';
+    case xterm.TerminalKey.space:
+      return ' ';
+    case xterm.TerminalKey.minus:
+      return '-';
+    case xterm.TerminalKey.equal:
+      return '=';
+    case xterm.TerminalKey.bracketLeft:
+      return '[';
+    case xterm.TerminalKey.bracketRight:
+      return ']';
+    case xterm.TerminalKey.backslash:
+      return r'\';
+    case xterm.TerminalKey.semicolon:
+      return ';';
+    case xterm.TerminalKey.quote:
+      return "'";
+    case xterm.TerminalKey.backquote:
+      return '`';
+    case xterm.TerminalKey.comma:
+      return ',';
+    case xterm.TerminalKey.period:
+      return '.';
+    case xterm.TerminalKey.slash:
+      return '/';
+    default:
+      return null;
+  }
+}
+
+int _ghosttyModsForAction(TerminalKeyAction action) {
+  var mods = 0;
+  if (action.ctrl) {
+    mods |= GhosttyModsMask.ctrl;
+  }
+  if (action.alt) {
+    mods |= GhosttyModsMask.alt;
+  }
+  if (action.shift) {
+    mods |= GhosttyModsMask.shift;
+  }
+  return mods;
 }
 
 int? _intOrNull(Object? value) {

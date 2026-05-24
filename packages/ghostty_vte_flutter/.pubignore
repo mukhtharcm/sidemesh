@@ -1,0 +1,13 @@
+# Build artifacts
+build/
+.prebuilt/
+
+# Example app build outputs
+example/build/
+example/.dart_tool/
+example/android/
+example/ios/
+example/linux/
+example/macos/
+example/windows/
+example/web/
