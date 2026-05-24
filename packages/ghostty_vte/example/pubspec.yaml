@@ -7,8 +7,6 @@ publish_to: none
 environment:
   sdk: ^3.10.4
 
-resolution: workspace
-
 dependencies:
   ghostty_vte:
     path: ../

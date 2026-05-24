@@ -463,6 +463,51 @@ class _TerminalPaneState extends State<TerminalPane> {
     _setModifierState(TerminalModifierState.none);
   }
 
+  Uri? _selectionLinkUri(String text) {
+    final trimmed = text.trim();
+    if (trimmed.isEmpty) {
+      return null;
+    }
+    final uri = Uri.tryParse(trimmed);
+    if (uri == null) {
+      return null;
+    }
+    final scheme = uri.scheme.toLowerCase();
+    if (scheme == 'mailto') {
+      return uri.path.isEmpty ? null : uri;
+    }
+    if ((scheme == 'http' || scheme == 'https') && uri.host.isNotEmpty) {
+      return uri;
+    }
+    return null;
+  }
+
+  Future<void> _openTerminalUri(Uri uri) async {
+    final ok = await launchUrl(uri, mode: LaunchMode.externalApplication);
+    if (!ok && mounted) {
+      showAppSnackBar(context, 'Could not open link');
+    }
+  }
+
+  List<ContextMenuButtonItem> _selectionContextMenuButtonItems(
+    GhosttyTerminalSelectionContextMenuDetails details,
+  ) {
+    final uri = _selectionLinkUri(details.selectedText);
+    if (uri == null) {
+      return details.defaultButtonItems;
+    }
+    return <ContextMenuButtonItem>[
+      ContextMenuButtonItem(
+        label: 'Open link',
+        onPressed: () {
+          details.hideToolbar();
+          unawaited(_openTerminalUri(uri));
+        },
+      ),
+      ...details.defaultButtonItems,
+    ];
+  }
+
   void _adoptReplacementTerminal(HostTerminalInfo replacement) {
     if (!mounted || replacement.id == _terminalInfo?.id) return;
     unawaited(_subscription?.cancel());
@@ -588,8 +633,17 @@ class _TerminalPaneState extends State<TerminalPane> {
                 hyperlinkColor: colors.accent,
                 scrollbarThumbColor: colors.textTertiary.withValues(alpha: 0.6),
                 scrollbarTrackColor: colors.canvas.withValues(alpha: 0.14),
+                copyOptions: const GhosttyTerminalCopyOptions(
+                  joinWrappedLines: true,
+                ),
+                selectionContextMenuButtonItemsBuilder:
+                    _selectionContextMenuButtonItems,
                 onOpenHyperlink: (uri) async {
-                  await launchUrl(Uri.parse(uri));
+                  final target = Uri.tryParse(uri);
+                  if (target == null) {
+                    return;
+                  }
+                  await _openTerminalUri(target);
                 },
               ),
             ),

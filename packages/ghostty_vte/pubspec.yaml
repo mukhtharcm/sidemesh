@@ -4,6 +4,7 @@ description: >-
   Paste-safety checks, OSC parsing, SGR attribute parsing, and keyboard
   event encoding — on native platforms and on the web via WebAssembly.
 version: 0.1.3
+publish_to: 'none'
 
 repository: https://github.com/kingwill101/dart_terminal/tree/master/pkgs/vte/ghostty_vte
 homepage: https://github.com/kingwill101/dart_terminal
@@ -21,8 +22,6 @@ environment:
 
 executables:
   setup: setup
-
-resolution: workspace
 
 dependencies:
   code_assets: ^1.0.0
