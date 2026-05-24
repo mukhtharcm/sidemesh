@@ -4,36 +4,36 @@ import 'package:test/test.dart';
 import '../hook/build.dart' as build_hook;
 
 void main() {
-  group('isPubCachePackagePath', () {
-    test('recognizes Unix pub cache paths', () {
+  group('preferSourceBuildFromEnvironment', () {
+    test('treats truthy override values as source-build requests', () {
       expect(
-        build_hook.isPubCachePackagePath(
-          '/home/me/.pub-cache/hosted/pub.dev/ghostty_vte-0.1.2',
+        build_hook.preferSourceBuildFromEnvironment(
+          const <String, String>{'GHOSTTY_VTE_PREFER_SOURCE': '1'},
         ),
         isTrue,
       );
     });
 
-    test('recognizes Windows Pub Cache paths', () {
+    test('accepts mixed-case truthy text', () {
       expect(
-        build_hook.isPubCachePackagePath(
-          r'C:\Users\me\AppData\Local\Pub\Cache\hosted\pub.dev\ghostty_vte-0.1.2',
+        build_hook.preferSourceBuildFromEnvironment(
+          const <String, String>{'GHOSTTY_VTE_PREFER_SOURCE': 'TrUe'},
         ),
         isTrue,
       );
     });
 
-    test('does not classify local checkouts as pub cache paths', () {
+    test('defaults to downloaded prebuilts when unset', () {
       expect(
-        build_hook.isPubCachePackagePath('/work/dart_terminal/pkgs/vte'),
+        build_hook.preferSourceBuildFromEnvironment(const <String, String>{}),
         isFalse,
       );
     });
 
-    test('does not treat hosted pub.dev segments as a cache by itself', () {
+    test('treats falsey override values as disabled', () {
       expect(
-        build_hook.isPubCachePackagePath(
-          '/work/fixtures/hosted/pub.dev/ghostty_vte',
+        build_hook.preferSourceBuildFromEnvironment(
+          const <String, String>{'GHOSTTY_VTE_PREFER_SOURCE': 'false'},
         ),
         isFalse,
       );

@@ -20,8 +20,6 @@ version: 1.0.0+1
 
 environment:
   sdk: ^3.10.4
-resolution: workspace
-
 # Dependencies specify other packages that your package needs in order to work.
 # To automatically upgrade your package dependencies to the latest versions
 # consider running `flutter pub upgrade --major-versions`. Alternatively,
@@ -31,7 +29,8 @@ resolution: workspace
 dependencies:
   flutter:
     sdk: flutter
-  ghostty_vte: ^0.1.0+2
+  ghostty_vte:
+    path: ../../ghostty_vte
   ghostty_vte_flutter:
     path: ../
   google_fonts: ^6.3.2

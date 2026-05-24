@@ -54,7 +54,7 @@ void main(List<String> args) async {
       code.targetArchitecture,
       iOSSdk: code.targetOS == OS.iOS ? code.iOS.targetSdk : null,
     );
-    final preferSourceBuild = _shouldPreferSourceBuild(input);
+    final preferSourceBuild = _shouldPreferSourceBuild();
 
     // ── 2. Try .prebuilt/ directory (manual or setup script) ──
     final prebuilt = _findLocalPrebuilt(input, platformLabel, dylibName);
@@ -90,7 +90,7 @@ void main(List<String> args) async {
     } else if (assetInfo != null && preferSourceBuild) {
       _info(
         'Skipping downloaded VTE prebuilt for $platformLabel because '
-        'this package is being used from a local checkout.',
+        'source builds were explicitly requested.',
       );
     }
 
@@ -101,36 +101,16 @@ void main(List<String> args) async {
   });
 }
 
-bool _shouldPreferSourceBuild(BuildInput input) {
-  final override = Platform.environment['GHOSTTY_VTE_PREFER_SOURCE'];
-  if (override != null && override.isNotEmpty && override != '0') {
-    return true;
-  }
-
-  final packagePath = Directory.fromUri(input.packageRoot).absolute.path;
-  return !isPubCachePackagePath(packagePath);
+bool _shouldPreferSourceBuild() {
+  return preferSourceBuildFromEnvironment(Platform.environment);
 }
 
-bool isPubCachePackagePath(String packagePath) {
-  final segments = packagePath
-      .replaceAll('\\', '/')
-      .toLowerCase()
-      .split('/')
-      .where((segment) => segment.isNotEmpty)
-      .toList();
-
-  for (var i = 0; i < segments.length; i++) {
-    if (segments[i] == '.pub-cache') {
-      return true;
-    }
-    if (segments[i] == 'pub' &&
-        i + 1 < segments.length &&
-        segments[i + 1] == 'cache') {
-      return true;
-    }
-  }
-
-  return false;
+bool preferSourceBuildFromEnvironment(Map<String, String> environment) {
+  final override = environment['GHOSTTY_VTE_PREFER_SOURCE'];
+  return override != null &&
+      override.isNotEmpty &&
+      override != '0' &&
+      override.toLowerCase() != 'false';
 }
 
 void _addAsset(BuildOutputBuilder output, String packageName, Uri file) {

@@ -110,13 +110,7 @@ final class GhosttyTerminalSnapshot
   /// Returns the OSC 8 hyperlink at [position], if the cell is linked.
   @override
   String? hyperlinkAt(GhosttyTerminalCellPosition position) {
-    if (lines.isEmpty || position.row < 0 || position.row >= lines.length) {
-      return null;
-    }
-    if (position.col < 0 || position.col >= lines[position.row].cellCount) {
-      return null;
-    }
-    return lines[position.row].hyperlinkAtCell(position.col);
+    return _hyperlinkInfoAtPosition(position)?.uri;
   }
 
   /// Returns a word-like inclusive selection anchored at [position].
@@ -129,6 +123,10 @@ final class GhosttyTerminalSnapshot
     if (lines.isEmpty || position.row < 0 || position.row >= lines.length) {
       return null;
     }
+    final hyperlink = _hyperlinkInfoAtPosition(position);
+    if (hyperlink != null) {
+      return hyperlink.selection;
+    }
     final cells = lines[position.row]._lineCells();
     if (position.col < 0 || position.col >= cells.length) {
       return null;
@@ -138,6 +136,134 @@ final class GhosttyTerminalSnapshot
       position.col,
       policy: policy,
     );
+  }
+
+  _GhosttyTerminalHyperlinkSelectionInfo? _hyperlinkInfoAtPosition(
+    GhosttyTerminalCellPosition position,
+  ) {
+    if (lines.isEmpty || position.row < 0 || position.row >= lines.length) {
+      return null;
+    }
+    final line = lines[position.row];
+    if (position.col < 0 || position.col >= line.cellCount) {
+      return null;
+    }
+    final group = _wrappedRowGroupFor(position.row);
+    if (group.cells.isEmpty) {
+      return null;
+    }
+    final logicalIndex = group.cells.indexWhere(
+      (cell) => cell.position == position,
+    );
+    if (logicalIndex < 0) {
+      return null;
+    }
+    final styled = _styledHyperlinkInfoInLogicalCells(group.cells, logicalIndex);
+    if (styled != null) {
+      return styled;
+    }
+    return _detectedHyperlinkInfoInLogicalCells(group.cells, logicalIndex);
+  }
+
+  _GhosttyTerminalWrappedRowGroup _wrappedRowGroupFor(int row) {
+    var startRow = row;
+    while (startRow > 0 && lines[startRow].wrapContinuation) {
+      startRow--;
+    }
+
+    var endRow = row;
+    while (endRow + 1 < lines.length && lines[endRow].wrap) {
+      endRow++;
+    }
+
+    final cells = <_GhosttyTerminalLogicalCell>[];
+    for (var currentRow = startRow; currentRow <= endRow; currentRow++) {
+      final rowCells = lines[currentRow]._lineCells();
+      for (var col = 0; col < rowCells.length; col++) {
+        final cell = rowCells[col];
+        cells.add(
+          _GhosttyTerminalLogicalCell(
+            position: GhosttyTerminalCellPosition(row: currentRow, col: col),
+            text: cell.text,
+            style: cell.style,
+          ),
+        );
+      }
+    }
+
+    return _GhosttyTerminalWrappedRowGroup(
+      startRow: startRow,
+      endRow: endRow,
+      cells: cells,
+    );
+  }
+
+  _GhosttyTerminalHyperlinkSelectionInfo? _styledHyperlinkInfoInLogicalCells(
+    List<_GhosttyTerminalLogicalCell> cells,
+    int targetIndex,
+  ) {
+    final uri = cells[targetIndex].style.hyperlink;
+    if (uri == null || uri.isEmpty) {
+      return null;
+    }
+
+    var startIndex = targetIndex;
+    while (startIndex > 0 && cells[startIndex - 1].style.hyperlink == uri) {
+      startIndex--;
+    }
+
+    var endIndex = targetIndex;
+    while (endIndex + 1 < cells.length &&
+        cells[endIndex + 1].style.hyperlink == uri) {
+      endIndex++;
+    }
+
+    return _GhosttyTerminalHyperlinkSelectionInfo(
+      uri: uri,
+      selection: GhosttyTerminalSelection(
+        base: cells[startIndex].position,
+        extent: cells[endIndex].position,
+      ),
+    );
+  }
+
+  _GhosttyTerminalHyperlinkSelectionInfo? _detectedHyperlinkInfoInLogicalCells(
+    List<_GhosttyTerminalLogicalCell> cells,
+    int targetIndex,
+  ) {
+    final text = cells.map((cell) => cell.text).join();
+    for (final match in _terminalUrlPattern.allMatches(text)) {
+      final raw = match.group(0);
+      if (raw == null || raw.isEmpty) {
+        continue;
+      }
+
+      final trimmed = raw.replaceFirst(RegExp(r'[),.;:!?]+$'), '');
+      if (trimmed.isEmpty) {
+        continue;
+      }
+
+      final prefixCellCount = _splitCharacters(
+        text.substring(0, match.start),
+      ).length;
+      final linkCellCount = _splitCharacters(trimmed).length;
+      final startIndex = prefixCellCount;
+      final endIndex = startIndex + linkCellCount - 1;
+      if (targetIndex < startIndex ||
+          targetIndex > endIndex ||
+          endIndex >= cells.length) {
+        continue;
+      }
+
+      return _GhosttyTerminalHyperlinkSelectionInfo(
+        uri: trimmed,
+        selection: GhosttyTerminalSelection(
+          base: cells[startIndex].position,
+          extent: cells[endIndex].position,
+        ),
+      );
+    }
+    return null;
   }
 }
 
@@ -547,6 +673,40 @@ final class _GhosttyTerminalHyperlink {
   final String uri;
   final int startCol;
   final int endCol;
+}
+
+final class _GhosttyTerminalLogicalCell {
+  const _GhosttyTerminalLogicalCell({
+    required this.position,
+    required this.text,
+    required this.style,
+  });
+
+  final GhosttyTerminalCellPosition position;
+  final String text;
+  final GhosttyTerminalStyle style;
+}
+
+final class _GhosttyTerminalWrappedRowGroup {
+  const _GhosttyTerminalWrappedRowGroup({
+    required this.startRow,
+    required this.endRow,
+    required this.cells,
+  });
+
+  final int startRow;
+  final int endRow;
+  final List<_GhosttyTerminalLogicalCell> cells;
+}
+
+final class _GhosttyTerminalHyperlinkSelectionInfo {
+  const _GhosttyTerminalHyperlinkSelectionInfo({
+    required this.uri,
+    required this.selection,
+  });
+
+  final String uri;
+  final GhosttyTerminalSelection selection;
 }
 
 enum _GhosttyTerminalCellClass { whitespace, word, other }
