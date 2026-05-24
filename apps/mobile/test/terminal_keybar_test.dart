@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sidemesh_mobile/src/terminal_key_models.dart';
+import 'package:sidemesh_mobile/src/terminal_modifier_state.dart';
 import 'package:sidemesh_mobile/src/theme/app_palettes.dart';
 import 'package:sidemesh_mobile/src/theme/app_theme.dart';
 import 'package:sidemesh_mobile/src/widgets/terminal_keybar.dart';
@@ -10,12 +11,21 @@ void main() {
     tester,
   ) async {
     TerminalKeyAction? firedAction;
+    var modifierState = TerminalModifierState.none;
 
     await tester.pumpWidget(
       MaterialApp(
         theme: buildLightTheme(ThemeVariant.codexAmber.light),
         home: Scaffold(
-          body: TerminalKeyBar(onAction: (action) => firedAction = action),
+          body: StatefulBuilder(
+            builder: (context, setState) => TerminalKeyBar(
+              onAction: (action) => firedAction = action,
+              modifierState: modifierState,
+              onModifierStateChanged: (next) {
+                setState(() => modifierState = next);
+              },
+            ),
+          ),
         ),
       ),
     );
@@ -48,12 +58,21 @@ void main() {
     tester,
   ) async {
     TerminalKeyAction? firedAction;
+    var modifierState = TerminalModifierState.none;
 
     await tester.pumpWidget(
       MaterialApp(
         theme: buildLightTheme(ThemeVariant.codexAmber.light),
         home: Scaffold(
-          body: TerminalKeyBar(onAction: (action) => firedAction = action),
+          body: StatefulBuilder(
+            builder: (context, setState) => TerminalKeyBar(
+              onAction: (action) => firedAction = action,
+              modifierState: modifierState,
+              onModifierStateChanged: (next) {
+                setState(() => modifierState = next);
+              },
+            ),
+          ),
         ),
       ),
     );
@@ -81,10 +100,22 @@ void main() {
   });
 
   testWidgets('more button opens the key sheet', (tester) async {
+    var modifierState = TerminalModifierState.none;
+
     await tester.pumpWidget(
       MaterialApp(
         theme: buildLightTheme(ThemeVariant.codexAmber.light),
-        home: Scaffold(body: TerminalKeyBar(onAction: (_) {})),
+        home: Scaffold(
+          body: StatefulBuilder(
+            builder: (context, setState) => TerminalKeyBar(
+              onAction: (_) {},
+              modifierState: modifierState,
+              onModifierStateChanged: (next) {
+                setState(() => modifierState = next);
+              },
+            ),
+          ),
+        ),
       ),
     );
 
@@ -93,8 +124,9 @@ void main() {
 
     // The sheet should show category labels and additional keys.
     expect(find.text('Navigation'), findsOneWidget);
+    expect(find.text('Letters'), findsOneWidget);
     expect(find.text('Symbols'), findsOneWidget);
     expect(find.text('Function'), findsOneWidget);
-    expect(find.text('Ctrl+C'), findsOneWidget);
+    expect(find.text('A'), findsOneWidget);
   });
 }

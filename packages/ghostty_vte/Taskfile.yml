@@ -1,0 +1,44 @@
+version: "3"
+
+tasks:
+  default:
+    cmds:
+      - task: test
+
+  ffigen:
+    desc: Regenerate Dart bindings from Ghostty headers
+    cmds:
+      - dart run tool/ffigen.dart
+
+  wasm:
+    desc: Build Ghostty VT wasm module and copy to Flutter package assets
+    cmds:
+      - dart run tool/build_wasm.dart
+
+  analyze:
+    desc: Analyze package
+    cmds:
+      - dart analyze
+
+  test:
+    desc: Run package tests (triggers build hook/native assets)
+    cmds:
+      - dart test -r expanded
+
+  example:analyze:
+    desc: Analyze example app
+    dir: example
+    cmds:
+      - dart analyze
+
+  example:run:
+    desc: Run the example CLI app
+    dir: example
+    cmds:
+      - dart run
+
+  submodule:init:
+    desc: Add and initialize Ghostty as a submodule
+    cmds:
+      - git submodule add https://github.com/ghostty-org/ghostty third_party/ghostty
+      - git submodule update --init --recursive
