@@ -4983,6 +4983,98 @@ describe("GET /api/sessions/:sessionId/status", () => {
       }
     });
   });
+
+  it("keeps rename live upserts aligned with canonical recent session summaries", async () => {
+    const stateDir = await mkdtemp(
+      nodePath.join(tmpdir(), "sidemesh-server-recent-rename-test-"),
+    );
+    await withServer(makeConfig(stateDir), async (server, config) => {
+      const recentLive = await openRecentSessionsLiveSocket(
+        server.port,
+        config.token,
+      );
+      try {
+        await waitFor(
+          () => recentLive.events.find((event) => event.type === "snapshot"),
+          "recent session live snapshot",
+        );
+
+        const createRes = await request({
+          hostname: "127.0.0.1",
+          port: server.port,
+          path: "/api/sessions/create",
+          method: "POST",
+          headers: {
+            Authorization: "Bearer " + config.token,
+            "content-type": "application/json",
+          },
+          body: JSON.stringify({
+            cwd: "/tmp/recent-rename-test",
+            prompt: "rename this recent session",
+          }),
+        });
+        assert.equal(createRes.statusCode, 201);
+        const sessionId = (createRes.body as any).session.id as string;
+
+        const createdUpsert = await waitFor(
+          () =>
+            recentLive.events.find(
+              (event) =>
+                event.type === "upsert" &&
+                event.session?.id === sessionId,
+            ),
+          "recent create upsert",
+        );
+        assert.ok(createdUpsert.session?.runtime);
+
+        const renameRes = await request({
+          hostname: "127.0.0.1",
+          port: server.port,
+          path: `/api/sessions/${encodeURIComponent(sessionId)}/name`,
+          method: "POST",
+          headers: {
+            Authorization: "Bearer " + config.token,
+            "content-type": "application/json",
+          },
+          body: JSON.stringify({
+            name: "Renamed recent session",
+          }),
+        });
+        assert.equal(renameRes.statusCode, 200);
+
+        const renamedUpsert = await waitFor(
+          () =>
+            recentLive.events.find(
+              (event) =>
+                event.type === "upsert" &&
+                event.session?.id === sessionId &&
+                event.session?.title === "Renamed recent session" &&
+                recentLive.events.indexOf(event) >
+                  recentLive.events.indexOf(createdUpsert),
+            ),
+          "recent rename upsert",
+        );
+
+        const sessionsRes = await request({
+          hostname: "127.0.0.1",
+          port: server.port,
+          path: "/api/sessions?limit=10",
+          method: "GET",
+          headers: {
+            Authorization: "Bearer " + config.token,
+          },
+        });
+        assert.equal(sessionsRes.statusCode, 200);
+        const canonical = (sessionsRes.body as Array<any>).find(
+          (session) => session.id === sessionId,
+        );
+        assert.ok(canonical);
+        assert.deepEqual(renamedUpsert.session, canonical);
+      } finally {
+        await closeSessionLiveSocket(recentLive.socket);
+      }
+    });
+  });
 });
 
 describe("GET /api/sessions/search", () => {
