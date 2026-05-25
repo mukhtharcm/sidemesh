@@ -56,10 +56,6 @@ dependencies:
   package_info_plus: ^9.0.1
   desktop_multi_window: ^0.3.0
   xterm: ^4.0.0
-  ghostty_vte:
-    path: ../../packages/ghostty_vte
-  ghostty_vte_flutter:
-    path: ../../packages/ghostty_vte_flutter
   mobile_scanner: ^7.2.0
   pdfrx: ^2.4.1
   webview_flutter: ^4.13.1
