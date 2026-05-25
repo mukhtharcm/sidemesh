@@ -121,6 +121,8 @@ class _TerminalPaneState extends State<TerminalPane> {
   int? _rows;
   TerminalModifierState _modifierState = const TerminalModifierState();
   bool _skipNextSoftInputTransform = false;
+  Offset? _contextMenuAnchor;
+  Offset? _selectionLongPressOrigin;
 
   @override
   void initState() {
@@ -447,6 +449,7 @@ class _TerminalPaneState extends State<TerminalPane> {
   void _handleTerminalSelectionChanged() {
     if (_terminalController.selection != null) {
       _terminalViewKey.currentState?.closeKeyboard();
+      _contextMenuAnchor = null;
     }
     if (!mounted) return;
     setState(() {});
@@ -462,6 +465,23 @@ class _TerminalPaneState extends State<TerminalPane> {
     HapticFeedback.selectionClick();
     showAppSnackBar(context, 'Copied selection');
     _terminalController.clearSelection();
+  }
+
+  Future<void> _pasteClipboard() async {
+    final data = await Clipboard.getData(Clipboard.kTextPlain);
+    final text = data?.text;
+    if (text == null || text.isEmpty) {
+      if (!mounted) return;
+      showAppSnackBar(context, 'Clipboard is empty');
+      return;
+    }
+    _terminal.paste(text);
+    if (!mounted) return;
+    HapticFeedback.selectionClick();
+    setState(() {
+      _contextMenuAnchor = null;
+      _selectionLongPressOrigin = null;
+    });
   }
 
   void _selectAll() {
@@ -492,6 +512,43 @@ class _TerminalPaneState extends State<TerminalPane> {
       _terminal.buffer.createAnchorFromOffset(nextEnd),
       mode: xterm.SelectionMode.line,
     );
+  }
+
+  void _beginTerminalContextMenuSelection(Offset localPosition) {
+    final viewState = _terminalViewKey.currentState;
+    if (viewState == null) return;
+    viewState.closeKeyboard();
+    final render = viewState.renderTerminal;
+    final wordBoundary = _terminal.buffer.getWordBoundary(
+      render.getCellOffset(localPosition),
+    );
+    setState(() {
+      _selectionLongPressOrigin = localPosition;
+      _contextMenuAnchor = wordBoundary == null ? localPosition : null;
+    });
+    if (wordBoundary != null) {
+      render.selectWord(localPosition);
+    }
+  }
+
+  void _updateTerminalContextSelection(Offset localPosition) {
+    final origin = _selectionLongPressOrigin;
+    final viewState = _terminalViewKey.currentState;
+    if (origin == null || viewState == null) return;
+    final render = viewState.renderTerminal;
+    if (_terminalController.selection != null) {
+      render.selectWord(origin, localPosition);
+    } else {
+      setState(() => _contextMenuAnchor = localPosition);
+    }
+  }
+
+  void _clearContextMenuAnchor() {
+    if (_contextMenuAnchor == null && _selectionLongPressOrigin == null) return;
+    setState(() {
+      _contextMenuAnchor = null;
+      _selectionLongPressOrigin = null;
+    });
   }
 
   void _sendChannelInput(String input) {
@@ -620,14 +677,40 @@ class _TerminalPaneState extends State<TerminalPane> {
                     ),
                     padding: EdgeInsets.all(widget.compact ? 10 : 12),
                   ),
+                  Positioned.fill(
+                    child: Listener(
+                      behavior: HitTestBehavior.translucent,
+                      onPointerDown: (_) {
+                        if (_contextMenuAnchor != null) {
+                          _clearContextMenuAnchor();
+                        }
+                      },
+                      child: GestureDetector(
+                        behavior: HitTestBehavior.translucent,
+                        onLongPressStart: (details) =>
+                            _beginTerminalContextMenuSelection(
+                              details.localPosition,
+                            ),
+                        onLongPressMoveUpdate: (details) =>
+                            _updateTerminalContextSelection(
+                              details.localPosition,
+                            ),
+                      ),
+                    ),
+                  ),
                   _TerminalSelectionOverlay(
                     terminal: _terminal,
                     controller: _terminalController,
                     terminalViewState: _terminalViewKey.currentState,
                     compact: widget.compact,
+                    contextMenuAnchor: _contextMenuAnchor,
                     onCopy: _copySelection,
+                    onPaste: _pasteClipboard,
                     onSelectAll: _selectAll,
-                    onClearSelection: _terminalController.clearSelection,
+                    onClearSelection: () {
+                      _terminalController.clearSelection();
+                      _clearContextMenuAnchor();
+                    },
                     onHandleDragUpdate: _updateSelectionHandle,
                   ),
                 ],
@@ -887,7 +970,9 @@ class _TerminalSelectionOverlay extends StatelessWidget {
     required this.controller,
     required this.terminalViewState,
     required this.compact,
+    required this.contextMenuAnchor,
     required this.onCopy,
+    required this.onPaste,
     required this.onSelectAll,
     required this.onClearSelection,
     required this.onHandleDragUpdate,
@@ -897,7 +982,9 @@ class _TerminalSelectionOverlay extends StatelessWidget {
   final xterm.TerminalController controller;
   final xterm.TerminalViewState? terminalViewState;
   final bool compact;
+  final Offset? contextMenuAnchor;
   final Future<void> Function() onCopy;
+  final Future<void> Function() onPaste;
   final VoidCallback onSelectAll;
   final VoidCallback onClearSelection;
   final void Function(_TerminalSelectionHandleSide side, Offset globalPosition)
@@ -906,12 +993,35 @@ class _TerminalSelectionOverlay extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final viewState = terminalViewState;
-    final selection = controller.selection?.normalized;
-    if (viewState == null || selection == null) {
+    if (viewState == null) {
       return const SizedBox.shrink();
     }
 
+    final selection = controller.selection?.normalized;
     final render = viewState.renderTerminal;
+    if (selection == null) {
+      final anchor = contextMenuAnchor;
+      if (anchor == null) {
+        return const SizedBox.shrink();
+      }
+      return AdaptiveTextSelectionToolbar.buttonItems(
+        anchors: TextSelectionToolbarAnchors(
+          primaryAnchor: anchor,
+          secondaryAnchor: anchor,
+        ),
+        buttonItems: [
+          ContextMenuButtonItem(
+            type: ContextMenuButtonType.paste,
+            onPressed: () => onPaste(),
+          ),
+          ContextMenuButtonItem(
+            type: ContextMenuButtonType.selectAll,
+            onPressed: onSelectAll,
+          ),
+        ],
+      );
+    }
+
     final cellSize = render.cellSize;
     final startOffset = render.getOffset(selection.begin);
     final endOffset = render.getOffset(selection.end);
@@ -936,12 +1046,12 @@ class _TerminalSelectionOverlay extends StatelessWidget {
           onPressed: () => onCopy(),
         ),
         ContextMenuButtonItem(
-          type: ContextMenuButtonType.selectAll,
-          onPressed: onSelectAll,
+          type: ContextMenuButtonType.paste,
+          onPressed: () => onPaste(),
         ),
         ContextMenuButtonItem(
-          label: 'Done',
-          onPressed: onClearSelection,
+          type: ContextMenuButtonType.selectAll,
+          onPressed: onSelectAll,
         ),
       ],
     );
