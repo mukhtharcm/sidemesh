@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
 import 'package:xterm/xterm.dart' as xterm;
 
@@ -104,7 +105,10 @@ class _TerminalPaneState extends State<TerminalPane> {
   late final String _reconnectSlotId =
       'terminal-live:${identityHashCode(this)}';
   late final xterm.Terminal _terminal;
+  late final xterm.TerminalController _terminalController;
   final FocusNode _focusNode = FocusNode();
+  final GlobalKey<xterm.TerminalViewState> _terminalViewKey =
+      GlobalKey<xterm.TerminalViewState>();
   WebSocketChannel? _channel;
   StreamSubscription<dynamic>? _subscription;
   HostTerminalInfo? _terminalInfo;
@@ -121,6 +125,8 @@ class _TerminalPaneState extends State<TerminalPane> {
   @override
   void initState() {
     super.initState();
+    _terminalController = xterm.TerminalController();
+    _terminalController.addListener(_handleTerminalSelectionChanged);
     _terminal = xterm.Terminal(
       maxLines: 5000,
       onOutput: _sendInput,
@@ -176,6 +182,8 @@ class _TerminalPaneState extends State<TerminalPane> {
     );
     unawaited(_subscription?.cancel() ?? Future<void>.value());
     unawaited(_channel?.sink.close() ?? Future<void>.value());
+    _terminalController.removeListener(_handleTerminalSelectionChanged);
+    _terminalController.dispose();
     _focusNode.dispose();
     super.dispose();
   }
@@ -436,6 +444,56 @@ class _TerminalPaneState extends State<TerminalPane> {
     setState(() => _modifierState = state);
   }
 
+  void _handleTerminalSelectionChanged() {
+    if (_terminalController.selection != null) {
+      _terminalViewKey.currentState?.closeKeyboard();
+    }
+    if (!mounted) return;
+    setState(() {});
+  }
+
+  Future<void> _copySelection() async {
+    final selection = _terminalController.selection?.normalized;
+    if (selection == null) return;
+    final text = _terminal.buffer.getText(selection);
+    if (text.isEmpty) return;
+    await Clipboard.setData(ClipboardData(text: text));
+    if (!mounted) return;
+    HapticFeedback.selectionClick();
+    showAppSnackBar(context, 'Copied selection');
+    _terminalController.clearSelection();
+  }
+
+  void _selectAll() {
+    final viewHeight = _terminal.viewHeight;
+    if (viewHeight <= 0) return;
+    _terminalController.setSelection(
+      _terminal.buffer.createAnchor(0, _terminal.buffer.height - viewHeight),
+      _terminal.buffer.createAnchor(_terminal.viewWidth, _terminal.buffer.height - 1),
+      mode: xterm.SelectionMode.line,
+    );
+  }
+
+  void _updateSelectionHandle(_TerminalSelectionHandleSide side, Offset globalPosition) {
+    final selection = _terminalController.selection?.normalized;
+    final viewState = _terminalViewKey.currentState;
+    if (selection == null || viewState == null) return;
+    final render = viewState.renderTerminal;
+    final local = render.globalToLocal(globalPosition);
+    final cell = render.getCellOffset(local);
+    final nextStart = side == _TerminalSelectionHandleSide.start
+        ? cell
+        : selection.begin;
+    final nextEnd = side == _TerminalSelectionHandleSide.end
+        ? xterm.CellOffset(cell.x + 1, cell.y)
+        : selection.end;
+    _terminalController.setSelection(
+      _terminal.buffer.createAnchorFromOffset(nextStart),
+      _terminal.buffer.createAnchorFromOffset(nextEnd),
+      mode: xterm.SelectionMode.line,
+    );
+  }
+
   void _sendChannelInput(String input) {
     final channel = _channel;
     if (channel == null || input.isEmpty) return;
@@ -544,18 +602,35 @@ class _TerminalPaneState extends State<TerminalPane> {
                 ],
               ),
               clipBehavior: Clip.antiAlias,
-              child: xterm.TerminalView(
-                _terminal,
-                focusNode: _focusNode,
-                autofocus: true,
-                keyboardType: TextInputType.text,
-                deleteDetection: true,
-                theme: _terminalTheme(colors),
-                textStyle: xterm.TerminalStyle(
-                  fontSize: widget.compact ? 12 : 13,
-                  height: 1.22,
-                ),
-                padding: EdgeInsets.all(widget.compact ? 10 : 12),
+              child: Stack(
+                fit: StackFit.expand,
+                children: [
+                  xterm.TerminalView(
+                    _terminal,
+                    key: _terminalViewKey,
+                    controller: _terminalController,
+                    focusNode: _focusNode,
+                    autofocus: true,
+                    keyboardType: TextInputType.text,
+                    deleteDetection: true,
+                    theme: _terminalTheme(colors),
+                    textStyle: xterm.TerminalStyle(
+                      fontSize: widget.compact ? 12 : 13,
+                      height: 1.22,
+                    ),
+                    padding: EdgeInsets.all(widget.compact ? 10 : 12),
+                  ),
+                  _TerminalSelectionOverlay(
+                    terminal: _terminal,
+                    controller: _terminalController,
+                    terminalViewState: _terminalViewKey.currentState,
+                    compact: widget.compact,
+                    onCopy: _copySelection,
+                    onSelectAll: _selectAll,
+                    onClearSelection: _terminalController.clearSelection,
+                    onHandleDragUpdate: _updateSelectionHandle,
+                  ),
+                ],
               ),
             ),
           ),
@@ -802,4 +877,165 @@ int? _intOrNull(Object? value) {
   if (value is int) return value;
   if (value is num) return value.toInt();
   return null;
+}
+
+enum _TerminalSelectionHandleSide { start, end }
+
+class _TerminalSelectionOverlay extends StatelessWidget {
+  const _TerminalSelectionOverlay({
+    required this.terminal,
+    required this.controller,
+    required this.terminalViewState,
+    required this.compact,
+    required this.onCopy,
+    required this.onSelectAll,
+    required this.onClearSelection,
+    required this.onHandleDragUpdate,
+  });
+
+  final xterm.Terminal terminal;
+  final xterm.TerminalController controller;
+  final xterm.TerminalViewState? terminalViewState;
+  final bool compact;
+  final Future<void> Function() onCopy;
+  final VoidCallback onSelectAll;
+  final VoidCallback onClearSelection;
+  final void Function(_TerminalSelectionHandleSide side, Offset globalPosition)
+  onHandleDragUpdate;
+
+  @override
+  Widget build(BuildContext context) {
+    final viewState = terminalViewState;
+    final selection = controller.selection?.normalized;
+    if (viewState == null || selection == null) {
+      return const SizedBox.shrink();
+    }
+
+    final render = viewState.renderTerminal;
+    final cellSize = render.cellSize;
+    final startOffset = render.getOffset(selection.begin);
+    final endOffset = render.getOffset(selection.end);
+    final handleY = cellSize.height;
+    final handleRadius = compact ? 8.0 : 9.0;
+    final toolbar = AdaptiveTextSelectionToolbar.buttonItems(
+      anchors: TextSelectionToolbarAnchors(
+        primaryAnchor: _primaryToolbarAnchor(
+          cellSize: cellSize,
+          startOffset: startOffset,
+          endOffset: endOffset,
+        ),
+        secondaryAnchor: _secondaryToolbarAnchor(
+          cellSize: cellSize,
+          startOffset: startOffset,
+          endOffset: endOffset,
+        ),
+      ),
+      buttonItems: [
+        ContextMenuButtonItem(
+          type: ContextMenuButtonType.copy,
+          onPressed: () => onCopy(),
+        ),
+        ContextMenuButtonItem(
+          type: ContextMenuButtonType.selectAll,
+          onPressed: onSelectAll,
+        ),
+        ContextMenuButtonItem(
+          label: 'Done',
+          onPressed: onClearSelection,
+        ),
+      ],
+    );
+
+    return Stack(
+      clipBehavior: Clip.none,
+      children: [
+        toolbar,
+        Positioned(
+          left: startOffset.dx - handleRadius,
+          top: startOffset.dy + handleY - handleRadius,
+          child: _TerminalSelectionHandle(
+            side: _TerminalSelectionHandleSide.start,
+            radius: handleRadius,
+            onDragUpdate: onHandleDragUpdate,
+          ),
+        ),
+        Positioned(
+          left: endOffset.dx - handleRadius,
+          top: endOffset.dy + handleY - handleRadius,
+          child: _TerminalSelectionHandle(
+            side: _TerminalSelectionHandleSide.end,
+            radius: handleRadius,
+            onDragUpdate: onHandleDragUpdate,
+          ),
+        ),
+      ],
+    );
+  }
+
+  Offset _primaryToolbarAnchor({
+    required Size cellSize,
+    required Offset startOffset,
+    required Offset endOffset,
+  }) {
+    return Offset(
+      (startOffset.dx + endOffset.dx) / 2,
+      startOffset.dy - 8,
+    );
+  }
+
+  Offset _secondaryToolbarAnchor({
+    required Size cellSize,
+    required Offset startOffset,
+    required Offset endOffset,
+  }) {
+    return Offset(
+      (startOffset.dx + endOffset.dx) / 2,
+      startOffset.dy + cellSize.height + 12,
+    );
+  }
+}
+
+class _TerminalSelectionHandle extends StatelessWidget {
+  const _TerminalSelectionHandle({
+    required this.side,
+    required this.radius,
+    required this.onDragUpdate,
+  });
+
+  final _TerminalSelectionHandleSide side;
+  final double radius;
+  final void Function(_TerminalSelectionHandleSide side, Offset globalPosition)
+  onDragUpdate;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    final size = radius * 2;
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onPanUpdate: (details) => onDragUpdate(side, details.globalPosition),
+      child: SizedBox(
+        width: size + 16,
+        height: size + 16,
+        child: Center(
+          child: Container(
+            width: size,
+            height: size,
+            decoration: BoxDecoration(
+              color: colors.accent,
+              shape: BoxShape.circle,
+              border: Border.all(color: colors.canvas, width: 2),
+              boxShadow: [
+                BoxShadow(
+                  color: colors.canvas.withValues(alpha: 0.16),
+                  blurRadius: 8,
+                  offset: const Offset(0, 2),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
 }
