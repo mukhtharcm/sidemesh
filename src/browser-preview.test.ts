@@ -274,6 +274,119 @@ describe("browser", () => {
     assert.equal(storageRefreshes, 1);
   });
 
+  it("coalesces slow-client browser frames to the latest pending frame", () => {
+    const registry = new BrowserPreviewRegistry({ enabled: true }) as any;
+    const preview = buildFakePreview(new FakeCdpConnection());
+    const socket = new ControlledFrameSocket();
+    preview.clients.add(socket);
+
+    registry.sendFramePayload(socket, {
+      type: "frame",
+      seq: 1,
+      mimeType: "image/jpeg",
+      width: 390,
+      height: 844,
+      timestamp: 1,
+      data: "frame-1",
+    });
+    registry.sendFramePayload(socket, {
+      type: "frame",
+      seq: 2,
+      mimeType: "image/jpeg",
+      width: 390,
+      height: 844,
+      timestamp: 2,
+      data: "frame-2",
+    });
+    registry.sendFramePayload(socket, {
+      type: "frame",
+      seq: 3,
+      mimeType: "image/jpeg",
+      width: 390,
+      height: 844,
+      timestamp: 3,
+      data: "frame-3",
+    });
+
+    assert.equal(socket.frames.length, 1);
+    assert.equal(socket.frames[0]?.seq, 1);
+
+    socket.flushNextSend();
+
+    assert.equal(socket.frames.length, 2);
+    assert.equal(socket.frames[1]?.seq, 3);
+  });
+
+  it("skips periodic captures when every client already has an in-flight and pending frame", async () => {
+    const registry = new BrowserPreviewRegistry({ enabled: true }) as any;
+    const cdp = new FakeCdpConnection();
+    cdp.sendResult = { data: "fresh-frame" };
+    const preview = buildFakePreview(cdp);
+    const socket = createFakeSocket([]);
+    preview.clients.add(socket);
+    registry.clientStates.set(socket, {
+      frameSendInFlight: true,
+      pendingFramePayload: {
+        type: "frame",
+        seq: 9,
+        mimeType: "image/jpeg",
+        width: 390,
+        height: 844,
+        timestamp: 9,
+        data: "pending",
+      },
+    });
+
+    await registry.captureAndBroadcast(preview);
+    assert.equal(cdp.sent.length, 0);
+
+    await registry.captureAndBroadcast(preview, { forceFreshFrame: true });
+    assert.equal(cdp.sent[0]?.method, "Page.captureScreenshot");
+  });
+
+  it("queues one immediate follow-up capture when input arrives during an active screenshot", async () => {
+    const registry = new BrowserPreviewRegistry({ enabled: true }) as any;
+    const cdp = new FakeCdpConnection();
+    let captureCount = 0;
+    let resolveFirstCapture: (value: Record<string, unknown>) => void = () => {
+      throw new Error("first capture resolver was not initialized");
+    };
+    cdp.sendHandler = async (method) => {
+      assert.equal(method, "Page.captureScreenshot");
+      captureCount += 1;
+      if (captureCount === 1) {
+        return await new Promise<Record<string, unknown>>((resolve) => {
+          resolveFirstCapture = resolve;
+        });
+      }
+      return { data: `frame-${captureCount}` };
+    };
+    const preview = buildFakePreview(cdp);
+    const messages: Array<Record<string, unknown>> = [];
+    preview.clients.add(createFakeSocket(messages));
+
+    const firstCapture = registry.captureAndBroadcast(preview);
+    await Promise.resolve();
+
+    await registry.captureAndBroadcast(preview, { forceFreshFrame: true });
+    assert.equal(preview.captureQueued, true);
+    assert.equal(preview.captureQueuedForceFresh, true);
+
+    resolveFirstCapture({ data: "frame-1" });
+    await firstCapture;
+    await new Promise((resolve) => setImmediate(resolve));
+
+    assert.equal(
+      cdp.sent.filter((entry: { method: string }) => entry.method === "Page.captureScreenshot")
+        .length,
+      2,
+    );
+    assert.deepEqual(
+      messages.map((message) => message.seq),
+      [1, 2],
+    );
+  });
+
   it("tracks network requests and emits summary updates", () => {
     const registry = new BrowserPreviewRegistry({ enabled: true }) as any;
     const cdp = new FakeCdpConnection();
@@ -1796,6 +1909,8 @@ function buildFakePreview(
     frameTimer: null,
     starting: null,
     capturingFrame: false,
+    captureQueued: false,
+    captureQueuedForceFresh: false,
     consoleBuffer: [],
     consoleHistory: [],
     nextConsoleSeq: 1,
@@ -1821,8 +1936,9 @@ function createFakeSocket(
     OPEN: 1,
     readyState: 1,
     bufferedAmount: 0,
-    send(payload: string) {
+    send(payload: string, callback?: (error?: Error) => void) {
       messages.push(JSON.parse(payload) as Record<string, unknown>);
+      callback?.();
     },
   } as unknown as WebSocket;
 }
@@ -1833,12 +1949,37 @@ class FakeAttachSocket extends EventEmitter {
   public bufferedAmount = 0;
   public readonly frames: Array<Record<string, unknown>> = [];
 
-  public send(payload: string): void {
+  public send(payload: string, callback?: (error?: Error) => void): void {
     this.frames.push(JSON.parse(payload) as Record<string, unknown>);
+    callback?.();
   }
 
   public close(): void {
     this.readyState = 3;
     this.emit("close");
+  }
+}
+
+class ControlledFrameSocket extends EventEmitter {
+  public readonly OPEN = 1;
+  public readyState = 1;
+  public bufferedAmount = 0;
+  public readonly frames: Array<Record<string, unknown>> = [];
+  private readonly pendingCallbacks: Array<() => void> = [];
+
+  public send(payload: string, callback?: (error?: Error) => void): void {
+    this.frames.push(JSON.parse(payload) as Record<string, unknown>);
+    this.bufferedAmount = 1;
+    if (callback) {
+      this.pendingCallbacks.push(() => {
+        this.bufferedAmount = 0;
+        callback();
+      });
+    }
+  }
+
+  public flushNextSend(): void {
+    const callback = this.pendingCallbacks.shift();
+    callback?.();
   }
 }
