@@ -3,7 +3,6 @@ import 'package:flutter/services.dart';
 import 'package:xterm/xterm.dart' as xterm;
 
 import '../terminal_key_models.dart';
-import '../terminal_modifier_state.dart';
 import '../theme/app_colors.dart';
 import '../theme/app_tokens.dart';
 import 'terminal_keybar_sheet.dart';
@@ -12,14 +11,10 @@ class TerminalKeyBar extends StatefulWidget {
   const TerminalKeyBar({
     super.key,
     required this.onAction,
-    required this.modifierState,
-    required this.onModifierStateChanged,
     this.compact = false,
   });
 
   final void Function(TerminalKeyAction action) onAction;
-  final TerminalModifierState modifierState;
-  final ValueChanged<TerminalModifierState> onModifierStateChanged;
   final bool compact;
 
   @override
@@ -27,6 +22,10 @@ class TerminalKeyBar extends StatefulWidget {
 }
 
 class _TerminalKeyBarState extends State<TerminalKeyBar> {
+  bool _ctrl = false;
+  bool _alt = false;
+  bool _shift = false;
+
   static const _essentials = <TerminalKeyAction>[
     TerminalKeyAction(label: 'Esc', key: xterm.TerminalKey.escape),
     TerminalKeyAction(label: 'Tab', key: xterm.TerminalKey.tab),
@@ -39,8 +38,7 @@ class _TerminalKeyBarState extends State<TerminalKeyBar> {
   @override
   Widget build(BuildContext context) {
     final colors = context.colors;
-    final modifiers = widget.modifierState;
-    final activeModifier = modifiers.hasModifiers;
+    final activeModifier = _ctrl || _alt || _shift;
 
     return SafeArea(
       top: false,
@@ -74,42 +72,30 @@ class _TerminalKeyBarState extends State<TerminalKeyBar> {
               case 0:
                 return _ModifierPill(
                   label: 'Ctrl',
-                  active: modifiers.ctrl,
+                  active: _ctrl,
                   compact: widget.compact,
-                  onTap: () => _toggleModifier(
-                    ctrl: !modifiers.ctrl,
-                    alt: modifiers.alt,
-                    shift: modifiers.shift,
-                  ),
+                  onTap: () => setState(() => _ctrl = !_ctrl),
                 );
               case 1:
                 return _ModifierPill(
                   label: 'Alt',
-                  active: modifiers.alt,
+                  active: _alt,
                   compact: widget.compact,
-                  onTap: () => _toggleModifier(
-                    ctrl: modifiers.ctrl,
-                    alt: !modifiers.alt,
-                    shift: modifiers.shift,
-                  ),
+                  onTap: () => setState(() => _alt = !_alt),
                 );
               case 2:
                 return _ModifierPill(
                   label: 'Shift',
-                  active: modifiers.shift,
+                  active: _shift,
                   compact: widget.compact,
-                  onTap: () => _toggleModifier(
-                    ctrl: modifiers.ctrl,
-                    alt: modifiers.alt,
-                    shift: !modifiers.shift,
-                  ),
+                  onTap: () => setState(() => _shift = !_shift),
                 );
               case 3:
                 return _MoreButton(
                   compact: widget.compact,
                   onTap: () => showTerminalKeyBarSheet(
                     context: context,
-                    onAction: _onAction,
+                    onAction: widget.onAction,
                     compact: widget.compact,
                   ),
                 );
@@ -122,24 +108,14 @@ class _TerminalKeyBarState extends State<TerminalKeyBar> {
     );
   }
 
-  void _toggleModifier({
-    required bool ctrl,
-    required bool alt,
-    required bool shift,
-  }) {
-    widget.onModifierStateChanged(
-      TerminalModifierState(ctrl: ctrl, alt: alt, shift: shift),
-    );
-  }
-
   void _onAction(TerminalKeyAction base) {
     if (!mounted) return;
     final effective = TerminalKeyAction(
       label: base.label,
       key: base.key,
-      ctrl: base.ctrl || widget.modifierState.ctrl,
-      alt: base.alt || widget.modifierState.alt,
-      shift: base.shift || widget.modifierState.shift,
+      ctrl: base.ctrl || _ctrl,
+      alt: base.alt || _alt,
+      shift: base.shift || _shift,
       rawText: base.rawText,
     );
     if (effective.key == null &&
@@ -150,8 +126,12 @@ class _TerminalKeyBarState extends State<TerminalKeyBar> {
     widget.onAction(effective);
 
     // One-shot: auto-clear modifiers after a key is sent.
-    if (widget.modifierState.hasModifiers) {
-      widget.onModifierStateChanged(TerminalModifierState.none);
+    if (_ctrl || _alt || _shift) {
+      setState(() {
+        _ctrl = false;
+        _alt = false;
+        _shift = false;
+      });
     }
   }
 }
