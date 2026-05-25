@@ -9,6 +9,8 @@ import '../api_client.dart';
 import '../models.dart';
 import '../terminal_input_filter.dart';
 import '../terminal_key_models.dart';
+import '../terminal_modifier_state.dart';
+import '../terminal_soft_input_transform.dart';
 import '../theme/app_colors.dart';
 import '../theme/color_contrast.dart';
 import '../theme/app_tokens.dart';
@@ -113,6 +115,8 @@ class _TerminalPaneState extends State<TerminalPane> {
   int _lastSeq = -1;
   int? _cols;
   int? _rows;
+  TerminalModifierState _modifierState = const TerminalModifierState();
+  bool _skipNextSoftInputTransform = false;
 
   @override
   void initState() {
@@ -375,18 +379,32 @@ class _TerminalPaneState extends State<TerminalPane> {
 
   void _sendInput(String data) {
     if (data.isEmpty || _terminalInfo?.isRunning != true) return;
-    final input = _terminal.isUsingAltBuffer
+    var input = _terminal.isUsingAltBuffer
         ? data
         : stripGeneratedTerminalResponses(data);
     if (input.isEmpty) return;
-    final channel = _channel;
-    if (channel == null) return;
-    channel.sink.add(jsonEncode({'type': 'input', 'data': input}));
+    if (_skipNextSoftInputTransform) {
+      _skipNextSoftInputTransform = false;
+    } else {
+      final transformed = transformTerminalSoftInput(
+        input: input,
+        modifiers: _modifierState,
+      );
+      input = transformed.output;
+      if (transformed.modifiersConsumed && mounted) {
+        setState(() {
+          _modifierState = transformed.nextModifierState;
+        });
+      }
+    }
+    if (input.isEmpty) return;
+    _sendChannelInput(input);
   }
 
   void _onKeyBarAction(TerminalKeyAction action) {
     if (_terminalInfo?.isRunning != true) return;
     if (action.key != null) {
+      _skipNextSoftInputTransform = true;
       _terminal.keyInput(
         action.key!,
         ctrl: action.ctrl,
@@ -394,8 +412,34 @@ class _TerminalPaneState extends State<TerminalPane> {
         shift: action.shift,
       );
     } else if (action.rawText != null && action.rawText!.isNotEmpty) {
-      _terminal.textInput(action.rawText!);
+      if (action.hasModifiers) {
+        final transformed = transformTerminalSoftInput(
+          input: action.rawText!,
+          modifiers: TerminalModifierState(
+            ctrl: action.ctrl,
+            alt: action.alt,
+            shift: action.shift,
+          ),
+        );
+        if (transformed.output.isNotEmpty) {
+          _sendChannelInput(transformed.output);
+        }
+      } else {
+        _skipNextSoftInputTransform = true;
+        _terminal.textInput(action.rawText!);
+      }
     }
+  }
+
+  void _setModifierState(TerminalModifierState state) {
+    if (_modifierState == state) return;
+    setState(() => _modifierState = state);
+  }
+
+  void _sendChannelInput(String input) {
+    final channel = _channel;
+    if (channel == null || input.isEmpty) return;
+    channel.sink.add(jsonEncode({'type': 'input', 'data': input}));
   }
 
   void _adoptReplacementTerminal(HostTerminalInfo replacement) {
@@ -516,7 +560,12 @@ class _TerminalPaneState extends State<TerminalPane> {
             ),
           ),
         ),
-        TerminalKeyBar(compact: widget.compact, onAction: _onKeyBarAction),
+        TerminalKeyBar(
+          compact: widget.compact,
+          modifierState: _modifierState,
+          onModifierStateChanged: _setModifierState,
+          onAction: _onKeyBarAction,
+        ),
       ],
     );
   }
