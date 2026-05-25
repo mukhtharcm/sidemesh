@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:sidemesh_mobile/src/terminal_key_models.dart';
+import 'package:sidemesh_mobile/src/terminal_modifier_state.dart';
 import 'package:sidemesh_mobile/src/terminal_keybar_store.dart';
 import 'package:sidemesh_mobile/src/theme/app_palettes.dart';
 import 'package:sidemesh_mobile/src/theme/app_theme.dart';
@@ -17,12 +18,20 @@ void main() {
     tester,
   ) async {
     TerminalKeyAction? firedAction;
+    TerminalModifierState modifierState = const TerminalModifierState();
 
     await tester.pumpWidget(
       MaterialApp(
         theme: buildLightTheme(ThemeVariant.codexAmber.light),
-        home: Scaffold(
-          body: TerminalKeyBar(onAction: (action) => firedAction = action),
+        home: StatefulBuilder(
+          builder: (context, setState) => Scaffold(
+            body: TerminalKeyBar(
+              modifierState: modifierState,
+              onModifierStateChanged: (value) =>
+                  setState(() => modifierState = value),
+              onAction: (action) => firedAction = action,
+            ),
+          ),
         ),
       ),
     );
@@ -55,12 +64,20 @@ void main() {
     tester,
   ) async {
     TerminalKeyAction? firedAction;
+    TerminalModifierState modifierState = const TerminalModifierState();
 
     await tester.pumpWidget(
       MaterialApp(
         theme: buildLightTheme(ThemeVariant.codexAmber.light),
-        home: Scaffold(
-          body: TerminalKeyBar(onAction: (action) => firedAction = action),
+        home: StatefulBuilder(
+          builder: (context, setState) => Scaffold(
+            body: TerminalKeyBar(
+              modifierState: modifierState,
+              onModifierStateChanged: (value) =>
+                  setState(() => modifierState = value),
+              onAction: (action) => firedAction = action,
+            ),
+          ),
         ),
       ),
     );
@@ -87,11 +104,65 @@ void main() {
     expect(firedAction!.ctrl, false);
   });
 
-  testWidgets('more button opens the key sheet', (tester) async {
+  testWidgets('modifier also applies to actions from the more sheet', (
+    tester,
+  ) async {
+    TerminalKeyAction? firedAction;
+    TerminalModifierState modifierState = const TerminalModifierState();
+
     await tester.pumpWidget(
       MaterialApp(
         theme: buildLightTheme(ThemeVariant.codexAmber.light),
-        home: Scaffold(body: TerminalKeyBar(onAction: (_) {})),
+        home: StatefulBuilder(
+          builder: (context, setState) => Scaffold(
+            body: TerminalKeyBar(
+              modifierState: modifierState,
+              onModifierStateChanged: (value) =>
+                  setState(() => modifierState = value),
+              onAction: (action) => firedAction = action,
+            ),
+          ),
+        ),
+      ),
+    );
+
+    await tester.tap(find.text('Ctrl'));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byIcon(Icons.more_horiz_rounded));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Enter'));
+    await tester.pumpAndSettle();
+
+    expect(firedAction, isNotNull);
+    expect(firedAction!.label, 'Enter');
+    expect(firedAction!.ctrl, true);
+
+    firedAction = null;
+    await tester.tap(find.text('Esc'));
+    await tester.pumpAndSettle();
+
+    expect(firedAction, isNotNull);
+    expect(firedAction!.label, 'Esc');
+    expect(firedAction!.ctrl, false);
+  });
+
+  testWidgets('more button opens the key sheet', (tester) async {
+    TerminalModifierState modifierState = const TerminalModifierState();
+
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: buildLightTheme(ThemeVariant.codexAmber.light),
+        home: StatefulBuilder(
+          builder: (context, setState) => Scaffold(
+            body: TerminalKeyBar(
+              modifierState: modifierState,
+              onModifierStateChanged: (value) =>
+                  setState(() => modifierState = value),
+              onAction: (_) {},
+            ),
+          ),
+        ),
       ),
     );
 

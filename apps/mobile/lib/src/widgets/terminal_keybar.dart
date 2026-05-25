@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import 'package:xterm/xterm.dart' as xterm;
 
 import '../terminal_key_models.dart';
+import '../terminal_modifier_state.dart';
 import '../theme/app_colors.dart';
 import '../theme/app_tokens.dart';
 import 'terminal_keybar_sheet.dart';
@@ -11,10 +12,14 @@ class TerminalKeyBar extends StatefulWidget {
   const TerminalKeyBar({
     super.key,
     required this.onAction,
+    required this.modifierState,
+    required this.onModifierStateChanged,
     this.compact = false,
   });
 
   final void Function(TerminalKeyAction action) onAction;
+  final TerminalModifierState modifierState;
+  final ValueChanged<TerminalModifierState> onModifierStateChanged;
   final bool compact;
 
   @override
@@ -22,10 +27,6 @@ class TerminalKeyBar extends StatefulWidget {
 }
 
 class _TerminalKeyBarState extends State<TerminalKeyBar> {
-  bool _ctrl = false;
-  bool _alt = false;
-  bool _shift = false;
-
   static const _essentials = <TerminalKeyAction>[
     TerminalKeyAction(label: 'Esc', key: xterm.TerminalKey.escape),
     TerminalKeyAction(label: 'Tab', key: xterm.TerminalKey.tab),
@@ -38,7 +39,7 @@ class _TerminalKeyBarState extends State<TerminalKeyBar> {
   @override
   Widget build(BuildContext context) {
     final colors = context.colors;
-    final activeModifier = _ctrl || _alt || _shift;
+    final activeModifier = widget.modifierState.hasModifiers;
 
     return SafeArea(
       top: false,
@@ -72,30 +73,36 @@ class _TerminalKeyBarState extends State<TerminalKeyBar> {
               case 0:
                 return _ModifierPill(
                   label: 'Ctrl',
-                  active: _ctrl,
+                  active: widget.modifierState.ctrl,
                   compact: widget.compact,
-                  onTap: () => setState(() => _ctrl = !_ctrl),
+                  onTap: () => widget.onModifierStateChanged(
+                    widget.modifierState.toggleCtrl(),
+                  ),
                 );
               case 1:
                 return _ModifierPill(
                   label: 'Alt',
-                  active: _alt,
+                  active: widget.modifierState.alt,
                   compact: widget.compact,
-                  onTap: () => setState(() => _alt = !_alt),
+                  onTap: () => widget.onModifierStateChanged(
+                    widget.modifierState.toggleAlt(),
+                  ),
                 );
               case 2:
                 return _ModifierPill(
                   label: 'Shift',
-                  active: _shift,
+                  active: widget.modifierState.shift,
                   compact: widget.compact,
-                  onTap: () => setState(() => _shift = !_shift),
+                  onTap: () => widget.onModifierStateChanged(
+                    widget.modifierState.toggleShift(),
+                  ),
                 );
               case 3:
                 return _MoreButton(
                   compact: widget.compact,
                   onTap: () => showTerminalKeyBarSheet(
                     context: context,
-                    onAction: widget.onAction,
+                    onAction: _onAction,
                     compact: widget.compact,
                   ),
                 );
@@ -113,9 +120,9 @@ class _TerminalKeyBarState extends State<TerminalKeyBar> {
     final effective = TerminalKeyAction(
       label: base.label,
       key: base.key,
-      ctrl: base.ctrl || _ctrl,
-      alt: base.alt || _alt,
-      shift: base.shift || _shift,
+      ctrl: base.ctrl || widget.modifierState.ctrl,
+      alt: base.alt || widget.modifierState.alt,
+      shift: base.shift || widget.modifierState.shift,
       rawText: base.rawText,
     );
     if (effective.key == null &&
@@ -126,12 +133,8 @@ class _TerminalKeyBarState extends State<TerminalKeyBar> {
     widget.onAction(effective);
 
     // One-shot: auto-clear modifiers after a key is sent.
-    if (_ctrl || _alt || _shift) {
-      setState(() {
-        _ctrl = false;
-        _alt = false;
-        _shift = false;
-      });
+    if (widget.modifierState.hasModifiers) {
+      widget.onModifierStateChanged(widget.modifierState.cleared());
     }
   }
 }
