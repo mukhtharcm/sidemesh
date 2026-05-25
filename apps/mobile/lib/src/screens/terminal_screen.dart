@@ -16,11 +16,9 @@ import '../theme/app_colors.dart';
 import '../theme/color_contrast.dart';
 import '../theme/app_tokens.dart';
 import '../widgets/app_snackbar.dart';
-import '../widgets/mesh_widgets.dart';
 import '../widgets/terminal_keybar.dart';
 import '../host_reconnect_scheduler.dart';
 import '../host_status_store.dart';
-import '../relative_time_ticker.dart';
 
 class TerminalScreen extends StatefulWidget {
   const TerminalScreen({
@@ -43,6 +41,9 @@ class TerminalScreen extends StatefulWidget {
 }
 
 class _TerminalScreenState extends State<TerminalScreen> {
+  TerminalPaneAppBarControls _appBarControls =
+      const TerminalPaneAppBarControls();
+
   @override
   Widget build(BuildContext context) {
     final colors = context.colors;
@@ -64,6 +65,31 @@ class _TerminalScreenState extends State<TerminalScreen> {
             ),
           ],
         ),
+        actions: [
+          if (_appBarControls.showRestart)
+            IconButton(
+              tooltip: 'Start a new terminal',
+              onPressed: _appBarControls.onRestart,
+              icon: const Icon(Icons.restart_alt_rounded),
+            )
+          else if (_appBarControls.showStop)
+            IconButton(
+              tooltip: 'Stop terminal',
+              onPressed: _appBarControls.stopping
+                  ? null
+                  : _appBarControls.onStop,
+              icon: _appBarControls.stopping
+                  ? SizedBox(
+                      width: 18,
+                      height: 18,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        color: colors.danger,
+                      ),
+                    )
+                  : Icon(Icons.stop_circle_rounded, color: colors.danger),
+            ),
+        ],
       ),
       body: TerminalPane(
         host: widget.host,
@@ -72,9 +98,40 @@ class _TerminalScreenState extends State<TerminalScreen> {
         sessionId: widget.sessionId,
         title: widget.title,
         reuseExisting: true,
+        onAppBarControlsChanged: (controls) {
+          if (_appBarControls == controls) return;
+          setState(() => _appBarControls = controls);
+        },
       ),
     );
   }
+}
+
+class TerminalPaneAppBarControls {
+  const TerminalPaneAppBarControls({
+    this.showStop = false,
+    this.showRestart = false,
+    this.stopping = false,
+    this.onStop,
+    this.onRestart,
+  });
+
+  final bool showStop;
+  final bool showRestart;
+  final bool stopping;
+  final VoidCallback? onStop;
+  final VoidCallback? onRestart;
+
+  @override
+  bool operator ==(Object other) {
+    return other is TerminalPaneAppBarControls &&
+        other.showStop == showStop &&
+        other.showRestart == showRestart &&
+        other.stopping == stopping;
+  }
+
+  @override
+  int get hashCode => Object.hash(showStop, showRestart, stopping);
 }
 
 class TerminalPane extends StatefulWidget {
@@ -87,6 +144,7 @@ class TerminalPane extends StatefulWidget {
     this.title,
     this.reuseExisting = true,
     this.compact = false,
+    this.onAppBarControlsChanged,
   });
 
   final HostProfile host;
@@ -96,6 +154,7 @@ class TerminalPane extends StatefulWidget {
   final String? title;
   final bool reuseExisting;
   final bool compact;
+  final ValueChanged<TerminalPaneAppBarControls>? onAppBarControlsChanged;
 
   @override
   State<TerminalPane> createState() => _TerminalPaneState();
@@ -119,6 +178,8 @@ class _TerminalPaneState extends State<TerminalPane> {
   int _lastSeq = -1;
   int? _cols;
   int? _rows;
+  TerminalPaneAppBarControls _lastAppBarControls =
+      const TerminalPaneAppBarControls();
   TerminalModifierState _modifierState = const TerminalModifierState();
   bool _skipNextSoftInputTransform = false;
   Offset? _contextMenuAnchor;
@@ -629,34 +690,36 @@ class _TerminalPaneState extends State<TerminalPane> {
   Widget build(BuildContext context) {
     final terminal = _terminalInfo;
     final colors = context.colors;
+    final appBarControls = _currentAppBarControls(terminal);
+    if (_lastAppBarControls != appBarControls) {
+      _lastAppBarControls = appBarControls;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        widget.onAppBarControlsChanged?.call(appBarControls);
+      });
+    }
     return Column(
       children: [
-        _TerminalStatusStrip(
-          hostId: widget.host.id,
+        _TerminalNoticeBanner(
           starting: _starting,
           connecting: _connecting,
-          stopping: _stopping,
           error: _error,
           terminal: terminal,
-          onStop: _stopTerminal,
-          onRestart: _restartTerminal,
         ),
         Expanded(
           child: Container(
             color: colors.codeBackground,
             child: Container(
-              margin: EdgeInsets.all(widget.compact ? 6 : 10),
+              margin: EdgeInsets.fromLTRB(
+                widget.compact ? 4 : 6,
+                widget.compact ? 2 : 4,
+                widget.compact ? 4 : 6,
+                widget.compact ? 4 : 6,
+              ),
               decoration: BoxDecoration(
                 color: colors.codeBackground,
                 border: Border.all(color: colors.codeBorder),
-                borderRadius: BorderRadius.circular(widget.compact ? 12 : 16),
-                boxShadow: [
-                  BoxShadow(
-                    color: colors.canvas.withValues(alpha: 0.08),
-                    blurRadius: 14,
-                    offset: const Offset(0, 6),
-                  ),
-                ],
+                borderRadius: BorderRadius.circular(widget.compact ? 10 : 12),
               ),
               clipBehavior: Clip.antiAlias,
               child: Stack(
@@ -727,6 +790,24 @@ class _TerminalPaneState extends State<TerminalPane> {
       ],
     );
   }
+
+  TerminalPaneAppBarControls _currentAppBarControls(
+    HostTerminalInfo? terminal,
+  ) {
+    final running = terminal?.isRunning == true;
+    final canRestart =
+        !running &&
+        !_starting &&
+        !_connecting &&
+        (terminal != null || _error != null);
+    return TerminalPaneAppBarControls(
+      showStop: running,
+      showRestart: canRestart,
+      stopping: _stopping,
+      onStop: _stopTerminal,
+      onRestart: _restartTerminal,
+    );
+  }
 }
 
 HostTerminalInfo _stoppedTerminal(HostTerminalInfo terminal) {
@@ -788,144 +869,149 @@ xterm.TerminalTheme _terminalTheme(AppColors colors) {
 Color _brightTerminalColor(Color color) =>
     Color.lerp(color, const Color(0xFFD8D8D8), 0.18)!;
 
-class _TerminalStatusStrip extends StatelessWidget {
-  const _TerminalStatusStrip({
-    required this.hostId,
+class _TerminalNoticeBanner extends StatelessWidget {
+  const _TerminalNoticeBanner({
     required this.starting,
     required this.connecting,
-    required this.stopping,
     required this.error,
     required this.terminal,
-    required this.onStop,
-    required this.onRestart,
   });
 
-  final String hostId;
   final bool starting;
   final bool connecting;
-  final bool stopping;
   final String? error;
   final HostTerminalInfo? terminal;
-  final VoidCallback onStop;
-  final VoidCallback onRestart;
 
   @override
   Widget build(BuildContext context) {
-    final colors = context.colors;
-    final running = terminal?.isRunning == true;
-    final canRestart =
-        !running &&
-        !starting &&
-        !connecting &&
-        (terminal != null || error != null);
-    final limitedBackend = terminal?.backend == 'pipe';
-    final baseLabel =
-        error ??
-        (starting
-            ? 'Starting terminal'
-            : connecting
-            ? 'Connecting'
-            : running
-            ? limitedBackend
-                  ? 'Connected, limited controls'
-                  : 'Connected'
-            : 'Stopped');
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-      decoration: BoxDecoration(
-        color: colors.surfaceElevated,
-        border: Border(bottom: BorderSide(color: colors.border)),
-      ),
-      child: Row(
-        children: [
-          if (starting || connecting)
-            SizedBox(
-              width: 14,
-              height: 14,
-              child: CircularProgressIndicator(
-                strokeWidth: 2,
-                color: colors.accent,
-              ),
-            )
-          else
-            Icon(
-              running ? Icons.bolt_rounded : Icons.stop_circle_rounded,
-              size: 16,
-              color: error == null
-                  ? (running ? colors.success : colors.textSecondary)
-                  : colors.danger,
-            ),
-          const SizedBox(width: 8),
-          Expanded(
-            child: ListenableBuilder(
-              listenable: Listenable.merge([
-                HostStatusStore.instance,
-                RelativeTimeTicker.seconds,
-              ]),
-              builder: (context, _) {
-                final status = HostStatusStore.instance.statusFor(hostId);
-                final freshness = _terminalFreshness(status);
-                final label = freshness != null
-                    ? '$baseLabel · $freshness'
-                    : baseLabel;
-                return Text(
-                  label,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: Theme.of(context).textTheme.labelMedium?.copyWith(
-                    color: error == null ? colors.textSecondary : colors.danger,
-                    fontWeight: AppWeights.emphasis,
+    final state = _bannerState(context);
+    return AnimatedSwitcher(
+      duration: const Duration(milliseconds: 140),
+      child: state == null
+          ? const SizedBox.shrink()
+          : Padding(
+              key: ValueKey(state.label),
+              padding: const EdgeInsets.fromLTRB(10, 8, 10, 0),
+              child: Align(
+                alignment: Alignment.centerLeft,
+                child: DecoratedBox(
+                  decoration: BoxDecoration(
+                    color: state.background,
+                    border: Border.all(color: state.border),
+                    borderRadius: BorderRadius.circular(999),
                   ),
-                );
-              },
-            ),
-          ),
-          if (terminal != null)
-            Flexible(
-              child: Tooltip(
-                message: terminal!.cwd,
-                child: Text(
-                  _terminalSummaryLabel(terminal!),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                    color: colors.textSecondary,
-                    fontFeatures: const [FontFeature.tabularFigures()],
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 10,
+                      vertical: 5,
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        if (state.spinner)
+                          SizedBox(
+                            width: 10,
+                            height: 10,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 1.8,
+                              color: state.foreground,
+                            ),
+                          )
+                        else
+                          Icon(
+                            state.icon,
+                            size: 12,
+                            color: state.foreground,
+                          ),
+                        const SizedBox(width: 6),
+                        Text(
+                          state.label,
+                          style: Theme.of(context).textTheme.labelSmall
+                              ?.copyWith(
+                                color: state.foreground,
+                                fontWeight: AppWeights.emphasis,
+                              ),
+                        ),
+                      ],
+                    ),
                   ),
                 ),
               ),
             ),
-          if (running) ...[
-            const SizedBox(width: 8),
-            MeshIconButton(
-              icon: Icons.stop_circle_rounded,
-              tooltip: 'Stop terminal',
-              color: colors.danger,
-              onTap: stopping ? () {} : onStop,
-            ),
-          ] else if (canRestart) ...[
-            const SizedBox(width: 8),
-            MeshIconButton(
-              icon: Icons.restart_alt_rounded,
-              tooltip: 'Start a new terminal',
-              color: colors.accent,
-              onTap: onRestart,
-            ),
-          ],
-        ],
-      ),
     );
   }
 
-  String? _terminalFreshness(HostStatus status) {
-    final last = status.lastEventAt ?? status.lastOnlineAt;
-    if (last == null) return null;
-    final elapsed = DateTime.now().difference(last);
-    if (elapsed.inSeconds < 5) return null;
-    if (elapsed.inMinutes < 1) return 'updated ${elapsed.inSeconds}s ago';
-    if (elapsed.inHours < 1) return 'updated ${elapsed.inMinutes}m ago';
-    return 'updated ${elapsed.inHours}h ago';
+  _TerminalBannerState? _bannerState(BuildContext context) {
+    final colors = context.colors;
+    final running = terminal?.isRunning == true;
+    final limitedBackend = terminal?.backend == 'pipe';
+    if (error != null && error!.trim().isNotEmpty) {
+      return _TerminalBannerState(
+        icon: Icons.error_outline_rounded,
+        label: error!,
+        background: colors.dangerMuted,
+        border: colors.danger.withValues(alpha: 0.25),
+        foreground: colors.danger,
+      );
+    }
+    if (starting) {
+      return _TerminalBannerState(
+        icon: Icons.sync_rounded,
+        label: 'Starting terminal',
+        background: colors.surfaceElevated,
+        border: colors.border,
+        foreground: colors.textSecondary,
+        spinner: true,
+      );
+    }
+    if (connecting) {
+      return _TerminalBannerState(
+        icon: Icons.sync_rounded,
+        label: 'Reconnecting…',
+        background: colors.surfaceElevated,
+        border: colors.border,
+        foreground: colors.textSecondary,
+        spinner: true,
+      );
+    }
+    if (!running && terminal != null) {
+      return _TerminalBannerState(
+        icon: Icons.stop_circle_outlined,
+        label: 'Terminal stopped',
+        background: colors.surfaceElevated,
+        border: colors.border,
+        foreground: colors.textSecondary,
+      );
+    }
+    if (limitedBackend) {
+      return _TerminalBannerState(
+        icon: Icons.info_outline_rounded,
+        label: 'Limited terminal access',
+        background: colors.infoMuted,
+        border: colors.info.withValues(alpha: 0.24),
+        foreground: colors.info,
+      );
+    }
+    return null;
   }
+}
+
+class _TerminalBannerState {
+  const _TerminalBannerState({
+    required this.icon,
+    required this.label,
+    required this.background,
+    required this.border,
+    required this.foreground,
+    this.spinner = false,
+  });
+
+  final IconData icon;
+  final String label;
+  final Color background;
+  final Color border;
+  final Color foreground;
+  final bool spinner;
 }
 
 String _basename(String path) {
@@ -944,16 +1030,6 @@ String _terminalLocationLabel(String hostLabel, String cwd) {
   final folder = _basename(trimmed);
   if (folder.isEmpty) return '$hostLabel · $trimmed';
   return '$hostLabel · $folder';
-}
-
-String _terminalSummaryLabel(HostTerminalInfo terminal) {
-  final folder = _basename(terminal.cwd);
-  if (folder.isNotEmpty) return folder;
-  final trimmed = terminal.cwd.trim();
-  if (trimmed.isNotEmpty) return trimmed;
-  final title = terminal.title.trim();
-  if (title.isNotEmpty) return title;
-  return 'Shell';
 }
 
 int? _intOrNull(Object? value) {
