@@ -131,11 +131,11 @@ void main() {
 
     await tester.tap(find.byIcon(Icons.more_horiz_rounded));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('D'));
+    await tester.tap(find.text('Enter'));
     await tester.pumpAndSettle();
 
     expect(firedAction, isNotNull);
-    expect(firedAction!.label, 'D');
+    expect(firedAction!.label, 'Enter');
     expect(firedAction!.ctrl, true);
 
     firedAction = null;

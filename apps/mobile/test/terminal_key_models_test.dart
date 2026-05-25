@@ -68,9 +68,9 @@ void main() {
   });
 
   group('defaultTerminalKeyCategories', () {
-    test('provides at least five categories', () {
+    test('provides the streamlined terminal-only categories', () {
       final categories = defaultTerminalKeyCategories();
-      expect(categories.length, greaterThanOrEqualTo(5));
+      expect(categories.map((c) => c.id).toList(), ['nav', 'sym', 'fn']);
     });
 
     test('nav category includes escape and arrows', () {
@@ -83,16 +83,6 @@ void main() {
       expect(labels, contains('↓'));
       expect(labels, contains('←'));
       expect(labels, contains('→'));
-    });
-
-    test('ctrl category includes ctrl combos', () {
-      final ctrl = defaultTerminalKeyCategories().firstWhere(
-        (c) => c.id == 'ctrl',
-      );
-      final labels = ctrl.actions.map((a) => a.label).toList();
-      expect(labels, contains('Ctrl+C'));
-      expect(labels, contains('Ctrl+D'));
-      expect(labels, contains('Ctrl+Z'));
     });
 
     test('sym category includes pipe and backslash', () {
