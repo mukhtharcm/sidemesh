@@ -19,6 +19,12 @@ import '../widgets/mesh_widgets.dart';
 import '../host_reconnect_scheduler.dart';
 import '../host_status_store.dart';
 
+// Keep drag/tap gestures on the legacy device set so a desktop trackpad pan
+// does not double-trigger the canvas drag recognizers.
+final Set<PointerDeviceKind> _browserPreviewNonTrackpadDevices = Set.unmodifiable(
+  PointerDeviceKind.values.where((kind) => kind != PointerDeviceKind.trackpad),
+);
+
 class BrowserPreviewScreen extends StatelessWidget {
   const BrowserPreviewScreen({
     super.key,
@@ -1249,6 +1255,21 @@ class _BrowserPreviewPaneState extends State<BrowserPreviewPane>
     });
   }
 
+  void _sendTrackpadScroll(DragUpdateDetails details, Size size) {
+    _browserFocusNode.requestFocus();
+    if (_inspectorPickActive) return;
+    final point = _mapPoint(details.localPosition, size);
+    if (point == null) return;
+    _send({
+      'type': 'scroll',
+      'x': point.dx,
+      'y': point.dy,
+      // Trackpad pan deltas already represent desktop scroll-sized movement.
+      'deltaY': -details.delta.dy,
+      'deltaX': -details.delta.dx,
+    });
+  }
+
   void _handlePointerSignal(PointerSignalEvent event, Size size) {
     if (event is! PointerScrollEvent) return;
     if (_inspectorPickActive) return;
@@ -1370,35 +1391,64 @@ class _BrowserPreviewPaneState extends State<BrowserPreviewPane>
                           child: Listener(
                             onPointerSignal: (event) =>
                                 _handlePointerSignal(event, size),
-                            child: GestureDetector(
-                              key: const ValueKey('browserPreviewCanvas'),
-                              behavior: HitTestBehavior.opaque,
-                              onTapDown: (details) =>
-                                  _sendTapDown(details, size),
-                              onTapUp: (details) => _sendTapUp(details, size),
-                              onVerticalDragUpdate: (details) =>
-                                  _sendScroll(details, size),
-                              onHorizontalDragUpdate: (details) =>
-                                  _sendScroll(details, size),
-                              child: Stack(
-                                children: [
-                                  Positioned.fill(
-                                    child: _buildPreviewBody(colors),
-                                  ),
-                                  Positioned.fill(
-                                    child: IgnorePointer(
-                                      child: _InspectorSelectionOverlay(
-                                        highlightRect: _inspectorHighlightRect(
-                                          size,
+                            child: RawGestureDetector(
+                              gestures:
+                                  <Type, GestureRecognizerFactory<GestureRecognizer>>{
+                                    PanGestureRecognizer:
+                                        GestureRecognizerFactoryWithHandlers<
+                                          PanGestureRecognizer
+                                        >(
+                                          () => PanGestureRecognizer(
+                                            supportedDevices: const <PointerDeviceKind>{
+                                              PointerDeviceKind.trackpad,
+                                            },
+                                          ),
+                                          (PanGestureRecognizer instance) {
+                                            instance.onStart = (_) {
+                                              _browserFocusNode.requestFocus();
+                                            };
+                                            instance.onUpdate = (details) =>
+                                                _sendTrackpadScroll(
+                                                  details,
+                                                  size,
+                                                );
+                                          },
                                         ),
-                                        pickMode: _inspectorPickActive,
-                                        hasSelection:
-                                            _inspectorSnapshot?.selectedNode !=
-                                            null,
+                                  },
+                              behavior: HitTestBehavior.opaque,
+                              child: GestureDetector(
+                                key: const ValueKey('browserPreviewCanvas'),
+                                behavior: HitTestBehavior.opaque,
+                                supportedDevices:
+                                    _browserPreviewNonTrackpadDevices,
+                                onTapDown: (details) =>
+                                    _sendTapDown(details, size),
+                                onTapUp: (details) =>
+                                    _sendTapUp(details, size),
+                                onVerticalDragUpdate: (details) =>
+                                    _sendScroll(details, size),
+                                onHorizontalDragUpdate: (details) =>
+                                    _sendScroll(details, size),
+                                child: Stack(
+                                  children: [
+                                    Positioned.fill(
+                                      child: _buildPreviewBody(colors),
+                                    ),
+                                    Positioned.fill(
+                                      child: IgnorePointer(
+                                        child: _InspectorSelectionOverlay(
+                                          highlightRect:
+                                              _inspectorHighlightRect(size),
+                                          pickMode: _inspectorPickActive,
+                                          hasSelection:
+                                              _inspectorSnapshot
+                                                  ?.selectedNode !=
+                                              null,
+                                        ),
                                       ),
                                     ),
-                                  ),
-                                ],
+                                  ],
+                                ),
                               ),
                             ),
                           ),
