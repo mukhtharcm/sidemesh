@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -123,6 +124,128 @@ void main() {
     expect(api.sentMessages, contains(containsPair('type', 'resize')));
     expect(api.sentMessages.last['width'], 1180);
     expect(api.sentMessages.last['height'] as int, greaterThan(700));
+  });
+
+  testWidgets('browser preview forwards trackpad pan gestures as scroll', (
+    tester,
+  ) async {
+    final api = _BrowserPreviewFakeApi();
+    addTearDown(api.dispose);
+
+    await _pumpApp(
+      tester,
+      BrowserPreviewScreen(host: _host(), api: api, preview: _preview()),
+      size: const Size(1180, 900),
+    );
+
+    api.emit({'type': 'hello', 'preview': _previewJson()});
+    api.emit({
+      'type': 'frame',
+      'data':
+          'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wn6zk8AAAAASUVORK5CYII=',
+      'width': 390,
+      'height': 844,
+    });
+    await _pumpFrames(tester);
+    api.sentMessages.clear();
+
+    final previewRect = tester.getRect(
+      find.byKey(const ValueKey('browserPreviewCanvas')),
+    );
+    final gesture = await tester.createGesture(
+      kind: PointerDeviceKind.trackpad,
+    );
+    await gesture.panZoomStart(previewRect.center);
+    await gesture.panZoomUpdate(
+      previewRect.center,
+      pan: const Offset(12, -18),
+    );
+    await tester.pump();
+    await gesture.up();
+    await _pumpFrames(tester);
+
+    final scrollMessages = api.sentMessages
+        .where((message) => message['type'] == 'scroll')
+        .toList(growable: false);
+    expect(scrollMessages, hasLength(1));
+    expect(scrollMessages.single['deltaX'], -12.0);
+    expect(scrollMessages.single['deltaY'], 18.0);
+  });
+
+  testWidgets('browser preview keeps mouse wheel scrolling working', (
+    tester,
+  ) async {
+    final api = _BrowserPreviewFakeApi();
+    addTearDown(api.dispose);
+
+    await _pumpApp(
+      tester,
+      BrowserPreviewScreen(host: _host(), api: api, preview: _preview()),
+      size: const Size(1180, 900),
+    );
+
+    api.emit({'type': 'hello', 'preview': _previewJson()});
+    api.emit({
+      'type': 'frame',
+      'data':
+          'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wn6zk8AAAAASUVORK5CYII=',
+      'width': 390,
+      'height': 844,
+    });
+    await _pumpFrames(tester);
+    api.sentMessages.clear();
+
+    final previewRect = tester.getRect(
+      find.byKey(const ValueKey('browserPreviewCanvas')),
+    );
+    final mouse = TestPointer(1, PointerDeviceKind.mouse);
+    await tester.sendEventToBinding(mouse.hover(previewRect.center));
+    await tester.sendEventToBinding(mouse.scroll(const Offset(0, 42)));
+    await _pumpFrames(tester);
+
+    final scrollMessages = api.sentMessages
+        .where((message) => message['type'] == 'scroll')
+        .toList(growable: false);
+    expect(scrollMessages, hasLength(1));
+    expect(scrollMessages.single['deltaY'], 42.0);
+  });
+
+  testWidgets('browser preview keeps canvas tap gestures working', (tester) async {
+    final api = _BrowserPreviewFakeApi();
+    addTearDown(api.dispose);
+
+    await _pumpApp(
+      tester,
+      BrowserPreviewScreen(host: _host(), api: api, preview: _preview()),
+      size: const Size(1180, 900),
+    );
+
+    api.emit({'type': 'hello', 'preview': _previewJson()});
+    api.emit({
+      'type': 'frame',
+      'data':
+          'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wn6zk8AAAAASUVORK5CYII=',
+      'width': 390,
+      'height': 844,
+    });
+    await _pumpFrames(tester);
+    api.sentMessages.clear();
+
+    final previewRect = tester.getRect(
+      find.byKey(const ValueKey('browserPreviewCanvas')),
+    );
+    await tester.tapAt(previewRect.center);
+    await _pumpFrames(tester);
+
+    final tapMessages = api.sentMessages
+        .where(
+          (message) =>
+              message['type'] == 'tapDown' || message['type'] == 'tapUp',
+        )
+        .toList(growable: false);
+    expect(tapMessages, hasLength(2));
+    expect(tapMessages.first['type'], 'tapDown');
+    expect(tapMessages.last['type'], 'tapUp');
   });
 
   testWidgets('browser preview renders a live network tab and detail sheet', (
