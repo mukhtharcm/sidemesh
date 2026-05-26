@@ -162,10 +162,12 @@ interface BrowserPreviewRecord {
   mainFrameId: string | null;
   ownsBrowser: boolean;
   nextFrameSeq: number;
-  lastFramePayload: Record<string, unknown> | null;
+  lastFramePayload: BrowserPreviewFramePayload | null;
   frameTimer: NodeJS.Timeout | null;
   starting: Promise<void> | null;
   capturingFrame: boolean;
+  captureQueued: boolean;
+  captureQueuedForceFresh: boolean;
   consoleBuffer: BrowserPreviewConsoleEntry[];
   consoleHistory: BrowserPreviewConsoleEntry[];
   nextConsoleSeq: number;
@@ -180,6 +182,21 @@ interface BrowserPreviewRecord {
   storageRefreshTimer: NodeJS.Timeout | null;
   pageLoading: boolean;
   cleanupHandlers: Array<() => void>;
+}
+
+interface BrowserPreviewFramePayload {
+  type: "frame";
+  seq: number;
+  mimeType: "image/jpeg";
+  width: number;
+  height: number;
+  timestamp: number;
+  data: string;
+}
+
+interface BrowserPreviewClientState {
+  frameSendInFlight: boolean;
+  pendingFramePayload: BrowserPreviewFramePayload | null;
 }
 
 interface PersistentBrowserHost {
@@ -379,6 +396,7 @@ export class BrowserPreviewRegistry {
   private readonly idleTtlMs: number;
   private readonly frameIntervalMs: number;
   private readonly quality: number;
+  private readonly clientStates = new WeakMap<WebSocket, BrowserPreviewClientState>();
   private cleanupTimer: NodeJS.Timeout | null = null;
   private persistentHost: PersistentBrowserHost | null = null;
   private persistentHostStarting: Promise<PersistentBrowserHost> | null = null;
@@ -511,6 +529,8 @@ export class BrowserPreviewRegistry {
       frameTimer: null,
       starting: null,
       capturingFrame: false,
+      captureQueued: false,
+      captureQueuedForceFresh: false,
       consoleBuffer: [],
       consoleHistory: [],
       nextConsoleSeq: 1,
@@ -561,6 +581,10 @@ export class BrowserPreviewRegistry {
 
     this.flushConsoleBuffer(preview);
     preview.clients.add(socket);
+    this.clientStates.set(socket, {
+      frameSendInFlight: false,
+      pendingFramePayload: null,
+    });
     preview.lastClientAt = Date.now();
     preview.updatedAt = preview.lastClientAt;
     sendJson(socket, { type: "hello", preview: this.info(preview) });
@@ -592,7 +616,7 @@ export class BrowserPreviewRegistry {
       });
     }
     if (preview.lastFramePayload) {
-      sendJson(socket, preview.lastFramePayload);
+      this.sendFramePayload(socket, preview.lastFramePayload);
     }
     if (preview.pageLoading) {
       sendJson(socket, { type: "loading", state: "started" });
@@ -917,7 +941,7 @@ export class BrowserPreviewRegistry {
         return;
       }
       await this.applyInput(preview, record);
-      await this.captureAndBroadcast(preview);
+      await this.captureAndBroadcast(preview, { forceFreshFrame: true });
     } catch (error) {
       sendJson(socket, {
         type: "error",
@@ -1153,9 +1177,23 @@ export class BrowserPreviewRegistry {
     preview.frameTimer = null;
   }
 
-  private async captureAndBroadcast(preview: BrowserPreviewRecord): Promise<void> {
+  private async captureAndBroadcast(
+    preview: BrowserPreviewRecord,
+    options?: { forceFreshFrame?: boolean },
+  ): Promise<void> {
+    const forceFreshFrame = options?.forceFreshFrame === true;
     if (preview.clients.size === 0 || preview.status !== "running") return;
-    if (preview.capturingFrame) return;
+    if (!forceFreshFrame && !this.previewNeedsAnotherFrame(preview)) {
+      return;
+    }
+    if (preview.capturingFrame) {
+      if (forceFreshFrame || this.previewNeedsAnotherFrame(preview)) {
+        preview.captureQueued = true;
+        preview.captureQueuedForceFresh =
+          preview.captureQueuedForceFresh || forceFreshFrame;
+      }
+      return;
+    }
     const cdp = preview.cdp;
     const sessionId = preview.sessionIdCdp;
     if (!cdp || !sessionId) return;
@@ -1175,7 +1213,7 @@ export class BrowserPreviewRegistry {
       preview.lastFrameAt = Date.now();
       preview.updatedAt = preview.lastFrameAt;
       preview.lastError = null;
-      const framePayload = {
+      const framePayload: BrowserPreviewFramePayload = {
         type: "frame",
         seq: preview.nextFrameSeq++,
         mimeType: "image/jpeg",
@@ -1185,9 +1223,20 @@ export class BrowserPreviewRegistry {
         data,
       };
       preview.lastFramePayload = framePayload;
-      this.broadcast(preview, framePayload);
+      this.broadcastFrame(preview, framePayload);
     } finally {
       preview.capturingFrame = false;
+      if (preview.captureQueued) {
+        const queuedForceFresh = preview.captureQueuedForceFresh;
+        preview.captureQueued = false;
+        preview.captureQueuedForceFresh = false;
+        queueMicrotask(() => {
+          void this.captureAndBroadcast(
+            preview,
+            queuedForceFresh ? { forceFreshFrame: true } : undefined,
+          ).catch((error: unknown) => this.handleCaptureError(preview, error));
+        });
+      }
     }
   }
 
@@ -2559,7 +2608,7 @@ export class BrowserPreviewRegistry {
       throw new BrowserPreviewError(`Could not open browser URL: ${errorText}`, 502);
     }
     this.updatePreviewUrl(preview, url);
-    await this.captureAndBroadcast(preview);
+    await this.captureAndBroadcast(preview, { forceFreshFrame: true });
   }
 
   private updatePreviewUrl(preview: BrowserPreviewRecord, url: string): void {
@@ -2584,6 +2633,69 @@ export class BrowserPreviewRegistry {
       }
       sendJson(client, payload);
     }
+  }
+
+  private broadcastFrame(
+    preview: BrowserPreviewRecord,
+    payload: BrowserPreviewFramePayload,
+  ): void {
+    for (const client of preview.clients) {
+      this.sendFramePayload(client, payload);
+    }
+  }
+
+  private sendFramePayload(
+    socket: WebSocket,
+    payload: BrowserPreviewFramePayload,
+  ): void {
+    if (socket.readyState !== socket.OPEN) return;
+    if (socket.bufferedAmount > MAX_CLIENT_BUFFERED_AMOUNT) {
+      socket.close(1013, "browser preview client is too far behind");
+      return;
+    }
+    const state = this.clientState(socket);
+    if (state.frameSendInFlight) {
+      state.pendingFramePayload = payload;
+      return;
+    }
+    state.frameSendInFlight = true;
+    state.pendingFramePayload = null;
+    try {
+      socket.send(JSON.stringify(payload), (error) => {
+        state.frameSendInFlight = false;
+        if (error || socket.readyState !== socket.OPEN) {
+          return;
+        }
+        const pending = state.pendingFramePayload;
+        if (!pending) return;
+        state.pendingFramePayload = null;
+        this.sendFramePayload(socket, pending);
+      });
+    } catch (error) {
+      state.frameSendInFlight = false;
+      throw error;
+    }
+  }
+
+  private clientState(socket: WebSocket): BrowserPreviewClientState {
+    const existing = this.clientStates.get(socket);
+    if (existing) return existing;
+    const created: BrowserPreviewClientState = {
+      frameSendInFlight: false,
+      pendingFramePayload: null,
+    };
+    this.clientStates.set(socket, created);
+    return created;
+  }
+
+  private previewNeedsAnotherFrame(preview: BrowserPreviewRecord): boolean {
+    for (const client of preview.clients) {
+      if (client.readyState !== client.OPEN) continue;
+      const state = this.clientState(client);
+      if (!state.frameSendInFlight) return true;
+      if (state.pendingFramePayload == null) return true;
+    }
+    return false;
   }
 
   private async cleanup(): Promise<void> {
