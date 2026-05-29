@@ -1,7 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
-import { mkdtemp, writeFile, mkdir } from "node:fs/promises";
+import { chmod, mkdtemp, writeFile, mkdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import nodePath from "node:path";
 import { promisify } from "node:util";
@@ -93,4 +93,71 @@ describe("detectInstallInfo", () => {
     assert.equal(info.packageVersion, "unknown");
     assert.equal(info.updateSupported, false);
   });
+
+  it("detects an active Termux runit service as managed", async () => {
+    const dir = await mkdtemp(nodePath.join(tmpdir(), "sidemesh-install-test-"));
+    const prefix = nodePath.join(dir, "prefix");
+    const binDir = nodePath.join(prefix, "bin");
+    const serviceDir = nodePath.join(prefix, "var", "service", "sidemesh");
+    const originalPrefix = process.env.PREFIX;
+    const originalTermuxVersion = process.env.TERMUX_VERSION;
+    const originalPath = process.env.PATH;
+
+    await mkdir(binDir, { recursive: true });
+    await mkdir(nodePath.join(prefix, "share", "termux-services"), {
+      recursive: true,
+    });
+    await mkdir(nodePath.join(serviceDir, "supervise"), { recursive: true });
+    await mkdir(nodePath.join(prefix, "var", "run"), { recursive: true });
+    await writeFile(
+      nodePath.join(dir, "package.json"),
+      JSON.stringify({ name: "sidemesh", version: "0.1.0" }),
+    );
+    await writeExecutable(
+      nodePath.join(binDir, "sv"),
+      "#!/bin/sh\necho 'run: sidemesh: (pid 123) 1s'\n",
+    );
+    await writeExecutable(
+      nodePath.join(binDir, "service-daemon"),
+      "#!/bin/sh\nexit 0\n",
+    );
+    await writeFile(
+      nodePath.join(prefix, "share", "termux-services", "svlogger"),
+      "#!/bin/sh\nexit 0\n",
+    );
+    await writeFile(nodePath.join(serviceDir, "run"), "#!/bin/sh\nexit 0\n");
+    await writeFile(nodePath.join(serviceDir, "supervise", "ok"), "");
+    await writeFile(
+      nodePath.join(prefix, "var", "run", "service-daemon.pid"),
+      String(process.pid),
+    );
+
+    try {
+      process.env.PREFIX = prefix;
+      process.env.TERMUX_VERSION = "0.118.1";
+      process.env.PATH = binDir;
+
+      const info = await detectInstallInfo(dir);
+
+      assert.equal(info.isManagedService, true);
+      assert.equal(info.serviceName, "sidemesh");
+    } finally {
+      restoreEnv("PREFIX", originalPrefix);
+      restoreEnv("TERMUX_VERSION", originalTermuxVersion);
+      restoreEnv("PATH", originalPath);
+    }
+  });
 });
+
+async function writeExecutable(path: string, content: string): Promise<void> {
+  await writeFile(path, content);
+  await chmod(path, 0o755);
+}
+
+function restoreEnv(key: string, value: string | undefined): void {
+  if (value === undefined) {
+    delete process.env[key];
+  } else {
+    process.env[key] = value;
+  }
+}

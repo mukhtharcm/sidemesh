@@ -9,6 +9,10 @@ import { VERSION as PI_VERSION } from "@mariozechner/pi-coding-agent";
 import { createAgentRegistry } from "acpx/runtime";
 
 import { createCopilotSdkClient } from "./copilot-sdk-client.js";
+import {
+  isTermuxEnvironment,
+  supportsSystemdServiceManagement,
+} from "./host-environment.js";
 import type {
   AgentProviderConfig,
   AcpxProviderConfig,
@@ -89,7 +93,7 @@ export async function runDoctor(
       : `No daemon responded at ${healthUrl}`,
     remedy: daemonReachable
       ? undefined
-      : "Start it with `sidemesh up` or `sidemesh start`, or install the macOS/Linux service if you want the app's Restart and Update buttons to bring it back on their own.",
+      : daemonStartRemedy(),
   });
 
   checks.push(await checkStateDir(config.stateDir));
@@ -729,6 +733,19 @@ function buildCopilotAuthDetail(authStatus: {
     fragments.push(`(${authStatus.statusMessage})`);
   }
   return fragments.join(" ");
+}
+
+function daemonStartRemedy(): string {
+  if (process.platform === "darwin") {
+    return "Start it with `sidemesh up` or `sidemesh start`, or install the macOS service if you want the app's Restart and Update buttons to bring it back on their own.";
+  }
+  if (supportsSystemdServiceManagement()) {
+    return "Start it with `sidemesh up` or `sidemesh start`, or install the Linux systemd service if you want the app's Restart and Update buttons to bring it back on their own.";
+  }
+  if (isTermuxEnvironment()) {
+    return "Start it with `sidemesh up` or `sidemesh start`, or install the Termux runit service with `pkg install termux-services` and `sidemesh service install` if you want the app's Restart and Update buttons to manage it.";
+  }
+  return "Start it with `sidemesh up` or `sidemesh start`.";
 }
 
 function formatError(error: unknown): string {

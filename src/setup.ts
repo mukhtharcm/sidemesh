@@ -22,6 +22,10 @@ import type {
   NodeConfig,
   UpdateChannel,
 } from "./types.js";
+import {
+  isTermuxEnvironment,
+  supportsSystemdServiceManagement,
+} from "./host-environment.js";
 import { listSetupAgentProviderDefinitionSummaries } from "./provider-registry.js";
 import { inferInstalledProviderConfigs } from "./provider-autodetect.js";
 
@@ -272,8 +276,10 @@ export async function runSetup(options: SetupOptions = {}): Promise<NodeConfig> 
   const lifecycleNote =
     process.platform === "darwin"
       ? "\n\nOn macOS, use `sidemesh service install` if you want the app's Restart and Update buttons to bring the host back on their own."
-      : process.platform === "linux"
+      : process.platform === "linux" && supportsSystemdServiceManagement()
         ? "\n\nOn Linux, use `sudo sidemesh service install` if you want the app's Restart and Update buttons to bring the host back on their own."
+        : isTermuxEnvironment()
+          ? "\n\nOn Termux, install `termux-services` with `pkg install termux-services`, then run `sidemesh service install` if you want the app's Restart and Update buttons to manage the daemon."
         : "";
   outro(
     `Saved ${persisted.path}\n\n  ❯ sidemesh up${lifecycleNote}`,

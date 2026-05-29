@@ -45,6 +45,17 @@ import {
   DEFAULT_SERVICE_NAME,
   uninstallSystemdService,
 } from "./systemd-service.js";
+import {
+  installTermuxService,
+  isTermuxServiceActive,
+  restartTermuxService,
+  termuxServiceStatus,
+  uninstallTermuxService,
+} from "./termux-service.js";
+import {
+  isTermuxEnvironment,
+  supportsSystemdServiceManagement,
+} from "./host-environment.js";
 import type { NodeConfig } from "./types.js";
 import {
   applyUpdateChannelOverrideFromEnv,
@@ -188,7 +199,7 @@ export async function main(argv = process.argv): Promise<void> {
       .description("install or update the OS service")
       .option(
         "--name <name>",
-        "systemd service name or launchd label",
+        "service name or launchd label",
         defaultServiceName(),
       )
       .option("--package-dir <path>", "Sidemesh package directory")
@@ -245,6 +256,24 @@ export async function main(argv = process.argv): Promise<void> {
               const loaded = await isLaunchdServiceLoaded(paths.label);
               console.log(`Service: ${loaded ? "loaded" : "not loaded"}`);
             }
+          } else if (isTermuxEnvironment()) {
+            const paths = await installTermuxService(config, {
+              serviceName: options.name,
+              packageDir: nodePath.resolve(options.packageDir ?? packageRoot()),
+              nodeBin: nodePath.resolve(options.nodeBin ?? process.execPath),
+              envPath: options.serviceEnvFile,
+              launcherPath: options.launcherFile,
+              start: options.start !== false,
+            });
+            console.log(`Installed ${paths.serviceName}`);
+            console.log(`Service dir: ${paths.serviceDir}`);
+            console.log(`Environment: ${paths.envPath}`);
+            console.log(`Launcher: ${paths.launcherPath}`);
+            console.log(`Logs: ${paths.logDir}`);
+            if (options.start !== false) {
+              const active = await isTermuxServiceActive(paths.serviceName);
+              console.log(`Service: ${active ? "running" : "not running"}`);
+            }
           } else {
             const paths = await installSystemdService(config, {
               serviceName: options.name,
@@ -275,14 +304,16 @@ export async function main(argv = process.argv): Promise<void> {
     .description("show service status")
     .option(
       "--name <name>",
-      "systemd service name or launchd label",
+      "service name or launchd label",
       defaultServiceName(),
     )
     .action(async (options: { name?: string }) => {
       process.stdout.write(
         process.platform === "darwin"
           ? await launchdServiceStatus(options.name)
-          : await systemdServiceStatus(options.name),
+          : isTermuxEnvironment()
+            ? await termuxServiceStatus(options.name)
+            : await systemdServiceStatus(options.name),
       );
     });
 
@@ -291,7 +322,7 @@ export async function main(argv = process.argv): Promise<void> {
     .description("restart the OS service")
     .option(
       "--name <name>",
-      "systemd service name or launchd label",
+      "service name or launchd label",
       defaultServiceName(),
     )
     .option("-y, --yes", "do not prompt before restarting")
@@ -304,6 +335,12 @@ export async function main(argv = process.argv): Promise<void> {
         await restartLaunchdService(options.name);
         const loaded = await isLaunchdServiceLoaded(options.name);
         console.log(`${options.name ?? defaultServiceName()} is ${loaded ? "loaded" : "not loaded"}.`);
+      } else if (isTermuxEnvironment()) {
+        await restartTermuxService(options.name);
+        const active = await isTermuxServiceActive(options.name);
+        console.log(
+          `${options.name ?? DEFAULT_SERVICE_NAME} is ${active ? "running" : "not running"}.`,
+        );
       } else {
         await restartSystemdService(options.name);
         const active = await isSystemdServiceActive(options.name);
@@ -319,7 +356,7 @@ export async function main(argv = process.argv): Promise<void> {
       .description("stop and remove the OS service wrapper")
       .option(
         "--name <name>",
-        "systemd service name or launchd label",
+        "service name or launchd label",
         defaultServiceName(),
       )
       .option("--unit-file <path>", "systemd unit path")
@@ -362,6 +399,23 @@ export async function main(argv = process.argv): Promise<void> {
               console.log(`Kept launcher: ${paths.launcherPath}`);
             } else {
               console.log(`Removed plist: ${paths.plistPath}`);
+              console.log(`Removed environment: ${paths.envPath}`);
+              console.log(`Removed launcher: ${paths.launcherPath}`);
+            }
+          } else if (isTermuxEnvironment()) {
+            const paths = await uninstallTermuxService({
+              serviceName: options.name,
+              envPath: options.serviceEnvFile,
+              launcherPath: options.launcherFile,
+              removeFiles: options.keepFiles !== true,
+            });
+            console.log(`Uninstalled ${paths.serviceName}`);
+            if (options.keepFiles === true) {
+              console.log(`Kept service dir: ${paths.serviceDir}`);
+              console.log(`Kept environment: ${paths.envPath}`);
+              console.log(`Kept launcher: ${paths.launcherPath}`);
+            } else {
+              console.log(`Removed service dir: ${paths.serviceDir}`);
               console.log(`Removed environment: ${paths.envPath}`);
               console.log(`Removed launcher: ${paths.launcherPath}`);
             }
@@ -885,7 +939,15 @@ function defaultServiceName(): string {
 }
 
 function serviceBackendLabel(): string {
-  return process.platform === "darwin" ? "macOS LaunchAgent" : "Linux systemd";
+  if (process.platform === "darwin") {
+    return "macOS LaunchAgent";
+  }
+  if (isTermuxEnvironment()) {
+    return "Termux runit";
+  }
+  return supportsSystemdServiceManagement()
+    ? "Linux systemd"
+    : "Linux service wrapper";
 }
 
 async function waitForDaemonHealth(

@@ -3,6 +3,11 @@ import { access, chmod, mkdir, readFile, rm, writeFile } from "node:fs/promises"
 import { dirname, join } from "node:path";
 import { promisify } from "node:util";
 
+import {
+  isTermuxEnvironment,
+  resolveDefaultShell,
+  supportsSystemdServiceManagement,
+} from "./host-environment.js";
 import type { NodeConfig } from "./types.js";
 
 const execFileAsync = promisify(execFile);
@@ -102,14 +107,15 @@ export function renderServiceLauncher(
   paths: ServicePaths,
   config: Pick<NodeConfig, "configPath">,
 ): string {
-  return `#!/usr/bin/env bash
-set -euo pipefail
-if [[ -z "\${USER:-}" ]]; then export USER="$(id -un)"; fi
-if [[ -z "\${LOGNAME:-}" ]]; then export LOGNAME="\${USER}"; fi
-if [[ -z "\${HOME:-}" ]]; then export HOME="$(getent passwd "\${USER}" 2>/dev/null | cut -d: -f6)"; fi
-if [[ -z "\${HOME:-}" ]]; then export HOME="$(eval echo ~"\${USER}")"; fi
-if [[ -z "\${SHELL:-}" ]]; then export SHELL="$(getent passwd "\${USER}" 2>/dev/null | cut -d: -f7)"; fi
-if [[ -z "\${SHELL:-}" ]]; then export SHELL="/bin/bash"; fi
+  const fallbackShell = shellQuote(resolveDefaultShell());
+  return `#!/bin/sh
+set -eu
+if [ -z "\${USER:-}" ]; then export USER="$(id -un)"; fi
+if [ -z "\${LOGNAME:-}" ]; then export LOGNAME="\${USER}"; fi
+if [ -z "\${HOME:-}" ] && command -v getent >/dev/null 2>&1; then export HOME="$(getent passwd "\${USER}" 2>/dev/null | cut -d: -f6)"; fi
+if [ -z "\${HOME:-}" ]; then export HOME="$(eval echo ~"\${USER}")"; fi
+if [ -z "\${SHELL:-}" ] && command -v getent >/dev/null 2>&1; then export SHELL="$(getent passwd "\${USER}" 2>/dev/null | cut -d: -f7)"; fi
+if [ -z "\${SHELL:-}" ]; then export SHELL=${fallbackShell}; fi
 export PATH=${shellQuote(dirname(paths.nodeBin))}:$PATH
 cd ${shellQuote(paths.packageDir)}
 exec ${shellQuote(paths.nodeBin)} ${shellQuote(join(paths.packageDir, "dist", "cli.js"))} daemon --config ${shellQuote(config.configPath)}
@@ -364,6 +370,16 @@ export async function isServiceWrapperStale(
 export function assertSystemdHost(options: { requireRoot: boolean }): void {
   if (process.platform !== "linux") {
     throw new Error("Sidemesh service helpers currently support Linux/systemd only.");
+  }
+  if (!supportsSystemdServiceManagement()) {
+    if (isTermuxEnvironment()) {
+      throw new Error(
+        "Sidemesh service helpers are not available in Termux. Use `sidemesh start` and `sidemesh stop` to manage the background daemon there.",
+      );
+    }
+    throw new Error(
+      "Sidemesh service helpers require a Linux host with `systemctl` available.",
+    );
   }
   if (options.requireRoot && process.getuid?.() !== 0) {
     throw new Error("Run this command as root, for example with `sudo sidemesh service install`.");

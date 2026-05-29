@@ -2,6 +2,7 @@ import { execFile, spawn } from "node:child_process";
 import { promisify } from "node:util";
 import nodePath from "node:path";
 
+import { isTermuxEnvironment } from "./host-environment.js";
 import { detectInstallInfo } from "./install-info.js";
 import type { NodeConfig, UpdateChannel } from "./types.js";
 
@@ -60,8 +61,15 @@ export async function spawnSelfUpdater(
       ? { SIDEMESH_UPDATE_CHANNEL: options.updateChannel }
       : {}),
   };
+  const managedService = info.isManagedService
+    ? info.serviceName ?? "sidemesh"
+    : null;
 
-  if (dependencies.platform === "linux" && info.isManagedService) {
+  if (
+    dependencies.platform === "linux" &&
+    managedService &&
+    !isTermuxEnvironment()
+  ) {
     const unitName = `sidemesh-self-update-${dependencies.now().toString(36)}`;
     const args = [
       `--unit=${unitName}`,
@@ -79,7 +87,7 @@ export async function spawnSelfUpdater(
       "--package-dir",
       packageDir,
       "--managed-service",
-      info.serviceName ?? "sidemesh",
+      managedService,
       "--yes",
     ];
     try {
@@ -103,6 +111,7 @@ export async function spawnSelfUpdater(
       config.configPath,
       "--package-dir",
       packageDir,
+      ...(managedService ? ["--managed-service", managedService] : []),
       "--yes",
     ],
     env,

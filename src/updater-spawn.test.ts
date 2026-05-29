@@ -168,4 +168,47 @@ describe("spawnSelfUpdater", () => {
     assert.equal(spawnedEnv.SIDEMESH_CONFIG, config.configPath);
     assert.equal(spawnedEnv.SIDEMESH_UPDATE_CHANNEL, "bleeding-edge");
   });
+
+  it("uses a detached child for managed Termux installs and preserves the service name", async () => {
+    const config = createConfig("/tmp/sidemesh-updater");
+    let spawnedArgs: string[] | null = null;
+    const originalPrefix = process.env.PREFIX;
+
+    process.env.PREFIX = "/data/data/com.termux/files/usr";
+    try {
+      await spawnSelfUpdater(
+        config,
+        { updateChannel: "bleeding-edge" },
+        {
+          platform: "linux",
+          detectInstallInfo: async () =>
+            createInstallInfo("/opt/sidemesh", { managedService: true }),
+          execFile: async () => {
+            throw new Error("systemd-run should not be called for Termux");
+          },
+          spawnDetached: (_file, args) => {
+            spawnedArgs = args;
+          },
+        },
+      );
+    } finally {
+      if (originalPrefix === undefined) {
+        delete process.env.PREFIX;
+      } else {
+        process.env.PREFIX = originalPrefix;
+      }
+    }
+
+    assert.deepEqual(spawnedArgs, [
+      nodePath.join("/opt/sidemesh", "dist", "cli.js"),
+      "self-update",
+      "--config",
+      config.configPath,
+      "--package-dir",
+      "/opt/sidemesh",
+      "--managed-service",
+      "sidemesh",
+      "--yes",
+    ]);
+  });
 });
