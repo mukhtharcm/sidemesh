@@ -1,6 +1,6 @@
 {
   "name": "sidemesh",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "private": false,
   "description": "Fleet-first coding-agent session node and Flutter client.",
   "license": "Apache-2.0",
