@@ -279,7 +279,7 @@ export async function runSetup(options: SetupOptions = {}): Promise<NodeConfig> 
       : process.platform === "linux" && supportsSystemdServiceManagement()
         ? "\n\nOn Linux, use `sudo sidemesh service install` if you want the app's Restart and Update buttons to bring the host back on their own."
         : isTermuxEnvironment()
-          ? "\n\nOn Termux, use `sidemesh start` if you want the daemon to keep running in the background. The app's Restart and Update buttons cannot manage Android processes directly."
+          ? "\n\nOn Termux, install `termux-services` with `pkg install termux-services`, then run `sidemesh service install` if you want the app's Restart and Update buttons to manage the daemon."
         : "";
   outro(
     `Saved ${persisted.path}\n\n  ❯ sidemesh up${lifecycleNote}`,
