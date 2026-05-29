@@ -129,8 +129,7 @@ Current workflows:
   Functions to Cloudflare Pages when `web/**` changes on `main`.
 - `Publish npm Package`: publishes the daemon package to npm on manual dispatch
   or when a GitHub Release with tag `npm-v<package.json version>` is published.
-  It currently uses the `NPM_TOKEN` GitHub Actions secret for the first publish
-  and early releases.
+  It uses npm trusted publishing from GitHub Actions.
 - `Secret Scan`: manual gitleaks scan over full git history.
 
 ## npm Publish Setup
@@ -139,21 +138,23 @@ The npm workflow assumes:
 
 - package name: `sidemesh`
 - GitHub environment name: `npm`
-- GitHub Actions secret: `NPM_TOKEN`
+- npm trusted publisher: GitHub Actions, repository `mukhtharcm/sidemesh`,
+  workflow filename `publish-npm.yml`, environment `npm`, allowed action
+  `npm publish`
 
 Before publishing:
 
 1. Confirm the package version in `package.json` is the version you want to
    publish.
 2. Confirm the `npm` GitHub environment exists.
-3. Confirm the repository Actions secret `NPM_TOKEN` is configured.
+3. Confirm the npm trusted publisher configuration matches the workflow.
 
 To publish the daemon package from a GitHub Release, create a release tag that
 matches `package.json` with an `npm-v` prefix, for example `npm-v0.1.2`.
 macOS app releases and appcast releases intentionally do not publish npm.
 
-After the first successful npm publish, switch to npm trusted publishing and
-remove the long-lived token if you want a tighter setup.
+Do not use long-lived npm publish tokens for routine releases. If a token was
+used for emergency publishing, revoke it after trusted publishing is restored.
 
 Store deployment is intentionally opt-in. Run TestFlight only when you actually
 need a mobile build. Keep product releases separate:
