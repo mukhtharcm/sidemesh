@@ -45,6 +45,7 @@ import {
   DEFAULT_SERVICE_NAME,
   uninstallSystemdService,
 } from "./systemd-service.js";
+import { supportsSystemdServiceManagement } from "./host-environment.js";
 import type { NodeConfig } from "./types.js";
 import {
   applyUpdateChannelOverrideFromEnv,
@@ -885,7 +886,12 @@ function defaultServiceName(): string {
 }
 
 function serviceBackendLabel(): string {
-  return process.platform === "darwin" ? "macOS LaunchAgent" : "Linux systemd";
+  if (process.platform === "darwin") {
+    return "macOS LaunchAgent";
+  }
+  return supportsSystemdServiceManagement()
+    ? "Linux systemd"
+    : "Linux service wrapper";
 }
 
 async function waitForDaemonHealth(
