@@ -7,11 +7,17 @@ export type HostEnvironment = Record<string, string | undefined>;
 export function isTermuxEnvironment(
   env: HostEnvironment = process.env,
 ): boolean {
-  const prefix = env.PREFIX?.trim();
+  const defaultPrefix = "/data/data/com.termux/files/usr";
+  const prefix = readTermuxPrefix(env);
+  const pathValue = env.PATH ?? env.Path ?? "";
   return (
     Boolean(env.TERMUX_VERSION?.trim()) ||
     Boolean(env.TERMUX_APP_PID?.trim()) ||
-    Boolean(prefix?.startsWith("/data/data/com.termux/files/usr"))
+    Boolean(prefix?.startsWith(defaultPrefix)) ||
+    pathHasTermuxPrefix(pathValue, defaultPrefix) ||
+    (env === process.env &&
+      (process.execPath.startsWith(defaultPrefix) ||
+        pathExistsSync(defaultPrefix)))
   );
 }
 
@@ -23,6 +29,32 @@ export function supportsSystemdServiceManagement(
     !isTermuxEnvironment(env) &&
     resolveExecutableSync("systemctl", env) !== null
   );
+}
+
+export function supportsTermuxServiceManagement(
+  env: HostEnvironment = process.env,
+): boolean {
+  const prefix = resolveTermuxPrefix(env);
+  const serviceEnv = withPrependedPathEntry(env, nodePath.join(prefix, "bin"));
+  return (
+    isTermuxRuntimePlatform() &&
+    isTermuxEnvironment(env) &&
+    resolveExecutableSync("sv", serviceEnv) !== null &&
+    resolveExecutableSync("service-daemon", serviceEnv) !== null &&
+    pathExistsSync(nodePath.join(prefix, "share", "termux-services", "svlogger"))
+  );
+}
+
+export function isTermuxRuntimePlatform(
+  platform: NodeJS.Platform = process.platform,
+): boolean {
+  return platform === "linux" || platform === "android";
+}
+
+export function resolveTermuxPrefix(
+  env: HostEnvironment = process.env,
+): string {
+  return readTermuxPrefix(env) || "/data/data/com.termux/files/usr";
 }
 
 export function resolvePreferredShell(
@@ -180,9 +212,55 @@ function readUserShell(): string | null {
   }
 }
 
+function readTermuxPrefix(env: HostEnvironment): string | null {
+  return env.PREFIX?.trim() || env.TERMUX__PREFIX?.trim() || null;
+}
+
+function pathHasTermuxPrefix(pathValue: string, defaultPrefix: string): boolean {
+  return pathValue
+    .split(nodePath.delimiter)
+    .some(
+      (entry) =>
+        entry === nodePath.join(defaultPrefix, "bin") ||
+        entry.startsWith(`${defaultPrefix}/`),
+    );
+}
+
+function withPrependedPathEntry(
+  env: HostEnvironment,
+  entry: string,
+): HostEnvironment {
+  const pathKey =
+    env.PATH === undefined && env.Path !== undefined ? "Path" : "PATH";
+  return {
+    ...env,
+    [pathKey]: prependPathEntry(env[pathKey] ?? "", entry),
+  };
+}
+
+function prependPathEntry(pathValue: string, entry: string): string {
+  const entries = pathValue
+    .split(nodePath.delimiter)
+    .map((value) => value.trim())
+    .filter(Boolean);
+  if (!entries.includes(entry)) {
+    entries.unshift(entry);
+  }
+  return entries.join(nodePath.delimiter);
+}
+
 function isExecutable(path: string): boolean {
   try {
     accessSync(path, fsConstants.X_OK);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function pathExistsSync(path: string): boolean {
+  try {
+    accessSync(path, fsConstants.F_OK);
     return true;
   } catch {
     return false;
