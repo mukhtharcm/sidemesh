@@ -1,11 +1,13 @@
 import { EventEmitter } from "node:events";
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
-import { access } from "node:fs/promises";
 import os from "node:os";
-import path from "node:path";
 import readline from "node:readline";
 
 import { codexRpcAudit } from "./codex-rpc-audit.js";
+import {
+  resolvePreferredShell,
+  shellCaptureArgs,
+} from "./host-environment.js";
 import type { JsonRpcMessage } from "./types.js";
 
 interface PendingRequest {
@@ -81,7 +83,7 @@ async function captureLoginShellEnv(
     return null;
   }
 
-  const shellPath = await resolveShellPath(baseEnv);
+  const shellPath = resolvePreferredShell(baseEnv);
   if (!shellPath) {
     return null;
   }
@@ -103,45 +105,6 @@ async function captureLoginShellEnv(
   }
 
   return parseShellEnvCapture(captured);
-}
-
-async function resolveShellPath(baseEnv: NodeJS.ProcessEnv): Promise<string | null> {
-  const candidates = [
-    baseEnv.SHELL?.trim(),
-    "/bin/zsh",
-    "/usr/bin/zsh",
-    "/bin/bash",
-    "/usr/bin/bash",
-    "/bin/sh",
-    "/usr/bin/sh",
-  ];
-
-  for (const candidate of candidates) {
-    if (!candidate) {
-      continue;
-    }
-    try {
-      await access(candidate);
-      return candidate;
-    } catch {
-      // Try the next known shell path.
-    }
-  }
-
-  return null;
-}
-
-function shellCaptureArgs(shellPath: string): string[] | null {
-  switch (path.basename(shellPath).toLowerCase()) {
-    case "zsh":
-    case "bash":
-    case "sh":
-    case "ksh":
-    case "fish":
-      return ["-l", "-i", "-c"];
-    default:
-      return null;
-  }
 }
 
 async function runShellEnvCapture(

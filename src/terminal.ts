@@ -8,8 +8,14 @@ import { arch, homedir, platform, userInfo } from "node:os";
 import { chmodSync, existsSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
 
-import * as pty from "node-pty";
 import type { WebSocket } from "ws";
+
+import {
+  resolveDefaultShell,
+  resolveExecutableSync,
+  shellLoginArgs,
+  shellNeedsInteractiveFlag,
+} from "./host-environment.js";
 
 const DEFAULT_COLS = 100;
 const DEFAULT_ROWS = 30;
@@ -23,6 +29,9 @@ const DEFAULT_IDLE_TTL_MS = 6 * 60 * 60 * 1000;
 const EXITED_TTL_MS = 5 * 60 * 1000;
 const MAX_WS_BUFFERED_AMOUNT = 4 * 1024 * 1024;
 const require = createRequire(import.meta.url);
+type NodePtyModule = typeof import("node-pty");
+let nodePtyModulePromise: Promise<NodePtyModule | null> | null = null;
+let nodePtyLoadError: Error | null = null;
 
 export interface TerminalRegistryOptions {
   enabled: boolean;
@@ -173,11 +182,11 @@ export class TerminalRegistry {
     const id = randomUUID();
     const title = request.title?.trim() || basename(cwd) || "Terminal";
     const now = Date.now();
-    const terminalProcess = spawnTerminalProcess(shell.path, shell.args, {
+    const terminalProcess = await spawnTerminalProcess(shell.path, shell.args, {
       cwd,
       cols: dimensions.cols,
       rows: dimensions.rows,
-      env: terminalEnvironment(),
+      env: terminalEnvironment(dimensions),
       requirePty: this.requirePty,
     });
     const terminal: TerminalRecord = {
@@ -457,14 +466,10 @@ export class TerminalRegistry {
 
   private resolveShell(): { path: string; args: string[] } {
     const shell =
-      this.shellOverride ||
-      process.env.SHELL?.trim() ||
-      (platform() === "win32" ? "powershell.exe" : "/bin/bash");
-    const name = basename(shell);
-    if (platform() !== "win32" && ["bash", "zsh", "fish"].includes(name)) {
-      return { path: shell, args: ["-l"] };
-    }
-    return { path: shell, args: [] };
+      (this.shellOverride
+        ? resolveExecutableSync(this.shellOverride) ?? this.shellOverride
+        : null) ?? resolveDefaultShell();
+    return { path: shell, args: shellLoginArgs(shell) };
   }
 
   private info(terminal: TerminalRecord): TerminalInfo {
@@ -537,7 +542,7 @@ export function normalizeTerminalShell(
   return shell;
 }
 
-function spawnTerminalProcess(
+async function spawnTerminalProcess(
   shell: string,
   args: string[],
   options: {
@@ -547,19 +552,27 @@ function spawnTerminalProcess(
     env: NodeJS.ProcessEnv;
     requirePty: boolean;
   },
-): TerminalProcess {
+): Promise<TerminalProcess> {
+  let ptyError: unknown = null;
   try {
-    return spawnPtyTerminalProcess(shell, args, options);
+    return await spawnPtyTerminalProcess(shell, args, options);
   } catch (error) {
+    ptyError = error;
     if (repairNodePtySpawnHelper()) {
+      resetNodePtyLoadState();
       try {
-        return spawnPtyTerminalProcess(shell, args, options);
-      } catch {
+        return await spawnPtyTerminalProcess(shell, args, options);
+      } catch (repairError) {
+        ptyError = repairError;
         // Fall through to the configured PTY failure behavior below.
       }
     }
+    const scriptTerminal = spawnScriptTerminalProcess(shell, args, options);
+    if (scriptTerminal) {
+      return scriptTerminal;
+    }
     if (options.requirePty) {
-      throw error;
+      throw ptyError;
     }
     return spawnPipeTerminalProcess(
       shell,
@@ -569,7 +582,7 @@ function spawnTerminalProcess(
   }
 }
 
-function spawnPtyTerminalProcess(
+async function spawnPtyTerminalProcess(
   shell: string,
   args: string[],
   options: {
@@ -578,8 +591,17 @@ function spawnPtyTerminalProcess(
     rows: number;
     env: NodeJS.ProcessEnv;
   },
-): TerminalProcess {
-  const ptyProcess = pty.spawn(shell, args, {
+): Promise<TerminalProcess> {
+  const nodePty = await loadNodePty();
+  if (!nodePty) {
+    const detail = nodePtyLoadError?.message?.trim();
+    throw new Error(
+      detail
+        ? `node-pty is unavailable on this host: ${detail}`
+        : "node-pty is unavailable on this host",
+    );
+  }
+  const ptyProcess = nodePty.spawn(shell, args, {
     name: "xterm-256color",
     cwd: options.cwd,
     cols: options.cols,
@@ -604,6 +626,27 @@ function spawnPtyTerminalProcess(
       );
     },
   };
+}
+
+async function loadNodePty(): Promise<NodePtyModule | null> {
+  if (!nodePtyModulePromise) {
+    nodePtyModulePromise = import("node-pty")
+      .then((module) => {
+        nodePtyLoadError = null;
+        return module;
+      })
+      .catch((error: unknown) => {
+        nodePtyLoadError =
+          error instanceof Error ? error : new Error(String(error));
+        return null;
+      });
+  }
+  return nodePtyModulePromise;
+}
+
+function resetNodePtyLoadState(): void {
+  nodePtyModulePromise = null;
+  nodePtyLoadError = null;
 }
 
 function repairNodePtySpawnHelper(): boolean {
@@ -666,6 +709,64 @@ function spawnPipeTerminalProcess(
   };
 }
 
+function spawnScriptTerminalProcess(
+  shell: string,
+  args: string[],
+  options: {
+    cwd: string;
+    cols: number;
+    rows: number;
+    env: NodeJS.ProcessEnv;
+  },
+): TerminalProcess | null {
+  if (platform() === "win32") {
+    return null;
+  }
+  const scriptPath = resolveExecutableSync("script", options.env);
+  if (!scriptPath) {
+    return null;
+  }
+  let exited = false;
+  const child = spawnChild(
+    scriptPath,
+    [
+      "-qfec",
+      buildScriptProxyCommand(shell, args, options.cols, options.rows),
+      "/dev/null",
+    ],
+    {
+      cwd: options.cwd,
+      env: options.env,
+      detached: true,
+      stdio: "pipe",
+    },
+  );
+  return {
+    // `script` gives the child process a PTY, but our transport remains pipe-based
+    // and cannot propagate terminal resize events reliably.
+    backend: "pipe",
+    write: (data) => {
+      child.stdin.write(data);
+    },
+    resize: () => {
+      // `script` proxy fallback does not support dynamic resize updates.
+    },
+    kill: () => {
+      terminatePipeProcess(child, () => exited);
+    },
+    onData: (callback) => {
+      child.stdout.on("data", (data) => callback(data.toString()));
+      child.stderr.on("data", (data) => callback(data.toString()));
+    },
+    onExit: (callback) => {
+      child.on("exit", (exitCode) => {
+        exited = true;
+        callback({ exitCode, signal: null });
+      });
+    },
+  };
+}
+
 function terminatePipeProcess(
   child: ChildProcessWithoutNullStreams,
   hasExited: () => boolean,
@@ -700,13 +801,7 @@ function sendSignal(
 }
 
 function fallbackShellArgs(shell: string, args: string[]): string[] {
-  const name = basename(shell);
-  if (platform() !== "win32" && ["bash", "zsh"].includes(name)) {
-    const next = new Set(args);
-    next.add("-i");
-    return [...next];
-  }
-  if (platform() !== "win32" && name === "fish") {
+  if (platform() !== "win32" && shellNeedsInteractiveFlag(shell)) {
     const next = new Set(args);
     next.add("-i");
     return [...next];
@@ -714,11 +809,16 @@ function fallbackShellArgs(shell: string, args: string[]): string[] {
   return args;
 }
 
-function terminalEnvironment(): NodeJS.ProcessEnv {
+function terminalEnvironment(dimensions: {
+  cols: number;
+  rows: number;
+}): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = {
     ...process.env,
     TERM: "xterm-256color",
     COLORTERM: process.env.COLORTERM || "truecolor",
+    COLUMNS: String(dimensions.cols),
+    LINES: String(dimensions.rows),
     SIDEMESH_TERMINAL_SESSION: "1",
   };
   seedInteractiveIdentity(env);
@@ -747,11 +847,29 @@ function seedInteractiveIdentity(env: NodeJS.ProcessEnv): void {
     env.LOGNAME ||= username;
   }
   if (!shell && platform() !== "win32") {
-    shell = "/bin/bash";
+    shell = resolveDefaultShell(env);
   }
   if (shell) {
     env.SHELL ||= shell;
   }
+}
+
+function buildScriptProxyCommand(
+  shell: string,
+  args: string[],
+  cols: number,
+  rows: number,
+): string {
+  const sizeCommand =
+    cols > 0 && rows > 0
+      ? `stty cols ${cols} rows ${rows} 2>/dev/null || true; `
+      : "";
+  const command = [shell, ...args].map(shellQuote).join(" ");
+  return `${sizeCommand}exec ${command}`;
+}
+
+function shellQuote(value: string): string {
+  return `'${value.replaceAll("'", "'\\''")}'`;
 }
 
 function normalizeDimensions(
