@@ -253,6 +253,12 @@ specific agent provider.
   a `status` field (default 403) that HTTP handlers can throw directly.
 - **Terminal security**: `SIDEMESH_TOKEN` is deleted from env before spawning
   the shell; `SIDEMESH_TERMINAL_SESSION=1` is injected.
+- **Termux / Android PTY support**: keep `node-pty` optional. Do not
+  reintroduce eager top-level PTY imports or make `node-pty` a required npm
+  dependency; Termux installs can lack a working native addon, so the daemon
+  must still start and fall back to `script`/pipe-backed terminals.
+- **Port forwarding lockdown**: Targets must resolve to loopback by default.
+  Enable `allowNonLoopbackTargets` in config to relax.
 
 ## Common Workflows
 

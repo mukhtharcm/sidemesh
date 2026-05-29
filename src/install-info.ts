@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 import nodePath from "node:path";
 import { promisify } from "node:util";
 
+import { supportsSystemdServiceManagement } from "./host-environment.js";
 import type { NodeConfig, UpdateChannel } from "./types.js";
 
 const execFileAsync = promisify(execFile);
@@ -54,7 +55,9 @@ export async function detectInstallInfo(
   const updateChannel = options.config?.updateChannel ?? "stable";
   const packageVersion = await readPackageVersion(packageRoot);
   const installType = await detectInstallType(packageRoot);
-  const isManagedService = await isSystemdServiceActive().catch(() => false);
+  const isManagedService = supportsSystemdServiceManagement()
+    ? await isSystemdServiceActive().catch(() => false)
+    : false;
   const serviceName = isManagedService ? "sidemesh" : null;
   const currentCommitSha =
     installType === "git" ? await readCurrentCommitSha(packageRoot) : null;
