@@ -29,8 +29,7 @@ export function resolvePreferredShell(
   env: HostEnvironment = process.env,
 ): string | null {
   const candidates = dedupe([
-    env.SHELL?.trim(),
-    readUserShell(),
+    normalizeShellCandidate(env.SHELL),
     ...(process.platform === "win32"
       ? ["powershell.exe", "cmd.exe"]
       : [
@@ -40,6 +39,7 @@ export function resolvePreferredShell(
                 "/data/data/com.termux/files/usr/bin/sh",
               ]
             : []),
+          normalizeShellCandidate(readUserShell()),
           "/bin/bash",
           "/usr/bin/bash",
           "/bin/zsh",
@@ -141,6 +141,20 @@ export function shellCaptureArgs(shellPath: string): string[] | null {
 export function shellNeedsInteractiveFlag(shellPath: string): boolean {
   const name = nodePath.basename(shellPath).toLowerCase();
   return ["bash", "zsh", "fish", "ksh", "sh", "dash", "ash"].includes(name);
+}
+
+function normalizeShellCandidate(
+  value: string | null | undefined,
+): string | null {
+  const trimmed = value?.trim();
+  if (!trimmed) {
+    return null;
+  }
+  const basename = nodePath.basename(trimmed).toLowerCase();
+  if (["login", "nologin", "false"].includes(basename)) {
+    return null;
+  }
+  return trimmed;
 }
 
 function dedupe(values: Array<string | null | undefined>): string[] {
