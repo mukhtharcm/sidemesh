@@ -51,28 +51,22 @@ class _SidemeshHomeScreenState extends State<SidemeshHomeScreen>
     with WidgetsBindingObserver {
   static const _tabs = [
     _TabDef(
-      title: 'Recent',
-      subtitle: 'Pick up where your agents left off',
-      icon: Icons.schedule_rounded,
-      selectedIcon: Icons.schedule_rounded,
+      title: 'Home',
+      subtitle: 'What needs attention, then what to continue',
+      icon: Icons.circle_outlined,
+      selectedIcon: Icons.circle_rounded,
     ),
     _TabDef(
-      title: 'Inbox',
-      subtitle: 'Approvals and pending replies in one place',
-      icon: Icons.all_inbox_rounded,
-      selectedIcon: Icons.all_inbox_rounded,
+      title: 'Search',
+      subtitle: 'Find sessions, workspaces, and machines',
+      icon: Icons.search_rounded,
+      selectedIcon: Icons.search_rounded,
     ),
     _TabDef(
-      title: 'Usage',
-      subtitle: 'Limits, versions, and host health',
-      icon: Icons.speed_rounded,
-      selectedIcon: Icons.speed_rounded,
-    ),
-    _TabDef(
-      title: 'Hosts',
-      subtitle: 'Machines you can reach from this device',
-      icon: Icons.hub_rounded,
-      selectedIcon: Icons.hub_rounded,
+      title: 'More',
+      subtitle: 'Hosts, usage, settings, and setup',
+      icon: Icons.more_horiz_rounded,
+      selectedIcon: Icons.more_horiz_rounded,
     ),
   ];
 
@@ -93,7 +87,6 @@ class _SidemeshHomeScreenState extends State<SidemeshHomeScreen>
   int _activeCount = 0;
   int _inboxCount = 0;
   String _query = '';
-  RecentSessionFilters _recentFilters = const RecentSessionFilters();
   bool _handlingNotificationIntent = false;
   String? _dismissedRecommendedMobileClientVersion;
   final Map<String, NodeInfo> _hostNodeInfo = {};
@@ -101,10 +94,6 @@ class _SidemeshHomeScreenState extends State<SidemeshHomeScreen>
   List<HostProfile> get _enabledHosts =>
       _hosts.where((host) => host.enabled).toList(growable: false);
 
-  bool _searchVisibleForTab(_TabDef tab, int enabledHostCount) {
-    if (tab.title == 'Usage') return false;
-    return tab.title != 'Hosts' || enabledHostCount >= 4;
-  }
 
   @override
   void initState() {
@@ -236,26 +225,6 @@ class _SidemeshHomeScreenState extends State<SidemeshHomeScreen>
     }
   }
 
-  void _toggleRecentRunningOnly(bool enabled) {
-    if (_recentFilters.runningOnly == enabled) return;
-    setState(() {
-      _recentFilters = _recentFilters.copyWith(runningOnly: enabled);
-    });
-  }
-
-  void _toggleRecentUnreadOnly(bool enabled) {
-    if (_recentFilters.unreadOnly == enabled) return;
-    setState(() {
-      _recentFilters = _recentFilters.copyWith(unreadOnly: enabled);
-    });
-  }
-
-  void _toggleRecentFavoritesOnly(bool enabled) {
-    if (_recentFilters.favoritesOnly == enabled) return;
-    setState(() {
-      _recentFilters = _recentFilters.copyWith(favoritesOnly: enabled);
-    });
-  }
 
   Future<void> _refreshHosts() async {
     final hosts = await _store.loadHosts();
@@ -470,8 +439,8 @@ class _SidemeshHomeScreenState extends State<SidemeshHomeScreen>
     _handlingNotificationIntent = true;
     try {
       if (!mounted) return;
-      if (_tabIndex != 1) {
-        setState(() => _tabIndex = 1);
+      if (_tabIndex != 0) {
+        setState(() => _tabIndex = 0);
       }
       final host = _hostForIntent(intent);
       if (host == null) {
@@ -546,18 +515,18 @@ class _SidemeshHomeScreenState extends State<SidemeshHomeScreen>
   }
 
   _HomePrimaryAction _primaryActionForTab(_TabDef tab) {
-    if (_hosts.isEmpty || tab.title == 'Hosts') {
+    if (_hosts.isEmpty) {
       return _HomePrimaryAction(
-        label: 'Add host',
+        label: 'Connect a machine',
         icon: Icons.add_link_rounded,
         onTap: () => _showHostEditor(),
       );
     }
     if (_enabledHosts.isEmpty) {
       return _HomePrimaryAction(
-        label: 'Open hosts',
+        label: 'Manage hosts',
         icon: Icons.hub_rounded,
-        onTap: () => setState(() => _tabIndex = 3),
+        onTap: () => setState(() => _tabIndex = 2),
       );
     }
     return _HomePrimaryAction(
@@ -590,17 +559,11 @@ class _SidemeshHomeScreenState extends State<SidemeshHomeScreen>
               tab: tab,
               primaryAction: primaryAction,
               searchController: _searchController,
-              searchVisible: _searchVisibleForTab(tab, enabledHosts.length),
-              recentFilters: _tabIndex == 0 ? _recentFilters : null,
-              onRunningOnlyChanged: _tabIndex == 0
-                  ? _toggleRecentRunningOnly
-                  : null,
-              onUnreadOnlyChanged: _tabIndex == 0
-                  ? _toggleRecentUnreadOnly
-                  : null,
-              onFavoritesOnlyChanged: _tabIndex == 0
-                  ? _toggleRecentFavoritesOnly
-                  : null,
+              searchVisible: _tabIndex == 1,
+              recentFilters: null,
+              onRunningOnlyChanged: null,
+              onUnreadOnlyChanged: null,
+              onFavoritesOnlyChanged: null,
               onRefresh: _refreshHosts,
               onOpenSettings: _openSettings,
             ),
@@ -627,58 +590,61 @@ class _SidemeshHomeScreenState extends State<SidemeshHomeScreen>
                   : IndexedStack(
                       index: _tabIndex,
                       children: [
-                        RecentPane(
+                        HomePane(
                           hosts: enabledHosts,
+                          allHosts: _hosts,
                           api: _api,
-                          query: _query,
+                          inboxCount: _inboxCount,
                           hasSavedHosts: _hosts.isNotEmpty,
-                          screenAwakeSourceKey: 'mobile-recent-sessions',
                           onOpenSession: _openSession,
                           onAddHost: () => _showHostEditor(),
+                          onOpenInbox: () => setState(() => _tabIndex = 1),
                           onActiveCountChanged: (count) {
                             if (!mounted) return;
                             setState(() => _activeCount = count);
                           },
-                          filters: _recentFilters,
                         ),
-                        InboxPane(
+                        GlobalSearchPane(
                           hosts: enabledHosts,
+                          allHosts: _hosts,
+                          hostNodes: _hostNodeInfo,
+                          installedAppVersion: installedAppVersion,
                           api: _api,
                           query: _query,
                           hasSavedHosts: _hosts.isNotEmpty,
-                          onOpenSession: (host, action) =>
-                              _openSession(host, _sessionFromAction(action)),
+                          onOpenSession: _openSession,
+                          onAddHost: () => _showHostEditor(),
+                          onOpenHost: _openHost,
+                          onEditHost: (host) =>
+                              _showHostEditor(initialHost: host),
+                          onRemoveHost: _removeHost,
+                          onToggleHostEnabled: _toggleHostEnabled,
+                          onInboxCountChanged: (count) {
+                            if (!mounted || count == _inboxCount) return;
+                            setState(() => _inboxCount = count);
+                          },
                           onOpenPendingSession: (host, session, composerSeed) =>
                               _openSession(
                                 host,
                                 session,
                                 composerSeed: composerSeed,
                               ),
-                          onEditHost: (host) =>
-                              _showHostEditor(initialHost: host),
-                          onToggleHostEnabled: _toggleHostEnabled,
-                          allHosts: _hosts,
-                          onInboxCountChanged: (count) {
-                            if (!mounted || count == _inboxCount) return;
-                            setState(() => _inboxCount = count);
-                          },
+                          onOpenPendingAction: (host, action) =>
+                              _openSession(host, _sessionFromAction(action)),
                         ),
-                        UsagePane(
-                          hosts: enabledHosts,
-                          api: _api,
-                          active: _tabIndex == 2,
-                        ),
-                        HostsPane(
+                        MorePane(
                           hosts: _hosts,
                           hostNodes: _hostNodeInfo,
                           installedAppVersion: installedAppVersion,
-                          query: _query,
+                          api: _api,
+                          onNewSession: _startSessionFromHome,
+                          onPairHost: () => _showHostEditor(),
+                          onOpenSettings: _openSettings,
                           onOpenHost: _openHost,
                           onEditHost: (host) =>
                               _showHostEditor(initialHost: host),
                           onRemoveHost: _removeHost,
-                          onToggleEnabled: _toggleHostEnabled,
-                          onAddHost: () => _showHostEditor(),
+                          onToggleHostEnabled: _toggleHostEnabled,
                         ),
                       ],
                     ),
@@ -686,29 +652,21 @@ class _SidemeshHomeScreenState extends State<SidemeshHomeScreen>
           ],
         ),
       ),
-      floatingActionButton: _tabIndex == 3 && _hosts.isNotEmpty
-          ? FloatingActionButton.extended(
-              onPressed: () => _showHostEditor(),
-              icon: const Icon(Icons.add_link_rounded),
-              label: const Text('Add host'),
-            )
-          : null,
+      floatingActionButton: null,
       bottomNavigationBar: _MeshNavBar(
         tabs: _tabs,
         currentIndex: _tabIndex,
         onTap: (index) {
           setState(() {
             _tabIndex = index;
-            final tab = _tabs[index];
-            final showSearch = _searchVisibleForTab(tab, _enabledHosts.length);
-            if (!showSearch &&
+            if (index != 1 &&
                 (_query.isNotEmpty || _searchController.text.isNotEmpty)) {
               _query = '';
               _searchController.clear();
             }
           });
         },
-        badges: [_activeCount, _inboxCount, 0, 0],
+        badges: [_inboxCount + _activeCount, 0, 0],
       ),
     );
   }
@@ -1221,6 +1179,355 @@ class _NavIconWithBadge extends StatelessWidget {
             ),
           ),
       ],
+    );
+  }
+}
+
+
+class HomePane extends StatelessWidget {
+  const HomePane({
+    super.key,
+    required this.hosts,
+    required this.allHosts,
+    required this.api,
+    required this.onOpenSession,
+    required this.onActiveCountChanged,
+    required this.onAddHost,
+    required this.onOpenInbox,
+    required this.inboxCount,
+    this.hasSavedHosts = false,
+  });
+
+  final List<HostProfile> hosts;
+  final List<HostProfile> allHosts;
+  final ApiClient api;
+  final void Function(HostProfile host, SessionSummary session) onOpenSession;
+  final ValueChanged<int> onActiveCountChanged;
+  final VoidCallback onAddHost;
+  final VoidCallback onOpenInbox;
+  final int inboxCount;
+  final bool hasSavedHosts;
+
+  @override
+  Widget build(BuildContext context) {
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(16, 8, 16, 32),
+      children: [
+        if (inboxCount > 0) ...[
+          MeshSectionHeader(
+            title: 'Needs attention',
+            subtitle: inboxCount == 1
+                ? '1 item is waiting for you.'
+                : '$inboxCount items are waiting for you.',
+          ),
+          MeshListRow(
+            tone: MeshSurfaceTone.elevated,
+            onTap: onOpenInbox,
+            leading: _PremiumIconWell(
+              icon: Icons.verified_user_rounded,
+              tone: MeshPillTone.warning,
+            ),
+            title: const Text('Review inbox'),
+            subtitle: Text(
+              inboxCount == 1
+                  ? 'Approve, reply, or recover a queued message.'
+                  : 'Approvals, replies, and queued messages are grouped here.',
+            ),
+            badges: [
+              MeshStatusBadge(
+                label: '$inboxCount',
+                tone: MeshStatusTone.approval,
+                compact: true,
+              ),
+            ],
+            trailing: const Icon(Icons.chevron_right_rounded),
+          ),
+          const SizedBox(height: 24),
+        ],
+        MeshSectionHeader(
+          title: 'Continue',
+          subtitle: hosts.isEmpty
+              ? 'Connect a machine to start using Sidemesh.'
+              : 'Running sessions first, then your recent work.',
+        ),
+        SizedBox(
+          height: max(320, MediaQuery.sizeOf(context).height * 0.62),
+          child: RecentPane(
+            hosts: hosts,
+            api: api,
+            hasSavedHosts: hasSavedHosts,
+            screenAwakeSourceKey: 'mobile-home-continue',
+            onOpenSession: onOpenSession,
+            onAddHost: onAddHost,
+            onActiveCountChanged: onActiveCountChanged,
+            filters: const RecentSessionFilters(),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class GlobalSearchPane extends StatelessWidget {
+  const GlobalSearchPane({
+    super.key,
+    required this.hosts,
+    required this.allHosts,
+    required this.hostNodes,
+    required this.installedAppVersion,
+    required this.api,
+    required this.query,
+    required this.onOpenSession,
+    required this.onAddHost,
+    required this.onOpenHost,
+    required this.onEditHost,
+    required this.onRemoveHost,
+    required this.onToggleHostEnabled,
+    required this.onInboxCountChanged,
+    required this.onOpenPendingSession,
+    required this.onOpenPendingAction,
+    this.hasSavedHosts = false,
+  });
+
+  final List<HostProfile> hosts;
+  final List<HostProfile> allHosts;
+  final Map<String, NodeInfo> hostNodes;
+  final String installedAppVersion;
+  final ApiClient api;
+  final String query;
+  final void Function(HostProfile host, SessionSummary session) onOpenSession;
+  final VoidCallback onAddHost;
+  final ValueChanged<HostProfile> onOpenHost;
+  final HostProfileActionCallback onEditHost;
+  final ValueChanged<HostProfile> onRemoveHost;
+  final HostProfileActionCallback onToggleHostEnabled;
+  final ValueChanged<int> onInboxCountChanged;
+  final OpenPendingSessionCallback onOpenPendingSession;
+  final void Function(HostProfile host, PendingAction action) onOpenPendingAction;
+  final bool hasSavedHosts;
+
+  @override
+  Widget build(BuildContext context) {
+    final q = query.trim();
+    if (q.isEmpty) {
+      return const MeshEmptyState(
+        icon: Icons.search_rounded,
+        title: 'Search everything',
+        body: 'Find sessions, transcript matches, workspaces, and machines from one place.',
+      );
+    }
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(16, 8, 16, 32),
+      children: [
+        MeshSectionHeader(
+          title: 'Sessions',
+          subtitle: 'Matches from recent and remote session search.',
+        ),
+        SizedBox(
+          height: 360,
+          child: RecentPane(
+            hosts: hosts,
+            api: api,
+            query: q,
+            hasSavedHosts: hasSavedHosts,
+            onOpenSession: onOpenSession,
+            onAddHost: onAddHost,
+            onActiveCountChanged: (_) {},
+          ),
+        ),
+        const SizedBox(height: 24),
+        MeshSectionHeader(
+          title: 'Attention',
+          subtitle: 'Queued messages and approval requests matching this search.',
+        ),
+        SizedBox(
+          height: 260,
+          child: InboxPane(
+            hosts: hosts,
+            allHosts: allHosts,
+            api: api,
+            query: q,
+            dense: true,
+            hasSavedHosts: hasSavedHosts,
+            onOpenSession: onOpenPendingAction,
+            onOpenPendingSession: onOpenPendingSession,
+            onEditHost: onEditHost,
+            onToggleHostEnabled: onToggleHostEnabled,
+            onInboxCountChanged: onInboxCountChanged,
+          ),
+        ),
+        const SizedBox(height: 24),
+        MeshSectionHeader(
+          title: 'Machines',
+          subtitle: 'Hosts whose name or URL matches.',
+        ),
+        SizedBox(
+          height: 260,
+          child: HostsPane(
+            hosts: allHosts,
+            hostNodes: hostNodes,
+            installedAppVersion: installedAppVersion,
+            query: q,
+            dense: true,
+            onOpenHost: onOpenHost,
+            onEditHost: onEditHost,
+            onRemoveHost: onRemoveHost,
+            onToggleEnabled: onToggleHostEnabled,
+            onAddHost: onAddHost,
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class MorePane extends StatelessWidget {
+  const MorePane({
+    super.key,
+    required this.hosts,
+    required this.hostNodes,
+    required this.installedAppVersion,
+    required this.api,
+    required this.onNewSession,
+    required this.onPairHost,
+    required this.onOpenSettings,
+    required this.onOpenHost,
+    required this.onEditHost,
+    required this.onRemoveHost,
+    required this.onToggleHostEnabled,
+  });
+
+  final List<HostProfile> hosts;
+  final Map<String, NodeInfo> hostNodes;
+  final String installedAppVersion;
+  final ApiClient api;
+  final VoidCallback onNewSession;
+  final VoidCallback onPairHost;
+  final VoidCallback onOpenSettings;
+  final ValueChanged<HostProfile> onOpenHost;
+  final ValueChanged<HostProfile> onEditHost;
+  final ValueChanged<HostProfile> onRemoveHost;
+  final ValueChanged<HostProfile> onToggleHostEnabled;
+
+  @override
+  Widget build(BuildContext context) {
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(16, 8, 16, 32),
+      children: [
+        const MeshSectionHeader(
+          title: 'Create',
+          subtitle: 'Start work or connect another machine.',
+        ),
+        MeshGroup(
+          children: [
+            MeshListRow(
+              framed: false,
+              leading: const _PremiumIconWell(icon: Icons.add_rounded),
+              title: const Text('New session'),
+              subtitle: const Text('Start with your defaults, then adjust as needed.'),
+              trailing: const Icon(Icons.chevron_right_rounded),
+              onTap: onNewSession,
+            ),
+            MeshListRow(
+              framed: false,
+              leading: const _PremiumIconWell(icon: Icons.add_link_rounded),
+              title: const Text('Pair host'),
+              subtitle: const Text('Add a laptop, desktop, or server.'),
+              trailing: const Icon(Icons.chevron_right_rounded),
+              onTap: onPairHost,
+            ),
+          ],
+        ),
+        const SizedBox(height: 24),
+        const MeshSectionHeader(
+          title: 'Manage',
+          subtitle: 'App-level settings and health.',
+        ),
+        MeshGroup(
+          children: [
+            MeshListRow(
+              framed: false,
+              leading: const _PremiumIconWell(icon: Icons.speed_rounded),
+              title: const Text('Usage'),
+              subtitle: const Text('Limits, versions, and host health.'),
+              trailing: const Icon(Icons.chevron_right_rounded),
+              onTap: () => _showUsageSheet(context),
+            ),
+            MeshListRow(
+              framed: false,
+              leading: const _PremiumIconWell(icon: Icons.tune_rounded),
+              title: const Text('Settings'),
+              subtitle: const Text('Appearance, notifications, updates, and defaults.'),
+              trailing: const Icon(Icons.chevron_right_rounded),
+              onTap: onOpenSettings,
+            ),
+          ],
+        ),
+        const SizedBox(height: 24),
+        MeshSectionHeader(
+          title: 'Hosts',
+          subtitle: hosts.isEmpty
+              ? 'No machines connected yet.'
+              : '${hosts.length} saved ${hosts.length == 1 ? 'machine' : 'machines'}.',
+          trailing: TextButton.icon(
+            onPressed: onPairHost,
+            icon: const Icon(Icons.add_rounded, size: 17),
+            label: const Text('Add'),
+          ),
+        ),
+        SizedBox(
+          height: hosts.isEmpty ? 220 : min(420, 92.0 * hosts.length + 32),
+          child: HostsPane(
+            hosts: hosts,
+            hostNodes: hostNodes,
+            installedAppVersion: installedAppVersion,
+            dense: true,
+            onOpenHost: onOpenHost,
+            onEditHost: onEditHost,
+            onRemoveHost: onRemoveHost,
+            onToggleEnabled: onToggleHostEnabled,
+            onAddHost: onPairHost,
+          ),
+        ),
+      ],
+    );
+  }
+
+  void _showUsageSheet(BuildContext context) {
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (context) => MeshBottomSheetScaffold(
+        icon: Icons.speed_rounded,
+        title: 'Usage',
+        description: 'Limits, versions, and host health across connected machines.',
+        maxHeightFactor: 0.9,
+        child: UsagePane(hosts: hosts.where((h) => h.enabled).toList(), api: api, active: true),
+      ),
+    );
+  }
+}
+
+class _PremiumIconWell extends StatelessWidget {
+  const _PremiumIconWell({required this.icon, this.tone = MeshPillTone.accent});
+
+  final IconData icon;
+  final MeshPillTone tone;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    final toneColors = meshPillColors(colors, tone);
+    return Container(
+      width: 38,
+      height: 38,
+      decoration: BoxDecoration(
+        color: toneColors.background,
+        borderRadius: BorderRadius.circular(AppRadii.control),
+        border: Border.all(color: toneColors.border.withValues(alpha: 0.72)),
+      ),
+      child: Icon(icon, color: toneColors.foreground, size: 19),
     );
   }
 }

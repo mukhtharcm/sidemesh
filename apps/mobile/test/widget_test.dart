@@ -44,9 +44,9 @@ void main() {
     await tester.pump();
 
     expect(find.byType(Scaffold), findsOneWidget);
-    expect(find.text('Recent'), findsWidgets);
-    expect(find.text('Inbox'), findsWidgets);
-    expect(find.text('Hosts'), findsWidgets);
+    expect(find.text('Home'), findsWidgets);
+    expect(find.text('Search'), findsWidgets);
+    expect(find.text('More'), findsWidgets);
 
     tester.view.resetPhysicalSize();
     tester.view.resetDevicePixelRatio();
