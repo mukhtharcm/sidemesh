@@ -94,7 +94,6 @@ class _SidemeshHomeScreenState extends State<SidemeshHomeScreen>
   List<HostProfile> get _enabledHosts =>
       _hosts.where((host) => host.enabled).toList(growable: false);
 
-
   @override
   void initState() {
     super.initState();
@@ -225,7 +224,6 @@ class _SidemeshHomeScreenState extends State<SidemeshHomeScreen>
     }
   }
 
-
   Future<void> _refreshHosts() async {
     final hosts = await _store.loadHosts();
     if (!mounted) {
@@ -354,11 +352,7 @@ class _SidemeshHomeScreenState extends State<SidemeshHomeScreen>
       return;
     }
     final navigator = Navigator.of(context);
-    final route = _buildSessionRoute(
-      host,
-      session,
-      composerSeed: composerSeed,
-    );
+    final route = _buildSessionRoute(host, session, composerSeed: composerSeed);
     if (replaceCurrentRoute) {
       await navigator.pushReplacement<void, void>(route);
     } else {
@@ -594,6 +588,7 @@ class _SidemeshHomeScreenState extends State<SidemeshHomeScreen>
                           hosts: enabledHosts,
                           allHosts: _hosts,
                           api: _api,
+                          activeCount: _activeCount,
                           inboxCount: _inboxCount,
                           hasSavedHosts: _hosts.isNotEmpty,
                           onOpenSession: _openSession,
@@ -799,6 +794,17 @@ class _HomeStickyHeader extends StatelessWidget {
                 ),
               ),
               const SizedBox(width: AppSpacing.sm),
+              FilledButton.icon(
+                onPressed: primaryAction.onTap,
+                icon: Icon(primaryAction.icon, size: 17),
+                label: Text(primaryAction.label),
+                style: FilledButton.styleFrom(
+                  minimumSize: const Size(0, 42),
+                  padding: const EdgeInsets.symmetric(horizontal: 12),
+                  visualDensity: VisualDensity.compact,
+                ),
+              ),
+              const SizedBox(width: AppSpacing.xs),
               PopupMenuButton<_HomeHeaderMenuAction>(
                 tooltip: 'More',
                 onSelected: (action) {
@@ -845,16 +851,7 @@ class _HomeStickyHeader extends StatelessWidget {
               ),
             ],
           ),
-          const SizedBox(height: AppSpacing.md),
-          Align(
-            alignment: Alignment.centerLeft,
-            child: FilledButton.icon(
-              onPressed: primaryAction.onTap,
-              icon: Icon(primaryAction.icon, size: 18),
-              label: Text(primaryAction.label),
-            ),
-          ),
-          const SizedBox(height: AppSpacing.md),
+          const SizedBox(height: AppSpacing.sm),
           AnimatedSwitcher(
             duration: const Duration(milliseconds: 220),
             child: searchVisible
@@ -950,9 +947,9 @@ class _HomeSearchField extends StatelessWidget {
               ),
             ),
             if (filters != null &&
-                    (onRunningOnlyChanged != null ||
-                        onUnreadOnlyChanged != null ||
-                        onFavoritesOnlyChanged != null)) ...[
+                (onRunningOnlyChanged != null ||
+                    onUnreadOnlyChanged != null ||
+                    onFavoritesOnlyChanged != null)) ...[
               const SizedBox(height: AppSpacing.sm),
               Wrap(
                 spacing: AppSpacing.sm,
@@ -960,22 +957,22 @@ class _HomeSearchField extends StatelessWidget {
                 children: [
                   _HomeSearchFilterToken(
                     icon: Icons.star_rounded,
-                      label: 'Favorites',
-                      selected: filters.favoritesOnly,
-                      onSelected: onFavoritesOnlyChanged,
-                    ),
-                    _HomeSearchFilterToken(
-                      icon: Icons.play_circle_outline_rounded,
-                      label: 'Running',
-                      selected: filters.runningOnly,
-                      onSelected: onRunningOnlyChanged,
-                    ),
-                    _HomeSearchFilterToken(
-                      icon: Icons.mark_chat_unread_rounded,
-                      label: 'Unread',
-                      selected: filters.unreadOnly,
-                      onSelected: onUnreadOnlyChanged,
-                    ),
+                    label: 'Favorites',
+                    selected: filters.favoritesOnly,
+                    onSelected: onFavoritesOnlyChanged,
+                  ),
+                  _HomeSearchFilterToken(
+                    icon: Icons.play_circle_outline_rounded,
+                    label: 'Running',
+                    selected: filters.runningOnly,
+                    onSelected: onRunningOnlyChanged,
+                  ),
+                  _HomeSearchFilterToken(
+                    icon: Icons.mark_chat_unread_rounded,
+                    label: 'Unread',
+                    selected: filters.unreadOnly,
+                    onSelected: onUnreadOnlyChanged,
+                  ),
                 ],
               ),
             ],
@@ -1031,9 +1028,7 @@ class _HomeSearchFilterToken extends StatelessWidget {
                 label,
                 style: Theme.of(context).textTheme.labelMedium?.copyWith(
                   color: selected ? colors.textPrimary : colors.textSecondary,
-                  fontWeight: selected
-                      ? AppWeights.title
-                      : AppWeights.emphasis,
+                  fontWeight: selected ? AppWeights.title : AppWeights.emphasis,
                 ),
               ),
             ],
@@ -1061,68 +1056,55 @@ class _MeshNavBar extends StatelessWidget {
   Widget build(BuildContext context) {
     final colors = context.colors;
     return Container(
-      padding: const EdgeInsets.fromLTRB(14, 8, 14, 14),
       decoration: BoxDecoration(
-        color: colors.canvas,
+        color: colors.canvas.withValues(alpha: 0.98),
         border: Border(top: BorderSide(color: colors.border)),
+        boxShadow: [
+          BoxShadow(
+            color: colors.textPrimary.withValues(alpha: 0.05),
+            blurRadius: 20,
+            offset: const Offset(0, -8),
+          ),
+        ],
       ),
       child: SafeArea(
         top: false,
-        child: Row(
-          children: List.generate(tabs.length, (index) {
-            final tab = tabs[index];
-            final selected = index == currentIndex;
-            final badge = index < badges.length ? badges[index] : 0;
-            return Expanded(
-              child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 3),
-                child: Material(
-                  color: Colors.transparent,
-                  child: InkWell(
-                    borderRadius: AppShapes.input,
-                    onTap: () => onTap(index),
-                    child: AnimatedContainer(
-                      duration: const Duration(milliseconds: 220),
-                      curve: Curves.easeOut,
-                      padding: const EdgeInsets.symmetric(vertical: 10),
-                      decoration: BoxDecoration(
-                        color: selected
-                            ? colors.accentMuted
-                            : Colors.transparent,
-                        borderRadius: AppShapes.input,
-                        border: Border.all(
-                          color: selected
-                              ? colors.accent.withValues(alpha: 0.4)
-                              : Colors.transparent,
-                        ),
-                      ),
-                      child: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          _NavIconWithBadge(
-                            icon: selected ? tab.selectedIcon : tab.icon,
-                            selected: selected,
-                            badge: badge,
-                          ),
-                          const SizedBox(height: 4),
-                          Text(
-                            tab.title,
-                            style: Theme.of(context).textTheme.labelSmall
-                                ?.copyWith(
-                                  color: selected
-                                      ? colors.accent
-                                      : colors.textSecondary,
-                                  fontWeight: AppWeights.emphasis,
-                                ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(12, 6, 12, 8),
+          child: NavigationBar(
+            selectedIndex: currentIndex,
+            onDestinationSelected: onTap,
+            height: 64,
+            backgroundColor: Colors.transparent,
+            elevation: 0,
+            indicatorColor: colors.accentMuted.withValues(alpha: 0.64),
+            labelBehavior: NavigationDestinationLabelBehavior.alwaysShow,
+            destinations: List.generate(tabs.length, (index) {
+              final tab = tabs[index];
+              final badge = index < badges.length ? badges[index] : 0;
+              final icon = _NavIconWithBadge(
+                icon: tab.icon,
+                selected: false,
+                badge: badge,
+              );
+              final selectedIcon = _NavIconWithBadge(
+                icon: tab.selectedIcon,
+                selected: true,
+                badge: badge,
+              );
+              return NavigationDestination(
+                tooltip: tab.title,
+                label: tab.title,
+                icon: Semantics(label: tab.title, button: true, child: icon),
+                selectedIcon: Semantics(
+                  label: '${tab.title}, selected',
+                  button: true,
+                  selected: true,
+                  child: selectedIcon,
                 ),
-              ),
-            );
-          }),
+              );
+            }),
+          ),
         ),
       ),
     );
@@ -1183,13 +1165,13 @@ class _NavIconWithBadge extends StatelessWidget {
   }
 }
 
-
 class HomePane extends StatelessWidget {
   const HomePane({
     super.key,
     required this.hosts,
     required this.allHosts,
     required this.api,
+    required this.activeCount,
     required this.onOpenSession,
     required this.onActiveCountChanged,
     required this.onAddHost,
@@ -1201,6 +1183,7 @@ class HomePane extends StatelessWidget {
   final List<HostProfile> hosts;
   final List<HostProfile> allHosts;
   final ApiClient api;
+  final int activeCount;
   final void Function(HostProfile host, SessionSummary session) onOpenSession;
   final ValueChanged<int> onActiveCountChanged;
   final VoidCallback onAddHost;
@@ -1210,53 +1193,121 @@ class HomePane extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final colors = context.colors;
     return ListView(
-      padding: const EdgeInsets.fromLTRB(16, 8, 16, 32),
+      padding: const EdgeInsets.fromLTRB(16, 4, 16, 96),
       children: [
-        if (inboxCount > 0) ...[
-          MeshSectionHeader(
-            title: 'Needs attention',
-            subtitle: inboxCount == 1
-                ? '1 item is waiting for you.'
-                : '$inboxCount items are waiting for you.',
-          ),
-          MeshListRow(
-            tone: MeshSurfaceTone.elevated,
-            onTap: onOpenInbox,
-            leading: _PremiumIconWell(
-              icon: Icons.verified_user_rounded,
-              tone: MeshPillTone.warning,
-            ),
-            title: const Text('Review inbox'),
-            subtitle: Text(
-              inboxCount == 1
-                  ? 'Approve, reply, or recover a queued message.'
-                  : 'Approvals, replies, and queued messages are grouped here.',
-            ),
-            badges: [
-              MeshStatusBadge(
-                label: '$inboxCount',
-                tone: MeshStatusTone.approval,
-                compact: true,
+        MeshSurface(
+          tone: inboxCount > 0
+              ? MeshSurfaceTone.warning
+              : MeshSurfaceTone.elevated,
+          radius: 28,
+          padding: const EdgeInsets.fromLTRB(18, 18, 18, 16),
+          onTap: inboxCount > 0 ? onOpenInbox : null,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  _PremiumIconWell(
+                    icon: inboxCount > 0
+                        ? Icons.priority_high_rounded
+                        : Icons.bolt_rounded,
+                    tone: inboxCount > 0
+                        ? MeshPillTone.warning
+                        : MeshPillTone.accent,
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          inboxCount > 0 ? 'Needs attention' : 'Ready to work',
+                          style: Theme.of(context).textTheme.titleLarge
+                              ?.copyWith(
+                                color: colors.textPrimary,
+                                fontWeight: AppWeights.title,
+                                letterSpacing: -0.4,
+                              ),
+                        ),
+                        const SizedBox(height: 3),
+                        Text(
+                          inboxCount > 0
+                              ? '$inboxCount item${inboxCount == 1 ? '' : 's'} waiting before you continue.'
+                              : '${activeCount == 0 ? 'No' : activeCount} active session${activeCount == 1 ? '' : 's'} across ${hosts.length} machine${hosts.length == 1 ? '' : 's'}.',
+                          style: Theme.of(context).textTheme.bodySmall
+                              ?.copyWith(
+                                color: colors.textSecondary,
+                                height: 1.35,
+                              ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  if (inboxCount > 0)
+                    const Icon(Icons.chevron_right_rounded)
+                  else
+                    FilledButton(
+                      onPressed: hosts.isEmpty ? onAddHost : null,
+                      style: FilledButton.styleFrom(
+                        visualDensity: VisualDensity.compact,
+                        minimumSize: const Size(0, 38),
+                        padding: const EdgeInsets.symmetric(horizontal: 12),
+                      ),
+                      child: Text(hosts.isEmpty ? 'Connect' : 'Live'),
+                    ),
+                ],
+              ),
+              const SizedBox(height: 16),
+              Row(
+                children: [
+                  Expanded(
+                    child: _HomeStatTile(
+                      label: 'Running',
+                      value: '$activeCount',
+                      icon: Icons.play_circle_outline_rounded,
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: _HomeStatTile(
+                      label: 'Attention',
+                      value: '$inboxCount',
+                      icon: Icons.notifications_active_outlined,
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: _HomeStatTile(
+                      label: 'Machines',
+                      value: '${hosts.length}',
+                      icon: Icons.dns_rounded,
+                    ),
+                  ),
+                ],
               ),
             ],
-            trailing: const Icon(Icons.chevron_right_rounded),
           ),
-          const SizedBox(height: 24),
-        ],
+        ),
+        const SizedBox(height: 20),
         MeshSectionHeader(
           title: 'Continue',
           subtitle: hosts.isEmpty
               ? 'Connect a machine to start using Sidemesh.'
-              : 'Running sessions first, then your recent work.',
+              : 'Your active and recent sessions, grouped by workspace.',
+          trailing: inboxCount > 0
+              ? TextButton(onPressed: onOpenInbox, child: const Text('Review'))
+              : null,
         ),
         SizedBox(
-          height: max(320, MediaQuery.sizeOf(context).height * 0.62),
+          height: max(420, MediaQuery.sizeOf(context).height * 0.72),
           child: RecentPane(
             hosts: hosts,
             api: api,
             hasSavedHosts: hasSavedHosts,
             screenAwakeSourceKey: 'mobile-home-continue',
+            padding: EdgeInsets.zero,
             onOpenSession: onOpenSession,
             onAddHost: onAddHost,
             onActiveCountChanged: onActiveCountChanged,
@@ -1264,6 +1315,54 @@ class HomePane extends StatelessWidget {
           ),
         ),
       ],
+    );
+  }
+}
+
+class _HomeStatTile extends StatelessWidget {
+  const _HomeStatTile({
+    required this.label,
+    required this.value,
+    required this.icon,
+  });
+
+  final String label;
+  final String value;
+  final IconData icon;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    return Container(
+      padding: const EdgeInsets.fromLTRB(10, 10, 10, 9),
+      decoration: BoxDecoration(
+        color: colors.canvas.withValues(alpha: 0.58),
+        borderRadius: BorderRadius.circular(AppRadii.control),
+        border: Border.all(color: colors.border.withValues(alpha: 0.72)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(icon, size: 15, color: colors.textSecondary),
+          const SizedBox(height: 8),
+          Text(
+            value,
+            style: Theme.of(context).textTheme.titleMedium?.copyWith(
+              color: colors.textPrimary,
+              fontWeight: AppWeights.title,
+            ),
+          ),
+          Text(
+            label,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: Theme.of(context).textTheme.labelSmall?.copyWith(
+              color: colors.textTertiary,
+              fontWeight: AppWeights.emphasis,
+            ),
+          ),
+        ],
+      ),
     );
   }
 }
@@ -1303,45 +1402,89 @@ class GlobalSearchPane extends StatelessWidget {
   final HostProfileActionCallback onToggleHostEnabled;
   final ValueChanged<int> onInboxCountChanged;
   final OpenPendingSessionCallback onOpenPendingSession;
-  final void Function(HostProfile host, PendingAction action) onOpenPendingAction;
+  final void Function(HostProfile host, PendingAction action)
+  onOpenPendingAction;
   final bool hasSavedHosts;
 
   @override
   Widget build(BuildContext context) {
     final q = query.trim();
     if (q.isEmpty) {
-      return const MeshEmptyState(
-        icon: Icons.search_rounded,
-        title: 'Search everything',
-        body: 'Find sessions, transcript matches, workspaces, and machines from one place.',
+      return ListView(
+        keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+        padding: const EdgeInsets.fromLTRB(16, 8, 16, 96),
+        children: const [
+          MeshEmptyState(
+            icon: Icons.travel_explore_rounded,
+            title: 'Search everything',
+            body:
+                'Type a title, workspace, host, or transcript phrase. Results stay grouped and compact so you can jump back into work quickly.',
+          ),
+        ],
       );
     }
     return ListView(
-      padding: const EdgeInsets.fromLTRB(16, 8, 16, 32),
+      keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+      padding: const EdgeInsets.fromLTRB(16, 4, 16, 120),
       children: [
-        MeshSectionHeader(
+        MeshSurface(
+          tone: MeshSurfaceTone.muted,
+          radius: AppRadii.surface,
+          padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+          child: Row(
+            children: [
+              const _PremiumIconWell(icon: Icons.search_rounded),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Results for “$q”',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                        fontWeight: AppWeights.title,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      'Sessions first. Transcript matches are shortened for scanning.',
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color: context.colors.textSecondary,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 16),
+        const MeshSectionHeader(
           title: 'Sessions',
-          subtitle: 'Matches from recent and remote session search.',
+          subtitle: 'Best matches across recent and remote history.',
         ),
         SizedBox(
-          height: 360,
+          height: 430,
           child: RecentPane(
             hosts: hosts,
             api: api,
             query: q,
             hasSavedHosts: hasSavedHosts,
+            padding: EdgeInsets.zero,
             onOpenSession: onOpenSession,
             onAddHost: onAddHost,
             onActiveCountChanged: (_) {},
           ),
         ),
-        const SizedBox(height: 24),
-        MeshSectionHeader(
+        const SizedBox(height: 20),
+        const MeshSectionHeader(
           title: 'Attention',
-          subtitle: 'Queued messages and approval requests matching this search.',
+          subtitle: 'Approvals and queued work matching this search.',
         ),
         SizedBox(
-          height: 260,
+          height: 220,
           child: InboxPane(
             hosts: hosts,
             allHosts: allHosts,
@@ -1356,13 +1499,13 @@ class GlobalSearchPane extends StatelessWidget {
             onInboxCountChanged: onInboxCountChanged,
           ),
         ),
-        const SizedBox(height: 24),
-        MeshSectionHeader(
+        const SizedBox(height: 20),
+        const MeshSectionHeader(
           title: 'Machines',
-          subtitle: 'Hosts whose name or URL matches.',
+          subtitle: 'Connected hosts by label or URL.',
         ),
         SizedBox(
-          height: 260,
+          height: 220,
           child: HostsPane(
             hosts: allHosts,
             hostNodes: hostNodes,
@@ -1411,9 +1554,51 @@ class MorePane extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final enabledCount = hosts.where((h) => h.enabled).length;
     return ListView(
-      padding: const EdgeInsets.fromLTRB(16, 8, 16, 32),
+      padding: const EdgeInsets.fromLTRB(16, 4, 16, 96),
       children: [
+        MeshSurface(
+          tone: MeshSurfaceTone.elevated,
+          radius: 28,
+          padding: const EdgeInsets.fromLTRB(18, 18, 18, 16),
+          child: Row(
+            children: [
+              const _PremiumIconWell(icon: Icons.dashboard_customize_rounded),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Control center',
+                      style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                        fontWeight: AppWeights.title,
+                        letterSpacing: -0.4,
+                      ),
+                    ),
+                    const SizedBox(height: 3),
+                    Text(
+                      '$enabledCount of ${hosts.length} machines enabled · app ${installedAppVersion.isEmpty ? 'current' : installedAppVersion}',
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color: context.colors.textSecondary,
+                        height: 1.35,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              IconButton.filledTonal(
+                onPressed: onPairHost,
+                tooltip: 'Add host',
+                icon: const Icon(Icons.add_rounded),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 20),
         const MeshSectionHeader(
           title: 'Create',
           subtitle: 'Start work or connect another machine.',
@@ -1424,7 +1609,9 @@ class MorePane extends StatelessWidget {
               framed: false,
               leading: const _PremiumIconWell(icon: Icons.add_rounded),
               title: const Text('New session'),
-              subtitle: const Text('Start with your defaults, then adjust as needed.'),
+              subtitle: const Text(
+                'Start with your defaults, then adjust as needed.',
+              ),
               trailing: const Icon(Icons.chevron_right_rounded),
               onTap: onNewSession,
             ),
@@ -1457,7 +1644,9 @@ class MorePane extends StatelessWidget {
               framed: false,
               leading: const _PremiumIconWell(icon: Icons.tune_rounded),
               title: const Text('Settings'),
-              subtitle: const Text('Appearance, notifications, updates, and defaults.'),
+              subtitle: const Text(
+                'Appearance, notifications, updates, and defaults.',
+              ),
               trailing: const Icon(Icons.chevron_right_rounded),
               onTap: onOpenSettings,
             ),
@@ -1501,9 +1690,14 @@ class MorePane extends StatelessWidget {
       builder: (context) => MeshBottomSheetScaffold(
         icon: Icons.speed_rounded,
         title: 'Usage',
-        description: 'Limits, versions, and host health across connected machines.',
+        description:
+            'Limits, versions, and host health across connected machines.',
         maxHeightFactor: 0.9,
-        child: UsagePane(hosts: hosts.where((h) => h.enabled).toList(), api: api, active: true),
+        child: UsagePane(
+          hosts: hosts.where((h) => h.enabled).toList(),
+          api: api,
+          active: true,
+        ),
       ),
     );
   }
@@ -1794,9 +1988,15 @@ String _hostListSignature(HostProfile host) {
 
 @immutable
 class _SessionGroup {
-  const _SessionGroup({required this.key, required this.title, required this.host, required this.entries});
+  const _SessionGroup({
+    required this.key,
+    required this.title,
+    required this.host,
+    required this.entries,
+  });
   final String key;
   final String title;
+
   /// Host all sessions in this group belong to.
   /// Groups are keyed by host-scoped gitCommonDir when available.
   final HostProfile host;
@@ -1886,10 +2086,7 @@ class _RecentPaneState extends State<RecentPane> {
     return _cwdBasename(stripped);
   }
 
-  int _compareRecentEntries(
-    RemoteSessionEntry left,
-    RemoteSessionEntry right,
-  ) {
+  int _compareRecentEntries(RemoteSessionEntry left, RemoteSessionEntry right) {
     final updatedCompare = right.session.updatedAt.compareTo(
       left.session.updatedAt,
     );
@@ -1936,12 +2133,14 @@ class _RecentPaneState extends State<RecentPane> {
         return a.compareTo(b);
       });
     return sortedKeys
-        .map((k) => _SessionGroup(
-          key: k,
-          title: _projectLabel(groups[k]!.first),
-          host: groups[k]!.first.host,
-          entries: groups[k]!,
-        ))
+        .map(
+          (k) => _SessionGroup(
+            key: k,
+            title: _projectLabel(groups[k]!.first),
+            host: groups[k]!.first.host,
+            entries: groups[k]!,
+          ),
+        )
         .toList();
   }
 
@@ -1965,7 +2164,10 @@ class _RecentPaneState extends State<RecentPane> {
         !_sameHostList(widget.hosts, oldWidget.hosts)) {
       _onQueryChanged(widget.query);
     }
-    _store.configure(hosts: widget.hosts, api: widget.api);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      _store.configure(hosts: widget.hosts, api: widget.api);
+    });
   }
 
   void _handleStoreChanged() {
@@ -2438,7 +2640,8 @@ class _RecentPaneState extends State<RecentPane> {
           final collapsed = _collapsedGroups.contains(group.key);
           final headerIndex = current;
           final entriesStart = headerIndex + 1;
-          final entriesEnd = entriesStart + (collapsed ? 0 : group.entries.length);
+          final entriesEnd =
+              entriesStart + (collapsed ? 0 : group.entries.length);
           if (index == headerIndex) {
             return Padding(
               padding: EdgeInsets.only(
@@ -4892,7 +5095,9 @@ class _HostEditorSheetState extends State<HostEditorSheet> {
                             height: 32,
                           ),
                           suffixIcon: IconButton(
-                            tooltip: _tokenVisible ? 'Hide token' : 'Show token',
+                            tooltip: _tokenVisible
+                                ? 'Hide token'
+                                : 'Show token',
                             padding: EdgeInsets.zero,
                             icon: Icon(
                               _tokenVisible
@@ -4900,9 +5105,8 @@ class _HostEditorSheetState extends State<HostEditorSheet> {
                                   : Icons.visibility_rounded,
                               size: 18,
                             ),
-                            onPressed: () => setState(
-                              () => _tokenVisible = !_tokenVisible,
-                            ),
+                            onPressed: () =>
+                                setState(() => _tokenVisible = !_tokenVisible),
                           ),
                         ),
                       ),
@@ -5238,9 +5442,7 @@ class _HostEditorToggle extends StatelessWidget {
           decoration: BoxDecoration(
             color: value ? activeKnob : colors.surface,
             shape: BoxShape.circle,
-            border: Border.all(
-              color: value ? activeKnob : colors.border,
-            ),
+            border: Border.all(color: value ? activeKnob : colors.border),
           ),
         ),
       ),
