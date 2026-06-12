@@ -6741,36 +6741,38 @@ class _SessionScreenState extends State<SessionScreen>
     bool controlsCustomized = false,
   }) {
     return [
-      // When the agent is running, surface the stop action at the top so
-      // it's immediately reachable without scrolling the sheet.
-      if (includeStop && _running && _supportsSessionInterrupt)
-        const _SessionActionGroup(
-          label: 'LIVE',
-          actions: [
-            _SessionActionSpec(
+      _SessionActionGroup(
+        label: 'Now',
+        actions: [
+          if (includeStop && _running && _supportsSessionInterrupt)
+            const _SessionActionSpec(
               value: 'stop',
               label: 'Stop agent',
               detail: 'Stop the current task immediately.',
               icon: Icons.stop_circle_rounded,
               tone: _SessionActionTone.danger,
             ),
-          ],
-        ),
+          _SessionActionSpec(
+            value: 'search',
+            label: searchOpen ? 'Close transcript search' : 'Search transcript',
+            detail: searchOpen
+                ? 'Hide the current search panel.'
+                : 'Find text in loaded messages.',
+            icon: searchOpen ? Icons.search_off_rounded : Icons.search_rounded,
+            tone: searchOpen ? _SessionActionTone.accent : _SessionActionTone.neutral,
+            active: searchOpen,
+          ),
+        ],
+      ),
       _SessionActionGroup(
-        label: 'Open',
+        label: 'Workspace',
         actions: [
-          if (_supportsBrowserPreview)
-            _SessionActionSpec(
-              value: 'preview',
-              label: 'Browser',
-              detail: browserOpen
-                  ? 'Choose another tab or return to the open browser.'
-                  : 'Open a tab or enter a URL.',
-              icon: Icons.open_in_browser_rounded,
-              tone: browserOpen
-                  ? _SessionActionTone.accent
-                  : _SessionActionTone.neutral,
-              active: browserOpen,
+          if (_supportsFilesystem)
+            const _SessionActionSpec(
+              value: 'browse',
+              label: 'Files',
+              detail: 'Browse this workspace.',
+              icon: Icons.folder_rounded,
             ),
           if (_supportsTerminal)
             _SessionActionSpec(
@@ -6780,17 +6782,19 @@ class _SessionScreenState extends State<SessionScreen>
                   ? 'Jump back to the active terminal.'
                   : 'Open a shell for this workspace.',
               icon: Icons.terminal_rounded,
-              tone: terminalOpen
-                  ? _SessionActionTone.accent
-                  : _SessionActionTone.neutral,
+              tone: terminalOpen ? _SessionActionTone.accent : _SessionActionTone.neutral,
               active: terminalOpen,
             ),
-          if (_supportsFilesystem)
-            const _SessionActionSpec(
-              value: 'browse',
-              label: 'Files',
-              detail: 'Browse this workspace.',
-              icon: Icons.folder_rounded,
+          if (_supportsBrowserPreview)
+            _SessionActionSpec(
+              value: 'preview',
+              label: browserOpen ? 'Browser is open' : 'Browser preview',
+              detail: browserOpen
+                  ? 'Choose another tab or return to the open browser.'
+                  : 'Open a tab or enter a URL.',
+              icon: Icons.open_in_browser_rounded,
+              tone: browserOpen ? _SessionActionTone.accent : _SessionActionTone.neutral,
+              active: browserOpen,
             ),
           if (_supportsSessionResources)
             _SessionActionSpec(
@@ -6798,36 +6802,39 @@ class _SessionScreenState extends State<SessionScreen>
               label: resourcesOpen ? 'Resources are open' : 'Resources',
               detail: 'View generated images and session assets.',
               icon: Icons.perm_media_rounded,
-              tone: resourcesOpen
-                  ? _SessionActionTone.accent
-                  : _SessionActionTone.neutral,
+              tone: resourcesOpen ? _SessionActionTone.accent : _SessionActionTone.neutral,
               active: resourcesOpen,
             ),
-          _SessionActionSpec(
-            value: 'search',
-            label: searchOpen ? 'Close search' : 'Search transcript',
-            detail: searchOpen
-                ? 'Hide the current search panel.'
-                : 'Find text in loaded messages.',
-            icon: searchOpen ? Icons.search_off_rounded : Icons.search_rounded,
-            tone: searchOpen
-                ? _SessionActionTone.accent
-                : _SessionActionTone.neutral,
-            active: searchOpen,
-          ),
           if (gitAvailable)
             _SessionActionSpec(
               value: 'git',
-              label: 'Git',
+              label: gitDirty ? 'Git changes' : 'Git status',
               detail: gitDirty
-                  ? 'Working tree has changes.'
+                  ? 'Review working tree changes.'
                   : 'Branch, upstream, and diff shortcuts.',
               icon: Icons.account_tree_rounded,
-              tone: gitDirty
-                  ? _SessionActionTone.warning
-                  : _SessionActionTone.neutral,
+              tone: gitDirty ? _SessionActionTone.warning : _SessionActionTone.neutral,
               active: gitDirty,
             ),
+        ],
+      ),
+      _SessionActionGroup(
+        label: 'Settings',
+        actions: [
+          _SessionActionSpec(
+            value: 'controls',
+            label: controlsCustomized ? 'Model & permissions changed' : 'Model & permissions',
+            detail: 'Model, thinking, approvals, file access, and internet.',
+            icon: Icons.tune_rounded,
+            tone: controlsCustomized ? _SessionActionTone.accent : _SessionActionTone.neutral,
+            active: controlsCustomized,
+          ),
+          const _SessionActionSpec(
+            value: 'info',
+            label: 'Session details',
+            detail: 'Host, model, git, usage, and metadata.',
+            icon: Icons.info_outline_rounded,
+          ),
         ],
       ),
       _SessionActionGroup(
@@ -6836,22 +6843,9 @@ class _SessionScreenState extends State<SessionScreen>
           if (includeNew)
             const _SessionActionSpec(
               value: 'new',
-              label: 'New session',
+              label: 'New session here',
               detail: 'Start beside this working directory.',
               icon: Icons.add_circle_outline_rounded,
-            ),
-          if (includeControls)
-            _SessionActionSpec(
-              value: 'controls',
-              label: controlsCustomized
-                  ? 'Session controls changed'
-                  : 'Session controls',
-              detail: 'Model, thinking, permissions, and access.',
-              icon: Icons.tune_rounded,
-              tone: controlsCustomized
-                  ? _SessionActionTone.accent
-                  : _SessionActionTone.neutral,
-              active: controlsCustomized,
             ),
           _SessionActionSpec(
             value: 'favorite',
@@ -6860,15 +6854,13 @@ class _SessionScreenState extends State<SessionScreen>
                 ? 'Take this session out of your shortcuts.'
                 : 'Keep this session easy to find.',
             icon: favorite ? Icons.star_rounded : Icons.star_outline_rounded,
-            tone: favorite
-                ? _SessionActionTone.warning
-                : _SessionActionTone.neutral,
+            tone: favorite ? _SessionActionTone.warning : _SessionActionTone.neutral,
             active: favorite,
           ),
           const _SessionActionSpec(
             value: 'unread',
             label: 'Flag for follow-up',
-            detail: 'Adds a blue dot to this session in your recents list.',
+            detail: 'Adds a blue dot to this session in Home.',
             icon: Icons.flag_rounded,
           ),
           if (_supportsSessionCompact)
@@ -6878,12 +6870,6 @@ class _SessionScreenState extends State<SessionScreen>
               detail: 'Summarize older context to keep the session lighter.',
               icon: Icons.compress_rounded,
             ),
-          const _SessionActionSpec(
-            value: 'info',
-            label: 'Session details',
-            detail: 'View host, model, git, and usage info.',
-            icon: Icons.info_outline_rounded,
-          ),
           const _SessionActionSpec(
             value: 'reload',
             label: 'Reload',
@@ -6900,12 +6886,17 @@ class _SessionScreenState extends State<SessionScreen>
             ),
         ],
       ),
-      if (_supportsProviderRestart ||
-          _supportsSessionRename ||
-          _supportsSessionArchive)
+      if (_supportsProviderRestart || _supportsSessionRename || _supportsSessionArchive)
         _SessionActionGroup(
           label: 'Manage',
           actions: [
+            if (_supportsSessionRename)
+              const _SessionActionSpec(
+                value: 'rename',
+                label: 'Rename',
+                detail: 'Change the session title.',
+                icon: Icons.drive_file_rename_outline,
+              ),
             if (_supportsProviderRestart)
               const _SessionActionSpec(
                 value: 'restart_provider',
@@ -6913,13 +6904,6 @@ class _SessionScreenState extends State<SessionScreen>
                 detail: 'Restart the active agent on this host.',
                 icon: Icons.restart_alt_rounded,
                 tone: _SessionActionTone.warning,
-              ),
-            if (_supportsSessionRename)
-              const _SessionActionSpec(
-                value: 'rename',
-                label: 'Rename',
-                detail: 'Change the session title.',
-                icon: Icons.drive_file_rename_outline,
               ),
             if (_supportsSessionArchive)
               const _SessionActionSpec(
@@ -7600,47 +7584,28 @@ class _SessionScreenState extends State<SessionScreen>
               if (isCompact) {
                 return Padding(
                   padding: const EdgeInsets.only(right: AppSpacing.sm),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      MeshIconButton(
-                        icon: Icons.tune_rounded,
-                        tooltip: 'Session controls',
-                        color: sessionControlsCustomized
-                            ? colors.accent
-                            : colors.textSecondary,
-                        onTap: () => _showSessionPolicySheet(session),
+                  child: MeshIconButton(
+                    icon: Icons.more_horiz_rounded,
+                    tooltip: _running
+                        ? 'Session tools (agent running)'
+                        : 'Session tools',
+                    color: _running || sessionControlsCustomized
+                        ? colors.accent
+                        : colors.textSecondary,
+                    onTap: () => unawaited(
+                      _showSessionActionsSheet(
+                        session: session,
+                        favorite: favorite,
+                        gitAvailable: gitAvailable,
+                        gitDirty: gitDirty,
+                        terminalOpen: terminalOpenInInspector,
+                        browserOpen: browserOpen,
+                        searchOpen: searchOpenInInspector,
+                        resourcesOpen: resourcesOpenInInspector,
+                        includeControls: true,
+                        controlsCustomized: sessionControlsCustomized,
                       ),
-                      const SizedBox(width: AppSpacing.xs),
-                      MeshIconButton(
-                        icon: favorite
-                            ? Icons.star_rounded
-                            : Icons.star_outline_rounded,
-                        tooltip: favorite ? 'Unpin session' : 'Pin session',
-                        color: favorite ? colors.warning : colors.textSecondary,
-                        onTap: _toggleFavorite,
-                      ),
-                      const SizedBox(width: AppSpacing.xs),
-                      MeshIconButton(
-                        icon: Icons.more_vert_rounded,
-                        tooltip: _running
-                            ? 'Session actions (agent running)'
-                            : 'Session actions',
-                        color: _running ? colors.warning : colors.textPrimary,
-                        onTap: () => unawaited(
-                          _showSessionActionsSheet(
-                            session: session,
-                            favorite: favorite,
-                            gitAvailable: gitAvailable,
-                            gitDirty: gitDirty,
-                            terminalOpen: terminalOpenInInspector,
-                            browserOpen: browserOpen,
-                            searchOpen: searchOpenInInspector,
-                            resourcesOpen: resourcesOpenInInspector,
-                          ),
-                        ),
-                      ),
-                    ],
+                    ),
                   ),
                 );
               }
@@ -7692,6 +7657,8 @@ class _SessionScreenState extends State<SessionScreen>
                       browserOpen: browserOpen,
                       searchOpen: searchOpenInInspector,
                       resourcesOpen: resourcesOpenInInspector,
+                      includeControls: true,
+                      controlsCustomized: sessionControlsCustomized,
                     ),
                   ),
                 ),

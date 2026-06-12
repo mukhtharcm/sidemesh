@@ -176,9 +176,9 @@ class _Composer extends StatelessWidget {
     final bool showPlusButton =
         !isDesktop &&
         (supportsImageInput || supportsSkillInput || supportsFileMentions);
-    final bool showModelButton = modelLabel != null && onModelTap != null;
+    final bool showModelButton = isDesktop && modelLabel != null && onModelTap != null;
     final bool showThinkingButton =
-        thinkingLabel != null && onThinkingTap != null;
+        isDesktop && thinkingLabel != null && onThinkingTap != null;
 
     final modelControlButton = showModelButton
         ? _ComposerModelButton(
@@ -263,7 +263,7 @@ class _Composer extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         textArea,
-        SizedBox(height: isDesktop ? 6 : 8),
+        SizedBox(height: isDesktop ? 6 : 4),
         toolbarRow,
       ],
     );
@@ -273,18 +273,18 @@ class _Composer extends StatelessWidget {
       curve: Curves.easeOutCubic,
       decoration: BoxDecoration(
         color: colors.composerBackground,
-        borderRadius: BorderRadius.circular(isDesktop ? 10 : AppRadii.control),
+        borderRadius: BorderRadius.circular(isDesktop ? 10 : 22),
         border: Border.all(
           color: isFocused
               ? colors.accent.withValues(alpha: 0.42)
-              : colors.border.withValues(alpha: 0.82),
+              : colors.border.withValues(alpha: isDesktop ? 0.82 : 0.48),
         ),
       ),
       padding: EdgeInsets.fromLTRB(
-        isDesktop ? 10 : 9,
-        isDesktop ? 8 : 9,
-        isDesktop ? 10 : 9,
-        isDesktop ? 8 : 9,
+        isDesktop ? 10 : 8,
+        isDesktop ? 8 : 7,
+        isDesktop ? 10 : 8,
+        isDesktop ? 8 : 7,
       ),
       child: barContent,
     );
