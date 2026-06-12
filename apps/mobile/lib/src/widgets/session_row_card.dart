@@ -263,129 +263,146 @@ class SessionRowCard extends StatelessWidget {
     return Semantics(
       button: true,
       label: 'Open session ${session.title}',
-      child: MeshSurface(
-        onTap: onTap,
-        selected: selected,
-        radius: AppRadii.surface,
-        padding: const EdgeInsets.fromLTRB(12, 12, 10, 12),
-        borderColor: selected ? colors.accent : null,
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Container(
-              width: 4,
-              height: 52,
-              decoration: BoxDecoration(
-                color: accent.withValues(alpha: running ? 1 : 0.72),
-                borderRadius: BorderRadius.circular(999),
-              ),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    children: [
-                      Expanded(
-                        child: Text(
-                          session.title,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: Theme.of(context).textTheme.titleSmall
-                              ?.copyWith(
-                                fontWeight: unread
-                                    ? AppWeights.title
-                                    : AppWeights.emphasis,
-                                letterSpacing: -0.1,
-                              ),
-                        ),
-                      ),
-                      if (unread) ...[
-                        const SizedBox(width: 6),
-                        _UnreadDot(color: colors.accent),
-                      ],
-                    ],
+      child: Container(
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(24),
+          boxShadow: running
+              ? [
+                  BoxShadow(
+                    color: colors.success.withValues(alpha: 0.10),
+                    blurRadius: 24,
+                    offset: const Offset(0, 10),
                   ),
-                  const SizedBox(height: 5),
-                  Row(
-                    children: [
-                      if (statusBadge != null) ...[
-                        statusBadge,
-                        const SizedBox(width: 7),
-                      ],
-                      if (session.provider != null) ...[
-                        AgentProviderBadge(
-                          providerKind: session.provider,
-                          compact: true,
+                ]
+              : null,
+        ),
+        child: MeshSurface(
+          onTap: onTap,
+          selected: selected,
+          radius: 24,
+          tone: MeshSurfaceTone.elevated,
+          padding: const EdgeInsets.fromLTRB(13, 13, 8, 13),
+          borderColor: selected
+              ? colors.accent
+              : colors.border.withValues(alpha: 0.72),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Container(
+                width: 4,
+                height: 52,
+                decoration: BoxDecoration(
+                  color: accent.withValues(alpha: running ? 1 : 0.72),
+                  borderRadius: BorderRadius.circular(999),
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            session.title,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: Theme.of(context).textTheme.titleSmall
+                                ?.copyWith(
+                                  fontWeight: unread
+                                      ? AppWeights.title
+                                      : AppWeights.emphasis,
+                                  letterSpacing: -0.1,
+                                ),
+                          ),
                         ),
-                        const SizedBox(width: 7),
+                        if (unread) ...[
+                          const SizedBox(width: 6),
+                          _UnreadDot(color: colors.accent),
+                        ],
                       ],
-                      Expanded(
-                        child: Text(
-                          showHost
-                              ? '${host.label} · $workspaceLabel'
-                              : workspaceLabel,
+                    ),
+                    const SizedBox(height: 5),
+                    Row(
+                      children: [
+                        if (statusBadge != null) ...[
+                          statusBadge,
+                          const SizedBox(width: 7),
+                        ],
+                        if (session.provider != null) ...[
+                          AgentProviderBadge(
+                            providerKind: session.provider,
+                            compact: true,
+                          ),
+                          const SizedBox(width: 7),
+                        ],
+                        Expanded(
+                          child: Text(
+                            showHost
+                                ? '${host.label} · $workspaceLabel'
+                                : workspaceLabel,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: theme.textTheme.bodySmall?.copyWith(
+                              color: colors.textSecondary,
+                              height: 1.25,
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        ListenableBuilder(
+                          listenable: RelativeTimeTicker.minutes,
+                          builder: (_, _) => Text(
+                            sessionTimeLabel(session.updatedAt),
+                            style: theme.textTheme.bodySmall?.copyWith(
+                              color: colors.textTertiary,
+                              fontSize: 11,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                    if (supportingText.isNotEmpty) ...[
+                      const SizedBox(height: 7),
+                      if (session.matchSnippet?.isNotEmpty == true)
+                        _HighlightedSnippet(
+                          text: _shortenSnippet(supportingText),
+                          query: query,
+                          style: theme.textTheme.bodySmall!.copyWith(
+                            color: colors.textSecondary,
+                            height: 1.3,
+                            fontSize: 12,
+                          ),
+                        )
+                      else
+                        Text(
+                          supportingText,
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                           style: theme.textTheme.bodySmall?.copyWith(
                             color: colors.textSecondary,
-                            height: 1.25,
+                            height: 1.3,
+                            fontSize: 12,
                           ),
                         ),
-                      ),
-                      const SizedBox(width: 8),
-                      ListenableBuilder(
-                        listenable: RelativeTimeTicker.minutes,
-                        builder: (_, _) => Text(
-                          sessionTimeLabel(session.updatedAt),
-                          style: theme.textTheme.bodySmall?.copyWith(
-                            color: colors.textTertiary,
-                            fontSize: 11,
-                          ),
-                        ),
-                      ),
                     ],
-                  ),
-                  if (supportingText.isNotEmpty) ...[
-                    const SizedBox(height: 7),
-                    if (session.matchSnippet?.isNotEmpty == true)
-                      _HighlightedSnippet(
-                        text: _shortenSnippet(supportingText),
-                        query: query,
-                        style: theme.textTheme.bodySmall!.copyWith(
-                          color: colors.textSecondary,
-                          height: 1.3,
-                          fontSize: 12,
-                        ),
-                      )
-                    else
-                      Text(
-                        supportingText,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: theme.textTheme.bodySmall?.copyWith(
-                          color: colors.textSecondary,
-                          height: 1.3,
-                          fontSize: 12,
-                        ),
-                      ),
                   ],
-                ],
+                ),
               ),
-            ),
-            IconButton(
-              onPressed: onToggleFavorite,
-              tooltip: favorite ? 'Remove favorite' : 'Add favorite',
-              visualDensity: VisualDensity.compact,
-              iconSize: 18,
-              constraints: const BoxConstraints(minWidth: 38, minHeight: 38),
-              icon: Icon(
-                favorite ? Icons.star_rounded : Icons.star_outline_rounded,
-                color: favorite ? colors.warning : colors.textTertiary,
+              IconButton(
+                onPressed: onToggleFavorite,
+                tooltip: favorite ? 'Remove favorite' : 'Add favorite',
+                visualDensity: VisualDensity.compact,
+                iconSize: 18,
+                constraints: const BoxConstraints(minWidth: 38, minHeight: 38),
+                icon: Icon(
+                  favorite ? Icons.star_rounded : Icons.star_outline_rounded,
+                  color: favorite ? colors.warning : colors.textTertiary,
+                ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );
