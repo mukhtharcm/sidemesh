@@ -5,7 +5,6 @@ import '../theme/color_contrast.dart';
 import '../theme/app_theme.dart';
 import '../theme/app_tokens.dart';
 
-
 /// Premium section heading for calm, scan-friendly mobile surfaces.
 class MeshSectionHeader extends StatelessWidget {
   const MeshSectionHeader({
@@ -306,14 +305,18 @@ class MeshSurface extends StatelessWidget {
     if (!effectiveEnabled) {
       return content;
     }
-    return Material(
-      color: Colors.transparent,
-      child: InkWell(
-        borderRadius: borderRadius,
-        onTap: onTap,
-        hoverColor: colors.surfaceElevated.withValues(alpha: 0.5),
-        splashColor: colors.accent.withValues(alpha: 0.08),
-        child: content,
+    return Semantics(
+      button: true,
+      enabled: effectiveEnabled,
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          borderRadius: borderRadius,
+          onTap: onTap,
+          hoverColor: colors.surfaceElevated.withValues(alpha: 0.5),
+          splashColor: colors.accent.withValues(alpha: 0.08),
+          child: content,
+        ),
       ),
     );
   }
@@ -636,14 +639,18 @@ class MeshListRow extends StatelessWidget {
       return content;
     }
 
-    return Material(
-      color: Colors.transparent,
-      child: InkWell(
-        borderRadius: borderRadius,
-        onTap: onTap,
-        hoverColor: colors.surfaceMuted.withValues(alpha: 0.62),
-        splashColor: colors.accent.withValues(alpha: 0.08),
-        child: content,
+    return Semantics(
+      button: true,
+      enabled: enabled,
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          borderRadius: borderRadius,
+          onTap: onTap,
+          hoverColor: colors.surfaceMuted.withValues(alpha: 0.62),
+          splashColor: colors.accent.withValues(alpha: 0.08),
+          child: content,
+        ),
       ),
     );
   }
