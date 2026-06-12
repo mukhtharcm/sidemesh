@@ -766,14 +766,29 @@ class _HomeStickyHeader extends StatelessWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(
-                      'Sidemesh',
-                      style: Theme.of(context).textTheme.labelLarge?.copyWith(
-                        color: colors.textSecondary,
-                        fontWeight: AppWeights.emphasis,
-                      ),
+                    Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Container(
+                          width: 8,
+                          height: 8,
+                          decoration: BoxDecoration(
+                            color: colors.accent,
+                            shape: BoxShape.circle,
+                          ),
+                        ),
+                        const SizedBox(width: 7),
+                        Text(
+                          'SIDEMESH',
+                          style: monoStyle(
+                            color: colors.textSecondary,
+                            fontSize: 11,
+                            fontWeight: AppWeights.title,
+                          ).copyWith(letterSpacing: 1.4),
+                        ),
+                      ],
                     ),
-                    const SizedBox(height: 6),
+                    const SizedBox(height: 8),
                     Text(
                       tab.title,
                       style: Theme.of(context).textTheme.headlineSmall
@@ -1193,104 +1208,38 @@ class HomePane extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final colors = context.colors;
     return ListView(
       padding: const EdgeInsets.fromLTRB(16, 4, 16, 96),
       children: [
-        MeshSurface(
-          tone: inboxCount > 0
-              ? MeshSurfaceTone.warning
-              : MeshSurfaceTone.elevated,
-          radius: 28,
-          padding: const EdgeInsets.fromLTRB(18, 18, 18, 16),
-          onTap: inboxCount > 0 ? onOpenInbox : null,
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                children: [
-                  _PremiumIconWell(
-                    icon: inboxCount > 0
-                        ? Icons.priority_high_rounded
-                        : Icons.bolt_rounded,
-                    tone: inboxCount > 0
-                        ? MeshPillTone.warning
-                        : MeshPillTone.accent,
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          inboxCount > 0 ? 'Needs attention' : 'Ready to work',
-                          style: Theme.of(context).textTheme.titleLarge
-                              ?.copyWith(
-                                color: colors.textPrimary,
-                                fontWeight: AppWeights.title,
-                                letterSpacing: -0.4,
-                              ),
-                        ),
-                        const SizedBox(height: 3),
-                        Text(
-                          inboxCount > 0
-                              ? '$inboxCount item${inboxCount == 1 ? '' : 's'} waiting before you continue.'
-                              : '${activeCount == 0 ? 'No' : activeCount} active session${activeCount == 1 ? '' : 's'} across ${hosts.length} machine${hosts.length == 1 ? '' : 's'}.',
-                          style: Theme.of(context).textTheme.bodySmall
-                              ?.copyWith(
-                                color: colors.textSecondary,
-                                height: 1.35,
-                              ),
-                        ),
-                      ],
-                    ),
-                  ),
-                  if (inboxCount > 0)
-                    const Icon(Icons.chevron_right_rounded)
-                  else
-                    FilledButton(
-                      onPressed: hosts.isEmpty ? onAddHost : null,
-                      style: FilledButton.styleFrom(
-                        visualDensity: VisualDensity.compact,
-                        minimumSize: const Size(0, 38),
-                        padding: const EdgeInsets.symmetric(horizontal: 12),
-                      ),
-                      child: Text(hosts.isEmpty ? 'Connect' : 'Live'),
-                    ),
-                ],
-              ),
-              const SizedBox(height: 16),
-              Row(
-                children: [
-                  Expanded(
-                    child: _HomeStatTile(
-                      label: 'Running',
-                      value: '$activeCount',
-                      icon: Icons.play_circle_outline_rounded,
-                    ),
-                  ),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: _HomeStatTile(
-                      label: 'Attention',
-                      value: '$inboxCount',
-                      icon: Icons.notifications_active_outlined,
-                    ),
-                  ),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: _HomeStatTile(
-                      label: 'Machines',
-                      value: '${hosts.length}',
-                      icon: Icons.dns_rounded,
-                    ),
-                  ),
-                ],
-              ),
-            ],
-          ),
+        _CommandDeckHero(
+          title: inboxCount > 0 ? 'Action required' : 'Command deck',
+          subtitle: inboxCount > 0
+              ? '$inboxCount item${inboxCount == 1 ? '' : 's'} waiting before you continue.'
+              : '${activeCount == 0 ? 'No' : activeCount} active session${activeCount == 1 ? '' : 's'} across ${hosts.length} machine${hosts.length == 1 ? '' : 's'}.',
+          actionLabel: inboxCount > 0
+              ? 'Review'
+              : (hosts.isEmpty ? 'Connect' : 'Ready'),
+          actionIcon: inboxCount > 0
+              ? Icons.priority_high_rounded
+              : Icons.bolt_rounded,
+          onTap: inboxCount > 0
+              ? onOpenInbox
+              : (hosts.isEmpty ? onAddHost : null),
+          stats: [
+            _CommandDeckStat(
+              'Running',
+              '$activeCount',
+              Icons.play_circle_outline_rounded,
+            ),
+            _CommandDeckStat(
+              'Attention',
+              '$inboxCount',
+              Icons.notifications_active_outlined,
+            ),
+            _CommandDeckStat('Machines', '${hosts.length}', Icons.dns_rounded),
+          ],
         ),
-        const SizedBox(height: 20),
+        const SizedBox(height: 24),
         MeshSectionHeader(
           title: 'Continue',
           subtitle: hosts.isEmpty
@@ -1319,47 +1268,217 @@ class HomePane extends StatelessWidget {
   }
 }
 
-class _HomeStatTile extends StatelessWidget {
-  const _HomeStatTile({
-    required this.label,
-    required this.value,
-    required this.icon,
-  });
-
+class _CommandDeckStat {
+  const _CommandDeckStat(this.label, this.value, this.icon);
   final String label;
   final String value;
   final IconData icon;
+}
+
+class _CommandDeckHero extends StatelessWidget {
+  const _CommandDeckHero({
+    required this.title,
+    required this.subtitle,
+    required this.actionLabel,
+    required this.actionIcon,
+    required this.stats,
+    this.onTap,
+  });
+
+  final String title;
+  final String subtitle;
+  final String actionLabel;
+  final IconData actionIcon;
+  final List<_CommandDeckStat> stats;
+  final VoidCallback? onTap;
 
   @override
   Widget build(BuildContext context) {
     final colors = context.colors;
+    final deckBg = Color.alphaBlend(
+      colors.accent.withValues(alpha: 0.22),
+      colors.textPrimary,
+    );
+    final primaryOnDeck = readableTextOn(
+      colors,
+      background: deckBg,
+      preferred: Colors.white,
+    );
+    final secondaryOnDeck = primaryOnDeck.withValues(alpha: 0.72);
+    final panel = Container(
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(34),
+        color: deckBg,
+        boxShadow: [
+          BoxShadow(
+            color: colors.textPrimary.withValues(alpha: 0.22),
+            blurRadius: 38,
+            offset: const Offset(0, 20),
+          ),
+        ],
+      ),
+      child: Stack(
+        children: [
+          Positioned(
+            right: -34,
+            top: -46,
+            child: IgnorePointer(
+              child: Container(
+                width: 148,
+                height: 148,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: colors.accent.withValues(alpha: 0.34),
+                ),
+              ),
+            ),
+          ),
+          Positioned(
+            left: -44,
+            bottom: -58,
+            child: IgnorePointer(
+              child: Container(
+                width: 158,
+                height: 158,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: colors.canvas.withValues(alpha: 0.10),
+                ),
+              ),
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(18, 18, 18, 16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Container(
+                      width: 46,
+                      height: 46,
+                      decoration: BoxDecoration(
+                        color: Colors.white.withValues(alpha: 0.12),
+                        borderRadius: BorderRadius.circular(17),
+                        border: Border.all(
+                          color: Colors.white.withValues(alpha: 0.16),
+                        ),
+                      ),
+                      child: Icon(actionIcon, color: primaryOnDeck, size: 21),
+                    ),
+                    const Spacer(),
+                    FilledButton.tonalIcon(
+                      onPressed: onTap,
+                      icon: Icon(actionIcon, size: 16),
+                      label: Text(actionLabel),
+                      style: FilledButton.styleFrom(
+                        foregroundColor: primaryOnDeck,
+                        backgroundColor: Colors.white.withValues(alpha: 0.12),
+                        disabledForegroundColor: secondaryOnDeck,
+                        disabledBackgroundColor: Colors.white.withValues(
+                          alpha: 0.08,
+                        ),
+                        side: BorderSide(
+                          color: Colors.white.withValues(alpha: 0.14),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 24),
+                Text(
+                  title,
+                  style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                    color: primaryOnDeck,
+                    fontWeight: AppWeights.title,
+                    letterSpacing: -0.8,
+                  ),
+                ),
+                const SizedBox(height: 5),
+                Text(
+                  subtitle,
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: secondaryOnDeck,
+                    height: 1.35,
+                    fontWeight: AppWeights.emphasis,
+                  ),
+                ),
+                const SizedBox(height: 18),
+                Row(
+                  children: [
+                    for (var i = 0; i < stats.length; i++) ...[
+                      Expanded(child: _CommandDeckStatTile(stat: stats[i])),
+                      if (i != stats.length - 1) const SizedBox(width: 9),
+                    ],
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+    if (onTap == null) return panel;
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(34),
+        onTap: onTap,
+        child: panel,
+      ),
+    );
+  }
+}
+
+class _CommandDeckStatTile extends StatelessWidget {
+  const _CommandDeckStatTile({required this.stat});
+  final _CommandDeckStat stat;
+
+  @override
+  Widget build(BuildContext context) {
     return Container(
       padding: const EdgeInsets.fromLTRB(10, 10, 10, 9),
       decoration: BoxDecoration(
-        color: colors.canvas.withValues(alpha: 0.58),
-        borderRadius: BorderRadius.circular(AppRadii.control),
-        border: Border.all(color: colors.border.withValues(alpha: 0.72)),
+        color: Colors.white.withValues(alpha: 0.10),
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.13)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Icon(icon, size: 15, color: colors.textSecondary),
-          const SizedBox(height: 8),
-          Text(
-            value,
-            style: Theme.of(context).textTheme.titleMedium?.copyWith(
-              color: colors.textPrimary,
-              fontWeight: AppWeights.title,
-            ),
+          Row(
+            children: [
+              Icon(
+                stat.icon,
+                size: 13,
+                color: Colors.white.withValues(alpha: 0.70),
+              ),
+              const Spacer(),
+              Flexible(
+                child: Text(
+                  stat.value,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  textAlign: TextAlign.right,
+                  style: monoStyle(
+                    color: Colors.white,
+                    fontSize: 15,
+                    fontWeight: AppWeights.title,
+                  ),
+                ),
+              ),
+            ],
           ),
+          const SizedBox(height: 9),
           Text(
-            label,
+            stat.label.toUpperCase(),
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
-            style: Theme.of(context).textTheme.labelSmall?.copyWith(
-              color: colors.textTertiary,
-              fontWeight: AppWeights.emphasis,
-            ),
+            style: monoStyle(
+              color: Colors.white.withValues(alpha: 0.58),
+              fontSize: 8.5,
+              fontWeight: AppWeights.title,
+            ).copyWith(letterSpacing: 0.9),
           ),
         ],
       ),
@@ -1558,45 +1677,28 @@ class MorePane extends StatelessWidget {
     return ListView(
       padding: const EdgeInsets.fromLTRB(16, 4, 16, 96),
       children: [
-        MeshSurface(
-          tone: MeshSurfaceTone.elevated,
-          radius: 28,
-          padding: const EdgeInsets.fromLTRB(18, 18, 18, 16),
-          child: Row(
-            children: [
-              const _PremiumIconWell(icon: Icons.dashboard_customize_rounded),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      'Control center',
-                      style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                        fontWeight: AppWeights.title,
-                        letterSpacing: -0.4,
-                      ),
-                    ),
-                    const SizedBox(height: 3),
-                    Text(
-                      '$enabledCount of ${hosts.length} machines enabled · app ${installedAppVersion.isEmpty ? 'current' : installedAppVersion}',
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                        color: context.colors.textSecondary,
-                        height: 1.35,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              IconButton.filledTonal(
-                onPressed: onPairHost,
-                tooltip: 'Add host',
-                icon: const Icon(Icons.add_rounded),
-              ),
-            ],
-          ),
+        _CommandDeckHero(
+          title: 'Control deck',
+          subtitle:
+              '$enabledCount of ${hosts.length} machines enabled · app ${installedAppVersion.isEmpty ? 'current' : installedAppVersion}',
+          actionLabel: 'Add host',
+          actionIcon: Icons.add_rounded,
+          onTap: onPairHost,
+          stats: [
+            _CommandDeckStat(
+              'Enabled',
+              '$enabledCount',
+              Icons.power_settings_new_rounded,
+            ),
+            _CommandDeckStat('Saved', '${hosts.length}', Icons.dns_rounded),
+            _CommandDeckStat(
+              'Version',
+              installedAppVersion.isEmpty
+                  ? '—'
+                  : installedAppVersion.split('+').first,
+              Icons.phone_iphone_rounded,
+            ),
+          ],
         ),
         const SizedBox(height: 20),
         const MeshSectionHeader(
@@ -1704,15 +1806,14 @@ class MorePane extends StatelessWidget {
 }
 
 class _PremiumIconWell extends StatelessWidget {
-  const _PremiumIconWell({required this.icon, this.tone = MeshPillTone.accent});
+  const _PremiumIconWell({required this.icon});
 
   final IconData icon;
-  final MeshPillTone tone;
 
   @override
   Widget build(BuildContext context) {
     final colors = context.colors;
-    final toneColors = meshPillColors(colors, tone);
+    final toneColors = meshPillColors(colors, MeshPillTone.accent);
     return Container(
       width: 38,
       height: 38,
