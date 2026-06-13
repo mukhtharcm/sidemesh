@@ -77,7 +77,7 @@ part 'session_screen_timeline.dart';
 part 'session_screen_controls.dart';
 part 'session_screen_preview.dart';
 
-enum _TranscriptFreshnessMode { cached, reconnecting, offline }
+enum _TranscriptFreshnessMode { cached, verifying, offline }
 
 class SessionScreen extends StatefulWidget {
   const SessionScreen({
@@ -895,6 +895,8 @@ class _SessionScreenState extends State<SessionScreen>
   // snapshot from clobbering an already-delivered action_opened / activity.
   final List<LiveEvent> _pendingLiveEvents = <LiveEvent>[];
   int? _snapshotInFlightRequestId;
+  String? _snapshotInFlightKey;
+  Future<void>? _snapshotInFlightFuture;
   int _skillsRequestId = 0;
   int _fileSearchRequestId = 0;
   int _nodeInfoRequestId = 0;
@@ -921,7 +923,7 @@ class _SessionScreenState extends State<SessionScreen>
     }
     return _resumeSyncFailed
         ? _TranscriptFreshnessMode.offline
-        : _TranscriptFreshnessMode.reconnecting;
+        : _TranscriptFreshnessMode.verifying;
   }
 
   String? get _lastConnectedLabel {
@@ -1298,7 +1300,10 @@ class _SessionScreenState extends State<SessionScreen>
   }
 
   void _markCurrentSessionSeen() {
-    if (_keepSessionUnread) {
+    if (_keepSessionUnread ||
+        _loading ||
+        _showingCachedSnapshot ||
+        _showingPossiblyStaleSnapshot) {
       return;
     }
     final session = _session ?? widget.session;
@@ -2369,7 +2374,7 @@ class _SessionScreenState extends State<SessionScreen>
   }
 
   void _reloadSnapshot() {
-    unawaited(_loadSnapshot(scrollToBottom: false));
+    unawaited(_loadSnapshot(scrollToBottom: false, force: true));
   }
 
   Future<void> _restartProvider() async {
@@ -2400,6 +2405,7 @@ class _SessionScreenState extends State<SessionScreen>
         messageLimit: _messageLimit,
         activityLimit: _activityLimit,
         scrollToBottom: false,
+        force: true,
       ),
     );
   }
@@ -2463,11 +2469,52 @@ class _SessionScreenState extends State<SessionScreen>
     int? messageLimit,
     int? activityLimit,
     bool scrollToBottom = true,
+    bool force = false,
   }) async {
     final resolvedMessageLimit = messageLimit ?? _messageLimit;
     final resolvedActivityLimit = activityLimit ?? _activityLimit;
+    final requestKey = _snapshotRequestKey(
+      resolvedMessageLimit,
+      resolvedActivityLimit,
+    );
+    final existingSnapshot = _snapshotInFlightFuture;
+    if (!force &&
+        existingSnapshot != null &&
+        _snapshotInFlightKey == requestKey) {
+      if ((_showingCachedSnapshot || _showingPossiblyStaleSnapshot) &&
+          mounted) {
+        setState(() => _snapshotRefreshing = true);
+      }
+      await existingSnapshot;
+      if (scrollToBottom && mounted && !_disposed) {
+        await _scrollToBottom();
+      }
+      return;
+    }
+
     final requestId = ++_snapshotRequestId;
     _snapshotInFlightRequestId = requestId;
+    _snapshotInFlightKey = requestKey;
+    final snapshotFuture = _loadSnapshotFresh(
+      requestId: requestId,
+      messageLimit: resolvedMessageLimit,
+      activityLimit: resolvedActivityLimit,
+      scrollToBottom: scrollToBottom,
+    );
+    _snapshotInFlightFuture = snapshotFuture;
+    await snapshotFuture;
+  }
+
+  String _snapshotRequestKey(int messageLimit, int activityLimit) {
+    return '${widget.session.id}::m$messageLimit::a$activityLimit';
+  }
+
+  Future<void> _loadSnapshotFresh({
+    required int requestId,
+    required int messageLimit,
+    required int activityLimit,
+    required bool scrollToBottom,
+  }) async {
     if (_showingCachedSnapshot && mounted) {
       setState(() => _snapshotRefreshing = true);
     }
@@ -2475,8 +2522,8 @@ class _SessionScreenState extends State<SessionScreen>
       final log = await widget.api.fetchLog(
         widget.host,
         widget.session.id,
-        messageLimit: resolvedMessageLimit,
-        activityLimit: resolvedActivityLimit,
+        messageLimit: messageLimit,
+        activityLimit: activityLimit,
       );
       if (!mounted || requestId != _snapshotRequestId) {
         return;
@@ -2498,8 +2545,8 @@ class _SessionScreenState extends State<SessionScreen>
         _optimisticMessages = _reconcileOptimisticMessages(log.messages);
         _activities = snapshotActivities;
         _history = log.history;
-        _messageLimit = resolvedMessageLimit;
-        _activityLimit = resolvedActivityLimit;
+        _messageLimit = messageLimit;
+        _activityLimit = activityLimit;
         _historyBannerDismissed = false;
         _showingCachedSnapshot = false;
         _snapshotRefreshing = false;
@@ -2580,6 +2627,8 @@ class _SessionScreenState extends State<SessionScreen>
     } finally {
       if (_snapshotInFlightRequestId == requestId) {
         _snapshotInFlightRequestId = null;
+        _snapshotInFlightKey = null;
+        _snapshotInFlightFuture = null;
       }
     }
   }
@@ -7096,7 +7145,7 @@ class _SessionScreenState extends State<SessionScreen>
                   mode: freshnessMode,
                   refreshing:
                       _snapshotRefreshing ||
-                      (freshnessMode == _TranscriptFreshnessMode.reconnecting &&
+                      (freshnessMode == _TranscriptFreshnessMode.verifying &&
                           _resumeSyncing),
                   lastConnectedLabel: _lastConnectedLabel,
                   onRetry: freshnessMode == _TranscriptFreshnessMode.offline
@@ -7121,7 +7170,8 @@ class _SessionScreenState extends State<SessionScreen>
                       )
                     else
                       RefreshIndicator(
-                        onRefresh: () => _loadSnapshot(scrollToBottom: false),
+                        onRefresh: () =>
+                            _loadSnapshot(scrollToBottom: false, force: true),
                         edgeOffset: 0,
                         displacement: 28,
                         child: SelectionArea(

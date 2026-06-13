@@ -18,18 +18,15 @@ class _CachedTranscriptStrip extends StatelessWidget {
     final colors = context.colors;
     final icon = switch (mode) {
       _TranscriptFreshnessMode.cached => Icons.history_rounded,
-      _TranscriptFreshnessMode.reconnecting => Icons.sync_rounded,
+      _TranscriptFreshnessMode.verifying => Icons.sync_rounded,
       _TranscriptFreshnessMode.offline => Icons.wifi_off_rounded,
     };
     final text = switch (mode) {
       _TranscriptFreshnessMode.cached =>
         refreshing
-            ? 'Cached transcript · syncing latest changes'
-            : 'Cached transcript · waiting for latest host snapshot',
-      _TranscriptFreshnessMode.reconnecting =>
-        lastConnectedLabel == null
-            ? 'Reconnecting · checking latest events'
-            : 'Reconnecting · $_lastConnectedText',
+            ? 'Cached transcript · verifying host snapshot'
+            : 'Cached transcript · host snapshot not verified',
+      _TranscriptFreshnessMode.verifying => _verificationText,
       _TranscriptFreshnessMode.offline =>
         lastConnectedLabel == null
             ? 'Offline · showing last known session state'
@@ -61,6 +58,16 @@ class _CachedTranscriptStrip extends StatelessWidget {
             )
           : null,
     );
+  }
+
+  String get _verificationText {
+    if (lastConnectedLabel == null) {
+      return 'Verifying transcript · checking host snapshot';
+    }
+    if (lastConnectedLabel == 'just now') {
+      return 'Verifying transcript · host connected, snapshot pending';
+    }
+    return 'Verifying transcript · host seen $lastConnectedLabel ago, snapshot pending';
   }
 
   String get _lastConnectedText => lastConnectedLabel == 'just now'

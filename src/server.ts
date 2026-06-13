@@ -45,6 +45,7 @@ import type {
   RecentSessionsLiveEvent,
   SessionMessageAttachment,
   SessionMessage,
+  SessionLogSnapshot,
   SessionResourcesResponse,
   SessionRuntimeSummary,
   SessionResource,
@@ -269,6 +270,7 @@ export async function startServer(
   );
   const runtimeCache = new Map<string, SessionRuntimeCacheEntry>();
   const logCache = new Map<string, SessionLogCacheEntry>();
+  const logReadPromises = new Map<string, Promise<SessionLogSnapshot>>();
   const sessionRuntimeSignals = await loadSessionRuntimeSignalsState(
     nodePath.join(config.stateDir, SESSION_RUNTIME_SIGNALS_FILE),
   );
@@ -1996,10 +1998,25 @@ export async function startServer(
       );
       const session = await readSession(provider, sessionId, false);
       reconcileObservedThreadStatus(session.id, threadStatusPhase(session));
-      const log = await provider.readSessionLog!(session, {
+      const readKey = buildSessionLogReadKey(
+        session,
         messageLimit,
         activityLimit,
-      });
+      );
+      let logPromise = logReadPromises.get(readKey);
+      if (!logPromise) {
+        logPromise = provider.readSessionLog!(session, {
+          messageLimit,
+          activityLimit,
+        });
+        logReadPromises.set(readKey, logPromise);
+        void logPromise.catch(() => undefined).then(() => {
+          if (logReadPromises.get(readKey) === logPromise) {
+            logReadPromises.delete(readKey);
+          }
+        });
+      }
+      const log = await logPromise;
       const latestPlanUpdate = mergeLatestPlanUpdate(
         sessionId,
         log.latestPlanUpdate ?? null,
@@ -5125,6 +5142,18 @@ function buildSessionLogCacheKey(
   activityLimit: number | null,
 ): string {
   return `${sessionId}::m${messageLimit ?? "all"}::a${activityLimit ?? "all"}`;
+}
+
+function buildSessionLogReadKey(
+  session: ThreadRecord,
+  messageLimit: number | null,
+  activityLimit: number | null,
+): string {
+  return [
+    buildSessionLogCacheKey(session.id, messageLimit, activityLimit),
+    `path:${session.path ?? ""}`,
+    `updated:${session.updatedAt}`,
+  ].join("::");
 }
 
 function buildSessionHistorySummary(
