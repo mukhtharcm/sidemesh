@@ -31,7 +31,7 @@ wizard.
 
 Requirements:
 
-- Node.js `>= 22.13.0`
+- Node.js `>= 22.19.0`
 - A user-managed Node install such as Homebrew, `nvm`, or Volta if you want
   `npm install -g` to work without `sudo`
 - Flutter, if you want to run the app locally

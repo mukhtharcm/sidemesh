@@ -261,8 +261,8 @@ try {
 | `~/.pi/agent/sessions/--root-dev-code-on-the-go-sidemesh--/2026-05-03T05-54-25-307Z_019dec66-fb9a-75fd-b66a-ad44098ed58f.jsonl` | Session history with 413/400 errors, 3 successful compactions |
 | `~/.sidemesh/pi-provider/sessions.json` | Sidemesh Pi state: 148 messages, 1,199 activities for this session |
 | `/opt/sidemesh/node_modules/@mariozechner/pi-ai/dist/utils/overflow.js` | Pi's overflow regex patterns (line ~30–70) |
-| `/opt/sidemesh/node_modules/@mariozechner/pi-coding-agent/dist/core/agent-session.js` | `_checkCompaction()` flow (line ~1393–1465) |
-| `/opt/sidemesh/node_modules/@mariozechner/pi-coding-agent/dist/core/compaction/compaction.js` | `compact()` and `generateSummary()` (lines ~557, ~432) |
+| `/opt/sidemesh/node_modules/@earendil-works/pi-coding-agent/dist/core/agent-session.js` | `_checkCompaction()` flow (line ~1393–1465) |
+| `/opt/sidemesh/node_modules/@earendil-works/pi-coding-agent/dist/core/compaction/compaction.js` | `compact()` and `generateSummary()` (lines ~557, ~432) |
 | `src/pi-provider.ts` | Sidemesh Pi adapter: `handleMessageEnd`, `compactSession`, `handleSessionEvent` |
 | `src/server.ts` | `/api/sessions/:sessionId/compact` endpoint |
 
