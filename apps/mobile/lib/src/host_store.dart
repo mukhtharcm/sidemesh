@@ -55,7 +55,7 @@ class HostStore {
   static FlutterSecureStorage _createSecureStorage({
     required bool useDataProtectionKeyChain,
   }) => FlutterSecureStorage(
-    aOptions: AndroidOptions(encryptedSharedPreferences: true),
+    aOptions: AndroidOptions(),
     iOptions: IOSOptions(accessibility: KeychainAccessibility.first_unlock),
     // Dev builds stay on the legacy file-based keychain because ad-hoc-signed
     // apps do not carry the app identifier entitlement that the Data
@@ -63,7 +63,7 @@ class HostStore {
     // Protection via a build-time dart-define and dedicated packaging step.
     mOptions: MacOsOptions(
       accountName: _macOsKeychainService,
-      useDataProtectionKeyChain: useDataProtectionKeyChain,
+      usesDataProtectionKeychain: useDataProtectionKeyChain,
     ),
   );
 

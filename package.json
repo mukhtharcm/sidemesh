@@ -82,30 +82,30 @@
     "secret:scan": "bash scripts/secret-scan.sh"
   },
   "dependencies": {
-    "@clack/prompts": "^1.3.0",
+    "@clack/prompts": "^1.6.0",
     "@earendil-works/pi-coding-agent": "^0.80.3",
-    "@github/copilot-sdk": "^0.3.0",
-    "@hono/node-server": "^2.0.1",
-    "@hono/zod-validator": "^0.7.6",
-    "acpx": "^0.8.0",
-    "commander": "^14.0.0",
-    "hono": "^4.12.16",
+    "@github/copilot-sdk": "^1.0.4",
+    "@hono/node-server": "^2.0.6",
+    "@hono/zod-validator": "^0.8.0",
+    "acpx": "^0.11.2",
+    "commander": "^15.0.0",
+    "hono": "^4.12.27",
     "ignore": "^7.0.5",
     "qrcode": "^1.5.4",
-    "ws": "^8.18.3",
-    "zod": "^4.1.5"
+    "ws": "^8.21.0",
+    "zod": "^4.4.3"
   },
   "optionalDependencies": {
     "node-pty": "^1.1.0"
   },
   "overrides": {
-    "@github/copilot": "^1.0.43"
+    "@github/copilot": "^1.0.67"
   },
   "devDependencies": {
-    "@types/node": "^25.6.0",
+    "@types/node": "^26.0.1",
     "@types/qrcode": "^1.5.6",
     "@types/ws": "^8.18.1",
-    "tsx": "^4.21.0",
+    "tsx": "^4.22.4",
     "typescript": "^6.0.3"
   }
 }

@@ -160,17 +160,20 @@ export type CopilotSdkClientFactory = (
 export async function createCopilotSdkClient(
   options: CopilotSdkClientFactoryOptions,
 ): Promise<CopilotSdkClient> {
-  const { CopilotClient } = await import("@github/copilot-sdk");
+  const { CopilotClient, RuntimeConnection } = await import(
+    "@github/copilot-sdk"
+  );
+  const customBin = options.bin.trim();
   const clientOptions: CopilotClientOptions = {
-    cwd: options.cwd,
+    workingDirectory: options.cwd,
     env: options.env,
     logLevel: "error",
     sessionIdleTimeoutSeconds: 0,
-    useStdio: true,
+    connection:
+      customBin && customBin !== "copilot"
+        ? RuntimeConnection.forStdio({ path: customBin })
+        : RuntimeConnection.forStdio(),
   };
-  if (options.bin.trim() && options.bin.trim() !== "copilot") {
-    clientOptions.cliPath = options.bin;
-  }
   return new CopilotClient(clientOptions) as unknown as CopilotSdkClient;
 }
 
