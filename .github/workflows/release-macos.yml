@@ -81,7 +81,6 @@ jobs:
           VERSION: ${{ steps.meta.outputs.version }}
           BUILD_NUMBER: ${{ steps.meta.outputs.build_number }}
           SIGNING_IDENTITY: ${{ secrets.SIGNING_IDENTITY }}
-          TEAM_ID: ${{ secrets.TEAM_ID }}
           SIDEMESH_SPARKLE_PUBLIC_ED_KEY: ${{ secrets.SPARKLE_PUBLIC_ED_KEY }}
         run: ./scripts/package-macos-release.sh
 
