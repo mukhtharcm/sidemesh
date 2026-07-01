@@ -8,7 +8,7 @@ development machines.
 ## What You Need
 
 - **Host machine** (where you code): macOS, Linux, or Windows with WSL
-  - Node.js 22.13+
+  - Node.js 22.19+
   - A user-managed Node install such as Homebrew, nvm, or Volta if you want
     `npm install -g` to work without sudo
   - For Pi provider: Pi must be installed separately
@@ -57,7 +57,7 @@ Use `sidemesh setup` when you want to customize providers, host features, or adv
 | Provider | Extra setup |
 |----------|-------------|
 | **Codex** (default) | Install codex CLI: npm install -g @openai/codex |
-| **Pi** | Install Pi: npm install -g @mariozechner/pi-coding-agent, then pi /login |
+| **Pi** | Install Pi: npm install -g @earendil-works/pi-coding-agent, then pi /login |
 | **Copilot** | Install GitHub Copilot CLI and authenticate |
 | **ACP via acpx** | Install/authenticate the selected ACP agent (for example Gemini, Claude, Qwen, Cursor, or Kimi) |
 | **Fake** | No extra setup; for testing only (--dev flag) |

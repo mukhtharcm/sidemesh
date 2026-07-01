@@ -175,7 +175,7 @@ Layer 1: classify support
 
 Layer 2: verify SDK hook point
 
-- Confirm whether `@mariozechner/pi-coding-agent` exposes an `ExtensionUIContext`
+- Confirm whether `@earendil-works/pi-coding-agent` exposes an `ExtensionUIContext`
   injection point when used as a library.
 - If the provider adapter can inject a custom UI context, implement a
   Sidemesh-backed UI context.

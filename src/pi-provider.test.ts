@@ -5,7 +5,7 @@ import nodePath from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { setTimeout as delay } from "node:timers/promises";
 
-import { SessionManager } from "@mariozechner/pi-coding-agent";
+import { SessionManager } from "@earendil-works/pi-coding-agent";
 
 import { PiAgentProvider } from "./pi-provider.js";
 import type { AgentCreateSessionRequest } from "./agent-provider.js";
@@ -616,11 +616,11 @@ describe("PiAgentProvider", () => {
     const provider = new PiAgentProvider({
       agentDir,
       stateDir,
-      createServices: (async () => fakeServices) as unknown as typeof import("@mariozechner/pi-coding-agent").createAgentSessionServices,
+      createServices: (async () => fakeServices) as unknown as typeof import("@earendil-works/pi-coding-agent").createAgentSessionServices,
       createSessionFromServices: (async () => ({
         session: fakeSession,
         extensionsResult: { extensions: [], errors: [], runtime: {} as never },
-      })) as unknown as typeof import("@mariozechner/pi-coding-agent").createAgentSessionFromServices,
+      })) as unknown as typeof import("@earendil-works/pi-coding-agent").createAgentSessionFromServices,
     });
     provider.on("liveEvent", (event) => liveEvents.push(event as never));
     await provider.start();
@@ -791,11 +791,11 @@ describe("PiAgentProvider", () => {
     const provider = new PiAgentProvider({
       agentDir,
       stateDir,
-      createServices: (async () => fakeServices) as unknown as typeof import("@mariozechner/pi-coding-agent").createAgentSessionServices,
+      createServices: (async () => fakeServices) as unknown as typeof import("@earendil-works/pi-coding-agent").createAgentSessionServices,
       createSessionFromServices: (async () => ({
         session: fakeSession,
         extensionsResult: { extensions: [], errors: [], runtime: {} as never },
-      })) as unknown as typeof import("@mariozechner/pi-coding-agent").createAgentSessionFromServices,
+      })) as unknown as typeof import("@earendil-works/pi-coding-agent").createAgentSessionFromServices,
     });
     provider.on("liveEvent", (event) => liveEvents.push(event as never));
     await provider.start();
@@ -906,7 +906,7 @@ describe("PiAgentProvider", () => {
     const provider = new PiAgentProvider({
       agentDir,
       stateDir,
-      createServices: (async () => fakeServices) as unknown as typeof import("@mariozechner/pi-coding-agent").createAgentSessionServices,
+      createServices: (async () => fakeServices) as unknown as typeof import("@earendil-works/pi-coding-agent").createAgentSessionServices,
       createSessionFromServices: (async (options: { sessionManager: SessionManager }) => {
         fakeSession.sessionId = options.sessionManager.getSessionId();
         fakeSession.sessionFile = options.sessionManager.getSessionFile() ?? null;
@@ -915,7 +915,7 @@ describe("PiAgentProvider", () => {
           session: fakeSession,
           extensionsResult: { extensions: [], errors: [], runtime: {} as never },
         };
-      }) as unknown as typeof import("@mariozechner/pi-coding-agent").createAgentSessionFromServices,
+      }) as unknown as typeof import("@earendil-works/pi-coding-agent").createAgentSessionFromServices,
     });
     provider.on("liveEvent", (event) => liveEvents.push(event as never));
     await provider.start();
@@ -1188,7 +1188,7 @@ describe("PiAgentProvider", () => {
     const provider = new PiAgentProvider({
       agentDir,
       stateDir,
-      createServices: (async () => fakeServices) as unknown as typeof import("@mariozechner/pi-coding-agent").createAgentSessionServices,
+      createServices: (async () => fakeServices) as unknown as typeof import("@earendil-works/pi-coding-agent").createAgentSessionServices,
       createSessionFromServices: (async (options: { sessionManager: SessionManager }) => {
         fakeSession.sessionId = options.sessionManager.getSessionId();
         fakeSession.sessionFile = options.sessionManager.getSessionFile() ?? null;
@@ -1197,7 +1197,7 @@ describe("PiAgentProvider", () => {
           session: fakeSession,
           extensionsResult: { extensions: [], errors: [], runtime: {} as never },
         };
-      }) as unknown as typeof import("@mariozechner/pi-coding-agent").createAgentSessionFromServices,
+      }) as unknown as typeof import("@earendil-works/pi-coding-agent").createAgentSessionFromServices,
     });
     await provider.start();
 
@@ -1348,7 +1348,7 @@ describe("PiAgentProvider", () => {
     const provider = new PiAgentProvider({
       agentDir,
       stateDir,
-      createServices: (async () => fakeServices) as unknown as typeof import("@mariozechner/pi-coding-agent").createAgentSessionServices,
+      createServices: (async () => fakeServices) as unknown as typeof import("@earendil-works/pi-coding-agent").createAgentSessionServices,
       createSessionFromServices: (async (options: { sessionManager: SessionManager }) => {
         fakeSession.sessionId = options.sessionManager.getSessionId();
         fakeSession.sessionFile = options.sessionManager.getSessionFile() ?? null;
@@ -1357,7 +1357,7 @@ describe("PiAgentProvider", () => {
           session: fakeSession,
           extensionsResult: { extensions: [], errors: [], runtime: {} as never },
         };
-      }) as unknown as typeof import("@mariozechner/pi-coding-agent").createAgentSessionFromServices,
+      }) as unknown as typeof import("@earendil-works/pi-coding-agent").createAgentSessionFromServices,
     });
     await provider.start();
 
@@ -1483,11 +1483,11 @@ describe("PiAgentProvider", () => {
     const provider = new PiAgentProvider({
       agentDir,
       stateDir,
-      createServices: (async () => fakeServices) as unknown as typeof import("@mariozechner/pi-coding-agent").createAgentSessionServices,
+      createServices: (async () => fakeServices) as unknown as typeof import("@earendil-works/pi-coding-agent").createAgentSessionServices,
       createSessionFromServices: (async () => ({
         session: fakeSession,
         extensionsResult: { extensions: [], errors: [], runtime: {} as never },
-      })) as unknown as typeof import("@mariozechner/pi-coding-agent").createAgentSessionFromServices,
+      })) as unknown as typeof import("@earendil-works/pi-coding-agent").createAgentSessionFromServices,
     });
     await provider.start();
 
@@ -1619,7 +1619,7 @@ describe("PiAgentProvider", () => {
     const provider = new PiAgentProvider({
       agentDir,
       stateDir,
-      createServices: (async () => fakeServices) as unknown as typeof import("@mariozechner/pi-coding-agent").createAgentSessionServices,
+      createServices: (async () => fakeServices) as unknown as typeof import("@earendil-works/pi-coding-agent").createAgentSessionServices,
       createSessionFromServices: (async (options: { sessionManager: SessionManager }) => {
         fakeSession.sessionId = options.sessionManager.getSessionId();
         fakeSession.sessionFile = options.sessionManager.getSessionFile() ?? null;
@@ -1628,7 +1628,7 @@ describe("PiAgentProvider", () => {
           session: fakeSession,
           extensionsResult: { extensions: [], errors: [], runtime: {} as never },
         };
-      }) as unknown as typeof import("@mariozechner/pi-coding-agent").createAgentSessionFromServices,
+      }) as unknown as typeof import("@earendil-works/pi-coding-agent").createAgentSessionFromServices,
     });
     provider.on("liveEvent", (event) => liveEvents.push(event as never));
     await provider.start();
@@ -2097,7 +2097,7 @@ describe("PiAgentProvider", () => {
     const provider = new PiAgentProvider({
       agentDir,
       stateDir,
-      createServices: (async () => fakeServices) as unknown as typeof import("@mariozechner/pi-coding-agent").createAgentSessionServices,
+      createServices: (async () => fakeServices) as unknown as typeof import("@earendil-works/pi-coding-agent").createAgentSessionServices,
       createSessionFromServices: (async (options: { sessionManager: SessionManager }) => {
         fakeSession.sessionId = options.sessionManager.getSessionId();
         fakeSession.sessionFile = options.sessionManager.getSessionFile() ?? null;
@@ -2106,7 +2106,7 @@ describe("PiAgentProvider", () => {
           session: fakeSession,
           extensionsResult: { extensions: [], errors: [], runtime: {} as never },
         };
-      }) as unknown as typeof import("@mariozechner/pi-coding-agent").createAgentSessionFromServices,
+      }) as unknown as typeof import("@earendil-works/pi-coding-agent").createAgentSessionFromServices,
     });
     await provider.start();
 
@@ -2250,11 +2250,11 @@ describe("PiAgentProvider", () => {
     const provider = new PiAgentProvider({
       agentDir,
       stateDir,
-      createServices: (async () => fakeServices) as unknown as typeof import("@mariozechner/pi-coding-agent").createAgentSessionServices,
+      createServices: (async () => fakeServices) as unknown as typeof import("@earendil-works/pi-coding-agent").createAgentSessionServices,
       createSessionFromServices: (async () => ({
         session: fakeSession,
         extensionsResult: { extensions: [], errors: [], runtime: {} as never },
-      })) as unknown as typeof import("@mariozechner/pi-coding-agent").createAgentSessionFromServices,
+      })) as unknown as typeof import("@earendil-works/pi-coding-agent").createAgentSessionFromServices,
     });
     provider.on("liveEvent", (event) => liveEvents.push(event as never));
     await provider.start();
@@ -2358,11 +2358,11 @@ describe("PiAgentProvider", () => {
       agentDir,
       stateDir,
       createServices: (async () =>
-        fakeServices) as unknown as typeof import("@mariozechner/pi-coding-agent").createAgentSessionServices,
+        fakeServices) as unknown as typeof import("@earendil-works/pi-coding-agent").createAgentSessionServices,
       createSessionFromServices: (async () => ({
         session: fakeSession,
         extensionsResult: { extensions: [], errors: [], runtime: {} as never },
-      })) as unknown as typeof import("@mariozechner/pi-coding-agent").createAgentSessionFromServices,
+      })) as unknown as typeof import("@earendil-works/pi-coding-agent").createAgentSessionFromServices,
     });
     await provider.start();
 
@@ -2459,11 +2459,11 @@ describe("PiAgentProvider", () => {
       agentDir,
       stateDir,
       createServices: (async () =>
-        fakeServices) as unknown as typeof import("@mariozechner/pi-coding-agent").createAgentSessionServices,
+        fakeServices) as unknown as typeof import("@earendil-works/pi-coding-agent").createAgentSessionServices,
       createSessionFromServices: (async () => ({
         session: fakeSession,
         extensionsResult: { extensions: [], errors: [], runtime: {} as never },
-      })) as unknown as typeof import("@mariozechner/pi-coding-agent").createAgentSessionFromServices,
+      })) as unknown as typeof import("@earendil-works/pi-coding-agent").createAgentSessionFromServices,
     });
     provider.on("stderr", (line) => warnings.push(line));
     await provider.start();
@@ -2601,11 +2601,11 @@ describe("PiAgentProvider", () => {
       agentDir,
       stateDir,
       createServices: (async () =>
-        fakeServices) as unknown as typeof import("@mariozechner/pi-coding-agent").createAgentSessionServices,
+        fakeServices) as unknown as typeof import("@earendil-works/pi-coding-agent").createAgentSessionServices,
       createSessionFromServices: (async () => ({
         session: fakeSession,
         extensionsResult: { extensions: [], errors: [], runtime: {} as never },
-      })) as unknown as typeof import("@mariozechner/pi-coding-agent").createAgentSessionFromServices,
+      })) as unknown as typeof import("@earendil-works/pi-coding-agent").createAgentSessionFromServices,
     });
     provider.on("liveEvent", (event) => liveEvents.push(event as never));
     await provider.start();
@@ -2693,11 +2693,11 @@ describe("PiAgentProvider", () => {
       agentDir,
       stateDir,
       createServices: (async () =>
-        fakeServices) as unknown as typeof import("@mariozechner/pi-coding-agent").createAgentSessionServices,
+        fakeServices) as unknown as typeof import("@earendil-works/pi-coding-agent").createAgentSessionServices,
       createSessionFromServices: (async () => ({
         session: fakeSession,
         extensionsResult: { extensions: [], errors: [], runtime: {} as never },
-      })) as unknown as typeof import("@mariozechner/pi-coding-agent").createAgentSessionFromServices,
+      })) as unknown as typeof import("@earendil-works/pi-coding-agent").createAgentSessionFromServices,
     });
     await provider.start();
 
@@ -2934,11 +2934,11 @@ describe("PiAgentProvider", () => {
       agentDir,
       stateDir,
       createServices: (async () =>
-        fakeServices) as unknown as typeof import("@mariozechner/pi-coding-agent").createAgentSessionServices,
+        fakeServices) as unknown as typeof import("@earendil-works/pi-coding-agent").createAgentSessionServices,
       createSessionFromServices: (async () => ({
         session: fakeSession,
         extensionsResult: { extensions: [], errors: [], runtime: {} as never },
-      })) as unknown as typeof import("@mariozechner/pi-coding-agent").createAgentSessionFromServices,
+      })) as unknown as typeof import("@earendil-works/pi-coding-agent").createAgentSessionFromServices,
     });
     provider.on("liveEvent", (event) => liveEvents.push(event as never));
     await provider.start();
@@ -3019,11 +3019,11 @@ describe("PiAgentProvider", () => {
       agentDir,
       stateDir,
       createServices: (async () =>
-        fakeServices) as unknown as typeof import("@mariozechner/pi-coding-agent").createAgentSessionServices,
+        fakeServices) as unknown as typeof import("@earendil-works/pi-coding-agent").createAgentSessionServices,
       createSessionFromServices: (async () => ({
         session: fakeSession,
         extensionsResult: { extensions: [], errors: [], runtime: {} as never },
-      })) as unknown as typeof import("@mariozechner/pi-coding-agent").createAgentSessionFromServices,
+      })) as unknown as typeof import("@earendil-works/pi-coding-agent").createAgentSessionFromServices,
     });
     await provider.start();
 
@@ -3104,11 +3104,11 @@ describe("PiAgentProvider", () => {
       agentDir,
       stateDir,
       createServices: (async () =>
-        fakeServices) as unknown as typeof import("@mariozechner/pi-coding-agent").createAgentSessionServices,
+        fakeServices) as unknown as typeof import("@earendil-works/pi-coding-agent").createAgentSessionServices,
       createSessionFromServices: (async () => ({
         session: fakeSession,
         extensionsResult: { extensions: [], errors: [], runtime: {} as never },
-      })) as unknown as typeof import("@mariozechner/pi-coding-agent").createAgentSessionFromServices,
+      })) as unknown as typeof import("@earendil-works/pi-coding-agent").createAgentSessionFromServices,
     });
     await provider.start();
 
@@ -3216,11 +3216,11 @@ describe("PiAgentProvider", () => {
       agentDir,
       stateDir,
       createServices: (async () =>
-        fakeServices) as unknown as typeof import("@mariozechner/pi-coding-agent").createAgentSessionServices,
+        fakeServices) as unknown as typeof import("@earendil-works/pi-coding-agent").createAgentSessionServices,
       createSessionFromServices: (async () => ({
         session: fakeSession,
         extensionsResult: { extensions: [], errors: [], runtime: {} as never },
-      })) as unknown as typeof import("@mariozechner/pi-coding-agent").createAgentSessionFromServices,
+      })) as unknown as typeof import("@earendil-works/pi-coding-agent").createAgentSessionFromServices,
     });
     await provider.start();
 
@@ -3274,11 +3274,11 @@ describe("PiAgentProvider", () => {
       agentDir,
       stateDir,
       createServices: (async () =>
-        fakeServices) as unknown as typeof import("@mariozechner/pi-coding-agent").createAgentSessionServices,
+        fakeServices) as unknown as typeof import("@earendil-works/pi-coding-agent").createAgentSessionServices,
       createSessionFromServices: (async () => ({
         session: fakeSession,
         extensionsResult: { extensions: [], errors: [], runtime: {} as never },
-      })) as unknown as typeof import("@mariozechner/pi-coding-agent").createAgentSessionFromServices,
+      })) as unknown as typeof import("@earendil-works/pi-coding-agent").createAgentSessionFromServices,
     });
     await provider2.start();
 
@@ -3375,11 +3375,11 @@ describe("PiAgentProvider", () => {
       agentDir,
       stateDir,
       createServices: (async () =>
-        fakeServices) as unknown as typeof import("@mariozechner/pi-coding-agent").createAgentSessionServices,
+        fakeServices) as unknown as typeof import("@earendil-works/pi-coding-agent").createAgentSessionServices,
       createSessionFromServices: (async () => ({
         session: fakeSession,
         extensionsResult: { extensions: [], errors: [], runtime: {} as never },
-      })) as unknown as typeof import("@mariozechner/pi-coding-agent").createAgentSessionFromServices,
+      })) as unknown as typeof import("@earendil-works/pi-coding-agent").createAgentSessionFromServices,
     });
     await provider.start();
 
@@ -3394,11 +3394,11 @@ describe("PiAgentProvider", () => {
       agentDir,
       stateDir,
       createServices: (async () =>
-        fakeServices) as unknown as typeof import("@mariozechner/pi-coding-agent").createAgentSessionServices,
+        fakeServices) as unknown as typeof import("@earendil-works/pi-coding-agent").createAgentSessionServices,
       createSessionFromServices: (async () => ({
         session: fakeSession,
         extensionsResult: { extensions: [], errors: [], runtime: {} as never },
-      })) as unknown as typeof import("@mariozechner/pi-coding-agent").createAgentSessionFromServices,
+      })) as unknown as typeof import("@earendil-works/pi-coding-agent").createAgentSessionFromServices,
     });
     await provider2.start();
 
@@ -3472,11 +3472,11 @@ describe("PiAgentProvider", () => {
       agentDir,
       stateDir,
       createServices: (async () =>
-        fakeServices) as unknown as typeof import("@mariozechner/pi-coding-agent").createAgentSessionServices,
+        fakeServices) as unknown as typeof import("@earendil-works/pi-coding-agent").createAgentSessionServices,
       createSessionFromServices: (async () => ({
         session: makeFakeSession("pi-multi-1"),
         extensionsResult: { extensions: [], errors: [], runtime: {} as never },
-      })) as unknown as typeof import("@mariozechner/pi-coding-agent").createAgentSessionFromServices,
+      })) as unknown as typeof import("@earendil-works/pi-coding-agent").createAgentSessionFromServices,
     });
     await provider.start();
 
@@ -3489,7 +3489,7 @@ describe("PiAgentProvider", () => {
     (provider as unknown as Record<string, unknown>)["createSessionFromServicesFactory"] = (async () => ({
       session: makeFakeSession("pi-multi-2"),
       extensionsResult: { extensions: [], errors: [], runtime: {} as never },
-    })) as unknown as typeof import("@mariozechner/pi-coding-agent").createAgentSessionFromServices;
+    })) as unknown as typeof import("@earendil-works/pi-coding-agent").createAgentSessionFromServices;
 
     const b = await provider.createSession({
       cwd: "/repo/b",
@@ -3582,7 +3582,7 @@ describe("PiAgentProvider", () => {
       agentDir,
       stateDir,
       createServices: (async () =>
-        fakeServices) as unknown as typeof import("@mariozechner/pi-coding-agent").createAgentSessionServices,
+        fakeServices) as unknown as typeof import("@earendil-works/pi-coding-agent").createAgentSessionServices,
     });
     await provider.start();
 
@@ -3733,11 +3733,11 @@ describe("PiAgentProvider", () => {
       agentDir,
       stateDir,
       createServices: (async () =>
-        fakeServices) as unknown as typeof import("@mariozechner/pi-coding-agent").createAgentSessionServices,
+        fakeServices) as unknown as typeof import("@earendil-works/pi-coding-agent").createAgentSessionServices,
       createSessionFromServices: (async () => ({
         session: fakeSession,
         extensionsResult: { extensions: [], errors: [], runtime: {} as never },
-      })) as unknown as typeof import("@mariozechner/pi-coding-agent").createAgentSessionFromServices,
+      })) as unknown as typeof import("@earendil-works/pi-coding-agent").createAgentSessionFromServices,
     });
     provider.on("liveEvent", (event) => liveEvents.push(event as never));
     await provider.start();

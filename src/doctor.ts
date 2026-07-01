@@ -5,7 +5,7 @@ import { homedir } from "node:os";
 import nodePath from "node:path";
 import { promisify } from "node:util";
 
-import { VERSION as PI_VERSION } from "@mariozechner/pi-coding-agent";
+import { VERSION as PI_VERSION } from "@earendil-works/pi-coding-agent";
 import { createAgentRegistry } from "acpx/runtime";
 
 import { createCopilotSdkClient } from "./copilot-sdk-client.js";

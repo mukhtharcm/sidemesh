@@ -131,7 +131,7 @@ The study used version-matched local clones in
     `session.create` / `session.resume`.
 
 - Pi coding agent:
-  - Dependency version: `@mariozechner/pi-coding-agent@0.71.1`.
+  - Dependency version: `@earendil-works/pi-coding-agent@0.71.1`.
   - Latest npm version observed during refresh: `0.72.1`. This plan still uses
     `v0.71.1` source references because that is the version locked by the repo.
   - Upstream tag used: `badlogic/pi-mono` `v0.71.1`.

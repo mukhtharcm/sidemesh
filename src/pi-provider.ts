@@ -16,7 +16,7 @@ import {
   type AgentSessionServices,
   type ResourceDiagnostic,
   type Skill as PiSkill,
-} from "@mariozechner/pi-coding-agent";
+} from "@earendil-works/pi-coding-agent";
 
 import { mergeActivity, normalizeStoredSessionActivity } from "./activity.js";
 import {
