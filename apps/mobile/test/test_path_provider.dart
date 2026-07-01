@@ -1,11 +1,13 @@
 import 'dart:io';
+import 'dart:isolate';
 
 import 'package:path_provider_platform_interface/path_provider_platform_interface.dart';
 import 'package:plugin_platform_interface/plugin_platform_interface.dart';
+import 'package:sidemesh_mobile/src/db.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
 final Directory _testSupportDirectory = Directory(
-  '${Directory.systemTemp.path}/sidemesh_test_$pid',
+  '${Directory.systemTemp.path}/sidemesh_test_${pid}_${Isolate.current.hashCode}',
 );
 
 class TestPathProvider extends PathProviderPlatform
@@ -30,5 +32,6 @@ Future<void> configureTestDatabaseFactory() async {
   databaseFactory = databaseFactoryFfiNoIsolate;
   await _testSupportDirectory.create(recursive: true);
   await databaseFactory.setDatabasesPath(_testSupportDirectory.path);
+  SidemeshDb.useConfiguredFfiFactoryForTest();
   PathProviderPlatform.instance = TestPathProvider();
 }

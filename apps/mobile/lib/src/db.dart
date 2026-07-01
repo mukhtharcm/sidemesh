@@ -46,6 +46,10 @@ class SidemeshDb {
     }
   }
 
+  static void useConfiguredFfiFactoryForTest() {
+    _ffiInitialized = true;
+  }
+
   static Future<Database> _open() async {
     _ensureFfiIfNeeded();
     final dbPath = await _resolveDbPath();

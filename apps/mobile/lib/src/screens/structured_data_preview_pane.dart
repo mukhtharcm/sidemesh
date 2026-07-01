@@ -500,43 +500,46 @@ class _StructuredBranchTile extends StatelessWidget {
     final colors = context.colors;
     return Theme(
       data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
-      child: ExpansionTile(
-        tilePadding: EdgeInsets.fromLTRB(
-          _rowInset(depth, dense),
-          dense ? 6 : 8,
-          12,
-          dense ? 6 : 8,
-        ),
-        childrenPadding: EdgeInsets.only(bottom: dense ? 4 : 6),
-        visualDensity: VisualDensity.compact,
-        iconColor: colors.textSecondary,
-        collapsedIconColor: colors.textSecondary,
-        title: Row(
-          children: [
-            Expanded(
-              child: Text(
-                label,
-                style: Theme.of(context).textTheme.labelLarge?.copyWith(
-                  color: colors.textPrimary,
-                  fontWeight: AppWeights.emphasis,
+      child: Material(
+        type: MaterialType.transparency,
+        child: ExpansionTile(
+          tilePadding: EdgeInsets.fromLTRB(
+            _rowInset(depth, dense),
+            dense ? 6 : 8,
+            12,
+            dense ? 6 : 8,
+          ),
+          childrenPadding: EdgeInsets.only(bottom: dense ? 4 : 6),
+          visualDensity: VisualDensity.compact,
+          iconColor: colors.textSecondary,
+          collapsedIconColor: colors.textSecondary,
+          title: Row(
+            children: [
+              Expanded(
+                child: Text(
+                  label,
+                  style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                    color: colors.textPrimary,
+                    fontWeight: AppWeights.emphasis,
+                  ),
                 ),
               ),
+              const SizedBox(width: 8),
+              _StructuredTypeChip(label: _nodeKindLabel(node)),
+            ],
+          ),
+          subtitle: Text(
+            _nodeSummary(node),
+            style: monoStyle(color: colors.textSecondary, fontSize: 10.5),
+          ),
+          children: [
+            _StructuredChildList(
+              children: _childrenForNode(node),
+              depth: depth + 1,
+              dense: dense,
             ),
-            const SizedBox(width: 8),
-            _StructuredTypeChip(label: _nodeKindLabel(node)),
           ],
         ),
-        subtitle: Text(
-          _nodeSummary(node),
-          style: monoStyle(color: colors.textSecondary, fontSize: 10.5),
-        ),
-        children: [
-          _StructuredChildList(
-            children: _childrenForNode(node),
-            depth: depth + 1,
-            dense: dense,
-          ),
-        ],
       ),
     );
   }
