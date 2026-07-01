@@ -876,7 +876,7 @@ export class CopilotAgentProvider
           session.copilotSessionId ?? session.thread.id,
           {
             ...config,
-            disableResume: true,
+            suppressResumeEvent: true,
           },
         )
       : await client.createSession({
@@ -1986,7 +1986,7 @@ export class CopilotAgentProvider
       await this.ensureSdkClient()
     ).resumeSession(sessionId, {
       ...this.buildSdkSessionConfig(state),
-      disableResume: true,
+      suppressResumeEvent: true,
     });
     state.sdkSession = sdkSession;
     const events = await sdkSession.getMessages?.();
@@ -3196,7 +3196,8 @@ function sdkSessionToThread(
   local: CopilotSessionState | null | undefined,
   includeTurns: boolean,
 ): ThreadRecord {
-  const cwd = session.context?.cwd ?? local?.thread.cwd ?? process.cwd();
+  const cwd =
+    session.context?.workingDirectory ?? local?.thread.cwd ?? process.cwd();
   return {
     id: session.sessionId,
     name: local?.thread.name ?? session.summary ?? null,

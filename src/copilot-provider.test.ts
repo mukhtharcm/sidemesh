@@ -37,7 +37,7 @@ describe("Copilot provider", () => {
               summary: "SDK Copilot Session",
               isRemote: false,
               context: {
-                cwd: dir,
+                workingDirectory: dir,
                 repository: "your-org/sidemesh",
                 branch: "main",
               },
@@ -1362,7 +1362,7 @@ describe("Copilot provider", () => {
               modifiedTime: new Date("2026-04-01T00:05:00.000Z"),
               summary: "History session",
               isRemote: false,
-              context: { cwd: dir },
+              context: { workingDirectory: dir },
             },
             events: [
               event("tool.execution_start", {
@@ -1969,7 +1969,7 @@ class FakeCopilotSdkClient implements CopilotSdkClient {
       startTime: new Date(),
       modifiedTime: new Date(),
       isRemote: false,
-      context: { cwd: config.workingDirectory ?? process.cwd() },
+      context: { workingDirectory: config.workingDirectory ?? process.cwd() },
     });
     this.created.push({ config, session });
     this.sessions.set(session.sessionId, session);
@@ -2135,6 +2135,7 @@ class FakeCopilotSdkSession implements CopilotSdkSession {
         }
       | undefined;
     if (options.prompt.includes("approval")) {
+      assert.ok(this.config.onPermissionRequest);
       const result = await this.config.onPermissionRequest(
         {
           kind: "shell",

@@ -111,6 +111,7 @@ type AcpxUserContent = Array<
   | { Text: string }
   | { Mention: { uri: string; content: string } }
   | { Image: { source: string } }
+  | { Audio: { data?: string; mimeType?: string; mime_type?: string } }
 >;
 
 const require = createRequire(import.meta.url);
@@ -1540,6 +1541,10 @@ function userContentText(content: AcpxUserContent): string {
       if ("Text" in entry) return entry.Text;
       if ("Mention" in entry) return `${entry.Mention.uri}\n${entry.Mention.content}`;
       if ("Image" in entry) return `[image: ${entry.Image.source}]`;
+      if ("Audio" in entry) {
+        const mimeType = entry.Audio.mimeType ?? entry.Audio.mime_type;
+        return mimeType ? `[audio: ${mimeType}]` : "[audio]";
+      }
       return "";
     })
     .filter(Boolean)
