@@ -57,10 +57,9 @@ class HostStore {
   }) => FlutterSecureStorage(
     aOptions: AndroidOptions(),
     iOptions: IOSOptions(accessibility: KeychainAccessibility.first_unlock),
-    // Dev builds stay on the legacy file-based keychain because ad-hoc-signed
-    // apps do not carry the app identifier entitlement that the Data
-    // Protection Keychain expects. Signed prod releases opt into Data
-    // Protection via a build-time dart-define and dedicated packaging step.
+    // Developer ID release builds stay on the regular keychain. macOS rejects
+    // GUI launch when a Developer ID app claims restricted app-id/team-id
+    // entitlements for Data Protection Keychain without a provisioning profile.
     mOptions: MacOsOptions(
       accountName: _macOsKeychainService,
       usesDataProtectionKeychain: useDataProtectionKeyChain,
@@ -226,8 +225,8 @@ class HostStore {
     await prefs.setBool(_migrationDoneKey, true);
   }
 
-  /// One-shot migration from the legacy file-based macOS keychain into the
-  /// Data Protection Keychain used by signed prod release builds.
+  /// One-shot migration for explicitly opted-in macOS Data Protection Keychain
+  /// builds. Standard Developer ID releases do not enable this path.
   Future<void> _migrateMacOsDataProtectionTokensIfNeeded(
     SharedPreferences prefs,
   ) async {

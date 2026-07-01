@@ -230,7 +230,7 @@ The macOS workflow uses the same secret names as the other macOS apps in
   `Developer ID Application: Example (TEAMID)`.
 - `APPLE_ID`: Apple ID used for notarization.
 - `APP_SPECIFIC_PASSWORD`: app-specific password for the Apple ID.
-- `TEAM_ID`: Apple Developer Team ID.
+- `TEAM_ID`: Apple Developer Team ID for notarization only.
 - `SPARKLE_PUBLIC_ED_KEY`: Sparkle EdDSA public key embedded into the macOS
   app. This key is not secret, but the workflow reads it from Actions secrets
   so app updates stay disabled until update signing is configured.
@@ -241,6 +241,14 @@ Without signing secrets, the workflow still produces unsigned/ad-hoc artifacts
 for internal smoke testing. With signing secrets only, it produces signed
 artifacts. With signing and notary secrets, it notarizes and staples both the
 app and DMG.
+
+Developer ID packaging must sign with
+`apps/mobile/macos/Runner/Release.entitlements` directly. Do not inject
+`com.apple.application-identifier` or
+`com.apple.developer.team-identifier` into the app entitlements; `TEAM_ID`
+belongs only in the notarization step. macOS 26 launchd/AMFI rejects a
+Developer ID GUI app that claims those restricted entitlements without a
+matching provisioning profile.
 
 With signing secrets, notary secrets, and Sparkle secrets, the workflow also
 generates `appcast-prod.xml` from the signed/notarized ZIP and uploads it to the
