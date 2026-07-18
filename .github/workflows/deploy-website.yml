@@ -32,6 +32,8 @@ jobs:
         run: |
           cd web
           npm ci
+          npm run check
+          npm audit --audit-level=high
           npm run build
 
       - name: Deploy to Cloudflare Pages

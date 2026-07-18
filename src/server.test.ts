@@ -2,7 +2,14 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { EventEmitter } from "node:events";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import {
+  mkdir,
+  mkdtemp,
+  readFile,
+  realpath,
+  rm,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import nodePath from "node:path";
 import http from "node:http";
@@ -84,6 +91,7 @@ function makeConfig(
       options.recommendedMobileClientVersion ?? null,
     minimumMobileClientVersion: options.minimumMobileClientVersion ?? null,
     stateDir,
+    workspaceRoots: [],
     terminal: { enabled: false, shell: null, requirePty: false },
     browserPreview: { enabled: false, chromePath: null, maxPreviews: 8, idleTtlMs: 3_600_000, frameIntervalMs: 900, quality: 55 },
     configPath: nodePath.join(stateDir, "config.json"),
@@ -115,6 +123,7 @@ function makeInstallInfo(
 function request(options: http.RequestOptions & { body?: string }): Promise<{
   statusCode: number;
   body: unknown;
+  headers: http.IncomingHttpHeaders;
 }> {
   return new Promise((resolve, reject) => {
     const req = http.request(options, (res) => {
@@ -125,11 +134,13 @@ function request(options: http.RequestOptions & { body?: string }): Promise<{
           resolve({
             statusCode: res.statusCode ?? 0,
             body: data ? JSON.parse(data) : null,
+            headers: res.headers,
           });
         } catch {
           resolve({
             statusCode: res.statusCode ?? 0,
             body: data,
+            headers: res.headers,
           });
         }
       });
@@ -534,6 +545,19 @@ const NO_FILE_MENTION_CAPABILITIES: AgentProviderCapabilities = {
 class NoFileMentionProvider extends RestartableFakeProvider {
   public override readonly displayName = "No File Mention Provider";
   public override readonly capabilities = NO_FILE_MENTION_CAPABILITIES;
+}
+
+const LOCAL_IMAGE_FAKE_CAPABILITIES: AgentProviderCapabilities = {
+  ...RESTARTABLE_FAKE_CAPABILITIES,
+  input: {
+    ...RESTARTABLE_FAKE_CAPABILITIES.input,
+    localImage: true,
+  },
+};
+
+class LocalImageFakeProvider extends RestartableFakeProvider {
+  public override readonly displayName = "Local Image Fake Provider";
+  public override readonly capabilities = LOCAL_IMAGE_FAKE_CAPABILITIES;
 }
 
 class SlowReadFakeProvider extends RestartableFakeProvider {
@@ -1651,6 +1675,76 @@ describe("/healthz", () => {
     }
   });
 
+  it("returns 503 when an explicit provider health probe rejects", async () => {
+    const prototype = FakeAgentProvider.prototype as unknown as {
+      health?: () => Promise<boolean>;
+    };
+    const original = prototype.health;
+    prototype.health = async () => {
+      throw new Error("simulated health rejection");
+    };
+    const stateDir = await mkdtemp(nodePath.join(tmpdir(), "sidemesh-server-test-"));
+    try {
+      await withServer(makeConfig(stateDir), async (server) => {
+        const res = await request({
+          hostname: "127.0.0.1",
+          port: server.port,
+          path: "/healthz",
+          method: "GET",
+        });
+        assert.equal(res.statusCode, 503);
+        assert.equal((res.body as any).ok, false);
+      });
+    } finally {
+      if (original) {
+        prototype.health = original;
+      } else {
+        delete prototype.health;
+      }
+    }
+  });
+
+});
+
+describe("browser CORS", () => {
+  it("allows loopback browser origins", async () => {
+    const stateDir = await mkdtemp(nodePath.join(tmpdir(), "sidemesh-server-test-"));
+    await withServer(makeConfig(stateDir), async (server, config) => {
+      const res = await request({
+        hostname: "127.0.0.1",
+        port: server.port,
+        path: "/api/node",
+        method: "GET",
+        headers: {
+          Authorization: `Bearer ${config.token}`,
+          Origin: "http://localhost:3000",
+        },
+      });
+      assert.equal(res.statusCode, 200);
+      assert.equal(
+        res.headers["access-control-allow-origin"],
+        "http://localhost:3000",
+      );
+    });
+  });
+
+  it("does not authorize non-loopback browser origins", async () => {
+    const stateDir = await mkdtemp(nodePath.join(tmpdir(), "sidemesh-server-test-"));
+    await withServer(makeConfig(stateDir), async (server, config) => {
+      const res = await request({
+        hostname: "127.0.0.1",
+        port: server.port,
+        path: "/api/node",
+        method: "GET",
+        headers: {
+          Authorization: `Bearer ${config.token}`,
+          Origin: "https://attacker.example",
+        },
+      });
+      assert.equal(res.statusCode, 200);
+      assert.equal(res.headers["access-control-allow-origin"], undefined);
+    });
+  });
 });
 
 describe("session input item parsing", () => {
@@ -1659,7 +1753,7 @@ describe("session input item parsing", () => {
     await mkdir(nodePath.join(cwd, "src"), { recursive: true });
     await writeFile(nodePath.join(cwd, "README.md"), "readme\n", "utf8");
     await writeFile(nodePath.join(cwd, "package.json"), "{}\n", "utf8");
-    return cwd;
+    return realpath(cwd);
   }
 
   it("passes file input items through create and submit routes", async () => {
@@ -1939,7 +2033,10 @@ describe("session input item parsing", () => {
     if (process.platform === "win32") {
       return;
     }
-    const stateDir = await mkdtemp(nodePath.join(tmpdir(), "sidemesh-server-test-"));
+    // Darwin limits Unix-domain socket paths to roughly 104 bytes. Its
+    // TMPDIR is much longer than /tmp, so keep this fixture intentionally
+    // short while still placing the socket inside the workspace under test.
+    const stateDir = await mkdtemp(nodePath.join("/tmp", "sidemesh-server-test-"));
     const cwd = await prepareFileInputWorkspace(stateDir);
     const socketPath = nodePath.join(cwd, "agent.sock");
     const socketServer = createNetServer();
@@ -2037,6 +2134,34 @@ describe("session input item parsing", () => {
         body: JSON.stringify({
           cwd,
           input: [{ type: "file", path: outsidePath }],
+        }),
+      });
+      assert.equal(res.statusCode, 403);
+      assert.equal((res.body as any).error, "path is outside any workspace");
+      assert.equal(provider.lastCreateInput, null);
+    });
+  });
+
+  it("rejects local image inputs outside the session workspace", async () => {
+    const stateDir = await mkdtemp(nodePath.join(tmpdir(), "sidemesh-server-test-"));
+    const cwd = await prepareFileInputWorkspace(stateDir);
+    const outsidePath = nodePath.join(stateDir, "outside.png");
+    await writeFile(outsidePath, "outside\n", "utf8");
+    const provider = new LocalImageFakeProvider();
+    const runtime = makeCustomSingleProviderRuntime(provider);
+    await withServerRuntime(makeConfig(stateDir), runtime, async (server, config) => {
+      const res = await request({
+        hostname: "127.0.0.1",
+        port: server.port,
+        path: "/api/sessions/create",
+        method: "POST",
+        headers: {
+          Authorization: "Bearer " + config.token,
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          cwd,
+          input: [{ type: "localImage", path: outsidePath }],
         }),
       });
       assert.equal(res.statusCode, 403);

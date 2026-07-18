@@ -94,7 +94,9 @@ describe("detectInstallInfo", () => {
     assert.equal(info.updateSupported, false);
   });
 
-  it("detects an active Termux runit service as managed", async () => {
+  it("detects an active Termux runit service as managed", {
+    skip: process.platform !== "linux" && process.platform !== "android",
+  }, async () => {
     const dir = await mkdtemp(nodePath.join(tmpdir(), "sidemesh-install-test-"));
     const prefix = nodePath.join(dir, "prefix");
     const binDir = nodePath.join(prefix, "bin");

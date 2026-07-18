@@ -222,6 +222,7 @@ export interface NodeConfig {
   recommendedMobileClientVersion?: string | null;
   minimumMobileClientVersion?: string | null;
   stateDir: string;
+  workspaceRoots: string[];
   terminal: HostTerminalConfig;
   browserPreview: HostBrowserPreviewConfig;
   configPath: string;

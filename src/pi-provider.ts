@@ -1,7 +1,18 @@
 import { randomUUID } from "node:crypto";
 import { EventEmitter } from "node:events";
 import { constants as fsConstants } from "node:fs";
-import { access, mkdir, open, readFile, readdir, stat, writeFile } from "node:fs/promises";
+import {
+  access,
+  chmod,
+  mkdir,
+  open,
+  readFile,
+  readdir,
+  rename,
+  rm,
+  stat,
+  writeFile,
+} from "node:fs/promises";
 import { homedir } from "node:os";
 import nodePath from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
@@ -266,7 +277,8 @@ export class PiAgentProvider
   }
 
   public async start(): Promise<void> {
-    await mkdir(this.stateDir, { recursive: true });
+    await mkdir(this.stateDir, { recursive: true, mode: 0o700 });
+    await chmod(this.stateDir, 0o700);
     await this.loadState();
   }
 
@@ -1896,7 +1908,8 @@ export class PiAgentProvider
   }
 
   private async saveState(): Promise<void> {
-    await mkdir(this.stateDir, { recursive: true });
+    await mkdir(this.stateDir, { recursive: true, mode: 0o700 });
+    await chmod(this.stateDir, 0o700);
     const payload = {
       archivedSessionIds: [...this.archivedSessionIds],
       sessions: [...this.sessions.values()].map((session) => ({
@@ -1930,7 +1943,16 @@ export class PiAgentProvider
         })),
       })),
     };
-    await writeFile(this.statePath, JSON.stringify(payload, null, 2));
+    const tempPath = `${this.statePath}.${process.pid}.${randomUUID()}.tmp`;
+    try {
+      await writeFile(tempPath, JSON.stringify(payload, null, 2), {
+        encoding: "utf8",
+        mode: 0o600,
+      });
+      await rename(tempPath, this.statePath);
+    } finally {
+      await rm(tempPath, { force: true }).catch(() => {});
+    }
   }
 
   private async listPiSessionSummaries(): Promise<PiSessionSummary[]> {

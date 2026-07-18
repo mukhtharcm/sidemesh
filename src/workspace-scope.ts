@@ -1,5 +1,4 @@
 import { realpath, stat } from "node:fs/promises";
-import { homedir } from "node:os";
 import path from "node:path";
 
 import type { SessionSummary } from "./types.js";
@@ -114,22 +113,22 @@ function stringifyError(error: unknown): string {
 }
 
 /**
- * Collect the distinct cwds of all known sessions for use as workspace roots,
- * plus the user's home directory as an implicit default root so the filesystem
- * is browsable on a fresh daemon before any sessions have been created.
+ * Collect explicitly configured roots plus the distinct cwds of known sessions.
+ * No ambient directory is trusted implicitly: a fresh daemon without configured
+ * roots or sessions exposes no host filesystem paths.
  */
 export async function collectWorkspaceRoots(
   listSessions: () => Promise<SessionSummary[]>,
+  configuredRoots: string[] = [],
 ): Promise<string[]> {
   try {
     const sessions = await listSessions();
-    const roots = new Set<string>();
-    roots.add(homedir());
+    const roots = new Set<string>(configuredRoots);
     for (const session of sessions) {
       if (session.cwd) roots.add(session.cwd);
     }
     return [...roots];
   } catch {
-    return [homedir()];
+    return [...new Set(configuredRoots)];
   }
 }

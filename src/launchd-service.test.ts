@@ -25,6 +25,7 @@ describe("launchd service rendering", () => {
       defaultProviderKind: "codex",
       updateChannel: "stable",
       stateDir: "/Users/example/.sidemesh",
+      workspaceRoots: [],
       terminal: { enabled: true, shell: "/bin/zsh", requirePty: false },
       browserPreview: {
         enabled: true,
@@ -105,6 +106,7 @@ describe("launchd service rendering", () => {
       defaultProviderKind: "codex",
       updateChannel: "stable",
       stateDir: "/Users/example/.sidemesh",
+      workspaceRoots: [],
       terminal: { enabled: true, shell: "/bin/zsh", requirePty: false },
       browserPreview: {
         enabled: true,

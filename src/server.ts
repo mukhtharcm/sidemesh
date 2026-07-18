@@ -1,9 +1,16 @@
 import { createServer } from "node:http";
 import type { Server } from "node:http";
 import { homedir, hostname, platform } from "node:os";
-import { createHash, randomUUID } from "node:crypto";
+import { createHash, randomUUID, timingSafeEqual } from "node:crypto";
 import { spawn } from "node:child_process";
-import { mkdir, readFile, rename, stat, writeFile } from "node:fs/promises";
+import {
+  chmod,
+  mkdir,
+  readFile,
+  rename,
+  stat,
+  writeFile,
+} from "node:fs/promises";
 import nodePath from "node:path";
 
 import { getRequestListener } from "@hono/node-server";
@@ -229,6 +236,8 @@ export async function startServer(
     ...DEFAULT_START_SERVER_DEPENDENCIES,
     ...dependencyOverrides,
   } satisfies StartServerDependencies;
+  await mkdir(config.stateDir, { recursive: true, mode: 0o700 });
+  await chmod(config.stateDir, 0o700);
   let runtimeConfig = config;
   const providerRuntime = prebuiltRuntime ?? createAgentProviderRuntime(config);
   const provider = providerRuntime.provider;
@@ -383,7 +392,13 @@ export async function startServer(
     shell: normalizeTerminalShell(config.terminal.shell),
     requirePty: config.terminal.requirePty,
     resolveCwd: (cwd, request) =>
-      resolveTerminalCwd(provider, runtimeCache, cwd, request.sessionId),
+      resolveTerminalCwd(
+        provider,
+        runtimeCache,
+        cwd,
+        request.sessionId,
+        config.workspaceRoots,
+      ),
   });
   const browserPreviewRegistry = new BrowserPreviewRegistry({
     enabled: hostCapabilities.workspace.browserPreview,
@@ -1356,7 +1371,15 @@ export async function startServer(
     },
     xFrameOptions: "DENY",
   }));
-  app.use("*", cors());
+  app.use("*", cors({
+    origin: (origin) => (isAllowedBrowserOrigin(origin) ? origin : null),
+    allowHeaders: ["Authorization", "Content-Type", "Range"],
+    exposeHeaders: [
+      "Accept-Ranges",
+      "Content-Length",
+      "Content-Range",
+    ],
+  }));
   // Compress large JSON responses while skipping already-compressed content
   // types (images, video) and the unauthenticated health-check endpoint.
   const compressionMiddleware = compress();
@@ -1375,17 +1398,7 @@ export async function startServer(
   }));
 
   app.get("/healthz", jsonRoute(async (_request, response) => {
-    const probe = provider.health
-      ? provider.health()
-      : provider.getVersion().then(() => true).catch(() => false);
-    let timer: NodeJS.Timeout | null = null;
-    const providerHealthy = await Promise.race([
-      probe,
-      new Promise<boolean>((resolve) => {
-        timer = setTimeout(() => resolve(false), 3_000);
-      }),
-    ]);
-    if (timer) clearTimeout(timer);
+    const providerHealthy = await probeProviderHealth(provider, 3_000);
     if (providerHealthy) {
       response.json({ ok: true, label: config.label });
       return;
@@ -1404,7 +1417,7 @@ export async function startServer(
     }
     const auth = c.req.header("Authorization") ?? "";
     const token = auth.startsWith("Bearer ") ? auth.slice("Bearer ".length) : "";
-    if (token !== config.token) {
+    if (!secretsEqual(token, config.token)) {
       throw new HTTPException(401, { message: "unauthorized" });
     }
     await next();
@@ -1794,15 +1807,16 @@ export async function startServer(
   );
 
   registerFsRoutes(app, {
-        listSessions: () =>
-          listSessions(
-            provider,
-            runtimeCache,
-            null,
-            "none",
-            sessionStatusOverrideForDisplay,
-          ),
+    listSessions: () =>
+      listSessions(
+        provider,
+        runtimeCache,
+        null,
+        "none",
+        sessionStatusOverrideForDisplay,
+      ),
     getSessionCwd,
+    workspaceRoots: config.workspaceRoots,
   });
 
   app.get("/api/terminals", jsonRoute((_request, response) => {
@@ -3137,7 +3151,11 @@ export async function startServer(
     }),
   );
 
-  const wsServer = new WebSocketServer({ noServer: true });
+  const wsServer = new WebSocketServer({
+    noServer: true,
+    maxPayload: 1024 * 1024,
+    perMessageDeflate: false,
+  });
   server.on("upgrade", (request, socket, head) => {
     const [pathOnly, queryString] = (request.url || "").split("?");
     const terminalLiveMatch = /^\/api\/terminals\/([^/]+)\/live$/.exec(
@@ -3161,7 +3179,7 @@ export async function startServer(
     const token = authHeader?.startsWith("Bearer ")
       ? authHeader.slice("Bearer ".length)
       : "";
-    if (token !== config.token) {
+    if (!secretsEqual(token, config.token)) {
       socket.destroy();
       return;
     }
@@ -3203,6 +3221,7 @@ export async function startServer(
             ),
           getSessionCwd,
           sessionId: params.get("sessionId"),
+          workspaceRoots: config.workspaceRoots,
         });
       });
       return;
@@ -3256,9 +3275,9 @@ export async function startServer(
       return;
     }
 
-    const params = new URLSearchParams(queryString || "");
-    const sessionId = params.get("sessionId");
-    if (!sessionId) {
+      const params = new URLSearchParams(queryString || "");
+      const sessionId = params.get("sessionId");
+      if (!sessionId || sessionId.length > 1024) {
       socket.destroy();
       return;
     }
@@ -3308,7 +3327,7 @@ export async function startServer(
   await listen(server, config.port);
 
   // Open search index and warm all provider indexes in the background
-  searchIndex.open().then(async () => {
+  const searchIndexBackfill = searchIndex.open().then(async () => {
     searchIndex.setBackfillRunning(true);
     let totalIndexed = 0;
     let totalRemoved = 0;
@@ -3379,7 +3398,8 @@ export async function startServer(
 
     searchIndex.setBackfillRunning(false);
     return { indexed: totalIndexed, removed: totalRemoved };
-  }).then((result) => {
+  });
+  void searchIndexBackfill.then((result) => {
     if (result.indexed > 0 || result.removed > 0) {
       console.log(`Search index caught up: ${result.indexed} indexed, ${result.removed} removed`);
     }
@@ -3402,30 +3422,35 @@ export async function startServer(
   const HEALTH_MONITOR_INTERVAL_MS = 30_000;
   const HEALTH_MONITOR_MAX_FAILURES = 3;
   let healthFailures = 0;
-  const healthMonitor = setInterval(async () => {
-    const probe = provider.health
-      ? provider.health()
-      : provider.getVersion().then(() => true).catch(() => false);
-    const healthy = await Promise.race([
-      probe,
-      new Promise<boolean>((resolve) =>
-        setTimeout(() => resolve(false), 5_000),
-      ),
-    ]);
+  let healthMonitor: NodeJS.Timeout | null = null;
+  let healthMonitorStopped = false;
+  const runHealthMonitor = async (): Promise<void> => {
+    const healthy = await probeProviderHealth(provider, 5_000);
     if (healthy) {
       healthFailures = 0;
-      return;
+    } else {
+      healthFailures++;
+      console.error(
+        `Health monitor: provider unhealthy (${healthFailures}/${HEALTH_MONITOR_MAX_FAILURES})`,
+      );
+      if (healthFailures >= HEALTH_MONITOR_MAX_FAILURES) {
+        console.error("Health monitor: exiting due to persistent provider failure");
+        await runningServerRef!.close();
+        dependencies.exitProcess(1);
+        return;
+      }
     }
-    healthFailures++;
-    console.error(
-      `Health monitor: provider unhealthy (${healthFailures}/${HEALTH_MONITOR_MAX_FAILURES})`,
-    );
-    if (healthFailures >= HEALTH_MONITOR_MAX_FAILURES) {
-      console.error("Health monitor: exiting due to persistent provider failure");
-      await runningServerRef!.close();
-      dependencies.exitProcess(1);
+    if (!healthMonitorStopped) {
+      healthMonitor = setTimeout(
+        () => void runHealthMonitor(),
+        HEALTH_MONITOR_INTERVAL_MS,
+      );
     }
-  }, HEALTH_MONITOR_INTERVAL_MS);
+  };
+  healthMonitor = setTimeout(
+    () => void runHealthMonitor(),
+    HEALTH_MONITOR_INTERVAL_MS,
+  );
 
   const boundAddress = server.address();
   const boundPort = typeof boundAddress === "string" ? 0 : (boundAddress?.port ?? 0);
@@ -3433,7 +3458,8 @@ export async function startServer(
   runningServerRef = {
     port: boundPort,
     close: async () => {
-      clearInterval(healthMonitor);
+      healthMonitorStopped = true;
+      if (healthMonitor) clearTimeout(healthMonitor);
       terminalRegistry.dispose();
       await browserPreviewRegistry.dispose();
       for (const socket of approvalSockets) socket.close();
@@ -3443,6 +3469,8 @@ export async function startServer(
       }
       await closeWebSocketServer(wsServer);
       await closeHttpServer(server);
+      await searchIndexBackfill.catch(() => undefined);
+      await searchIndex.close();
       await sessionRuntimeSignalsSaveChain.catch(() => undefined);
       await provider.close?.();
     },
@@ -3472,6 +3500,52 @@ async function listen(server: Server, port: number): Promise<void> {
     server.once("listening", onListening);
     server.listen(port);
   });
+}
+
+async function probeProviderHealth(
+  provider: AgentProvider,
+  timeoutMs: number,
+): Promise<boolean> {
+  let timer: NodeJS.Timeout | null = null;
+  try {
+    const probe = Promise.resolve()
+      .then(() =>
+        provider.health
+          ? provider.health()
+          : provider.getVersion().then(() => true),
+      )
+      .catch(() => false);
+    return await Promise.race([
+      probe,
+      new Promise<boolean>((resolve) => {
+        timer = setTimeout(() => resolve(false), timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
+function secretsEqual(candidate: string, expected: string): boolean {
+  const candidateDigest = createHash("sha256").update(candidate).digest();
+  const expectedDigest = createHash("sha256").update(expected).digest();
+  return timingSafeEqual(candidateDigest, expectedDigest);
+}
+
+function isAllowedBrowserOrigin(origin: string): boolean {
+  try {
+    const parsed = new URL(origin);
+    const hostname = parsed.hostname.replace(/^\[|\]$/g, "").toLowerCase();
+    return (
+      (parsed.protocol === "http:" || parsed.protocol === "https:") &&
+      (hostname === "localhost" ||
+        hostname === "127.0.0.1" ||
+        hostname === "::1" ||
+        hostname.endsWith(".localhost"))
+    );
+  } catch {
+    return false;
+  }
 }
 
 async function closeHttpServer(server: Server): Promise<void> {
@@ -3649,6 +3723,7 @@ async function resolveTerminalCwd(
   runtimeCache: Map<string, SessionRuntimeCacheEntry>,
   cwd: string,
   sessionId: string | null | undefined,
+  configuredRoots: string[],
 ): Promise<string> {
   if (sessionId?.trim() && hasProviderMethod(provider, "readSessionThread")) {
     try {
@@ -3663,8 +3738,9 @@ async function resolveTerminalCwd(
   }
   return resolveWorkspacePath(
     cwd,
-    await collectWorkspaceRoots(() =>
-      listSessions(provider, runtimeCache, null, "none"),
+    await collectWorkspaceRoots(
+      () => listSessions(provider, runtimeCache, null, "none"),
+      configuredRoots,
     ),
   );
 }
@@ -5343,8 +5419,12 @@ function parseInputItems(value: unknown): AgentSessionInputItem[] {
   return items;
 }
 
-function hasFileInputItem(input: AgentSessionInputItem[]): boolean {
-  return input.some((item) => item.type === "file");
+const LOCAL_IMAGE_MAX_BYTES = 10 * 1024 * 1024;
+
+function hasLocalPathInputItem(input: AgentSessionInputItem[]): boolean {
+  return input.some(
+    (item) => item.type === "file" || item.type === "localImage",
+  );
 }
 
 async function resolveFileInputItemsForSession(
@@ -5352,7 +5432,7 @@ async function resolveFileInputItemsForSession(
   sessionId: string,
   input: AgentSessionInputItem[],
 ): Promise<AgentSessionInputItem[]> {
-  if (!hasFileInputItem(input)) {
+  if (!hasLocalPathInputItem(input)) {
     return input;
   }
   const thread = await readSession(provider, sessionId, false);
@@ -5369,13 +5449,13 @@ async function resolveFileInputItemsForCwd(
   input: AgentSessionInputItem[],
   cwd: string,
 ): Promise<AgentSessionInputItem[]> {
-  if (!hasFileInputItem(input)) {
+  if (!hasLocalPathInputItem(input)) {
     return input;
   }
   const workspaceRoot = nodePath.resolve(cwd);
   return Promise.all(
     input.map(async (item): Promise<AgentSessionInputItem> => {
-      if (item.type !== "file") {
+      if (item.type !== "file" && item.type !== "localImage") {
         return item;
       }
       const candidate = nodePath.isAbsolute(item.path)
@@ -5383,6 +5463,21 @@ async function resolveFileInputItemsForCwd(
         : nodePath.resolve(workspaceRoot, item.path);
       const path = await resolveWorkspacePath(candidate, [workspaceRoot]);
       const info = await stat(path);
+      if (item.type === "localImage") {
+        if (!info.isFile()) {
+          throw new WorkspaceAccessError(
+            "local image path must be a regular file",
+            400,
+          );
+        }
+        if (info.size > LOCAL_IMAGE_MAX_BYTES) {
+          throw new WorkspaceAccessError(
+            "local image exceeds 10 MiB",
+            413,
+          );
+        }
+        return { type: "localImage", path };
+      }
       if (!info.isFile() && !info.isDirectory()) {
         throw new WorkspaceAccessError(
           "file mention path must be a regular file or directory",

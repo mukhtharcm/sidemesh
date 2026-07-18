@@ -33,11 +33,12 @@ export function supportsSystemdServiceManagement(
 
 export function supportsTermuxServiceManagement(
   env: HostEnvironment = process.env,
+  platform: NodeJS.Platform = process.platform,
 ): boolean {
   const prefix = resolveTermuxPrefix(env);
   const serviceEnv = withPrependedPathEntry(env, nodePath.join(prefix, "bin"));
   return (
-    isTermuxRuntimePlatform() &&
+    isTermuxRuntimePlatform(platform) &&
     isTermuxEnvironment(env) &&
     resolveExecutableSync("sv", serviceEnv) !== null &&
     resolveExecutableSync("service-daemon", serviceEnv) !== null &&
@@ -71,7 +72,9 @@ export function resolvePreferredShell(
                 "/data/data/com.termux/files/usr/bin/sh",
               ]
             : []),
-          normalizeShellCandidate(readUserShell()),
+          ...(env === process.env
+            ? [normalizeShellCandidate(readUserShell())]
+            : []),
           "/bin/bash",
           "/usr/bin/bash",
           "/bin/zsh",

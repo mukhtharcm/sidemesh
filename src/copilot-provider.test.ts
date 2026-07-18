@@ -777,7 +777,7 @@ describe("Copilot provider", () => {
     );
     const originalFetch = globalThis.fetch;
     globalThis.fetch = async (input: string | URL | Request) => {
-      assert.equal(String(input), "https://example.com/cat.png");
+      assert.equal(String(input), "https://93.184.216.34/cat.png");
       return new Response(Uint8Array.from([1, 2, 3]), {
         status: 200,
         headers: { "content-type": "image/png; charset=binary" },
@@ -792,18 +792,21 @@ describe("Copilot provider", () => {
       await provider.start();
 
       const completed = waitForTurnCompleted(provider);
-      await provider.createSession({
+      const created = await provider.createSession({
         cwd: dir,
-        input: [{ type: "image", url: "https://example.com/cat.png" }],
+        input: [{ type: "image", url: "https://93.184.216.34/cat.png" }],
         overrides: emptyOverrides(),
       });
       await completed;
 
-      assert.equal(
-        sdk.created[0]?.session.sent[0]?.prompt,
-        "Please inspect the attached image.",
-      );
-      assert.deepEqual(sdk.created[0]?.session.sent[0]?.attachments, [
+      const sent = sdk.created[0]?.session.sent[0];
+      if (!sent) {
+        const thread = await provider.readSessionThread!(created.thread.id, true);
+        const log = await provider.readSessionLog!(thread);
+        assert.fail(log.messages.at(-1)?.text ?? "Copilot image turn did not send");
+      }
+      assert.equal(sent.prompt, "Please inspect the attached image.");
+      assert.deepEqual(sent.attachments, [
         {
           type: "blob",
           data: "AQID",
@@ -811,6 +814,139 @@ describe("Copilot provider", () => {
           displayName: "cat.png",
         },
       ]);
+    } finally {
+      globalThis.fetch = originalFetch;
+      await settleProviderWrites();
+      await rm(dir, {
+        recursive: true,
+        force: true,
+        maxRetries: 5,
+        retryDelay: 50,
+      });
+    }
+  });
+
+  it("rejects loopback remote image URLs before fetching", async () => {
+    const dir = await mkdtemp(
+      nodePath.join(tmpdir(), "sidemesh-copilot-private-image-"),
+    );
+    const originalFetch = globalThis.fetch;
+    let fetchCalled = false;
+    globalThis.fetch = async () => {
+      fetchCalled = true;
+      return new Response(Uint8Array.from([1, 2, 3]), {
+        headers: { "content-type": "image/png" },
+      });
+    };
+    try {
+      const sdk = new FakeCopilotSdkClient();
+      const provider = new CopilotAgentProvider({
+        stateDir: nodePath.join(dir, "state"),
+        sdkClientFactory: fakeSdkFactory(sdk),
+      });
+      await provider.start();
+
+      const completed = waitForTurnCompleted(provider);
+      const created = await provider.createSession({
+          cwd: dir,
+          input: [{ type: "image", url: "http://127.0.0.1/private.png" }],
+          overrides: emptyOverrides(),
+        });
+      await completed;
+      const thread = await provider.readSessionThread!(created.thread.id, true);
+      const log = await provider.readSessionLog!(thread);
+      assert.equal(thread.turns?.[0]?.status, "failed");
+      assert.match(log.messages.at(-1)?.text ?? "", /public network address/);
+      assert.equal(fetchCalled, false);
+    } finally {
+      globalThis.fetch = originalFetch;
+      await settleProviderWrites();
+      await rm(dir, {
+        recursive: true,
+        force: true,
+        maxRetries: 5,
+        retryDelay: 50,
+      });
+    }
+  });
+
+  it("rejects remote image redirects to loopback addresses", async () => {
+    const dir = await mkdtemp(
+      nodePath.join(tmpdir(), "sidemesh-copilot-image-redirect-"),
+    );
+    const originalFetch = globalThis.fetch;
+    let fetchCalls = 0;
+    globalThis.fetch = async () => {
+      fetchCalls += 1;
+      return new Response(null, {
+        status: 302,
+        headers: { location: "http://127.0.0.1/private.png" },
+      });
+    };
+    try {
+      const sdk = new FakeCopilotSdkClient();
+      const provider = new CopilotAgentProvider({
+        stateDir: nodePath.join(dir, "state"),
+        sdkClientFactory: fakeSdkFactory(sdk),
+      });
+      await provider.start();
+
+      const completed = waitForTurnCompleted(provider);
+      const created = await provider.createSession({
+          cwd: dir,
+          input: [{ type: "image", url: "https://93.184.216.34/cat.png" }],
+          overrides: emptyOverrides(),
+        });
+      await completed;
+      const thread = await provider.readSessionThread!(created.thread.id, true);
+      const log = await provider.readSessionLog!(thread);
+      assert.equal(thread.turns?.[0]?.status, "failed");
+      assert.match(log.messages.at(-1)?.text ?? "", /public network address/);
+      assert.equal(fetchCalls, 1);
+    } finally {
+      globalThis.fetch = originalFetch;
+      await settleProviderWrites();
+      await rm(dir, {
+        recursive: true,
+        force: true,
+        maxRetries: 5,
+        retryDelay: 50,
+      });
+    }
+  });
+
+  it("rejects oversized remote image responses before buffering", async () => {
+    const dir = await mkdtemp(
+      nodePath.join(tmpdir(), "sidemesh-copilot-large-image-"),
+    );
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async () =>
+      new Response(null, {
+        status: 200,
+        headers: {
+          "content-type": "image/png",
+          "content-length": String(10 * 1024 * 1024 + 1),
+        },
+      });
+    try {
+      const sdk = new FakeCopilotSdkClient();
+      const provider = new CopilotAgentProvider({
+        stateDir: nodePath.join(dir, "state"),
+        sdkClientFactory: fakeSdkFactory(sdk),
+      });
+      await provider.start();
+
+      const completed = waitForTurnCompleted(provider);
+      const created = await provider.createSession({
+          cwd: dir,
+          input: [{ type: "image", url: "https://93.184.216.34/cat.png" }],
+          overrides: emptyOverrides(),
+        });
+      await completed;
+      const thread = await provider.readSessionThread!(created.thread.id, true);
+      const log = await provider.readSessionLog!(thread);
+      assert.equal(thread.turns?.[0]?.status, "failed");
+      assert.match(log.messages.at(-1)?.text ?? "", /exceeds 10 MiB/);
     } finally {
       globalThis.fetch = originalFetch;
       await settleProviderWrites();

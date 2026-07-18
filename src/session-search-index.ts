@@ -1,5 +1,5 @@
 import { createReadStream } from "node:fs";
-import { access, readdir, stat } from "node:fs/promises";
+import { access, chmod, readdir, stat } from "node:fs/promises";
 import nodePath from "node:path";
 import readline from "node:readline";
 import { DatabaseSync } from "node:sqlite";
@@ -244,48 +244,59 @@ export class SessionSearchIndex {
       throw new Error(`State directory does not exist: ${parent}`);
     });
 
-    this.db = new DatabaseSync(this.dbPath);
+    const db = new DatabaseSync(this.dbPath);
+    await chmod(this.dbPath, 0o600);
 
-    // Schema version + metadata table
-    this.db.exec(`
-      CREATE TABLE IF NOT EXISTS session_search_meta (
-        key TEXT PRIMARY KEY,
-        value TEXT NOT NULL
-      );
-      CREATE TABLE IF NOT EXISTS session_search_documents (
-        session_id TEXT PRIMARY KEY,
-        provider_kind TEXT,
-        title TEXT,
-        preview TEXT,
-        cwd TEXT,
-        created_at INTEGER,
-        updated_at INTEGER,
-        archived INTEGER NOT NULL DEFAULT 0,
-        fingerprint TEXT NOT NULL,
-        indexed_at INTEGER NOT NULL
-      );
-      CREATE INDEX IF NOT EXISTS idx_search_documents_provider ON session_search_documents(provider_kind);
-      CREATE INDEX IF NOT EXISTS idx_search_documents_archived ON session_search_documents(archived);
-      CREATE INDEX IF NOT EXISTS idx_search_documents_updated_at ON session_search_documents(updated_at);
-      CREATE TABLE IF NOT EXISTS manifest (
-        rollout_path TEXT PRIMARY KEY,
-        size INTEGER NOT NULL,
-        mtime_ms INTEGER NOT NULL,
-        indexed_at INTEGER NOT NULL
-      );
-      CREATE TABLE IF NOT EXISTS session_manifest (
-        session_key TEXT PRIMARY KEY,
-        fingerprint TEXT NOT NULL,
-        indexed_at INTEGER NOT NULL
-      );
-      CREATE VIRTUAL TABLE IF NOT EXISTS session_fts USING fts5(
-        session_id UNINDEXED,
-        content,
-        tokenize = 'unicode61'
-      );
-    `);
+    try {
+      // Do not expose the database to request handlers until the complete
+      // schema exists. Startup intentionally opens the index in the
+      // background, so assigning this.db earlier creates a narrow race where
+      // getStats() can query tables that have not been created yet.
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS session_search_meta (
+          key TEXT PRIMARY KEY,
+          value TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS session_search_documents (
+          session_id TEXT PRIMARY KEY,
+          provider_kind TEXT,
+          title TEXT,
+          preview TEXT,
+          cwd TEXT,
+          created_at INTEGER,
+          updated_at INTEGER,
+          archived INTEGER NOT NULL DEFAULT 0,
+          fingerprint TEXT NOT NULL,
+          indexed_at INTEGER NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_search_documents_provider ON session_search_documents(provider_kind);
+        CREATE INDEX IF NOT EXISTS idx_search_documents_archived ON session_search_documents(archived);
+        CREATE INDEX IF NOT EXISTS idx_search_documents_updated_at ON session_search_documents(updated_at);
+        CREATE TABLE IF NOT EXISTS manifest (
+          rollout_path TEXT PRIMARY KEY,
+          size INTEGER NOT NULL,
+          mtime_ms INTEGER NOT NULL,
+          indexed_at INTEGER NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS session_manifest (
+          session_key TEXT PRIMARY KEY,
+          fingerprint TEXT NOT NULL,
+          indexed_at INTEGER NOT NULL
+        );
+        CREATE VIRTUAL TABLE IF NOT EXISTS session_fts USING fts5(
+          session_id UNINDEXED,
+          content,
+          tokenize = 'unicode61'
+        );
+      `);
 
-    this.migrate();
+      this.db = db;
+      this.migrate();
+    } catch (error) {
+      this.db = null;
+      db.close();
+      throw error;
+    }
   }
 
   private migrate(): void {

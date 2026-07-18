@@ -31,6 +31,7 @@ function createConfig(): NodeConfig {
     defaultProviderKind: "codex",
     updateChannel: "stable",
     stateDir: "/root/.sidemesh",
+    workspaceRoots: [],
     terminal: { enabled: true, shell: "/bin/zsh", requirePty: false },
     browserPreview: {
       enabled: true,
@@ -129,7 +130,9 @@ describe("termux service rendering", () => {
     assert.equal(await isServiceWrapperStale(paths, config), true);
   });
 
-  it("removes the runit down marker when starting an installed service", async () => {
+  it("removes the runit down marker when starting an installed service", {
+    skip: process.platform !== "linux" && process.platform !== "android",
+  }, async () => {
     const dir = await mkdtemp(
       nodePath.join(tmpdir(), "sidemesh-termux-service-test-"),
     );

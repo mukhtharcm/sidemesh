@@ -82,7 +82,7 @@ describe("host environment helpers", () => {
         PREFIX: prefix,
         TERMUX_VERSION: "0.118.1",
         PATH: "/usr/bin",
-      }),
+      }, "linux"),
       true,
     );
     assert.equal(resolveTermuxPrefix({ PREFIX: prefix }), prefix);

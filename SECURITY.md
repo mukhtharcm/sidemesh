@@ -51,9 +51,10 @@ SIDEMESH_TERMINAL=1 sidemesh daemon
 
 ## Reporting Issues
 
-For now, report security issues privately to the repository owner. Do not file
-public issues with tokens, hostnames, logs, screenshots, or private workspace
-paths.
+Report security issues privately through
+[GitHub Security Advisories](https://github.com/mukhtharcm/sidemesh/security/advisories/new).
+Do not file public issues with tokens, hostnames, logs, screenshots, or private
+workspace paths.
 
 ## Before Any Public Release
 
