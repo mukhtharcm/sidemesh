@@ -10,6 +10,7 @@ import {
   open,
   readdir,
   realpath,
+  rename,
   rm,
   stat,
   writeFile,
@@ -42,10 +43,14 @@ const WORKSPACE_ROOTS_TTL_MS = 5_000;
 interface FsRoutesOptions {
   listSessions: () => Promise<SessionSummary[]>;
   getSessionCwd?: (sessionId: string) => Promise<string | null>;
+  workspaceRoots?: string[];
 }
 
 export function registerFsRoutes(app: Hono<HonoServerEnv>, opts: FsRoutesOptions): void {
-  const fallbackResolveRoots = createWorkspaceRootsResolver(opts.listSessions);
+  const fallbackResolveRoots = createWorkspaceRootsResolver(
+    opts.listSessions,
+    opts.workspaceRoots,
+  );
 
   app.get(
     "/api/fs/list",
@@ -146,10 +151,18 @@ export function registerFsRoutes(app: Hono<HonoServerEnv>, opts: FsRoutesOptions
       opts,
       fallbackResolveRoots,
     );
-    const target = await resolveIncomingBlobPath(
-      request.query.path,
-      resolveRoots,
-    );
+    let target: string;
+    try {
+      target = await resolveIncomingBlobPath(request.query.path, resolveRoots);
+    } catch (error) {
+      if (error instanceof WorkspaceAccessError) {
+        return c.json(
+          { error: error.message },
+          error.status as 400 | 403,
+        );
+      }
+      throw error;
+    }
     const info = await stat(target);
     const range = parseByteRangeHeader(c.req.header("range"), info.size);
     c.header("Content-Type", guessMime(target));
@@ -208,7 +221,7 @@ export function registerFsRoutes(app: Hono<HonoServerEnv>, opts: FsRoutesOptions
         response.status(413).json({ error: "payload too large" });
         return;
       }
-      await writeFile(target, buffer);
+      await writeFileAtomically(target, buffer);
       clearFsSearchCache();
       response.json({ path: target, bytes: buffer.byteLength });
     }),
@@ -248,6 +261,7 @@ export function registerFsRoutes(app: Hono<HonoServerEnv>, opts: FsRoutesOptions
         request.body?.path,
         resolveRoots,
       );
+      await assertNotWorkspaceRoot(target, await resolveRoots());
       const recursive = request.body?.recursive !== false;
       const force = request.body?.force !== false;
       await rm(target, { recursive, force });
@@ -389,34 +403,43 @@ async function resolveIncomingBlobPath(
   raw: unknown,
   roots: () => Promise<string[]>,
 ): Promise<string> {
+  return resolveIncomingPath(raw, roots);
+}
+
+async function assertNotWorkspaceRoot(
+  target: string,
+  roots: string[],
+): Promise<void> {
+  const canonicalRoots = await Promise.all(
+    roots.map((root) => realpath(root).catch(() => null)),
+  );
+  if (canonicalRoots.includes(target)) {
+    throw new WorkspaceAccessError("cannot remove a workspace root");
+  }
+}
+
+async function writeFileAtomically(target: string, buffer: Buffer): Promise<void> {
+  let existingMode: number | undefined;
   try {
-    return await resolveIncomingPath(raw, roots);
+    existingMode = (await stat(target)).mode & 0o777;
   } catch (error) {
-    if (typeof raw !== "string" || !path.isAbsolute(raw)) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
       throw error;
     }
-
-    const canonical = await realpath(raw).catch((realpathError) => {
-      throw new WorkspaceAccessError(
-        `cannot resolve path: ${realpathError instanceof Error ? realpathError.message : String(realpathError)}`,
-      );
-    });
-    const info = await stat(canonical).catch((statError) => {
-      throw new WorkspaceAccessError(
-        `cannot stat path: ${statError instanceof Error ? statError.message : String(statError)}`,
-      );
-    });
-    if (!info.isFile()) {
-      throw new WorkspaceAccessError("path is not a regular file", 400);
-    }
-    if (!guessMime(canonical).startsWith("image/")) {
-      throw new WorkspaceAccessError(
-        "blob route only supports image files",
-        403,
-      );
-    }
-
-    return canonical;
+  }
+  const tempPath = path.join(
+    path.dirname(target),
+    `.${path.basename(target)}.${randomUUID()}.tmp`,
+  );
+  try {
+    await writeFile(
+      tempPath,
+      buffer,
+      existingMode === undefined ? undefined : { mode: existingMode },
+    );
+    await rename(tempPath, target);
+  } finally {
+    await rm(tempPath, { force: true }).catch(() => {});
   }
 }
 
@@ -426,7 +449,17 @@ function asyncRoute(
     response: JsonRouteResponse,
   ) => Promise<void>,
 ): ReturnType<typeof jsonRoute> {
-  return jsonRoute(handler);
+  return jsonRoute(async (request, response) => {
+    try {
+      await handler(request, response);
+    } catch (error) {
+      if (error instanceof WorkspaceAccessError) {
+        response.status(error.status).json({ error: error.message });
+        return;
+      }
+      throw error;
+    }
+  });
 }
 
 function asString(value: unknown): string | null {
@@ -532,6 +565,7 @@ export function attachFsLiveSocket(
     listSessions: () => Promise<SessionSummary[]>;
     getSessionCwd?: (sessionId: string) => Promise<string | null>;
     sessionId?: string | null;
+    workspaceRoots?: string[];
   },
 ): void {
   const resolveRoots = createSocketRootsResolver(opts);
@@ -594,6 +628,7 @@ export function attachWatchUpgrade(
   opts: {
     listSessions: () => Promise<SessionSummary[]>;
     getSessionCwd?: (sessionId: string) => Promise<string | null>;
+    workspaceRoots?: string[];
   },
 ) {
   return (
@@ -641,6 +676,7 @@ async function readFilePreview(target: string, size: number): Promise<Buffer> {
 
 function createWorkspaceRootsResolver(
   listSessions: () => Promise<SessionSummary[]>,
+  configuredRoots: string[] = [],
 ): () => Promise<string[]> {
   let expiresAt = 0;
   let promise: Promise<string[]> | null = null;
@@ -649,7 +685,9 @@ function createWorkspaceRootsResolver(
     if (promise && now < expiresAt) {
       return promise;
     }
-    promise = collectWorkspaceRoots(listSessions).catch(() => []);
+    promise = collectWorkspaceRoots(listSessions, configuredRoots).catch(
+      () => [...configuredRoots],
+    );
     expiresAt = now + WORKSPACE_ROOTS_TTL_MS;
     return promise;
   };
@@ -671,11 +709,12 @@ function createSocketRootsResolver(opts: {
   listSessions: () => Promise<SessionSummary[]>;
   getSessionCwd?: (sessionId: string) => Promise<string | null>;
   sessionId?: string | null;
+  workspaceRoots?: string[];
 }): () => Promise<string[]> {
   return createSessionScopedRootsResolver(
     opts.sessionId ?? null,
     opts.getSessionCwd,
-    createWorkspaceRootsResolver(opts.listSessions),
+    createWorkspaceRootsResolver(opts.listSessions, opts.workspaceRoots),
   );
 }
 
@@ -692,8 +731,16 @@ function createSessionScopedRootsResolver(
   let promise: Promise<string[]> | null = null;
   return async () => {
     promise ??= getSessionCwd(normalizedSessionId)
-      .then((cwd) => (cwd ? [cwd] : fallbackResolveRoots()))
-      .catch(() => fallbackResolveRoots());
+      .then((cwd) => {
+        if (!cwd) {
+          throw new WorkspaceAccessError("session workspace is unavailable");
+        }
+        return [cwd];
+      })
+      .catch((error: unknown) => {
+        if (error instanceof WorkspaceAccessError) throw error;
+        throw new WorkspaceAccessError("session workspace is unavailable");
+      });
     return promise;
   };
 }

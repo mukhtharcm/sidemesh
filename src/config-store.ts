@@ -126,6 +126,17 @@ const persistedNodeConfigSchema = z.object({
   recommendedMobileClientVersion: mobileClientVersionSchema.nullable().optional(),
   minimumMobileClientVersion: mobileClientVersionSchema.nullable().optional(),
   stateDir: z.string().trim().min(1).optional(),
+  workspaceRoots: z
+    .array(
+      z
+        .string()
+        .trim()
+        .min(1)
+        .refine((value) => nodePath.isAbsolute(value), {
+          message: "workspace roots must be absolute paths",
+        }),
+    )
+    .optional(),
   terminal: terminalConfigSchema.optional(),
   browserPreview: browserPreviewConfigSchema.optional(),
   defaultProviderKind: z
@@ -222,6 +233,7 @@ export function persistedConfigFromNodeConfig(
     recommendedMobileClientVersion: config.recommendedMobileClientVersion,
     minimumMobileClientVersion: config.minimumMobileClientVersion,
     stateDir: config.stateDir,
+    workspaceRoots: config.workspaceRoots,
     terminal: config.terminal,
     browserPreview: config.browserPreview,
     defaultProviderKind: config.defaultProviderKind,

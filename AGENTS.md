@@ -76,7 +76,7 @@ apps/mobile/lib/src/
 
 | Layer | Runtime / Language | Key Tools |
 |-------|------------------|-----------|
-| Daemon | Node.js 20+, TypeScript 6.x | `tsx`, `tsc`, `node:test` |
+| Daemon | Node.js 22.19+, TypeScript 6.x | `tsx`, `tsc`, `node:test` |
 | Client | Flutter 3.41.7 (stable), Dart | `flutter test`, `flutter analyze` |
 | Web | Vanilla HTML/JS | Cloudflare Pages |
 
@@ -250,7 +250,10 @@ specific agent provider.
   place without producing replayable deltas.
 - **Workspace sandboxing**: `resolveWorkspacePath` uses `realpath` and prefix
   match against workspace roots. `WorkspaceAccessError` extends `Error` with
-  a `status` field (default 403) that HTTP handlers can throw directly.
+  a `status` field (default 403) that HTTP handlers can throw directly. Roots
+  come from the explicit `workspaceRoots` config plus known session working
+  directories; unknown sessions fail closed, and the environment override is
+  the comma-separated `SIDEMESH_WORKSPACE_ROOTS` list.
 - **Terminal security**: `SIDEMESH_TOKEN` is deleted from env before spawning
   the shell; `SIDEMESH_TERMINAL_SESSION=1` is injected.
 - **Termux / Android PTY support**: keep `node-pty` optional. Do not

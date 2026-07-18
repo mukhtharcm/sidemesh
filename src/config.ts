@@ -1,6 +1,6 @@
 import { hostname, homedir } from "node:os";
 import { randomBytes } from "node:crypto";
-import { join } from "node:path";
+import { isAbsolute, join } from "node:path";
 
 import type {
   AgentProviderConfig,
@@ -60,6 +60,10 @@ export async function loadConfig(
     env.SIDEMESH_STATE_DIR?.trim() ||
     persisted.value?.stateDir ||
     join(homedir(), ".sidemesh");
+  const workspaceRoots = resolveWorkspaceRoots(
+    env.SIDEMESH_WORKSPACE_ROOTS,
+    persisted.value?.workspaceRoots ?? [],
+  );
   const port = parseInteger(
     env.SIDEMESH_PORT,
     persisted.value?.port ?? 8787,
@@ -116,6 +120,7 @@ export async function loadConfig(
     recommendedMobileClientVersion,
     minimumMobileClientVersion,
     stateDir,
+    workspaceRoots,
     terminal,
     browserPreview,
     configPath,
@@ -132,6 +137,23 @@ export async function loadConfig(
   }
 
   return config;
+}
+
+function resolveWorkspaceRoots(
+  environmentValue: string | undefined,
+  persistedRoots: string[],
+): string[] {
+  const roots = environmentValue?.trim()
+    ? environmentValue.split(",")
+    : persistedRoots;
+  const normalized = roots
+    .map((root) => root.trim())
+    .filter((root) => root.length > 0);
+  const invalid = normalized.find((root) => !isAbsolute(root));
+  if (invalid) {
+    throw new Error(`Workspace root must be an absolute path: ${invalid}`);
+  }
+  return [...new Set(normalized)];
 }
 
 export async function saveConfig(

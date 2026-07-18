@@ -22,6 +22,7 @@ class SidemeshDb {
 
   static Database? _db;
   static Future<Database>? _openingDb;
+  static String? _databaseDirectoryOverrideForTest;
 
   static Future<Database> get instance async {
     final db = _db;
@@ -46,8 +47,11 @@ class SidemeshDb {
     }
   }
 
-  static void useConfiguredFfiFactoryForTest() {
+  static void useConfiguredFfiFactoryForTest({
+    required String databaseDirectory,
+  }) {
     _ffiInitialized = true;
+    _databaseDirectoryOverrideForTest = databaseDirectory;
   }
 
   static Future<Database> _open() async {
@@ -102,12 +106,14 @@ class SidemeshDb {
   }
 
   static Future<String> _resolveDbPath() async {
-    final dir = Platform.isMacOS
-        ? (await getSidemeshApplicationSupportDirectory()).path
-        : await getDatabasesPath();
+    final databaseDirectoryOverride = _databaseDirectoryOverrideForTest;
+    final dir = databaseDirectoryOverride ??
+        (Platform.isMacOS
+            ? (await getSidemeshApplicationSupportDirectory()).path
+            : await getDatabasesPath());
     await Directory(dir).create(recursive: true);
     final dbPath = join(dir, 'sidemesh_v1.db');
-    if (Platform.isMacOS) {
+    if (Platform.isMacOS && databaseDirectoryOverride == null) {
       await _migrateLegacyMacosDatabaseIfNeeded(dbPath);
     }
     return dbPath;

@@ -11,8 +11,15 @@ import 'models.dart';
 import 'fs_models.dart';
 import 'usage_models.dart';
 
+const _defaultWriteRequestTimeout = Duration(seconds: 45);
+
 class ApiClient {
-  ApiClient({http.Client? client}) : _client = client ?? http.Client();
+  ApiClient({
+    http.Client? client,
+    Duration defaultWriteTimeout = _defaultWriteRequestTimeout,
+  }) : assert(defaultWriteTimeout > Duration.zero),
+       _client = client ?? http.Client(),
+       _defaultWriteTimeout = defaultWriteTimeout;
 
   static const Duration _quickReadTimeout = Duration(seconds: 6);
   static const Duration _standardReadTimeout = Duration(seconds: 12);
@@ -26,6 +33,7 @@ class ApiClient {
   static const Duration _backgroundWebSocketPingInterval = Duration(minutes: 1);
 
   final http.Client _client;
+  final Duration _defaultWriteTimeout;
 
   Future<NodeInfo> fetchNode(HostProfile host) async {
     final response = await _get(
@@ -224,16 +232,11 @@ class ApiClient {
     );
   }
 
-  Future<void> updateDaemon(
-    HostProfile host, {
-    String? updateChannel,
-  }) async {
+  Future<void> updateDaemon(HostProfile host, {String? updateChannel}) async {
     await _post(
       host,
       '/api/admin/update',
-      body: {
-        if ((updateChannel ?? '').isNotEmpty) 'channel': updateChannel,
-      },
+      body: {if ((updateChannel ?? '').isNotEmpty) 'channel': updateChannel},
       timeout: const Duration(seconds: 15),
       operation: 'update daemon',
     );
@@ -385,10 +388,7 @@ class ApiClient {
     return HostBrowserPreviewInfo.fromJson(_decodeObject(response));
   }
 
-  Future<void> stopBrowserPreview(
-    HostProfile host,
-    String previewId,
-  ) async {
+  Future<void> stopBrowserPreview(HostProfile host, String previewId) async {
     final response = await _delete(
       host,
       '/api/browser-previews/$previewId',
@@ -805,11 +805,7 @@ class ApiClient {
     final response = await _post(
       host,
       '/api/fs/search',
-      body: {
-        'query': query,
-        'sessionId': sessionId,
-        'limit': limit,
-      },
+      body: {'query': query, 'sessionId': sessionId, 'limit': limit},
       operation: 'search files',
     );
     final decoded = _decodeObject(response);
@@ -1000,17 +996,15 @@ class ApiClient {
     String? operation,
   }) {
     _ensureHostEnabled(host);
+    final resolvedTimeout = timeout ?? _defaultWriteTimeout;
     final request = _client.post(
       _uri(host, path),
       headers: _jsonHeaders(host),
       body: jsonEncode(body),
     );
-    if (timeout == null) {
-      return request;
-    }
     return _withTimeout(
       request,
-      timeout: timeout,
+      timeout: resolvedTimeout,
       operation: operation ?? 'send request',
     );
   }
@@ -1022,16 +1016,14 @@ class ApiClient {
     String? operation,
   }) {
     _ensureHostEnabled(host);
+    final resolvedTimeout = timeout ?? _defaultWriteTimeout;
     final request = _client.delete(
       _uri(host, path),
       headers: authHeaders(host),
     );
-    if (timeout == null) {
-      return request;
-    }
     return _withTimeout(
       request,
-      timeout: timeout,
+      timeout: resolvedTimeout,
       operation: operation ?? 'delete request',
     );
   }

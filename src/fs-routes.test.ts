@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { access, chmod, mkdtemp, rm, stat, writeFile } from "node:fs/promises";
 import { createServer, type Server } from "node:http";
 import { tmpdir } from "node:os";
 import nodePath from "node:path";
@@ -114,6 +114,66 @@ describe("filesystem routes", () => {
     }
   });
 
+  it("rejects blob reads outside the resolved workspace", async () => {
+    const root = await tempRoot(tempRoots);
+    const outsideRoot = await tempRoot(tempRoots);
+    const outsidePath = nodePath.join(outsideRoot, "secret.png");
+    await writeFile(outsidePath, Buffer.from("not really an image", "utf8"));
+    const app = testApp(root);
+    const server = await listen(app);
+    try {
+      const response = await fetch(
+        `${baseUrl(server)}/api/fs/blob?path=${encodeURIComponent(outsidePath)}`,
+      );
+      assert.equal(response.status, 403);
+      assert.deepEqual(await response.json(), {
+        error: "path is outside any workspace",
+      });
+    } finally {
+      await close(server);
+    }
+  });
+
+  it("rejects deletion of a workspace root", async () => {
+    const root = await tempRoot(tempRoots);
+    const app = testApp(root);
+    const server = await listen(app);
+    try {
+      const response = await fetch(`${baseUrl(server)}/api/fs/remove`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ path: root }),
+      });
+      assert.equal(response.status, 403);
+      assert.deepEqual(await response.json(), {
+        error: "cannot remove a workspace root",
+      });
+      await access(root);
+    } finally {
+      await close(server);
+    }
+  });
+
+  it("preserves an existing file's mode during atomic writes", async () => {
+    const root = await tempRoot(tempRoots);
+    const filePath = nodePath.join(root, "script.sh");
+    await writeFile(filePath, "old", "utf8");
+    await chmod(filePath, 0o755);
+    const app = testApp(root);
+    const server = await listen(app);
+    try {
+      const response = await fetch(`${baseUrl(server)}/api/fs/write`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ path: filePath, contents: "new" }),
+      });
+      assert.equal(response.status, 200);
+      assert.equal((await stat(filePath)).mode & 0o777, 0o755);
+    } finally {
+      await close(server);
+    }
+  });
+
   it("caches workspace roots across adjacent filesystem requests", async () => {
     const root = await tempRoot(tempRoots);
     await writeFile(nodePath.join(root, "a.txt"), "a", "utf8");
@@ -163,6 +223,32 @@ describe("filesystem routes", () => {
       assert.equal(response.status, 200);
       assert.equal(listCalls, 0);
       assert.equal(cwdCalls, 1);
+    } finally {
+      await close(server);
+    }
+  });
+
+  it("fails closed when a requested session has no workspace", async () => {
+    const root = await tempRoot(tempRoots);
+    let listCalls = 0;
+    const app = new Hono<HonoServerEnv>();
+    registerFsRoutes(app, {
+      listSessions: async () => {
+        listCalls += 1;
+        return [sessionForRoot(root)];
+      },
+      getSessionCwd: async () => null,
+    });
+    const server = await listen(app);
+    try {
+      const response = await fetch(
+        `${baseUrl(server)}/api/fs/list?path=${encodeURIComponent(root)}&sessionId=missing-session`,
+      );
+      assert.equal(response.status, 403);
+      assert.deepEqual(await response.json(), {
+        error: "session workspace is unavailable",
+      });
+      assert.equal(listCalls, 0);
     } finally {
       await close(server);
     }

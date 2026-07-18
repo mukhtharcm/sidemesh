@@ -61,13 +61,42 @@ jobs:
         working-directory: apps/mobile
         run: flutter pub get
 
-      - name: Run focused Flutter tests
+      - name: Run Flutter tests
         working-directory: apps/mobile
-        run: |
-          flutter test test/provider_metadata_models_test.dart
-          flutter test test/api_client_provider_scoping_test.dart
-          flutter test test/capability_ui_gates_test.dart
+        run: flutter test
 
       - name: Analyze Flutter app
         working-directory: apps/mobile
         run: flutter analyze
+
+  web:
+    name: Website checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    defaults:
+      run:
+        working-directory: web
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Check content and types
+        run: npm run check
+
+      - name: Security audit
+        run: npm audit --audit-level=high
+
+      - name: Build website
+        run: npm run build

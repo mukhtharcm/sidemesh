@@ -67,6 +67,7 @@ function makeMultiProviderConfig(): NodeConfig {
     defaultProviderKind: "copilot",
     updateChannel: "stable",
     stateDir: "/tmp/sidemesh-runtime-test",
+    workspaceRoots: [],
     terminal: { enabled: false, shell: null, requirePty: false },
     browserPreview: {
       enabled: false,

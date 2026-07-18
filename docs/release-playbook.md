@@ -200,17 +200,9 @@ Required GitHub Actions secrets:
 - `CLOUDFLARE_API_TOKEN`
 - `CLOUDFLARE_ACCOUNT_ID`
 
-The site now includes a Cloudflare Pages waitlist flow again. Production setup
-needs:
-
-- a `DB` D1 binding wired to a `waitlist` table
-- `TURNSTILE_SECRET` Pages secret if Turnstile should be enforced
-- `ADMIN_PASS` Pages secret for `/admin`
-- `PUBLIC_TURNSTILE_SITE_KEY` available at build time for the landing page form
-
-The deploy action publishes the built Astro site. Pages Functions are picked up
-from `web/functions/`, but the D1 binding and runtime secrets still need to be
-configured in the Cloudflare Pages project.
+The site is static and does not collect waitlist or analytics data. The deploy
+action publishes the built Astro site; there are no Pages Functions, runtime
+secrets, or database bindings to configure.
 
 Manual deploy:
 
@@ -230,7 +222,9 @@ The macOS workflow uses the same secret names as the other macOS apps in
   `Developer ID Application: Example (TEAMID)`.
 - `APPLE_ID`: Apple ID used for notarization.
 - `APP_SPECIFIC_PASSWORD`: app-specific password for the Apple ID.
-- `TEAM_ID`: Apple Developer Team ID for notarization only.
+- `TEAM_ID`: Apple Developer Team ID used by notarization. Do not inject it
+  into Developer ID app entitlements; macOS 26 rejects GUI launches when
+  restricted app-identifier entitlements are present without a matching profile.
 - `SPARKLE_PUBLIC_ED_KEY`: Sparkle EdDSA public key embedded into the macOS
   app. This key is not secret, but the workflow reads it from Actions secrets
   so app updates stay disabled until update signing is configured.

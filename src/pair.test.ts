@@ -20,6 +20,7 @@ describe("pairing helpers", () => {
       defaultProviderKind: "codex",
       updateChannel: "stable",
       stateDir: "/tmp/sidemesh",
+      workspaceRoots: [],
       terminal: { enabled: false, shell: null, requirePty: false },
       browserPreview: {
         enabled: false,

@@ -29,11 +29,11 @@ class HostProfile {
     );
   }
 
-  Map<String, dynamic> toJson() => {
+  Map<String, dynamic> toJson({bool includeToken = false}) => {
     'id': id,
     'label': label,
     'baseUrl': baseUrl,
-    'token': token,
+    if (includeToken) 'token': token,
     'enabled': enabled,
   };
 
@@ -610,11 +610,17 @@ class HostBrowserPreviewInfo {
 }
 
 class GitInfoSummary {
-  const GitInfoSummary({this.sha, this.branch, this.originUrl, this.gitCommonDir});
+  const GitInfoSummary({
+    this.sha,
+    this.branch,
+    this.originUrl,
+    this.gitCommonDir,
+  });
 
   final String? sha;
   final String? branch;
   final String? originUrl;
+
   /// Absolute path to the shared .git directory — same for all worktrees of
   /// the same repository. Use this to group sessions by project in the sidebar
   /// rather than by CWD basename, so worktree sessions stay with their repo.
@@ -777,10 +783,9 @@ class SessionSummary {
   }
 
   factory SessionSummary.fromJson(Map<String, dynamic> json) {
-    final subAgentJson =
-        json['subAgent'] is Map
-            ? (json['subAgent'] as Map).cast<String, dynamic>()
-            : null;
+    final subAgentJson = json['subAgent'] is Map
+        ? (json['subAgent'] as Map).cast<String, dynamic>()
+        : null;
     return SessionSummary(
       id: _stringValue(json['id']),
       title: _stringValue(json['title']),
@@ -800,10 +805,9 @@ class SessionSummary {
           ? GitInfoSummary.fromJson(json['gitInfo'] as Map<String, dynamic>)
           : null,
       isSubAgent: (json['isSubAgent'] as bool?) ?? (subAgentJson != null),
-      subAgent:
-          subAgentJson != null
-              ? SessionSubAgentInfo.fromJson(subAgentJson)
-              : null,
+      subAgent: subAgentJson != null
+          ? SessionSubAgentInfo.fromJson(subAgentJson)
+          : null,
       matchSnippet: json['matchSnippet'] as String?,
       matchRank: json['matchRank'] as num?,
     );
@@ -980,8 +984,9 @@ class SessionContextWindowSummary {
   final int? systemTokens;
   final int? toolDefinitionsTokens;
 
-  double? get usageFraction =>
-      tokenLimit <= 0 || currentTokens == null ? null : currentTokens! / tokenLimit;
+  double? get usageFraction => tokenLimit <= 0 || currentTokens == null
+      ? null
+      : currentTokens! / tokenLimit;
 
   factory SessionContextWindowSummary.fromJson(Map<String, dynamic> json) =>
       SessionContextWindowSummary(
@@ -1157,7 +1162,8 @@ const List<ProviderModeSummary> kDefaultProviderModes = <ProviderModeSummary>[
   ProviderModeSummary(
     id: 'interactive',
     label: 'Interactive',
-    description: 'Interactive keeps the agent conversational and approval-oriented.',
+    description:
+        'Interactive keeps the agent conversational and approval-oriented.',
   ),
   ProviderModeSummary(
     id: 'plan',
@@ -1263,6 +1269,7 @@ class SessionGitStatus {
   final bool isRepo;
   final String cwd;
   final String? repoRoot;
+
   /// The absolute path to the shared .git directory for this repository.
   /// Identical across every linked worktree of the same repo, making it a
   /// stable project identifier regardless of which worktree a session is in.
@@ -1744,9 +1751,8 @@ class SessionMessage {
       content: blocks,
       attachments: (json['attachments'] as List<dynamic>? ?? [])
           .map(
-            (item) => SessionMessageAttachment.fromJson(
-              item as Map<String, dynamic>,
-            ),
+            (item) =>
+                SessionMessageAttachment.fromJson(item as Map<String, dynamic>),
           )
           .toList(),
       createdAt: _dateValue(json['createdAt']),
@@ -1805,10 +1811,8 @@ class TextBlock extends ContentBlock {
 }
 
 class ThinkingBlock extends ContentBlock {
-  const ThinkingBlock(
-    this.thinking, {
-    this.summary = false,
-  }) : super('thinking');
+  const ThinkingBlock(this.thinking, {this.summary = false})
+    : super('thinking');
 
   final String thinking;
   final bool summary;
@@ -2764,18 +2768,17 @@ class SessionLog {
 
   factory SessionLog.fromJson(Map<String, dynamic> json) {
     final latestPlanUpdateJson = json['latestPlanUpdate'];
-    final latestPlanUpdate =
-        latestPlanUpdateJson is Map<String, dynamic>
-            ? LiveEvent.fromJson(latestPlanUpdateJson)
-            : latestPlanUpdateJson is Map<dynamic, dynamic>
-            ? LiveEvent.fromJson(latestPlanUpdateJson.cast<String, dynamic>())
-            : null;
+    final latestPlanUpdate = latestPlanUpdateJson is Map<String, dynamic>
+        ? LiveEvent.fromJson(latestPlanUpdateJson)
+        : latestPlanUpdateJson is Map<dynamic, dynamic>
+        ? LiveEvent.fromJson(latestPlanUpdateJson.cast<String, dynamic>())
+        : null;
     final normalizedPlanUpdate =
         latestPlanUpdate != null &&
-                latestPlanUpdate.type == 'plan_updated' &&
-                latestPlanUpdate.plan != null
-            ? latestPlanUpdate
-            : null;
+            latestPlanUpdate.type == 'plan_updated' &&
+            latestPlanUpdate.plan != null
+        ? latestPlanUpdate
+        : null;
     return SessionLog(
       session: SessionSummary.fromJson(json['session'] as Map<String, dynamic>),
       messages: (json['messages'] as List<dynamic>? ?? [])
@@ -3061,9 +3064,7 @@ class LiveEvent {
                 (item) =>
                     LiveEventPlanStep.fromJson(item.cast<String, dynamic>()),
               )
-              .where(
-                (item) => item.step.isNotEmpty && item.status.isNotEmpty,
-              )
+              .where((item) => item.step.isNotEmpty && item.status.isNotEmpty)
               .toList(growable: false)
         : null,
     steeringCount: _intOrNull(json['steeringCount']),

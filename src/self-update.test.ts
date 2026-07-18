@@ -33,6 +33,7 @@ function createConfig(dir: string): NodeConfig {
     defaultProviderKind: "fake",
     updateChannel: "stable",
     stateDir: nodePath.join(dir, "state"),
+    workspaceRoots: [],
     terminal: { enabled: false, shell: null, requirePty: false },
     browserPreview: {
       enabled: false,
@@ -194,7 +195,9 @@ describe("runSelfUpdate", () => {
     }
   });
 
-  it("reinstalls a stale managed service wrapper after update", async () => {
+  it("reinstalls a stale managed service wrapper after update", {
+    skip: process.platform !== "linux",
+  }, async () => {
     const dir = await mkdtemp(nodePath.join(tmpdir(), "sidemesh-self-update-test-"));
     const packageDir = nodePath.join(dir, "package");
     const config = createConfig(dir);

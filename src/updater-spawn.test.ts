@@ -31,6 +31,7 @@ function createConfig(dir: string): NodeConfig {
     defaultProviderKind: "fake",
     updateChannel: "stable",
     stateDir: nodePath.join(dir, "state"),
+    workspaceRoots: [],
     terminal: { enabled: false, shell: null, requirePty: false },
     browserPreview: {
       enabled: false,

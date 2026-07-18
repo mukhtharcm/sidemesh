@@ -70,6 +70,7 @@ export async function runSetup(options: SetupOptions = {}): Promise<NodeConfig> 
   // Port and state dir are advanced — accept defaults silently unless --advanced is passed.
   let port = existing?.port ?? 8787;
   let stateDir = existing?.stateDir || nodePath.join(homedir(), ".sidemesh");
+  let workspaceRoots = existing?.workspaceRoots ?? [homedir()];
   if (options.advanced) {
     const portValue = await promptText({
       message: "Daemon port",
@@ -90,6 +91,24 @@ export async function runSetup(options: SetupOptions = {}): Promise<NodeConfig> 
       validate: (value) =>
         value.trim() ? undefined : "State directory cannot be empty.",
     });
+
+    const workspaceRootsValue = await promptText({
+      message: "Filesystem workspace roots (comma-separated)",
+      defaultValue: workspaceRoots.join(", "),
+      validate: (value) => {
+        const roots = value
+          .split(",")
+          .map((root) => root.trim())
+          .filter(Boolean);
+        return roots.every((root) => nodePath.isAbsolute(root))
+          ? undefined
+          : "Every workspace root must be an absolute path.";
+      },
+    });
+    workspaceRoots = workspaceRootsValue
+      .split(",")
+      .map((root) => root.trim())
+      .filter(Boolean);
   }
 
   const inferredProviders =
@@ -267,6 +286,7 @@ export async function runSetup(options: SetupOptions = {}): Promise<NodeConfig> 
     defaultProviderKind: defaultProvider as AgentProviderKind,
     updateChannel,
     stateDir: stateDir.trim(),
+    workspaceRoots,
     terminal,
     browserPreview,
     configPath: persisted.path,

@@ -24,6 +24,8 @@ void main() {
 
     expect(host.enabled, isFalse);
     expect(host.toJson()['enabled'], isFalse);
+    expect(host.toJson(), isNot(contains('token')));
+    expect(host.toJson(includeToken: true)['token'], 'token');
     expect(host.copyWith(enabled: true).enabled, isTrue);
   });
 }

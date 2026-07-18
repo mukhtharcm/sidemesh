@@ -25,10 +25,17 @@ Connect to `WS /api/fs/live` to receive real-time file change notifications. Whe
 
 ## Workspace sandboxing
 
-The daemon resolves paths against configured workspace roots. `resolveWorkspacePath` uses `realpath` and a prefix match to prevent escaping the workspace. Attempts to access files outside the workspace raise a `WorkspaceAccessError` with HTTP 403.
+The daemon resolves paths against an explicit allowlist plus the working directories reported by existing sessions. A normal `sidemesh setup` stores your home directory as the initial allowlisted root; advanced setup lets you choose narrower roots. You can also override the persisted list with a comma-separated environment variable:
+
+```bash
+SIDEMESH_WORKSPACE_ROOTS=/Users/me/code,/Users/me/documents sidemesh daemon
+```
+
+Each root must be absolute. `resolveWorkspacePath` canonicalizes paths with `realpath` and checks path boundaries to prevent traversal and symlink escapes. Unknown session IDs fail closed, direct blob/image reads use the same scope, and workspace roots themselves cannot be deleted through the API. Attempts to access files outside the workspace return HTTP 403.
 
 ## Security notes
 
 - Filesystem access requires the shared bearer token
 - There is no per-file permission model; token holders can read/write anything inside the workspace roots
+- Prefer the narrowest practical `SIDEMESH_WORKSPACE_ROOTS` allowlist
 - Keep the daemon on trusted networks only

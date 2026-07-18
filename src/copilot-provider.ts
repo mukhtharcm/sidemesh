@@ -1,7 +1,9 @@
 import { randomUUID } from "node:crypto";
+import { lookup } from "node:dns/promises";
 import { EventEmitter } from "node:events";
-import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import { chmod, mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
+import { BlockList, isIP } from "node:net";
 import nodePath from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 
@@ -264,7 +266,8 @@ export class CopilotAgentProvider
   }
 
   public async start(): Promise<void> {
-    await mkdir(this.stateDir, { recursive: true });
+    await mkdir(this.stateDir, { recursive: true, mode: 0o700 });
+    await chmod(this.stateDir, 0o700);
     await this.ensureSdkClient();
     await this.loadState();
   }
@@ -1896,7 +1899,8 @@ export class CopilotAgentProvider
   }
 
   private async saveState(): Promise<void> {
-    await mkdir(this.stateDir, { recursive: true });
+    await mkdir(this.stateDir, { recursive: true, mode: 0o700 });
+    await chmod(this.stateDir, 0o700);
     const payload: CopilotStateFile = {
       archivedSessionIds: [...this.archivedSessionIds],
       sessions: [...this.sessions.values()].map((session) => ({
@@ -1921,7 +1925,10 @@ export class CopilotAgentProvider
       })),
     };
     const tmpPath = `${this.statePath}.${process.pid}.${randomUUID()}.tmp`;
-    await writeFile(tmpPath, JSON.stringify(payload, null, 2), "utf8");
+    await writeFile(tmpPath, JSON.stringify(payload, null, 2), {
+      encoding: "utf8",
+      mode: 0o600,
+    });
     await rename(tmpPath, this.statePath);
   }
 
@@ -2511,22 +2518,179 @@ async function fetchImageAttachment(
       `Unsupported Copilot image URL protocol: ${parsed.protocol}`,
     );
   }
-  const response = await fetch(parsed);
-  if (!response.ok) {
-    throw new Error(
-      `Failed to fetch Copilot image URL: ${response.status} ${response.statusText}`,
-    );
-  }
-  const mimeType =
-    response.headers.get("content-type")?.split(";")[0]?.trim() || "image/png";
-  const bytes = Buffer.from(await response.arrayBuffer());
+  const { response, bytes, finalUrl } = await fetchPublicImage(parsed);
+  const mimeType = response.headers
+    .get("content-type")!
+    .split(";")[0]!
+    .trim()
+    .toLowerCase();
   return {
     type: "blob",
     data: bytes.toString("base64"),
     mimeType,
     displayName:
-      nodePath.basename(parsed.pathname) || suggestedInlineImageName(mimeType),
+      nodePath.basename(finalUrl.pathname) || suggestedInlineImageName(mimeType),
   };
+}
+
+const REMOTE_IMAGE_MAX_BYTES = 10 * 1024 * 1024;
+const REMOTE_IMAGE_TIMEOUT_MS = 10_000;
+const REMOTE_IMAGE_MAX_REDIRECTS = 3;
+const blockedImageAddresses = createBlockedImageAddressList();
+
+async function fetchPublicImage(parsed: URL): Promise<{
+  response: Response;
+  bytes: Buffer;
+  finalUrl: URL;
+}> {
+  let current = parsed;
+  for (let redirects = 0; redirects <= REMOTE_IMAGE_MAX_REDIRECTS; redirects += 1) {
+    await assertPublicImageUrl(current);
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), REMOTE_IMAGE_TIMEOUT_MS);
+    try {
+      const response = await fetch(current, {
+        redirect: "manual",
+        signal: controller.signal,
+      });
+      if (isRedirectStatus(response.status)) {
+        const location = response.headers.get("location");
+        if (!location) {
+          throw new Error("Copilot image redirect is missing a Location header.");
+        }
+        if (redirects === REMOTE_IMAGE_MAX_REDIRECTS) {
+          throw new Error("Copilot image URL exceeded the redirect limit.");
+        }
+        current = new URL(location, current);
+        if (current.protocol !== "http:" && current.protocol !== "https:") {
+          throw new Error(
+            `Unsupported Copilot image URL protocol: ${current.protocol}`,
+          );
+        }
+        continue;
+      }
+      if (!response.ok) {
+        throw new Error(
+          `Failed to fetch Copilot image URL: ${response.status} ${response.statusText}`,
+        );
+      }
+      const mimeType = response.headers
+        .get("content-type")
+        ?.split(";")[0]
+        ?.trim()
+        .toLowerCase();
+      if (!mimeType?.startsWith("image/")) {
+        throw new Error("Copilot image URL did not return an image content type.");
+      }
+      const declaredLength = Number(response.headers.get("content-length"));
+      if (
+        Number.isFinite(declaredLength) &&
+        declaredLength > REMOTE_IMAGE_MAX_BYTES
+      ) {
+        throw new Error("Copilot image URL exceeds 10 MiB.");
+      }
+      const bytes = await readBoundedResponseBody(
+        response,
+        REMOTE_IMAGE_MAX_BYTES,
+      );
+      return { response, bytes, finalUrl: current };
+    } catch (error) {
+      if (controller.signal.aborted) {
+        throw new Error("Copilot image URL timed out.", { cause: error });
+      }
+      throw error;
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+  throw new Error("Copilot image URL exceeded the redirect limit.");
+}
+
+async function assertPublicImageUrl(url: URL): Promise<void> {
+  const hostname = url.hostname.replace(/^\[|\]$/g, "").toLowerCase();
+  if (
+    hostname === "localhost" ||
+    hostname.endsWith(".localhost") ||
+    hostname.endsWith(".local")
+  ) {
+    throw new Error("Copilot image URL must resolve to a public network address.");
+  }
+  const literalVersion = isIP(hostname);
+  const addresses = literalVersion
+    ? [{ address: hostname, family: literalVersion }]
+    : await lookup(hostname, { all: true, verbatim: true });
+  if (
+    addresses.length === 0 ||
+    addresses.some(({ address, family }) =>
+      blockedImageAddresses.check(
+        address,
+        family === 6 ? "ipv6" : "ipv4",
+      ),
+    )
+  ) {
+    throw new Error("Copilot image URL must resolve to a public network address.");
+  }
+}
+
+async function readBoundedResponseBody(
+  response: Response,
+  maxBytes: number,
+): Promise<Buffer> {
+  if (!response.body) return Buffer.alloc(0);
+  const reader = response.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  while (true) {
+    const result = await reader.read();
+    if (result.done) break;
+    total += result.value.byteLength;
+    if (total > maxBytes) {
+      await reader.cancel("response exceeds size limit");
+      throw new Error("Copilot image URL exceeds 10 MiB.");
+    }
+    chunks.push(result.value);
+  }
+  return Buffer.concat(chunks.map((chunk) => Buffer.from(chunk)), total);
+}
+
+function isRedirectStatus(status: number): boolean {
+  return [301, 302, 303, 307, 308].includes(status);
+}
+
+function createBlockedImageAddressList(): BlockList {
+  const list = new BlockList();
+  const ipv4Subnets: Array<[string, number]> = [
+    ["0.0.0.0", 8],
+    ["10.0.0.0", 8],
+    ["100.64.0.0", 10],
+    ["127.0.0.0", 8],
+    ["169.254.0.0", 16],
+    ["172.16.0.0", 12],
+    ["192.0.0.0", 24],
+    ["192.0.2.0", 24],
+    ["192.168.0.0", 16],
+    ["198.18.0.0", 15],
+    ["198.51.100.0", 24],
+    ["203.0.113.0", 24],
+    ["224.0.0.0", 4],
+    ["240.0.0.0", 4],
+  ];
+  for (const [address, prefix] of ipv4Subnets) {
+    list.addSubnet(address, prefix, "ipv4");
+  }
+  const ipv6Subnets: Array<[string, number]> = [
+    ["::", 128],
+    ["::1", 128],
+    ["100::", 64],
+    ["2001:db8::", 32],
+    ["fc00::", 7],
+    ["fe80::", 10],
+    ["ff00::", 8],
+  ];
+  for (const [address, prefix] of ipv6Subnets) {
+    list.addSubnet(address, prefix, "ipv6");
+  }
+  return list;
 }
 
 function suggestedInlineImageName(mimeType: string): string {

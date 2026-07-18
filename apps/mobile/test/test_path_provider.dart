@@ -32,6 +32,8 @@ Future<void> configureTestDatabaseFactory() async {
   databaseFactory = databaseFactoryFfiNoIsolate;
   await _testSupportDirectory.create(recursive: true);
   await databaseFactory.setDatabasesPath(_testSupportDirectory.path);
-  SidemeshDb.useConfiguredFfiFactoryForTest();
+  SidemeshDb.useConfiguredFfiFactoryForTest(
+    databaseDirectory: _testSupportDirectory.path,
+  );
   PathProviderPlatform.instance = TestPathProvider();
 }

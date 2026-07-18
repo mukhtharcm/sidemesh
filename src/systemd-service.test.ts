@@ -25,6 +25,7 @@ describe("systemd service rendering", () => {
       defaultProviderKind: "codex",
       updateChannel: "stable",
       stateDir: "/root/.sidemesh",
+      workspaceRoots: [],
       terminal: { enabled: true, shell: "/bin/zsh", requirePty: false },
       browserPreview: {
         enabled: true,
@@ -119,6 +120,7 @@ describe("systemd service rendering", () => {
       defaultProviderKind: "codex",
       updateChannel: "stable",
       stateDir: "/root/.sidemesh",
+      workspaceRoots: [],
       terminal: { enabled: true, shell: "/bin/zsh", requirePty: false },
       browserPreview: {
         enabled: true,
