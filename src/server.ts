@@ -3155,6 +3155,8 @@ export async function startServer(
     noServer: true,
     maxPayload: 1024 * 1024,
     perMessageDeflate: false,
+    handleProtocols: (protocols) =>
+      protocols.has("sidemesh") ? "sidemesh" : false,
   });
   server.on("upgrade", (request, socket, head) => {
     const [pathOnly, queryString] = (request.url || "").split("?");
@@ -3175,10 +3177,16 @@ export async function startServer(
       return;
     }
 
+    const origin = request.headers.origin;
+    if (origin && !isAllowedBrowserOrigin(origin)) {
+      socket.destroy();
+      return;
+    }
+
     const authHeader = request.headers.authorization;
     const token = authHeader?.startsWith("Bearer ")
       ? authHeader.slice("Bearer ".length)
-      : "";
+      : tokenFromWebSocketProtocols(request.headers["sec-websocket-protocol"]);
     if (!secretsEqual(token, config.token)) {
       socket.destroy();
       return;
@@ -3532,16 +3540,38 @@ function secretsEqual(candidate: string, expected: string): boolean {
   return timingSafeEqual(candidateDigest, expectedDigest);
 }
 
+function tokenFromWebSocketProtocols(header: string | undefined): string {
+  const prefix = "sidemesh.auth.";
+  const encoded = header
+    ?.split(",")
+    .map((value) => value.trim())
+    .find((value) => value.startsWith(prefix))
+    ?.slice(prefix.length);
+  if (!encoded) return "";
+  try {
+    const decoded = Buffer.from(encoded, "base64url");
+    if (decoded.toString("base64url") !== encoded) return "";
+    return decoded.toString("utf8");
+  } catch {
+    return "";
+  }
+}
+
 function isAllowedBrowserOrigin(origin: string): boolean {
   try {
     const parsed = new URL(origin);
     const hostname = parsed.hostname.replace(/^\[|\]$/g, "").toLowerCase();
+    const loopback =
+      hostname === "localhost" ||
+      hostname === "127.0.0.1" ||
+      hostname === "::1" ||
+      hostname.endsWith(".localhost");
+    const hostedApp =
+      parsed.origin === "https://app.sidemesh.com" ||
+      parsed.origin === "https://sidemesh-app.pages.dev";
     return (
       (parsed.protocol === "http:" || parsed.protocol === "https:") &&
-      (hostname === "localhost" ||
-        hostname === "127.0.0.1" ||
-        hostname === "::1" ||
-        hostname.endsWith(".localhost"))
+      (loopback || hostedApp)
     );
   } catch {
     return false;

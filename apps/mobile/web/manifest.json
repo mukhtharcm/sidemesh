@@ -1,0 +1,19 @@
+{
+  "name": "Sidemesh",
+  "short_name": "Sidemesh",
+  "description": "Control your Sidemesh agent sessions from the browser.",
+  "start_url": ".",
+  "display": "standalone",
+  "background_color": "#16130F",
+  "theme_color": "#16130F",
+  "orientation": "any",
+  "prefer_related_applications": false,
+  "icons": [
+    {
+      "src": "assets/assets/icon/app_icon.png",
+      "sizes": "1024x1024",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}

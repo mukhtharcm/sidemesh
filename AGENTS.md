@@ -222,6 +222,15 @@ specific agent provider.
   startup-critical local storage paths in this app.
 - **Flutter flavors**: Build/run commands must include `--flavor dev` or
   `--flavor prod`.
+- **Flutter web**: The browser entry point is `apps/mobile/lib/main_web.dart`.
+  Build it with `npm run mobile:web:build`; the hosted client only accepts
+  remote daemon URLs over HTTPS/WSS. Browser WebSocket authentication uses the
+  `sidemesh.auth.<base64url-token>` subprotocol, while the server selects only
+  the non-secret `sidemesh` protocol in its response.
+- **Flutter web SQLite**: `apps/mobile/web/sqlite3.wasm` and
+  `apps/mobile/web/sqflite_sw.js` are generated runtime assets. Regenerate them
+  from `apps/mobile/` with
+  `dart run sqflite_common_ffi_web:setup --force` after upgrading the package.
 - **No formatter**: No Prettier, Biome, or ESLint. Follow file-local style.
 - **WebSocket `hello`**: The server sends `{"type":"hello"}` on every WS
   connection.

@@ -69,6 +69,10 @@ jobs:
         working-directory: apps/mobile
         run: flutter analyze
 
+      - name: Build Flutter web app
+        working-directory: apps/mobile
+        run: flutter build web --release -t lib/main_web.dart --no-web-resources-cdn
+
   web:
     name: Website checks
     runs-on: ubuntu-latest

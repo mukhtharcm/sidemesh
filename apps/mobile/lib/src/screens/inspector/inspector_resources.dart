@@ -1,6 +1,5 @@
 import 'dart:async';
 import 'dart:convert';
-import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
@@ -195,12 +194,11 @@ class _SessionResourcesPanelState extends State<SessionResourcesPanel> {
         title: resource.title,
         subtitle: _gallerySubtitle(resource),
         imageProviderLoader: () async {
-          final file = await ImageBlobCacheStore.instance.load(
+          return ImageBlobCacheStore.instance.loadImageProvider(
             host: widget.host,
             path: path!,
             api: widget.api,
           );
-          return FileImage(file);
         },
       );
     }
@@ -809,7 +807,7 @@ class _LocalResourceImage extends StatefulWidget {
 }
 
 class _LocalResourceImageState extends State<_LocalResourceImage> {
-  File? _file;
+  ImageProvider<Object>? _imageProvider;
   Object? _error;
   int _loadGeneration = 0;
 
@@ -833,17 +831,17 @@ class _LocalResourceImageState extends State<_LocalResourceImage> {
   Future<void> _load() async {
     final gen = ++_loadGeneration;
     setState(() {
-      _file = null;
+      _imageProvider = null;
       _error = null;
     });
     try {
-      final file = await ImageBlobCacheStore.instance.load(
+      final imageProvider = await ImageBlobCacheStore.instance.loadImageProvider(
         host: widget.host,
         path: widget.path,
         api: widget.api,
       );
       if (!mounted || gen != _loadGeneration) return;
-      setState(() => _file = file);
+      setState(() => _imageProvider = imageProvider);
     } catch (error) {
       if (!mounted || gen != _loadGeneration) return;
       setState(() => _error = error);
@@ -853,15 +851,15 @@ class _LocalResourceImageState extends State<_LocalResourceImage> {
   @override
   Widget build(BuildContext context) {
     final colors = context.colors;
-    final file = _file;
-    if (file == null) {
+    final imageProvider = _imageProvider;
+    if (imageProvider == null) {
       return _MediaFallback(
         title: _basename(widget.path),
         detail: _error == null ? 'Loading image...' : widget.path,
         colors: colors,
       );
     }
-    return _MediaPreview(provider: FileImage(file), fallbackLabel: widget.path);
+    return _MediaPreview(provider: imageProvider, fallbackLabel: widget.path);
   }
 }
 

@@ -66,6 +66,7 @@
     "mobile:version": "node scripts/bump-mobile-version.mjs",
     "mobile:get": "cd apps/mobile && flutter pub get",
     "mobile:analyze": "cd apps/mobile && flutter analyze",
+    "mobile:web:build": "cd apps/mobile && flutter build web --release -t lib/main_web.dart --no-web-resources-cdn",
     "mobile:android:dev": "cd apps/mobile && flutter run --flavor dev -t lib/main.dart",
     "mobile:android:prod": "cd apps/mobile && flutter run --flavor prod -t lib/main.dart",
     "mobile:android:build:dev": "cd apps/mobile && flutter build apk --flavor dev --debug",

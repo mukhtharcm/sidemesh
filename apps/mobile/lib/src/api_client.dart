@@ -1,8 +1,8 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
-import 'dart:typed_data';
 
+import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import 'package:web_socket_channel/io.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
@@ -12,6 +12,8 @@ import 'fs_models.dart';
 import 'usage_models.dart';
 
 const _defaultWriteRequestTimeout = Duration(seconds: 45);
+const _webSocketAppProtocol = 'sidemesh';
+const _webSocketAuthProtocolPrefix = 'sidemesh.auth.';
 
 class ApiClient {
   ApiClient({
@@ -664,10 +666,9 @@ class ApiClient {
       queryParameters: {'sessionId': sessionId},
     );
 
-    return IOWebSocketChannel.connect(
+    return _connectWebSocket(
+      host,
       wsUri,
-      headers: {'Authorization': 'Bearer ${host.token}'},
-      connectTimeout: _webSocketConnectTimeout,
       pingInterval: _interactiveWebSocketPingInterval,
     );
   }
@@ -680,10 +681,9 @@ class ApiClient {
       path: '/api/actions/live',
     );
 
-    return IOWebSocketChannel.connect(
+    return _connectWebSocket(
+      host,
       wsUri,
-      headers: {'Authorization': 'Bearer ${host.token}'},
-      connectTimeout: _webSocketConnectTimeout,
       pingInterval: _backgroundWebSocketPingInterval,
     );
   }
@@ -696,10 +696,9 @@ class ApiClient {
       path: '/api/sessions/live',
     );
 
-    return IOWebSocketChannel.connect(
+    return _connectWebSocket(
+      host,
       wsUri,
-      headers: {'Authorization': 'Bearer ${host.token}'},
-      connectTimeout: _webSocketConnectTimeout,
       pingInterval: _backgroundWebSocketPingInterval,
     );
   }
@@ -717,10 +716,9 @@ class ApiClient {
       queryParameters: {'since': '$since'},
     );
 
-    return IOWebSocketChannel.connect(
+    return _connectWebSocket(
+      host,
       wsUri,
-      headers: {'Authorization': 'Bearer ${host.token}'},
-      connectTimeout: _webSocketConnectTimeout,
       pingInterval: _interactiveWebSocketPingInterval,
     );
   }
@@ -733,10 +731,9 @@ class ApiClient {
       path: '/api/browser-previews/$previewId/live',
     );
 
-    return IOWebSocketChannel.connect(
+    return _connectWebSocket(
+      host,
       wsUri,
-      headers: {'Authorization': 'Bearer ${host.token}'},
-      connectTimeout: _webSocketConnectTimeout,
       pingInterval: _interactiveWebSocketPingInterval,
     );
   }
@@ -953,11 +950,35 @@ class ApiClient {
       path: '/api/fs/live',
       queryParameters: _fsQuery(sessionId: sessionId),
     );
-    return IOWebSocketChannel.connect(
+    return _connectWebSocket(
+      host,
       wsUri,
+      pingInterval: _backgroundWebSocketPingInterval,
+    );
+  }
+
+  WebSocketChannel _connectWebSocket(
+    HostProfile host,
+    Uri uri, {
+    required Duration pingInterval,
+  }) {
+    if (kIsWeb) {
+      final encodedToken = base64Url
+          .encode(utf8.encode(host.token))
+          .replaceAll('=', '');
+      return WebSocketChannel.connect(
+        uri,
+        protocols: <String>[
+          _webSocketAppProtocol,
+          '$_webSocketAuthProtocolPrefix$encodedToken',
+        ],
+      );
+    }
+    return IOWebSocketChannel.connect(
+      uri,
       headers: {'Authorization': 'Bearer ${host.token}'},
       connectTimeout: _webSocketConnectTimeout,
-      pingInterval: _backgroundWebSocketPingInterval,
+      pingInterval: pingInterval,
     );
   }
 
@@ -1057,6 +1078,10 @@ class ApiClient {
     if (!host.enabled) {
       throw StateError('Host "${host.label}" is disabled.');
     }
+    final browserIssue = browserHostUrlIssue(host.baseUrl);
+    if (browserIssue != null) {
+      throw BrowserHostConnectionException(browserIssue);
+    }
   }
 
   Map<String, dynamic> _decodeObject(http.Response response) {
@@ -1108,6 +1133,15 @@ class ApiTimeoutException implements Exception {
 
   @override
   String toString() => 'ApiTimeoutException($operation, ${seconds}s)';
+}
+
+class BrowserHostConnectionException implements Exception {
+  const BrowserHostConnectionException(this.message);
+
+  final String message;
+
+  @override
+  String toString() => message;
 }
 
 /// Turns low-level errors (ApiException, SocketException, TimeoutException)
@@ -1197,4 +1231,17 @@ String normalizeBaseUrl(String raw) {
   final uri = Uri.parse(withScheme);
   final normalized = uri.replace(path: '', query: '', fragment: '');
   return normalized.toString().replaceFirst(RegExp(r'/$'), '');
+}
+
+String? browserHostUrlIssue(String raw) {
+  if (!kIsWeb) return null;
+  final uri = Uri.tryParse(raw.trim());
+  if (uri == null || uri.scheme.toLowerCase() != 'http') return null;
+  final hostname = uri.host.toLowerCase();
+  final loopback = hostname == 'localhost' ||
+      hostname == '127.0.0.1' ||
+      hostname == '::1' ||
+      hostname.endsWith('.localhost');
+  if (loopback) return null;
+  return 'The web app requires an HTTPS host. Use Tailscale Serve or another trusted HTTPS/WSS endpoint.';
 }

@@ -3514,7 +3514,7 @@ class _SessionScreenState extends State<SessionScreen>
   }
 
   _ComposerImagePickerConfig _composerImagePickerConfig() {
-    if (Platform.isIOS) {
+    if (!kIsWeb && Platform.isIOS) {
       // `FileType.image` routes iOS through the Photos gallery picker instead
       // of the Files document picker used by `FileType.custom`.
       return const _ComposerImagePickerConfig(
@@ -3538,7 +3538,7 @@ class _SessionScreenState extends State<SessionScreen>
   }
 
   Future<bool> _ensureImagePickerAccess() async {
-    if (!Platform.isIOS) {
+    if (kIsWeb || !Platform.isIOS) {
       return true;
     }
     final status = await Permission.photos.request();

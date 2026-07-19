@@ -1728,7 +1728,64 @@ describe("browser CORS", () => {
     });
   });
 
-  it("does not authorize non-loopback browser origins", async () => {
+  it("allows the hosted Sidemesh web app origin", async () => {
+    const stateDir = await mkdtemp(nodePath.join(tmpdir(), "sidemesh-server-test-"));
+    await withServer(makeConfig(stateDir), async (server, config) => {
+      const res = await request({
+        hostname: "127.0.0.1",
+        port: server.port,
+        path: "/api/node",
+        method: "GET",
+        headers: {
+          Authorization: `Bearer ${config.token}`,
+          Origin: "https://app.sidemesh.com",
+        },
+      });
+      assert.equal(res.statusCode, 200);
+      assert.equal(
+        res.headers["access-control-allow-origin"],
+        "https://app.sidemesh.com",
+      );
+    });
+  });
+
+  it("accepts browser WebSockets authenticated by subprotocol", async () => {
+    const stateDir = await mkdtemp(nodePath.join(tmpdir(), "sidemesh-server-test-"));
+    await withServer(makeConfig(stateDir), async (server, config) => {
+      const encodedToken = Buffer.from(config.token, "utf8").toString("base64url");
+      const socket = await new Promise<WebSocket>((resolve, reject) => {
+        const ws = new WebSocket(
+          `ws://127.0.0.1:${server.port}/api/sessions/live`,
+          ["sidemesh", `sidemesh.auth.${encodedToken}`],
+          { headers: { Origin: "https://app.sidemesh.com" } },
+        );
+        ws.once("open", () => resolve(ws));
+        ws.once("error", reject);
+      });
+      assert.equal(socket.protocol, "sidemesh");
+      await closeSessionLiveSocket(socket);
+    });
+  });
+
+  it("rejects authenticated WebSockets from untrusted browser origins", async () => {
+    const stateDir = await mkdtemp(nodePath.join(tmpdir(), "sidemesh-server-test-"));
+    await withServer(makeConfig(stateDir), async (server, config) => {
+      const encodedToken = Buffer.from(config.token, "utf8").toString("base64url");
+      await assert.rejects(
+        new Promise<WebSocket>((resolve, reject) => {
+          const ws = new WebSocket(
+            `ws://127.0.0.1:${server.port}/api/sessions/live`,
+            ["sidemesh", `sidemesh.auth.${encodedToken}`],
+            { headers: { Origin: "https://attacker.example" } },
+          );
+          ws.once("open", () => resolve(ws));
+          ws.once("error", reject);
+        }),
+      );
+    });
+  });
+
+  it("does not grant CORS to untrusted browser origins", async () => {
     const stateDir = await mkdtemp(nodePath.join(tmpdir(), "sidemesh-server-test-"));
     await withServer(makeConfig(stateDir), async (server, config) => {
       const res = await request({

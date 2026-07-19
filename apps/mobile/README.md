@@ -2,6 +2,31 @@
 
 Flutter client for connecting to Sidemesh hosts.
 
+## Web
+
+The production web app is deployed to
+[app.sidemesh.com](https://app.sidemesh.com). Build it locally with:
+
+```bash
+flutter pub get
+flutter analyze
+flutter build web --release -t lib/main_web.dart --no-web-resources-cdn
+```
+
+The browser entry point is `lib/main_web.dart`. Its SQLite cache uses IndexedDB
+through the committed `web/sqlite3.wasm` and `web/sqflite_sw.js` worker assets.
+Regenerate those files after upgrading `sqflite_common_ffi_web`:
+
+```bash
+dart run sqflite_common_ffi_web:setup --force
+```
+
+The hosted app can connect to HTTPS/WSS daemon addresses and loopback HTTP
+addresses. Browsers block an HTTPS page from connecting to an insecure daemon
+on another machine, so use a trusted-network TLS endpoint such as Tailscale
+Serve. The daemon remains a trusted-network service and must not be exposed
+directly to the public internet.
+
 ## iOS Flavors
 
 The iOS project has two shared schemes so development and production builds can

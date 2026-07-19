@@ -4415,6 +4415,14 @@ class _HostEditorSheetState extends State<HostEditorSheet> {
       });
       return;
     }
+    final browserIssue = browserHostUrlIssue(baseUrl);
+    if (browserIssue != null) {
+      setState(() {
+        _testResult = browserIssue;
+        _testSuccess = false;
+      });
+      return;
+    }
     setState(() {
       _testing = true;
       _testResult = null;
@@ -4456,6 +4464,11 @@ class _HostEditorSheetState extends State<HostEditorSheet> {
       setState(() {
         _error = 'Name, address, and token are required.';
       });
+      return;
+    }
+    final browserIssue = browserHostUrlIssue(baseUrl);
+    if (browserIssue != null) {
+      setState(() => _error = browserIssue);
       return;
     }
     Navigator.of(context).pop(
