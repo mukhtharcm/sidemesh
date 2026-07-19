@@ -1374,7 +1374,7 @@ class _LocalImageAttachmentTile extends StatefulWidget {
 }
 
 class _LocalImageAttachmentTileState extends State<_LocalImageAttachmentTile> {
-  File? _file;
+  ImageProvider<Object>? _imageProvider;
   Object? _error;
   int _loadGeneration = 0;
 
@@ -1398,11 +1398,11 @@ class _LocalImageAttachmentTileState extends State<_LocalImageAttachmentTile> {
   Future<void> _load() async {
     final gen = ++_loadGeneration;
     setState(() {
-      _file = null;
+      _imageProvider = null;
       _error = null;
     });
     try {
-      final file = await ImageBlobCacheStore.instance.load(
+      final imageProvider = await ImageBlobCacheStore.instance.loadImageProvider(
         host: widget.host,
         path: widget.path,
         api: widget.api,
@@ -1410,7 +1410,7 @@ class _LocalImageAttachmentTileState extends State<_LocalImageAttachmentTile> {
       if (!mounted || gen != _loadGeneration) {
         return;
       }
-      setState(() => _file = file);
+      setState(() => _imageProvider = imageProvider);
     } catch (error) {
       if (!mounted || gen != _loadGeneration) {
         return;
@@ -1423,8 +1423,7 @@ class _LocalImageAttachmentTileState extends State<_LocalImageAttachmentTile> {
   Widget build(BuildContext context) {
     final colors = context.colors;
     final heroTag = _messageImageHeroTag('${widget.host.id}:${widget.path}');
-    final file = _file;
-    final imageProvider = file == null ? null : FileImage(file);
+    final imageProvider = _imageProvider;
     final hasFailed = _error != null;
     return _ImageAttachmentCard(
       imageProvider: imageProvider,

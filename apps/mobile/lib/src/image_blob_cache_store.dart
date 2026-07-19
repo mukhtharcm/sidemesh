@@ -1,6 +1,8 @@
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:flutter/foundation.dart';
+import 'package:flutter/widgets.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'api_client.dart';
@@ -15,10 +17,14 @@ class ImageBlobCacheStore {
   static const _cacheFolderName = 'sidemesh_image_blobs_v1';
   static const _indexKey = 'sidemesh_image_blob_cache_index_v1';
   static const _maxEntries = 500;
+  static const _maxWebEntries = 100;
   static const _maxTotalBytes = 200 * 1024 * 1024;
   static const _ttl = Duration(days: 30);
 
   final Map<String, Future<File>> _inFlight = <String, Future<File>>{};
+  final Map<String, Future<ImageProvider<Object>>> _webInFlight =
+      <String, Future<ImageProvider<Object>>>{};
+  final Map<String, Uint8List> _webCache = <String, Uint8List>{};
   Future<void> _indexMutation = Future<void>.value();
   var _clearGeneration = 0;
 
@@ -27,6 +33,9 @@ class ImageBlobCacheStore {
     required String path,
     required ApiClient api,
   }) async {
+    if (kIsWeb) {
+      throw UnsupportedError('Use loadImageProvider on the web.');
+    }
     final key = _cacheKey(host, path);
     final cached = await _loadCachedFile(key);
     if (cached != null) {
@@ -55,7 +64,51 @@ class ImageBlobCacheStore {
     }
   }
 
+  Future<ImageProvider<Object>> loadImageProvider({
+    required HostProfile host,
+    required String path,
+    required ApiClient api,
+  }) async {
+    if (!kIsWeb) {
+      return FileImage(await load(host: host, path: path, api: api));
+    }
+    final key = _cacheKey(host, path);
+    final cachedBytes = _webCache.remove(key);
+    if (cachedBytes != null) {
+      _webCache[key] = cachedBytes;
+      return MemoryImage(cachedBytes);
+    }
+    final existing = _webInFlight[key];
+    if (existing != null) return existing;
+    final generation = _clearGeneration;
+    final request = api.fetchFsBlob(host, path).then<ImageProvider<Object>>((
+      bytes,
+    ) {
+      if (generation == _clearGeneration) {
+        _webCache[key] = bytes;
+        while (_webCache.length > _maxWebEntries) {
+          _webCache.remove(_webCache.keys.first);
+        }
+      }
+      return MemoryImage(bytes);
+    });
+    _webInFlight[key] = request;
+    try {
+      return await request;
+    } finally {
+      if (identical(_webInFlight[key], request)) {
+        _webInFlight.remove(key);
+      }
+    }
+  }
+
   Future<void> clearHost(HostProfile host) async {
+    if (kIsWeb) {
+      _clearGeneration += 1;
+      final prefix = _cacheKeyPrefix(host);
+      _webCache.removeWhere((key, _) => key.startsWith(prefix));
+      return;
+    }
     final prefs = await SharedPreferences.getInstance();
     final dir = await _cacheDir();
     final prefix = _cacheKeyPrefix(host);
@@ -76,6 +129,11 @@ class ImageBlobCacheStore {
   }
 
   Future<void> clearAll() async {
+    if (kIsWeb) {
+      _clearGeneration += 1;
+      _webCache.clear();
+      return;
+    }
     final prefs = await SharedPreferences.getInstance();
     final dir = await _cacheDir();
     await _runIndexMutation(() async {
@@ -86,6 +144,7 @@ class ImageBlobCacheStore {
   }
 
   Future<File?> _loadCachedFile(String key) async {
+    if (kIsWeb) return null;
     final prefs = await SharedPreferences.getInstance();
     final dir = await _cacheDir();
     final file = _fileFor(dir, key);

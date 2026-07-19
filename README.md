@@ -9,7 +9,7 @@ This repository contains:
 
 - `src/`: the Node.js daemon, CLI, provider adapters, and host-side APIs
 - `apps/mobile/`: the Flutter client
-- `web/`: the landing site deployed separately
+- `web/`: the landing and documentation site deployed separately
 
 ## Providers
 
@@ -87,6 +87,19 @@ To run the Flutter app locally:
 cd apps/mobile
 flutter pub get
 flutter run --flavor dev -t lib/main.dart
+```
+
+The browser build is available at [app.sidemesh.com](https://app.sidemesh.com).
+Because browsers block insecure active content from an HTTPS page, remote hosts
+must use an HTTPS/WSS address. A loopback `http://localhost` address remains
+valid for a daemon running on the same machine. For another machine, publish
+the daemon only through a trusted-network HTTPS endpoint such as Tailscale
+Serve; do not expose it directly to the public internet.
+
+Build the browser app locally with:
+
+```bash
+npm run mobile:web:build
 ```
 
 Platform-specific app notes live in `apps/mobile/README.md`.

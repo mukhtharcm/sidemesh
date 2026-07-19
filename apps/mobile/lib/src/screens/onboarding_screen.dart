@@ -3,6 +3,7 @@ import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../api_client.dart';
 import '../host_store.dart';
 import '../models.dart';
 import '../onboarding_store.dart';
@@ -860,6 +861,11 @@ class _ManualHostSheetState extends State<_ManualHostSheet> {
         (uri.scheme != 'http' && uri.scheme != 'https') ||
         uri.host.isEmpty) {
       setState(() => _error = 'Enter a valid http:// or https:// URL.');
+      return;
+    }
+    final browserIssue = browserHostUrlIssue(baseUrl);
+    if (browserIssue != null) {
+      setState(() => _error = browserIssue);
       return;
     }
 

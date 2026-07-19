@@ -504,12 +504,11 @@ class FileViewerPaneState extends State<FileViewerPane> {
             title: baseName(widget.path),
             subtitle: '${formatBytes(file.size)} • $mimeLabel',
             imageProviderLoader: () async {
-              final cached = await ImageBlobCacheStore.instance.load(
+              return ImageBlobCacheStore.instance.loadImageProvider(
                 host: widget.host,
                 path: widget.path,
                 api: widget.api,
               );
-              return FileImage(cached);
             },
           ),
           dense: widget.dense,

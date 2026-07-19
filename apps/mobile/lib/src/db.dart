@@ -1,7 +1,9 @@
 import 'dart:io';
 
+import 'package:flutter/foundation.dart';
 import 'package:path/path.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
+import 'package:sqflite_common_ffi_web/sqflite_ffi_web.dart';
 
 import 'app_directories.dart';
 
@@ -11,6 +13,13 @@ class SidemeshDb {
   static bool _ffiInitialized = false;
 
   static void _ensureFfiIfNeeded() {
+    if (kIsWeb) {
+      if (!_ffiInitialized) {
+        databaseFactory = databaseFactoryFfiWeb;
+        _ffiInitialized = true;
+      }
+      return;
+    }
     if (Platform.isLinux || Platform.isWindows) {
       if (!_ffiInitialized) {
         sqfliteFfiInit();
@@ -107,6 +116,11 @@ class SidemeshDb {
 
   static Future<String> _resolveDbPath() async {
     final databaseDirectoryOverride = _databaseDirectoryOverrideForTest;
+    if (kIsWeb) {
+      return databaseDirectoryOverride == null
+          ? 'sidemesh_v1.db'
+          : join(databaseDirectoryOverride, 'sidemesh_v1.db');
+    }
     final dir = databaseDirectoryOverride ??
         (Platform.isMacOS
             ? (await getSidemeshApplicationSupportDirectory()).path
