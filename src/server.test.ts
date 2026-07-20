@@ -3283,6 +3283,414 @@ describe("session live rich events", () => {
     });
   });
 
+  it("pages backward over a unified session timeline without changing legacy log responses", async () => {
+    const stateDir = await mkdtemp(nodePath.join(tmpdir(), "sidemesh-server-page-test-"));
+    const { runtime, provider } = makeSingleProviderRuntime({
+      latencyMs: 0,
+      seedSessions: true,
+      workspaceRoot: stateDir,
+    });
+    await withServerRuntime(makeConfig(stateDir), runtime, async (server, config) => {
+      const [thread] = await provider.listSessionThreads({
+        limit: 1,
+        archived: false,
+      });
+      assert.ok(thread);
+      const basePath = `/api/sessions/${encodeURIComponent(thread.id)}/log`;
+
+      const legacy = await request({
+        hostname: "127.0.0.1",
+        port: server.port,
+        path: `${basePath}?messageLimit=120&activityLimit=80`,
+        method: "GET",
+        headers: { Authorization: "Bearer " + config.token },
+      });
+      assert.equal(legacy.statusCode, 200);
+      assert.equal(Object.hasOwn(legacy.body as object, "page"), false);
+
+      const latest = await request({
+        hostname: "127.0.0.1",
+        port: server.port,
+        path: `${basePath}?entryLimit=1&messageLimit=120&activityLimit=80`,
+        method: "GET",
+        headers: { Authorization: "Bearer " + config.token },
+      });
+      assert.equal(latest.statusCode, 200);
+      assert.equal(
+        (latest.body as any).messages.length +
+          (latest.body as any).activities.length,
+        1,
+      );
+      assert.equal((latest.body as any).page.hasMoreBefore, true);
+      assert.equal(typeof (latest.body as any).page.beforeCursor, "string");
+      assert.equal(typeof (latest.body as any).nextSeq, "number");
+
+      const cursor = encodeURIComponent((latest.body as any).page.beforeCursor);
+      const older = await request({
+        hostname: "127.0.0.1",
+        port: server.port,
+        path: `${basePath}?entryLimit=1&beforeCursor=${cursor}`,
+        method: "GET",
+        headers: { Authorization: "Bearer " + config.token },
+      });
+      assert.equal(older.statusCode, 200);
+      assert.equal(
+        (older.body as any).messages.length +
+          (older.body as any).activities.length,
+        1,
+      );
+      assert.equal((older.body as any).page.hasMoreBefore, false);
+
+      const invalid = await request({
+        hostname: "127.0.0.1",
+        port: server.port,
+        path: `${basePath}?entryLimit=1&beforeCursor=not-a-cursor`,
+        method: "GET",
+        headers: { Authorization: "Bearer " + config.token },
+      });
+      assert.equal(invalid.statusCode, 400);
+      assert.equal((invalid.body as any).code, "INVALID_SESSION_LOG_CURSOR");
+
+      const oversized = await request({
+        hostname: "127.0.0.1",
+        port: server.port,
+        path: `${basePath}?entryLimit=1&beforeCursor=${"a".repeat(513)}`,
+        method: "GET",
+        headers: { Authorization: "Bearer " + config.token },
+      });
+      assert.equal(oversized.statusCode, 400);
+      assert.equal((oversized.body as any).code, "INVALID_SESSION_LOG_CURSOR");
+
+      const emptyCursor = await request({
+        hostname: "127.0.0.1",
+        port: server.port,
+        path: `${basePath}?entryLimit=1&beforeCursor=`,
+        method: "GET",
+        headers: { Authorization: "Bearer " + config.token },
+      });
+      assert.equal(emptyCursor.statusCode, 400);
+      assert.equal((emptyCursor.body as any).code, "INVALID_SESSION_LOG_CURSOR");
+
+      const cursorWithoutLimit = await request({
+        hostname: "127.0.0.1",
+        port: server.port,
+        path: `${basePath}?beforeCursor=${cursor}`,
+        method: "GET",
+        headers: { Authorization: "Bearer " + config.token },
+      });
+      assert.equal(cursorWithoutLimit.statusCode, 400);
+    });
+  });
+
+  it("keeps snapshot cursors exclusive so the first post-snapshot event is replayed", async () => {
+    const stateDir = await mkdtemp(nodePath.join(tmpdir(), "sidemesh-server-cursor-test-"));
+    const { runtime, provider } = makeSingleProviderRuntime({
+      latencyMs: 0,
+      seedSessions: false,
+      workspaceRoot: stateDir,
+    });
+    await withServerRuntime(makeConfig(stateDir), runtime, async (server, config) => {
+      const created = await provider.createSession({
+        cwd: stateDir,
+        input: [],
+        overrides: EMPTY_OVERRIDES,
+      });
+      const sessionId = created.thread.id;
+      const logPath = `/api/sessions/${encodeURIComponent(sessionId)}/log?entryLimit=200`;
+      const snapshot = await request({
+        hostname: "127.0.0.1",
+        port: server.port,
+        path: logPath,
+        method: "GET",
+        headers: { Authorization: "Bearer " + config.token },
+      });
+      assert.equal(snapshot.statusCode, 200);
+      const exclusiveNextSeq = (snapshot.body as any).nextSeq as number;
+
+      provider.emit("liveEvent", {
+        type: "activity_updated",
+        sessionId,
+        turnId: "turn-after-snapshot",
+        activity: {
+          id: "first-post-snapshot-activity",
+          type: "command",
+          turnId: "turn-after-snapshot",
+          status: "in_progress",
+          command: "npm test",
+          cwd: stateDir,
+          output: "",
+          exitCode: null,
+          durationMs: null,
+          source: "agent",
+          processId: null,
+          commandActions: [],
+          terminalStatus: null,
+          terminalInput: null,
+        },
+      });
+
+      const delta = await request({
+        hostname: "127.0.0.1",
+        port: server.port,
+        path:
+          `/api/sessions/${encodeURIComponent(sessionId)}/events?since=${exclusiveNextSeq - 1}`,
+        method: "GET",
+        headers: { Authorization: "Bearer " + config.token },
+      });
+      assert.equal(delta.statusCode, 200);
+      assert.equal((delta.body as any).activities.length, 1);
+      assert.equal(
+        (delta.body as any).activities[0].id,
+        "first-post-snapshot-activity",
+      );
+      assert.equal((delta.body as any).activities[0].seq, exclusiveNextSeq);
+      assert.equal((delta.body as any).nextSeq, exclusiveNextSeq);
+    });
+  });
+
+  it("keeps paged head responses within entryLimit when live activities are unpersisted", async () => {
+    const stateDir = await mkdtemp(nodePath.join(tmpdir(), "sidemesh-server-page-live-test-"));
+    const { runtime, provider } = makeSingleProviderRuntime({
+      latencyMs: 0,
+      seedSessions: true,
+      workspaceRoot: stateDir,
+    });
+    await withServerRuntime(makeConfig(stateDir), runtime, async (server, config) => {
+      const [thread] = await provider.listSessionThreads({ limit: 1, archived: false });
+      assert.ok(thread);
+      provider.emit("liveEvent", {
+        type: "activity_updated",
+        sessionId: thread.id,
+        turnId: "turn-live",
+        activity: {
+          id: "unpersisted-live-activity",
+          type: "command",
+          turnId: "turn-live",
+          status: "in_progress",
+          command: "npm test",
+          cwd: stateDir,
+          output: "",
+          exitCode: null,
+          durationMs: null,
+          source: "agent",
+          processId: null,
+          commandActions: [],
+          terminalStatus: null,
+          terminalInput: null,
+        },
+      });
+
+      const result = await request({
+        hostname: "127.0.0.1",
+        port: server.port,
+        path: `/api/sessions/${encodeURIComponent(thread.id)}/log?entryLimit=1`,
+        method: "GET",
+        headers: { Authorization: "Bearer " + config.token },
+      });
+      assert.equal(result.statusCode, 200);
+      assert.ok(
+        (result.body as any).messages.length +
+          (result.body as any).activities.length <=
+          1,
+      );
+      assert.equal(
+        (result.body as any).history.returnedActivities,
+        (result.body as any).activities.length,
+      );
+      assert.ok(
+        (result.body as any).replayNextSeq > (result.body as any).nextSeq,
+      );
+
+      const recoveredLive = await request({
+        hostname: "127.0.0.1",
+        port: server.port,
+        path:
+          `/api/sessions/${encodeURIComponent(thread.id)}/events?since=${(result.body as any).nextSeq - 1}`,
+        method: "GET",
+        headers: { Authorization: "Bearer " + config.token },
+      });
+      assert.equal(recoveredLive.statusCode, 200);
+      assert.ok(
+        (recoveredLive.body as any).activities.some(
+          (activity: { id: string }) =>
+            activity.id === "unpersisted-live-activity",
+        ),
+      );
+
+      const legacyWithLive = await request({
+        hostname: "127.0.0.1",
+        port: server.port,
+        path: `/api/sessions/${encodeURIComponent(thread.id)}/log`,
+        method: "GET",
+        headers: { Authorization: "Bearer " + config.token },
+      });
+      assert.equal(legacyWithLive.statusCode, 200);
+      assert.ok(
+        (legacyWithLive.body as any).activities.some(
+          (activity: { id: string }) =>
+            activity.id === "unpersisted-live-activity",
+        ),
+      );
+    });
+  });
+
+  it("chunks large persisted replay gaps without skipping messages", async () => {
+    const stateDir = await mkdtemp(nodePath.join(tmpdir(), "sidemesh-server-live-chunks-test-"));
+    const { runtime, provider } = makeSingleProviderRuntime({
+      latencyMs: 0,
+      seedSessions: false,
+      workspaceRoot: stateDir,
+    });
+    await withServerRuntime(makeConfig(stateDir), runtime, async (server, config) => {
+      const created = await provider.createSession({
+        cwd: stateDir,
+        input: [],
+        overrides: EMPTY_OVERRIDES,
+      });
+      const sessionId = created.thread.id;
+      for (let index = 0; index < 221; index += 1) {
+        await provider.submitInput({
+          sessionId,
+          activeTurnId: "turn-live-gap",
+          input: [{
+            type: "text",
+            text: `replay gap ${index}`,
+            text_elements: [],
+          }],
+          overrides: EMPTY_OVERRIDES,
+        });
+      }
+
+      let since = -1;
+      const legacyDelta = await request({
+        hostname: "127.0.0.1",
+        port: server.port,
+        path: `/api/sessions/${encodeURIComponent(sessionId)}/events?since=${since}`,
+        method: "GET",
+        headers: { Authorization: "Bearer " + config.token },
+      });
+      assert.equal(legacyDelta.statusCode, 410);
+      assert.equal((legacyDelta.body as any).reason, "delta_too_large");
+
+      const recoveredIds = new Set<string>();
+      let pageCount = 0;
+      while (true) {
+        const delta = await request({
+          hostname: "127.0.0.1",
+          port: server.port,
+          path: `/api/sessions/${encodeURIComponent(sessionId)}/events?since=${since}&page=true`,
+          method: "GET",
+          headers: { Authorization: "Bearer " + config.token },
+        });
+        assert.equal(delta.statusCode, 200);
+        pageCount += 1;
+        for (const message of (delta.body as any).messages) {
+          recoveredIds.add(message.id);
+        }
+        const nextSeq = (delta.body as any).nextSeq as number;
+        assert.ok(nextSeq > since);
+        since = nextSeq;
+        if (!(delta.body as any).hasMore) break;
+        assert.ok(pageCount < 10);
+      }
+
+      assert.equal(pageCount, 2);
+      assert.equal(recoveredIds.size, 221);
+    });
+  });
+
+  it("bounds retained live-only activities to the latest head window", async () => {
+    const stateDir = await mkdtemp(nodePath.join(tmpdir(), "sidemesh-server-live-window-test-"));
+    const { runtime, provider } = makeSingleProviderRuntime({
+      latencyMs: 0,
+      seedSessions: false,
+      workspaceRoot: stateDir,
+    });
+    await withServerRuntime(makeConfig(stateDir), runtime, async (server, config) => {
+      const created = await provider.createSession({
+        cwd: stateDir,
+        input: [],
+        overrides: EMPTY_OVERRIDES,
+      });
+      for (let index = 0; index < 221; index += 1) {
+        provider.emit("liveEvent", {
+          type: "activity_updated",
+          sessionId: created.thread.id,
+          turnId: "turn-live-window",
+          activity: {
+            id: `live-window-${index}`,
+            type: "command",
+            turnId: "turn-live-window",
+            status: "in_progress",
+            command: `echo ${index}`,
+            cwd: stateDir,
+            output: "",
+            exitCode: null,
+            durationMs: null,
+            source: "agent",
+            processId: null,
+            commandActions: [],
+            terminalStatus: null,
+            terminalInput: null,
+          },
+        });
+      }
+
+      const delta = await request({
+        hostname: "127.0.0.1",
+        port: server.port,
+        path: `/api/sessions/${encodeURIComponent(created.thread.id)}/events?since=-1&page=true`,
+        method: "GET",
+        headers: { Authorization: "Bearer " + config.token },
+      });
+      assert.equal(delta.statusCode, 200);
+      assert.equal((delta.body as any).activities.length, 200);
+      assert.equal((delta.body as any).hasMore, false);
+      assert.equal(
+        (delta.body as any).activities.some(
+          (activity: { id: string }) => activity.id === "live-window-0",
+        ),
+        false,
+      );
+      assert.equal(
+        (delta.body as any).activities.some(
+          (activity: { id: string }) => activity.id === "live-window-220",
+        ),
+        true,
+      );
+    });
+  });
+
+  it("returns one indivisible oversized event so replay can advance", async () => {
+    const stateDir = await mkdtemp(nodePath.join(tmpdir(), "sidemesh-server-large-event-test-"));
+    const { runtime, provider } = makeSingleProviderRuntime({
+      latencyMs: 0,
+      seedSessions: false,
+      workspaceRoot: stateDir,
+    });
+    await withServerRuntime(makeConfig(stateDir), runtime, async (server, config) => {
+      const oversizedText = "x".repeat(300 * 1024);
+      const created = await provider.createSession({
+        cwd: stateDir,
+        input: [{ type: "text", text: oversizedText, text_elements: [] }],
+        overrides: EMPTY_OVERRIDES,
+      });
+      const result = await request({
+        hostname: "127.0.0.1",
+        port: server.port,
+        path: `/api/sessions/${encodeURIComponent(created.thread.id)}/events?since=-1&page=true`,
+        method: "GET",
+        headers: { Authorization: "Bearer " + config.token },
+      });
+
+      assert.equal(result.statusCode, 200);
+      assert.equal((result.body as any).messages.length, 1);
+      assert.equal((result.body as any).messages[0].text, oversizedText);
+      assert.equal((result.body as any).hasMore, false);
+      assert.ok((result.body as any).nextSeq >= 0);
+    });
+  });
+
   it("replays the latest missed plan update through the events delta route", async () => {
     const stateDir = await mkdtemp(nodePath.join(tmpdir(), "sidemesh-server-live-test-"));
     const { runtime, provider } = makeSingleProviderRuntime({

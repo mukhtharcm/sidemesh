@@ -13,6 +13,7 @@ import '../host_store.dart';
 import '../live_activity_service.dart';
 import '../local_notification_service.dart';
 import '../models.dart';
+import '../session_local_store.dart';
 import '../theme/app_colors.dart';
 import '../theme/color_contrast.dart';
 import '../theme/app_theme.dart';
@@ -42,6 +43,9 @@ class DesktopShell extends StatefulWidget {
 }
 
 enum _SidebarSection { recent, inbox, hosts }
+
+const _detailPaneTransitionDuration = Duration(milliseconds: 180);
+const _detailPaneDisposalSettleDuration = Duration(milliseconds: 220);
 
 class _OnboardingEmptyState extends StatelessWidget {
   const _OnboardingEmptyState({required this.colors, required this.onAddHost});
@@ -225,6 +229,8 @@ class _DesktopShellState extends State<DesktopShell> {
 
   List<HostProfile> _hosts = const [];
   bool _loading = true;
+  bool _hostMutationInFlight = false;
+  int _hostLoadGeneration = 0;
   _SidebarSection _section = _SidebarSection.recent;
   _ActiveSession? _active;
   HostProfile? _activeHost;
@@ -326,8 +332,14 @@ class _DesktopShellState extends State<DesktopShell> {
   }
 
   Future<void> _loadHosts() async {
+    if (_hostMutationInFlight) return;
+    final generation = ++_hostLoadGeneration;
     final hosts = await _store.loadHosts();
-    if (!mounted) return;
+    if (!mounted ||
+        _hostMutationInFlight ||
+        generation != _hostLoadGeneration) {
+      return;
+    }
     setState(() {
       _hosts = hosts;
       _loading = false;
@@ -599,31 +611,81 @@ class _DesktopShellState extends State<DesktopShell> {
       builder: (_) => HostEditorSheet(initialHost: initial),
     );
     if (result == null) return;
+    if (_hostMutationInFlight) return;
     final exists = _hosts.any((h) => h.id == result.id);
+    final previousHost = exists
+        ? _hosts.firstWhere((host) => host.id == result.id)
+        : null;
     final updated = exists
         ? _hosts.map((h) => h.id == result.id ? result : h).toList()
         : [..._hosts, result];
-    await _store.saveHosts(updated);
-    await _loadHosts();
+    _hostMutationInFlight = true;
+    _hostLoadGeneration += 1;
+    try {
+      if (previousHost != null &&
+          (previousHost.baseUrl != result.baseUrl ||
+              previousHost.token != result.token)) {
+        setState(() {
+          _hosts = updated
+              .where((host) => host.id != previousHost.id)
+              .toList(growable: false);
+        });
+        await WidgetsBinding.instance.endOfFrame;
+        await _closeHostSurfacesBeforeCacheClear(previousHost);
+        await SessionLocalStore.instance.clearHost(previousHost);
+      }
+      await _store.saveHosts(updated);
+    } finally {
+      _hostMutationInFlight = false;
+      await _loadHosts();
+    }
     _bumpRefresh();
   }
 
   Future<void> _removeHost(HostProfile host) async {
-    final active = _active;
+    if (_hostMutationInFlight) return;
     final updated = _hosts.where((h) => h.id != host.id).toList();
-    await _store.saveHosts(updated);
-    if (active?.host.id == host.id) {
-      _inspector.closeForOwner('${active!.host.id}|${active.session.id}');
-      setState(() => _active = null);
+    _hostMutationInFlight = true;
+    _hostLoadGeneration += 1;
+    try {
+      setState(() => _hosts = updated);
+      await WidgetsBinding.instance.endOfFrame;
+      await _closeHostSurfacesBeforeCacheClear(host);
+      await SessionLocalStore.instance.clearHost(host);
+      await _store.saveHosts(updated);
+    } finally {
+      _hostMutationInFlight = false;
+      await _loadHosts();
     }
-    if (_activeHost?.id == host.id) {
-      setState(() => _activeHost = null);
-    }
-    await _loadHosts();
     _bumpRefresh();
   }
 
+  Future<void> _closeHostSurfacesBeforeCacheClear(HostProfile host) async {
+    final active = _active;
+    final closesSession = active?.host.id == host.id;
+    final closesHostDetail = _activeHost?.id == host.id;
+    if (closesSession) {
+      _inspector.closeForOwner('${active!.host.id}|${active.session.id}');
+    }
+    if (closesSession || closesHostDetail) {
+      setState(() {
+        if (closesSession) {
+          _active = null;
+        }
+        if (closesHostDetail) {
+          _activeHost = null;
+        }
+      });
+      await WidgetsBinding.instance.endOfFrame;
+      await Future<void>.delayed(_detailPaneDisposalSettleDuration);
+      await WidgetsBinding.instance.endOfFrame;
+    }
+    await SessionLocalStore.instance.waitForIdle();
+    await SessionLocalStore.instance.waitForLogIdle();
+  }
+
   Future<void> _toggleHostEnabled(HostProfile host) async {
+    if (_hostMutationInFlight) return;
     final disabling = host.enabled;
     final active = _active;
     final updated = _hosts
@@ -632,19 +694,25 @@ class _DesktopShellState extends State<DesktopShell> {
               item.id == host.id ? item.copyWith(enabled: !item.enabled) : item,
         )
         .toList();
-    await _store.saveHosts(updated);
-    if (disabling) {
-      HostStatusStore.instance.clear(host.id);
-      await LiveActivityService.instance.clearPrimarySessionForHost(host.id);
+    _hostMutationInFlight = true;
+    _hostLoadGeneration += 1;
+    try {
+      await _store.saveHosts(updated);
+      if (disabling) {
+        HostStatusStore.instance.clear(host.id);
+        await LiveActivityService.instance.clearPrimarySessionForHost(host.id);
+      }
+      if (active?.host.id == host.id && disabling) {
+        _inspector.closeForOwner('${active!.host.id}|${active.session.id}');
+        setState(() => _active = null);
+      }
+      if (_activeHost?.id == host.id && disabling) {
+        setState(() => _activeHost = null);
+      }
+    } finally {
+      _hostMutationInFlight = false;
+      await _loadHosts();
     }
-    if (active?.host.id == host.id && disabling) {
-      _inspector.closeForOwner('${active!.host.id}|${active.session.id}');
-      setState(() => _active = null);
-    }
-    if (_activeHost?.id == host.id && disabling) {
-      setState(() => _activeHost = null);
-    }
-    await _loadHosts();
     _bumpRefresh();
   }
 
@@ -2036,7 +2104,7 @@ class _DetailPaneState extends State<_DetailPane> {
       child = _buildEmpty(context, key: const ValueKey('empty'));
     }
     return AnimatedSwitcher(
-      duration: const Duration(milliseconds: 180),
+      duration: _detailPaneTransitionDuration,
       switchInCurve: Curves.easeOutCubic,
       switchOutCurve: Curves.easeInCubic,
       transitionBuilder: (child, animation) =>

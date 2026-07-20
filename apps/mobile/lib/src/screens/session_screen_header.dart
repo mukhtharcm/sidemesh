@@ -345,7 +345,6 @@ class _SessionActionRow extends StatelessWidget {
   }
 }
 
-
 String? _gitHeaderLabel(SessionSummary session, SessionGitStatus? status) {
   final branch = status?.branch ?? session.gitInfo?.branch;
   final shortSha = status?.shortSha ?? session.gitInfo?.shortSha;
@@ -364,6 +363,7 @@ String? _gitHeaderLabel(SessionSummary session, SessionGitStatus? status) {
   }
   return label;
 }
+
 class _JumpToLatestPill extends StatelessWidget {
   const _JumpToLatestPill({required this.onTap});
 
@@ -386,11 +386,7 @@ class _JumpToLatestPill extends StatelessWidget {
           child: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Icon(
-                Icons.arrow_downward_rounded,
-                size: 16,
-                color: foreground,
-              ),
+              Icon(Icons.arrow_downward_rounded, size: 16, color: foreground),
               const SizedBox(width: 6),
               Text(
                 'Jump to latest',
@@ -1145,11 +1141,7 @@ class _PinnedMessageSheet extends StatelessWidget {
     final pinnedLinkStyle = linkTextStyleForBackground(
       background: colors.surfaceMuted,
       preferred: colors.accent,
-      fallbacks: [
-        colors.info,
-        colors.textPrimary,
-        colors.textSecondary,
-      ],
+      fallbacks: [colors.info, colors.textPrimary, colors.textSecondary],
       baseStyle: textStyle,
     );
     return MeshBottomSheetScaffold(
@@ -1938,12 +1930,14 @@ class _HistoryTruncationCard extends StatelessWidget {
   const _HistoryTruncationCard({
     required this.history,
     required this.loading,
+    this.error,
     required this.onLoadOlderHistory,
     this.onDismiss,
   });
 
   final SessionLogHistorySummary history;
   final bool loading;
+  final String? error;
   final VoidCallback onLoadOlderHistory;
   final VoidCallback? onDismiss;
 
@@ -1974,9 +1968,10 @@ class _HistoryTruncationCard extends StatelessWidget {
           const SizedBox(width: 8),
           Expanded(
             child: Text(
-              hiddenParts.isEmpty
-                  ? '${history.returnedMessages} msgs · ${history.returnedActivities} actions loaded'
-                  : '${hiddenParts.join(' · ')} hidden',
+              error ??
+                  (hiddenParts.isEmpty
+                      ? '${history.returnedMessages} msgs · ${history.returnedActivities} actions loaded'
+                      : '${hiddenParts.join(' · ')} hidden'),
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
               style: Theme.of(context).textTheme.bodySmall?.copyWith(
@@ -1999,7 +1994,7 @@ class _HistoryTruncationCard extends StatelessWidget {
               child: Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                 child: Text(
-                  'Load older',
+                  error == null ? 'Load older' : 'Retry',
                   style: Theme.of(context).textTheme.bodySmall?.copyWith(
                     color: colors.accent,
                     fontWeight: FontWeight.w600,

@@ -101,6 +101,10 @@ class HostReconnectScheduler {
   final Map<String, _HostRetryController> _controllers = {};
   final _stateControllers = <String, StreamController<HostRetryState>>{};
 
+  @visibleForTesting
+  int registeredSlotCount(String hostId) =>
+      _controllers[hostId]?.slots.length ?? 0;
+
   Random get _random => _randomOverride ?? Random();
 
   /// Register a reconnect slot for [hostId].
