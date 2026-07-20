@@ -39,6 +39,7 @@ class _PendingRecentMutation {
 /// older servers, while the websocket path keeps the list fresh between polls.
 class RecentSessionsStore extends ChangeNotifier {
   static const int _maxSessionsPerHost = 40;
+  static int _nextStoreId = 0;
 
   RecentSessionsStore({
     Duration pollInterval = const Duration(seconds: 90),
@@ -49,6 +50,7 @@ class RecentSessionsStore extends ChangeNotifier {
 
   final Duration _pollInterval;
   final Duration _initialHttpFallbackDelay;
+  late final String _reconnectSlotId = 'recent-sessions-live-${_nextStoreId++}';
 
   ApiClient? _api;
   List<HostProfile> _hosts = const [];
@@ -76,7 +78,8 @@ class RecentSessionsStore extends ChangeNotifier {
 
   void configure({required List<HostProfile> hosts, required ApiClient api}) {
     if (_disposed) return;
-    _api = api;
+    final previousApi = _api;
+    final previousHostsById = Map<String, HostProfile>.from(_hostsById);
     final enabledHosts = hosts
         .where((host) => host.enabled)
         .toList(growable: false);
@@ -85,6 +88,26 @@ class RecentSessionsStore extends ChangeNotifier {
     final hostsChanged =
         newSignatures.length != oldSignatures.length ||
         !newSignatures.containsAll(oldSignatures);
+    final apiChanged = previousApi != null && !identical(previousApi, api);
+    final credentialChangedHostIds = enabledHosts
+        .where((host) {
+          final previous = previousHostsById[host.id];
+          return previous != null &&
+              _hostSignature(previous) != _hostSignature(host);
+        })
+        .map((host) => host.id)
+        .toSet();
+    if (hostsChanged || apiChanged) {
+      _loadGen += 1;
+    }
+    _api = api;
+
+    for (final hostId in credentialChangedHostIds) {
+      _sessionsByHostId.remove(hostId);
+      _hostFreshnessById.remove(hostId);
+      _confirmedHostIds.remove(hostId);
+      _liveHostIds.remove(hostId);
+    }
 
     _hosts = List.unmodifiable(enabledHosts);
     _hostsById
@@ -107,8 +130,13 @@ class RecentSessionsStore extends ChangeNotifier {
       return;
     }
 
-    if (hostsChanged || !_hasLoadedOnce) {
-      unawaited(_hydrateCachedHosts(_hosts));
+    if (hostsChanged || apiChanged || !_hasLoadedOnce) {
+      final cacheEligibleHosts = _hosts
+          .where((host) => !credentialChangedHostIds.contains(host.id))
+          .toList(growable: false);
+      if (cacheEligibleHosts.isNotEmpty) {
+        unawaited(_hydrateCachedHosts(cacheEligibleHosts));
+      }
       _scheduleInitialHttpFallback();
     }
   }
@@ -146,11 +174,20 @@ class RecentSessionsStore extends ChangeNotifier {
 
     await Future.wait(
       hosts.map((host) async {
+        final freshnessAtStart = _hostFreshnessById[host.id] ?? 0;
+        var expectedFreshness = freshnessAtStart;
         try {
           final sessions = await api.fetchSessions(host, limit: 40);
-          if (_disposed || gen != _loadGen) return;
+          if (_disposed ||
+              gen != _loadGen ||
+              !identical(_api, api) ||
+              !_isCurrentHost(host) ||
+              (_hostFreshnessById[host.id] ?? 0) != freshnessAtStart) {
+            return;
+          }
           HostStatusStore.instance.markOnline(host.id);
           _markHostFresh(host.id);
+          expectedFreshness = _hostFreshnessById[host.id] ?? expectedFreshness;
           _confirmedHostIds.add(host.id);
           _replaceHostSessions(host, sessions);
           _failedHostLabels = _failedHostLabels
@@ -160,7 +197,13 @@ class RecentSessionsStore extends ChangeNotifier {
           _publishEntries();
           unawaited(SessionLocalStore.instance.upsertSessions(host, sessions));
         } catch (error) {
-          if (_disposed || gen != _loadGen) return;
+          if (_disposed ||
+              gen != _loadGen ||
+              !identical(_api, api) ||
+              !_isCurrentHost(host) ||
+              (_hostFreshnessById[host.id] ?? 0) != freshnessAtStart) {
+            return;
+          }
           HostStatusStore.instance.markOffline(
             host.id,
             error: friendlyError(error),
@@ -170,7 +213,11 @@ class RecentSessionsStore extends ChangeNotifier {
             failures.add(host.label);
           }
         } finally {
-          if (!_disposed && gen == _loadGen) {
+          if (!_disposed &&
+              gen == _loadGen &&
+              identical(_api, api) &&
+              _isCurrentHost(host) &&
+              (_hostFreshnessById[host.id] ?? 0) == expectedFreshness) {
             if (showLoading) {
               _pendingHostIds = {..._pendingHostIds}..remove(host.id);
               _failedHostLabels = List.unmodifiable(failures);
@@ -267,7 +314,7 @@ class RecentSessionsStore extends ChangeNotifier {
         continue;
       }
       final existing = _liveConnections[host.id];
-      if (existing != null && existing.matches(host)) {
+      if (existing != null && existing.matches(host, api)) {
         continue;
       }
       existing?.dispose();
@@ -276,6 +323,7 @@ class RecentSessionsStore extends ChangeNotifier {
       _liveConnections[host.id] = _RecentHostLiveConnection(
         host: host,
         api: api,
+        reconnectSlotId: _reconnectSlotId,
         onOnline: _handleLiveOnline,
         onOffline: _handleLiveOffline,
         onSnapshot: _handleLiveSnapshot,
@@ -286,11 +334,12 @@ class RecentSessionsStore extends ChangeNotifier {
   }
 
   void _handleLiveOnline(HostProfile host) {
+    if (!_isCurrentHost(host)) return;
     HostStatusStore.instance.markOnline(host.id);
   }
 
   void _handleLiveOffline(HostProfile host, Object? error) {
-    if (_disposed) return;
+    if (_disposed || !_isCurrentHost(host)) return;
     _liveHostIds.remove(host.id);
     _syncPollTimer();
     if (_confirmedHostIds.remove(host.id)) {
@@ -299,7 +348,7 @@ class RecentSessionsStore extends ChangeNotifier {
   }
 
   void _handleLiveSnapshot(HostProfile host, List<SessionSummary> sessions) {
-    if (_disposed || !_hostsById.containsKey(host.id)) return;
+    if (_disposed || !_isCurrentHost(host)) return;
     _markHostFreshFromLive(host);
     _hasLoadedOnce = true;
     _replaceHostSessions(host, sessions);
@@ -309,7 +358,7 @@ class RecentSessionsStore extends ChangeNotifier {
   }
 
   void _handleLiveUpsert(HostProfile host, SessionSummary session) {
-    if (_disposed || !_hostsById.containsKey(host.id)) return;
+    if (_disposed || !_isCurrentHost(host)) return;
     _markHostFreshFromLive(host);
     final next = Map<String, SessionSummary>.from(
       _sessionsByHostId[host.id] ?? const <String, SessionSummary>{},
@@ -324,7 +373,7 @@ class RecentSessionsStore extends ChangeNotifier {
   }
 
   void _handleLiveRemove(HostProfile host, String sessionId) {
-    if (_disposed || !_hostsById.containsKey(host.id)) return;
+    if (_disposed || !_isCurrentHost(host)) return;
     _markHostFreshFromLive(host);
     final existing = _sessionsByHostId[host.id];
     if (existing == null || !existing.containsKey(sessionId)) {
@@ -403,6 +452,11 @@ class RecentSessionsStore extends ChangeNotifier {
   String _hostSignature(HostProfile host) =>
       '${host.id}\u001f${host.baseUrl}\u001f${host.token}\u001f${host.enabled ? 1 : 0}';
 
+  bool _isCurrentHost(HostProfile host) {
+    final current = _hostsById[host.id];
+    return current != null && _hostSignature(current) == _hostSignature(host);
+  }
+
   @override
   void dispose() {
     if (_disposed) {
@@ -441,11 +495,10 @@ class RecentSessionsStore extends ChangeNotifier {
 }
 
 class _RecentHostLiveConnection {
-  static const _reconnectSlotId = 'recent-sessions-live';
-
   _RecentHostLiveConnection({
     required this.host,
     required this.api,
+    required this.reconnectSlotId,
     required this.onOnline,
     required this.onOffline,
     required this.onSnapshot,
@@ -454,7 +507,7 @@ class _RecentHostLiveConnection {
   }) {
     HostReconnectScheduler.instance.registerSlot(
       host.id,
-      _reconnectSlotId,
+      reconnectSlotId,
       ReconnectPriority.backgroundSocket,
       connect,
     );
@@ -462,6 +515,7 @@ class _RecentHostLiveConnection {
 
   final HostProfile host;
   final ApiClient api;
+  final String reconnectSlotId;
   final void Function(HostProfile host) onOnline;
   final void Function(HostProfile host, Object? error) onOffline;
   final void Function(HostProfile host, List<SessionSummary> sessions)
@@ -476,7 +530,8 @@ class _RecentHostLiveConnection {
   final List<_PendingRecentMutation> _pendingMutations =
       <_PendingRecentMutation>[];
 
-  bool matches(HostProfile next) =>
+  bool matches(HostProfile next, ApiClient nextApi) =>
+      identical(api, nextApi) &&
       host.id == next.id &&
       host.baseUrl == next.baseUrl &&
       host.token == next.token;
@@ -499,7 +554,7 @@ class _RecentHostLiveConnection {
               if (_disposed || !identical(_channel, channel)) return;
               HostReconnectScheduler.instance.markConnected(
                 host.id,
-                _reconnectSlotId,
+                reconnectSlotId,
               );
             })
             .catchError((Object error) {
@@ -517,7 +572,7 @@ class _RecentHostLiveConnection {
   }
 
   void _handleMessage(dynamic raw) {
-    if (raw is! String) return;
+    if (_disposed || raw is! String) return;
     try {
       final event = RecentSessionsLiveEvent.fromJson(
         (jsonDecode(raw) as Map).cast<String, dynamic>(),
@@ -598,7 +653,7 @@ class _RecentHostLiveConnection {
       unawaited(channel.sink.close());
     }
     onOffline(host, error);
-    HostReconnectScheduler.instance.markDisconnected(host.id, _reconnectSlotId);
+    HostReconnectScheduler.instance.markDisconnected(host.id, reconnectSlotId);
   }
 
   void _scheduleReconnectIfCurrent(WebSocketChannel channel, Object? error) {
@@ -610,7 +665,7 @@ class _RecentHostLiveConnection {
 
   void dispose() {
     _disposed = true;
-    HostReconnectScheduler.instance.unregisterSlot(host.id, _reconnectSlotId);
+    HostReconnectScheduler.instance.unregisterSlot(host.id, reconnectSlotId);
     unawaited(_subscription?.cancel() ?? Future<void>.value());
     final sink = _channel?.sink;
     if (sink != null) {

@@ -5,6 +5,7 @@ import nodePath from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
 
 import {
+  CodexHistoryParser,
   listRecentRolloutThreads,
   loadRolloutLog,
   loadSessionRuntime,
@@ -472,5 +473,109 @@ describe("loadSessionRuntime", () => {
     assert.equal(activity.exitCode, 0);
     assert.equal(activity.durationMs, 1235);
     assert.match(activity.output ?? "", /tests passed/);
+  });
+
+  it("does not let a late update for an evicted activity displace newer bounded activities", async () => {
+    const commandCall = (id: string, second: number) => JSON.stringify({
+      timestamp: `2026-04-29T00:00:0${second}.000Z`,
+      type: "response_item",
+      payload: {
+        type: "function_call",
+        name: "exec_command",
+        arguments: JSON.stringify({ cmd: `echo ${id}`, workdir: "/repo" }),
+        call_id: id,
+      },
+    });
+    const lines = [
+      commandCall("call-old", 1),
+      commandCall("call-newer-1", 2),
+      commandCall("call-newer-2", 3),
+      JSON.stringify({
+        timestamp: "2026-04-29T00:00:04.000Z",
+        type: "response_item",
+        payload: {
+          type: "function_call_output",
+          call_id: "call-old",
+          output: "Process exited with code 0\nOutput:\ndone\n",
+        },
+      }),
+    ];
+
+    await writeFile(rolloutPath, `${lines.join("\n")}\n`, "utf8");
+
+    const log = await loadRolloutLog("thread-1", rolloutPath, null, null, 2);
+
+    assert.equal(log.totalActivities, 3);
+    assert.equal(log.nextSeq, 3);
+    assert.deepEqual(
+      log.activities.map((activity) => activity.id),
+      ["call-newer-1", "call-newer-2"],
+    );
+  });
+
+  it("bounds head rows by canonical timestamp rather than file position", async () => {
+    const lines = [
+      JSON.stringify({
+        timestamp: "2026-04-29T00:00:10.000Z",
+        type: "event_msg",
+        payload: { type: "user_message", message: "Newest timestamp" },
+      }),
+      JSON.stringify({
+        timestamp: "2026-04-29T00:00:01.000Z",
+        type: "event_msg",
+        payload: { type: "agent_message", message: "Later file row", phase: "final_answer" },
+      }),
+    ];
+    await writeFile(rolloutPath, `${lines.join("\n")}\n`, "utf8");
+
+    const log = await loadRolloutLog("thread-1", rolloutPath, null, 1, null);
+
+    assert.equal(log.totalMessages, 2);
+    assert.deepEqual(log.messages.map((message) => message.text), [
+      "Newest timestamp",
+    ]);
+  });
+
+  it("forgets completed activity IDs without recounting pending updates", () => {
+    const parser = new CodexHistoryParser();
+    parser.parseLine(JSON.stringify({
+      timestamp: "2026-04-29T00:00:00.000Z",
+      type: "response_item",
+      payload: {
+        type: "function_call",
+        name: "exec_command",
+        call_id: "pending-command",
+        arguments: JSON.stringify({ cmd: "sleep 1", workdir: "/repo" }),
+      },
+    }));
+
+    for (let index = 0; index < 3; index += 1) {
+      parser.parseLine(JSON.stringify({
+        timestamp: `2026-04-29T00:00:0${index + 1}.000Z`,
+        type: "event_msg",
+        payload: {
+          type: "exec_command_end",
+          call_id: `bounded-${index}`,
+          command: `echo ${index}`,
+          cwd: "/repo",
+          aggregated_output: "done",
+        },
+      }));
+    }
+
+    const update = parser.parseLine(JSON.stringify({
+      timestamp: "2026-04-29T00:00:05.000Z",
+      type: "response_item",
+      payload: {
+        type: "function_call_output",
+        call_id: "pending-command",
+        output: "Process exited with code 0\nFinal output",
+      },
+    }));
+
+    assert.equal(update?.isNewActivity, false);
+    assert.equal(update?.activity?.seq, 0);
+    assert.equal(parser.nextSeq, 4);
+    assert.equal(parser.trackedActivityIdCount, 0);
   });
 });

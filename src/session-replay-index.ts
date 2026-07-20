@@ -1,18 +1,10 @@
 import crypto from "node:crypto";
 import { createReadStream } from "node:fs";
-import { stat } from "node:fs/promises";
+import { open, stat } from "node:fs/promises";
 import readline from "node:readline";
 
-import {
-  parseJsonLine,
-  parseMessage,
-  parseActivity,
-  parseRuntime,
-  mergeRuntime,
-  resolveCommittedTurnId,
-  resolveDiscardedTurnId,
-  parseTimestamp,
-} from "./codex-history.js";
+import { mergeActivity } from "./activity.js";
+import { CodexHistoryParser } from "./codex-history.js";
 import type {
   SessionLogSnapshot,
   SessionMessage,
@@ -46,10 +38,12 @@ export interface ReplayIndexEntry {
   messages: SessionMessage[];
   activities: SessionActivity[];
   runtime: SessionRuntimeSummary | null;
-  pendingTurnRuntime: Map<string, SessionRuntimeSummary>;
+  parser: CodexHistoryParser;
   totalMessages: number;
   totalActivities: number;
+  highestEvictedSeq: number;
   lastAccessedAt: number;
+  prefixLength: number;
   prefixHash: string;
 }
 
@@ -74,6 +68,7 @@ export interface SessionReplayIndexStats {
  */
 export class SessionReplayIndex {
   private entries = new Map<string, ReplayIndexEntry>();
+  private readonly pendingLoads = new Map<string, Promise<ReplayIndexEntry>>();
   private readonly maxSessions: number;
   private readonly maxMessages: number;
   private readonly maxActivities: number;
@@ -94,6 +89,25 @@ export class SessionReplayIndex {
    * has grown or from scratch if the file rotated / changed inode.
    */
   async load(sessionId: string, rolloutPath: string): Promise<ReplayIndexEntry> {
+    const previous = this.pendingLoads.get(sessionId);
+    const pending = (previous
+      ? previous.catch(() => undefined)
+      : Promise.resolve()
+    ).then(() => this.loadSerialized(sessionId, rolloutPath));
+    this.pendingLoads.set(sessionId, pending);
+    try {
+      return await pending;
+    } finally {
+      if (this.pendingLoads.get(sessionId) === pending) {
+        this.pendingLoads.delete(sessionId);
+      }
+    }
+  }
+
+  private async loadSerialized(
+    sessionId: string,
+    rolloutPath: string,
+  ): Promise<ReplayIndexEntry> {
     const existing = this.entries.get(sessionId);
 
     let stats;
@@ -104,14 +118,19 @@ export class SessionReplayIndex {
       throw new Error(`Rollout file not found: ${rolloutPath}`);
     }
 
-    const prefixHash = stats.size > 0 ? await hashPrefix(rolloutPath, Math.min(stats.size, 4096)) : "";
+    const existingPrefixHash = existing &&
+        existing.prefixLength > 0 &&
+        stats.size >= existing.prefixLength
+      ? await hashPrefix(rolloutPath, existing.prefixLength)
+      : "";
     if (
       existing &&
       existing.rolloutPath === rolloutPath &&
       existing.inode === stats.ino &&
       existing.device === stats.dev &&
       existing.size <= stats.size &&
-      existing.prefixHash === prefixHash
+      stats.size >= existing.prefixLength &&
+      existing.prefixHash === existingPrefixHash
     ) {
       existing.lastAccessedAt = Date.now();
 
@@ -134,15 +153,9 @@ export class SessionReplayIndex {
    * retained event in the ring buffer.
    */
   getDelta(entry: ReplayIndexEntry, since: number): ReplayDeltaResult {
-    if (since < 0) since = 0;
+    if (since < -1) since = -1;
 
-    const oldestMessageSeq =
-      entry.messages.length > 0 ? entry.messages[0].seq : entry.nextSeq;
-    const oldestActivitySeq =
-      entry.activities.length > 0 ? entry.activities[0].seq : entry.nextSeq;
-    const oldestSeq = Math.min(oldestMessageSeq, oldestActivitySeq);
-
-    if (since < oldestSeq && oldestSeq > 0) {
+    if (since < entry.highestEvictedSeq) {
       const error = new Error("Stale cursor") as Error & {
         code: string;
         staleSince: number;
@@ -150,7 +163,7 @@ export class SessionReplayIndex {
       };
       error.code = "STALE_CURSOR";
       error.staleSince = since;
-      error.oldestAvailableSeq = oldestSeq;
+      error.oldestAvailableSeq = entry.highestEvictedSeq + 1;
       throw error;
     }
 
@@ -209,23 +222,28 @@ export class SessionReplayIndex {
     rolloutPath: string,
     stats: { ino: number; dev: number; size: number; mtimeMs: number },
   ): Promise<ReplayIndexEntry> {
-    const prefixHash = stats.size > 0 ? await hashPrefix(rolloutPath, Math.min(stats.size, 4096)) : "";
+    const prefixLength = Math.min(stats.size, 4096);
+    const prefixHash = prefixLength > 0
+      ? await hashPrefix(rolloutPath, prefixLength)
+      : "";
     const entry: ReplayIndexEntry = {
       sessionId,
       rolloutPath,
       inode: stats.ino,
       device: stats.dev,
-      size: stats.size,
+      size: 0,
       mtimeMs: stats.mtimeMs,
       lastByteOffset: 0,
       nextSeq: 0,
       messages: [],
       activities: [],
       runtime: null,
-      pendingTurnRuntime: new Map(),
+      parser: new CodexHistoryParser(),
       totalMessages: 0,
       totalActivities: 0,
+      highestEvictedSeq: -1,
       lastAccessedAt: Date.now(),
+      prefixLength,
       prefixHash,
     };
 
@@ -243,7 +261,6 @@ export class SessionReplayIndex {
   ): Promise<void> {
     if (entry.lastByteOffset >= newSize) return;
     await this.parseBytes(entry, rolloutPath, entry.lastByteOffset, newSize);
-    entry.size = newSize;
     entry.mtimeMs = Date.now();
   }
 
@@ -253,10 +270,18 @@ export class SessionReplayIndex {
     startOffset: number,
     endOffset: number,
   ): Promise<void> {
+    const completeEndOffset = await findLastCompleteLineOffset(
+      rolloutPath,
+      startOffset,
+      endOffset,
+    );
+    if (completeEndOffset <= startOffset) {
+      return;
+    }
     const file = createReadStream(rolloutPath, {
       encoding: "utf8",
       start: startOffset,
-      end: endOffset - 1,
+      end: completeEndOffset - 1,
     });
     const lines = readline.createInterface({
       input: file,
@@ -264,63 +289,52 @@ export class SessionReplayIndex {
     });
 
     for await (const line of lines) {
-      const parsed = parseJsonLine(line);
-      if (!parsed) continue;
+      const result = entry.parser.parseLine(line);
+      if (!result) continue;
+      entry.runtime = entry.parser.runtime;
+      entry.nextSeq = entry.parser.nextSeq;
 
-      const nextRuntime = parseRuntime(parsed);
-      if (nextRuntime) {
-        if (nextRuntime.turnId) {
-          entry.pendingTurnRuntime.set(
-            nextRuntime.turnId,
-            mergeRuntime(
-              entry.pendingTurnRuntime.get(nextRuntime.turnId) ?? null,
-              nextRuntime,
-            ),
-          );
-        } else {
-          entry.runtime = mergeRuntime(entry.runtime, nextRuntime);
-        }
-      }
-
-      const committedTurnId = resolveCommittedTurnId(parsed);
-      if (committedTurnId) {
-        const committed = entry.pendingTurnRuntime.get(committedTurnId);
-        if (committed) {
-          entry.runtime = mergeRuntime(entry.runtime, {
-            ...committed,
-            updatedAt: parseTimestamp(parsed.timestamp),
-          });
-        }
-        entry.pendingTurnRuntime.delete(committedTurnId);
-      }
-
-      const discardedTurnId = resolveDiscardedTurnId(parsed);
-      if (discardedTurnId) {
-        entry.pendingTurnRuntime.delete(discardedTurnId);
-      }
-
-      const message = parseMessage(parsed, entry.nextSeq);
-      if (message) {
+      if (result.message) {
         entry.totalMessages += 1;
-        entry.nextSeq += 1;
-        entry.messages.push(message);
+        entry.messages.push(result.message);
         if (entry.messages.length > this.maxMessages) {
-          entry.messages.shift();
+          const evicted = entry.messages.shift();
+          if (evicted) {
+            entry.highestEvictedSeq = Math.max(
+              entry.highestEvictedSeq,
+              evicted.seq,
+            );
+          }
         }
       }
 
-      const activity = parseActivity(parsed, entry.nextSeq);
-      if (activity) {
-        entry.totalActivities += 1;
-        entry.nextSeq += 1;
-        entry.activities.push(activity);
-        if (entry.activities.length > this.maxActivities) {
-          entry.activities.shift();
+      if (result.activity) {
+        const existingIndex = entry.activities.findIndex(
+          (activity) => activity.id === result.activity!.id,
+        );
+        if (existingIndex >= 0) {
+          entry.activities[existingIndex] = mergeActivity(
+            entry.activities[existingIndex],
+            result.activity,
+          );
+        } else if (result.isNewActivity) {
+          entry.totalActivities += 1;
+          entry.activities.push(result.activity);
+          if (entry.activities.length > this.maxActivities) {
+            const evicted = entry.activities.shift();
+            if (evicted) {
+              entry.highestEvictedSeq = Math.max(
+                entry.highestEvictedSeq,
+                evicted.seq,
+              );
+            }
+          }
         }
       }
     }
 
-    entry.lastByteOffset = endOffset;
+    entry.lastByteOffset = completeEndOffset;
+    entry.size = completeEndOffset;
   }
 
   private evictIfNeeded(): void {
@@ -337,5 +351,69 @@ export class SessionReplayIndex {
     if (oldestKey) {
       this.entries.delete(oldestKey);
     }
+  }
+}
+
+async function findLastCompleteLineOffset(
+  rolloutPath: string,
+  startOffset: number,
+  endOffset: number,
+): Promise<number> {
+  const handle = await open(rolloutPath, "r");
+  try {
+    const chunkSize = 64 * 1024;
+    let cursor = endOffset;
+    let lastNewlineEnd = startOffset;
+    let foundNewline = false;
+    while (cursor > startOffset) {
+      const readStart = Math.max(startOffset, cursor - chunkSize);
+      const buffer = Buffer.allocUnsafe(cursor - readStart);
+      const { bytesRead } = await handle.read(
+        buffer,
+        0,
+        buffer.length,
+        readStart,
+      );
+      for (let index = bytesRead - 1; index >= 0; index -= 1) {
+        if (buffer[index] === 0x0a) {
+          lastNewlineEnd = readStart + index + 1;
+          foundNewline = true;
+          break;
+        }
+      }
+      if (foundNewline) break;
+      cursor = readStart;
+    }
+    if (lastNewlineEnd === endOffset) {
+      return endOffset;
+    }
+
+    // JSONL writers do not universally append a final newline. Treat a
+    // syntactically complete terminal JSON value as a finished record, while
+    // retaining an actually partial tail until a later append completes it.
+    const tail = Buffer.allocUnsafe(endOffset - lastNewlineEnd);
+    let bytesRead = 0;
+    while (bytesRead < tail.length) {
+      const result = await handle.read(
+        tail,
+        bytesRead,
+        tail.length - bytesRead,
+        lastNewlineEnd + bytesRead,
+      );
+      if (result.bytesRead === 0) break;
+      bytesRead += result.bytesRead;
+    }
+    const terminalLine = tail.subarray(0, bytesRead).toString("utf8").trim();
+    if (!terminalLine) {
+      return endOffset;
+    }
+    try {
+      JSON.parse(terminalLine);
+      return endOffset;
+    } catch {
+      return lastNewlineEnd;
+    }
+  } finally {
+    await handle.close();
   }
 }

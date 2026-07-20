@@ -239,6 +239,29 @@ specific agent provider.
   stable while replay freshness is tracked separately in `src/server.ts`, so
   delta sync should use the replay cursor rather than assuming updated
   activities get a newer transcript `seq`.
+- **Session history cursor separation**: `SessionLogSnapshot.nextSeq` is the
+  provider's exclusive next-unused transcript sequence; mobile converts it to
+  the inclusive replay cursor with `nextSeq - 1`. A log response can include a
+  larger exclusive `replayNextSeq` when host live-only activities need an
+  immediate delta catch-up, while `SessionEventsDelta.nextSeq` is inclusive.
+  Backward history uses an opaque provider-owned `beforeCursor`; never derive
+  one cursor domain from another. Page limits apply to the unified
+  message/activity timeline so page boundaries cannot split the two record
+  types at different points in history. Providers must assign unique `seq`
+  values across that unified message/activity namespace.
+- **Paged replay compatibility**: bounded `/events` chunking is opt-in through
+  `page=true`. A paged client must drain `hasMore` using each response's
+  `nextSeq`, not a WebSocket-advanced global cursor. Requests without the flag
+  retain the legacy `stale_cursor` fallback contract for released clients.
+- **Credential replacement quiescence**: before clearing a host's credential-
+  scoped cache, remove that host from the authoritative widget host list and
+  invalidate in-flight host loads. Otherwise a child rebuild or stale
+  `HostStore.loadHosts()` completion can remount the old Recent HTTP/socket
+  producer during the clear. Keep it excluded through save and reconfiguration.
+- **Recent HTTP/live ordering**: an HTTP recent-session refresh must capture
+  and recheck the host freshness generation. A live snapshot or upsert that
+  lands while HTTP is in flight is newer and must not be overwritten or
+  persisted by the older HTTP response.
 - **Mobile delta parity**: `SessionEventsDelta` does not include a full
   `history` summary. When replaying deltas into a cached session,
   `apps/mobile/lib/src/screens/session_screen.dart` must keep

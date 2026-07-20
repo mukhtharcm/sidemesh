@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, rm, writeFile, appendFile } from "node:fs/promises";
+import { appendFile, mkdtemp, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import nodePath from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
@@ -84,11 +84,60 @@ describe("SessionReplayIndex", () => {
     );
 
     const entry2 = await index.load("thread-1", rolloutPath);
+    assert.strictEqual(entry2, entry1);
     assert.equal(entry2.messages.length, 2);
     assert.equal(entry2.messages[1].seq, 1);
     assert.equal(entry2.messages[1].role, "assistant");
     assert.equal(entry2.nextSeq, 2);
     assert.equal(entry2.totalMessages, 2);
+  });
+
+  it("keeps command and appended-message sequences aligned with snapshots", async () => {
+    const lines = [
+      JSON.stringify({
+        timestamp: "2026-04-29T00:00:00.000Z",
+        type: "event_msg",
+        payload: { type: "user_message", message: "Before command" },
+      }),
+      JSON.stringify({
+        timestamp: "2026-04-29T00:00:01.000Z",
+        type: "response_item",
+        payload: {
+          type: "function_call",
+          name: "exec_command",
+          arguments: JSON.stringify({ cmd: "npm test", workdir: "/repo" }),
+          call_id: "command-1",
+        },
+      }),
+    ];
+    await writeFile(rolloutPath, lines.join("\n") + "\n", "utf8");
+
+    const index = new SessionReplayIndex();
+    const initial = await index.load("thread-1", rolloutPath);
+    assert.equal(initial.nextSeq, 2);
+    assert.equal(initial.activities[0].seq, 1);
+
+    await appendFile(
+      rolloutPath,
+      JSON.stringify({
+        timestamp: "2026-04-29T00:00:02.000Z",
+        type: "event_msg",
+        payload: {
+          type: "agent_message",
+          message: "After command",
+          phase: "final_answer",
+        },
+      }) + "\n",
+      "utf8",
+    );
+    const updated = await index.load("thread-1", rolloutPath);
+    const delta = index.getDelta(updated, 1);
+
+    assert.deepEqual(delta.messages.map((message) => message.text), [
+      "After command",
+    ]);
+    assert.equal(delta.messages[0].seq, 2);
+    assert.equal(updated.nextSeq, 3);
   });
 
   it("rebuilds from scratch when the file is rewritten (inode changes)", async () => {
@@ -162,6 +211,25 @@ describe("SessionReplayIndex", () => {
     assert.equal(delta2.nextSeq, 2);
   });
 
+  it("preserves minus one as the cursor before sequence zero", async () => {
+    await writeFile(
+      rolloutPath,
+      JSON.stringify({
+        timestamp: "2026-04-29T00:00:00.000Z",
+        type: "event_msg",
+        payload: { type: "user_message", message: "First" },
+      }) + "\n",
+      "utf8",
+    );
+
+    const index = new SessionReplayIndex();
+    const entry = await index.load("thread-1", rolloutPath);
+    const delta = index.getDelta(entry, -1);
+
+    assert.deepEqual(delta.messages.map((message) => message.text), ["First"]);
+    assert.equal(delta.messages[0].seq, 0);
+  });
+
   it("throws STALE_CURSOR when since is older than the retained ring buffer", async () => {
     const index = new SessionReplayIndex({ maxMessages: 2, maxActivities: 2 });
 
@@ -188,10 +256,137 @@ describe("SessionReplayIndex", () => {
     assert.equal(entry.messages.length, 2);
 
     assert.throws(() => index.getDelta(entry, -1), /Stale cursor/);
-    assert.throws(() => index.getDelta(entry, 0), /Stale cursor/);
+    assert.equal(index.getDelta(entry, 0).messages.length, 2);
 
     const delta = index.getDelta(entry, 1);
     assert.equal(delta.messages.length, 1);
+  });
+
+  it("uses the highest eviction across sparse message and activity rings", async () => {
+    const index = new SessionReplayIndex({ maxMessages: 1, maxActivities: 10 });
+    const lines = [
+      JSON.stringify({
+        timestamp: "2026-04-29T00:00:00.000Z",
+        type: "event_msg",
+        payload: {
+          type: "exec_command_end",
+          call_id: "activity-0",
+          command: "echo activity",
+          cwd: "/repo",
+          aggregated_output: "done",
+        },
+      }),
+      JSON.stringify({
+        timestamp: "2026-04-29T00:00:01.000Z",
+        type: "event_msg",
+        payload: { type: "user_message", message: "Evicted message" },
+      }),
+      JSON.stringify({
+        timestamp: "2026-04-29T00:00:02.000Z",
+        type: "event_msg",
+        payload: { type: "agent_message", message: "Retained", phase: "final_answer" },
+      }),
+    ];
+    await writeFile(rolloutPath, lines.join("\n") + "\n", "utf8");
+
+    const entry = await index.load("thread-1", rolloutPath);
+    assert.equal(entry.activities[0].seq, 0);
+    assert.equal(entry.highestEvictedSeq, 1);
+    assert.throws(() => index.getDelta(entry, 0), /Stale cursor/);
+    assert.equal(index.getDelta(entry, 1).messages[0].text, "Retained");
+  });
+
+  it("retains an incomplete appended line until its newline arrives", async () => {
+    await writeFile(
+      rolloutPath,
+      JSON.stringify({
+        timestamp: "2026-04-29T00:00:00.000Z",
+        type: "event_msg",
+        payload: { type: "user_message", message: "Complete" },
+      }) + "\n",
+      "utf8",
+    );
+    const index = new SessionReplayIndex();
+    await index.load("thread-1", rolloutPath);
+
+    const appended = JSON.stringify({
+      timestamp: "2026-04-29T00:00:01.000Z",
+      type: "event_msg",
+      payload: { type: "agent_message", message: "Eventually complete", phase: "final_answer" },
+    });
+    const midpoint = Math.floor(appended.length / 2);
+    await appendFile(rolloutPath, appended.slice(0, midpoint), "utf8");
+    const partial = await index.load("thread-1", rolloutPath);
+    assert.equal(partial.messages.length, 1);
+
+    await appendFile(rolloutPath, appended.slice(midpoint) + "\n", "utf8");
+    const completed = await index.load("thread-1", rolloutPath);
+    assert.deepEqual(completed.messages.map((message) => message.text), [
+      "Complete",
+      "Eventually complete",
+    ]);
+  });
+
+  it("parses a complete terminal JSON record without a trailing newline", async () => {
+    await writeFile(
+      rolloutPath,
+      JSON.stringify({
+        timestamp: "2026-04-29T00:00:00.000Z",
+        type: "event_msg",
+        payload: { type: "user_message", message: "No trailing newline" },
+      }),
+      "utf8",
+    );
+
+    const index = new SessionReplayIndex();
+    const entry = await index.load("thread-1", rolloutPath);
+
+    assert.deepEqual(entry.messages.map((message) => message.text), [
+      "No trailing newline",
+    ]);
+    assert.equal(entry.lastByteOffset, (await stat(rolloutPath)).size);
+  });
+
+  it("serializes concurrent refreshes of the same appended byte range", async () => {
+    const padding = "x".repeat(5000);
+    await writeFile(
+      rolloutPath,
+      [
+        JSON.stringify({
+          timestamp: "2026-04-29T00:00:00.000Z",
+          type: "session_meta",
+          payload: { id: "thread-1", padding },
+        }),
+        JSON.stringify({
+          timestamp: "2026-04-29T00:00:01.000Z",
+          type: "event_msg",
+          payload: { type: "user_message", message: "Initial" },
+        }),
+      ].join("\n") + "\n",
+      "utf8",
+    );
+    const index = new SessionReplayIndex();
+    await index.load("thread-1", rolloutPath);
+    await appendFile(
+      rolloutPath,
+      JSON.stringify({
+        timestamp: "2026-04-29T00:00:02.000Z",
+        type: "event_msg",
+        payload: { type: "agent_message", message: "Once", phase: "final_answer" },
+      }) + "\n",
+      "utf8",
+    );
+
+    const [first, second] = await Promise.all([
+      index.load("thread-1", rolloutPath),
+      index.load("thread-1", rolloutPath),
+    ]);
+    assert.equal(first, second);
+    assert.deepEqual(first.messages.map((message) => message.text), [
+      "Initial",
+      "Once",
+    ]);
+    assert.equal(first.totalMessages, 2);
   });
 
   it("evicts least-recently-used sessions when over capacity", async () => {

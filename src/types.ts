@@ -982,6 +982,12 @@ export interface SessionLogSnapshot {
   totalActivities: number;
   nextSeq: number;
   latestPlanUpdate?: LatestPlanUpdate | null;
+  page?: SessionLogPageInfo;
+}
+
+export interface SessionLogPageInfo {
+  beforeCursor: string | null;
+  hasMoreBefore: boolean;
 }
 
 export interface SessionRuntimeSummary {

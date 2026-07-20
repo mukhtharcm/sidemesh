@@ -1,6 +1,8 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:math' as math;
 
+import 'package:crypto/crypto.dart' as crypto;
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -12,6 +14,24 @@ class CachedSessionLog {
 
   final SessionLog log;
   final DateTime cachedAt;
+}
+
+class _CachedTimelineEntry {
+  const _CachedTimelineEntry.message(this.message)
+    : activity = null,
+      kindRank = 1;
+
+  const _CachedTimelineEntry.activity(this.activity)
+    : message = null,
+      kindRank = 0;
+
+  final SessionMessage? message;
+  final SessionActivity? activity;
+  final int kindRank;
+
+  int get seq => message?.seq ?? activity!.seq;
+  DateTime get createdAt => message?.createdAt ?? activity!.createdAt;
+  String get id => message?.id ?? activity!.id;
 }
 
 /// Replaces [SessionCacheStore] and [SessionFavoritesStore] with an
@@ -27,6 +47,9 @@ class SessionLocalStore extends ChangeNotifier {
   Future<void> _operationQueue = Future<void>.value();
   int _pendingOperationCount = 0;
   Completer<void>? _idleCompleter;
+  Future<void> _logOperationQueue = Future<void>.value();
+  int _pendingLogOperationCount = 0;
+  Completer<void>? _logIdleCompleter;
 
   @visibleForTesting
   void resetMigrationState() {
@@ -38,6 +61,9 @@ class SessionLocalStore extends ChangeNotifier {
     _operationQueue = Future<void>.value();
     _pendingOperationCount = 0;
     _idleCompleter = null;
+    _logOperationQueue = Future<void>.value();
+    _pendingLogOperationCount = 0;
+    _logIdleCompleter = null;
   }
 
   final Set<String> _favoriteKeys = <String>{};
@@ -72,7 +98,10 @@ class SessionLocalStore extends ChangeNotifier {
     final queued = _operationQueue
         .catchError((error) {})
         .then<T>((_) => action());
-    _operationQueue = queued.then<void>((_) {}, onError: (error, stackTrace) {});
+    _operationQueue = queued.then<void>(
+      (_) {},
+      onError: (error, stackTrace) {},
+    );
     return queued.whenComplete(() {
       _pendingOperationCount -= 1;
       if (_pendingOperationCount == 0) {
@@ -82,10 +111,40 @@ class SessionLocalStore extends ChangeNotifier {
     });
   }
 
-  @visibleForTesting
+  Future<T> _serializeLogOperation<T>(Future<T> Function() action) {
+    final wasIdle = _pendingLogOperationCount == 0;
+    _pendingLogOperationCount += 1;
+    _logIdleCompleter ??= Completer<void>();
+    // Start an idle queue directly. Chaining every operation through an
+    // already-completed Future can strand the first operation in Flutter's
+    // widget-test fake-async zone, and adds an unnecessary microtask in prod.
+    final queued = wasIdle
+        ? Future<T>.sync(action)
+        : _logOperationQueue.catchError((error) {}).then<T>((_) => action());
+    _logOperationQueue = queued.then<void>(
+      (_) {},
+      onError: (error, stackTrace) {},
+    );
+    return queued.whenComplete(() {
+      _pendingLogOperationCount -= 1;
+      if (_pendingLogOperationCount == 0) {
+        _logIdleCompleter?.complete();
+        _logIdleCompleter = null;
+      }
+    });
+  }
+
   Future<void> waitForIdle() async {
     final completer = _idleCompleter;
     if (_pendingOperationCount == 0 || completer == null) {
+      return;
+    }
+    await completer.future;
+  }
+
+  Future<void> waitForLogIdle() async {
+    final completer = _logIdleCompleter;
+    if (_pendingLogOperationCount == 0 || completer == null) {
       return;
     }
     await completer.future;
@@ -245,7 +304,7 @@ class SessionLocalStore extends ChangeNotifier {
       final db = await SidemeshDb.instance;
       final now = DateTime.now().millisecondsSinceEpoch;
       await db.rawInsert(
-      '''
+        '''
       INSERT INTO sessions (
         host_id, session_id, title, preview, cwd, provider, status,
         created_at, updated_at, runtime_json, git_info_json,
@@ -267,23 +326,27 @@ class SessionLocalStore extends ChangeNotifier {
         source = excluded.source,
         cached_at = excluded.cached_at
     ''',
-      [
-        host.id,
-        session.id,
-        session.title,
-        session.preview,
-        session.cwd,
-        session.provider,
-        session.status,
-        session.createdAt.millisecondsSinceEpoch,
-        session.updatedAt.millisecondsSinceEpoch,
-        session.runtime != null ? jsonEncode(session.runtime!.toJson()) : null,
-        session.gitInfo != null ? jsonEncode(session.gitInfo!.toJson()) : null,
-        session.isSubAgent ? 1 : 0,
-        _encodeSubAgentInfo(session.subAgent),
-        now,
-      ],
-    );
+        [
+          host.id,
+          session.id,
+          session.title,
+          session.preview,
+          session.cwd,
+          session.provider,
+          session.status,
+          session.createdAt.millisecondsSinceEpoch,
+          session.updatedAt.millisecondsSinceEpoch,
+          session.runtime != null
+              ? jsonEncode(session.runtime!.toJson())
+              : null,
+          session.gitInfo != null
+              ? jsonEncode(session.gitInfo!.toJson())
+              : null,
+          session.isSubAgent ? 1 : 0,
+          _encodeSubAgentInfo(session.subAgent),
+          now,
+        ],
+      );
     });
   }
 
@@ -299,9 +362,9 @@ class SessionLocalStore extends ChangeNotifier {
       final db = await SidemeshDb.instance;
       final batch = db.batch();
       final now = DateTime.now().millisecondsSinceEpoch;
-    for (final s in sessions) {
-      batch.execute(
-        '''
+      for (final s in sessions) {
+        batch.execute(
+          '''
         INSERT INTO sessions (
           host_id, session_id, title, preview, cwd, provider, status,
           created_at, updated_at, runtime_json, git_info_json,
@@ -323,66 +386,66 @@ class SessionLocalStore extends ChangeNotifier {
           source = excluded.source,
           cached_at = excluded.cached_at
       ''',
-        [
-          host.id,
-          s.id,
-          s.title,
-          s.preview,
-          s.cwd,
-          s.provider,
-          s.status,
-          s.createdAt.millisecondsSinceEpoch,
-          s.updatedAt.millisecondsSinceEpoch,
-          s.runtime != null ? jsonEncode(s.runtime!.toJson()) : null,
-          s.gitInfo != null ? jsonEncode(s.gitInfo!.toJson()) : null,
-          s.isSubAgent ? 1 : 0,
-          _encodeSubAgentInfo(s.subAgent),
-          0,
-          source,
-          now,
-        ],
-      );
-    }
-    if (source == 'recent') {
-      final sessionIds = sessions
-          .map((session) => session.id)
-          .toSet()
-          .toList(growable: false);
-      if (sessionIds.isEmpty) {
-        batch.execute(
-          '''
+          [
+            host.id,
+            s.id,
+            s.title,
+            s.preview,
+            s.cwd,
+            s.provider,
+            s.status,
+            s.createdAt.millisecondsSinceEpoch,
+            s.updatedAt.millisecondsSinceEpoch,
+            s.runtime != null ? jsonEncode(s.runtime!.toJson()) : null,
+            s.gitInfo != null ? jsonEncode(s.gitInfo!.toJson()) : null,
+            s.isSubAgent ? 1 : 0,
+            _encodeSubAgentInfo(s.subAgent),
+            0,
+            source,
+            now,
+          ],
+        );
+      }
+      if (source == 'recent') {
+        final sessionIds = sessions
+            .map((session) => session.id)
+            .toSet()
+            .toList(growable: false);
+        if (sessionIds.isEmpty) {
+          batch.execute(
+            '''
           UPDATE sessions
           SET source = 'favorite', cached_at = ?
           WHERE host_id = ? AND source = 'recent' AND is_favorite = 1
         ''',
-          [now, host.id],
-        );
-        batch.delete(
-          'sessions',
-          where: "host_id = ? AND source = 'recent' AND is_favorite = 0",
-          whereArgs: [host.id],
-        );
-      } else {
-        final placeholders = List.filled(sessionIds.length, '?').join(', ');
-        batch.execute(
-          '''
+            [now, host.id],
+          );
+          batch.delete(
+            'sessions',
+            where: "host_id = ? AND source = 'recent' AND is_favorite = 0",
+            whereArgs: [host.id],
+          );
+        } else {
+          final placeholders = List.filled(sessionIds.length, '?').join(', ');
+          batch.execute(
+            '''
           UPDATE sessions
           SET source = 'favorite', cached_at = ?
           WHERE host_id = ? AND source = 'recent' AND is_favorite = 1
             AND session_id NOT IN ($placeholders)
         ''',
-          [now, host.id, ...sessionIds],
-        );
-        batch.delete(
-          'sessions',
-          where:
-              "host_id = ? AND source = 'recent' AND is_favorite = 0 "
-              "AND session_id NOT IN ($placeholders)",
-          whereArgs: [host.id, ...sessionIds],
-        );
+            [now, host.id, ...sessionIds],
+          );
+          batch.delete(
+            'sessions',
+            where:
+                "host_id = ? AND source = 'recent' AND is_favorite = 0 "
+                "AND session_id NOT IN ($placeholders)",
+            whereArgs: [host.id, ...sessionIds],
+          );
+        }
       }
-    }
-    await batch.commit(noResult: true);
+      await batch.commit(noResult: true);
     });
   }
 
@@ -420,6 +483,7 @@ class SessionLocalStore extends ChangeNotifier {
       final db = await SidemeshDb.instance;
       await db.delete('sessions', where: 'host_id = ?', whereArgs: [host.id]);
       _favoriteKeys.removeWhere((key) => key.startsWith('${host.id}::'));
+      await clearHostLogs(host);
     });
   }
 
@@ -485,68 +549,126 @@ class SessionLocalStore extends ChangeNotifier {
   static const _logIndexKey = 'sidemesh_cached_session_log_index_v1';
   static const _maxSessionLogCacheChars = 2 * 1024 * 1024;
   static const _maxSessionLogEntries = 20;
+  static const _maxCachedTimelineEntries = 200;
   static const _sessionLogTtl = Duration(days: 14);
 
-  Future<CachedSessionLog?> loadSessionLog(
-    HostProfile host,
-    String sessionId,
-  ) async {
-    final prefs = await SharedPreferences.getInstance();
-    final key = _logKey(host, sessionId);
-    final raw = prefs.getString(key);
-    if (raw == null || raw.isEmpty) return null;
-    try {
-      final decoded = jsonDecode(raw);
-      if (decoded is! Map<String, dynamic>) return null;
-      final cachedAtMs = decoded['cachedAt'];
-      final logJson = decoded['log'];
-      if (cachedAtMs is! int || logJson is! Map<String, dynamic>) return null;
-      final cachedAt = DateTime.fromMillisecondsSinceEpoch(cachedAtMs);
-      if (DateTime.now().difference(cachedAt) > _sessionLogTtl) {
-        await prefs.remove(key);
-        await _removeLogIndexEntry(prefs, key);
+  Future<CachedSessionLog?> loadSessionLog(HostProfile host, String sessionId) {
+    return _serializeLogOperation(() async {
+      final prefs = await SharedPreferences.getInstance();
+      final key = _logKey(host, sessionId);
+      final raw = prefs.getString(key);
+      if (raw == null || raw.isEmpty) return null;
+      try {
+        final decoded = jsonDecode(raw);
+        if (decoded is! Map<String, dynamic>) {
+          await _removeCachedLog(prefs, key);
+          return null;
+        }
+        final cachedAtMs = decoded['cachedAt'];
+        final logJson = decoded['log'];
+        if (cachedAtMs is! int || logJson is! Map<String, dynamic>) {
+          await _removeCachedLog(prefs, key);
+          return null;
+        }
+        final cachedAt = DateTime.fromMillisecondsSinceEpoch(cachedAtMs);
+        if (DateTime.now().difference(cachedAt) > _sessionLogTtl) {
+          await _removeCachedLog(prefs, key);
+          return null;
+        }
+        final log = _boundedSessionLog(SessionLog.fromJson(logJson));
+        await _touchLogIndex(prefs, key, cachedAt: cachedAt);
+        return CachedSessionLog(log: log, cachedAt: cachedAt);
+      } catch (_) {
+        await _removeCachedLog(prefs, key);
         return null;
       }
-      final log = SessionLog.fromJson(logJson);
-      await _touchLogIndex(prefs, key);
-      return CachedSessionLog(log: log, cachedAt: cachedAt);
-    } catch (_) {
-      await prefs.remove(key);
-      await _removeLogIndexEntry(prefs, key);
-      return null;
-    }
-  }
-
-  Future<void> saveSessionLog(HostProfile host, SessionLog log) async {
-    final prefs = await SharedPreferences.getInstance();
-    final encoded = jsonEncode({
-      'cachedAt': DateTime.now().millisecondsSinceEpoch,
-      'log': log.toJson(),
     });
-    final key = _logKey(host, log.session.id);
-    if (encoded.length > _maxSessionLogCacheChars) {
-      await prefs.remove(key);
-      await _removeLogIndexEntry(prefs, key);
-      return;
-    }
-    await prefs.setString(key, encoded);
-    final now = DateTime.now();
-    await _updateLogIndex(prefs, key, cachedAt: now, lastUsedAt: now);
   }
 
-  Future<void> clearHostLogs(HostProfile host) async {
-    final prefs = await SharedPreferences.getInstance();
-    final logPrefix = '$_logPrefix:${host.id}';
-    for (final key in prefs.getKeys().toList(growable: false)) {
-      if (key.startsWith('$logPrefix:')) {
-        await prefs.remove(key);
+  Future<void> saveSessionLog(HostProfile host, SessionLog log) {
+    return _serializeLogOperation(() async {
+      final prefs = await SharedPreferences.getInstance();
+      final boundedLog = _boundedSessionLog(log);
+      final now = DateTime.now();
+      final encoded = jsonEncode({
+        'cachedAt': now.millisecondsSinceEpoch,
+        'log': boundedLog.toJson(),
+      });
+      final key = _logKey(host, boundedLog.session.id);
+      if (encoded.length > _maxSessionLogCacheChars) {
+        await _removeCachedLog(prefs, key);
+        return;
       }
+      await prefs.setString(key, encoded);
+      await _updateLogIndex(prefs, key, cachedAt: now, lastUsedAt: now);
+    });
+  }
+
+  SessionLog _boundedSessionLog(SessionLog log) {
+    final timeline =
+        <_CachedTimelineEntry>[
+          ...log.messages.map(_CachedTimelineEntry.message),
+          ...log.activities.map(_CachedTimelineEntry.activity),
+        ]..sort((left, right) {
+          final byCreatedAt = left.createdAt.compareTo(right.createdAt);
+          if (byCreatedAt != 0) return byCreatedAt;
+          if (left.seq != right.seq) return left.seq.compareTo(right.seq);
+          if (left.kindRank != right.kindRank) {
+            return left.kindRank.compareTo(right.kindRank);
+          }
+          return left.id.compareTo(right.id);
+        });
+    final start = timeline.length > _maxCachedTimelineEntries
+        ? timeline.length - _maxCachedTimelineEntries
+        : 0;
+    final messages = <SessionMessage>[];
+    final activities = <SessionActivity>[];
+    for (final entry in timeline.skip(start)) {
+      if (entry.message != null) messages.add(entry.message!);
+      if (entry.activity != null) activities.add(entry.activity!);
     }
-    final index = await _loadLogIndex(prefs);
-    final filtered = index
-        .where((entry) => !entry.key.startsWith('$logPrefix:'))
-        .toList(growable: false);
-    await _saveLogIndex(prefs, filtered);
+    final history = log.history;
+    return SessionLog(
+      session: log.session,
+      messages: messages,
+      activities: activities,
+      pendingAction: log.pendingAction,
+      history: SessionLogHistorySummary(
+        isTruncated:
+            (history?.totalMessages ?? log.messages.length) > messages.length ||
+            (history?.totalActivities ?? log.activities.length) >
+                activities.length,
+        totalMessages: math.max(
+          history?.totalMessages ?? log.messages.length,
+          log.messages.length,
+        ),
+        returnedMessages: messages.length,
+        totalActivities: math.max(
+          history?.totalActivities ?? log.activities.length,
+          log.activities.length,
+        ),
+        returnedActivities: activities.length,
+      ),
+      nextSeq: log.nextSeq,
+      latestPlanUpdate: log.latestPlanUpdate,
+    );
+  }
+
+  Future<void> clearHostLogs(HostProfile host) {
+    return _serializeLogOperation(() async {
+      final prefs = await SharedPreferences.getInstance();
+      final logPrefix = '$_logPrefix:${host.id}:';
+      for (final key in prefs.getKeys().toList(growable: false)) {
+        if (key.startsWith(logPrefix)) {
+          await prefs.remove(key);
+        }
+      }
+      final index = await _loadLogIndex(prefs);
+      final filtered = index
+          .where((entry) => !entry.key.startsWith(logPrefix))
+          .toList(growable: false);
+      await _saveLogIndex(prefs, filtered);
+    });
   }
 
   Future<void> clearAll() async {
@@ -557,18 +679,29 @@ class SessionLocalStore extends ChangeNotifier {
     await clearAllLogs();
   }
 
-  Future<void> clearAllLogs() async {
-    final prefs = await SharedPreferences.getInstance();
-    for (final key in prefs.getKeys().toList(growable: false)) {
-      if (key.startsWith('$_logPrefix:')) {
-        await prefs.remove(key);
+  Future<void> clearAllLogs() {
+    return _serializeLogOperation(() async {
+      final prefs = await SharedPreferences.getInstance();
+      for (final key in prefs.getKeys().toList(growable: false)) {
+        if (key.startsWith('$_logPrefix:')) {
+          await prefs.remove(key);
+        }
       }
-    }
-    await prefs.remove(_logIndexKey);
+      await prefs.remove(_logIndexKey);
+    });
   }
 
-  String _logKey(HostProfile host, String sessionId) =>
-      '$_logPrefix:${host.id}:$sessionId';
+  String _logKey(HostProfile host, String sessionId) {
+    final fingerprint = crypto.sha256
+        .convert(
+          utf8.encode(
+            '${host.baseUrl.length}:${host.baseUrl}'
+            '${host.token.length}:${host.token}',
+          ),
+        )
+        .toString();
+    return '$_logPrefix:${host.id}:$fingerprint:$sessionId';
+  }
 
   // ─── Log index helpers ───
 
@@ -605,14 +738,25 @@ class SessionLocalStore extends ChangeNotifier {
     );
   }
 
-  Future<void> _touchLogIndex(SharedPreferences prefs, String key) async {
+  Future<void> _touchLogIndex(
+    SharedPreferences prefs,
+    String key, {
+    required DateTime cachedAt,
+  }) async {
     final index = await _loadLogIndex(prefs);
     final now = DateTime.now();
-    final updated = index
-        .map(
-          (entry) => entry.key == key ? entry.copyWith(lastUsedAt: now) : entry,
-        )
-        .toList(growable: false);
+    _LogCacheIndexEntry? matching;
+    for (final entry in index) {
+      if (entry.key == key) {
+        matching = entry;
+        break;
+      }
+    }
+    final updated = [
+      ...index.where((entry) => entry.key != key),
+      matching?.copyWith(lastUsedAt: now) ??
+          _LogCacheIndexEntry(key: key, cachedAt: cachedAt, lastUsedAt: now),
+    ];
     await _pruneLogCache(prefs, updated);
   }
 
@@ -636,6 +780,11 @@ class SessionLocalStore extends ChangeNotifier {
         .where((entry) => entry.key != key)
         .toList(growable: false);
     await _saveLogIndex(prefs, updated);
+  }
+
+  Future<void> _removeCachedLog(SharedPreferences prefs, String key) async {
+    await prefs.remove(key);
+    await _removeLogIndexEntry(prefs, key);
   }
 
   Future<void> _pruneLogCache(

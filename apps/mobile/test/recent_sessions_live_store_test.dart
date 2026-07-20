@@ -5,6 +5,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:sidemesh_mobile/src/api_client.dart';
 import 'package:sidemesh_mobile/src/db.dart';
+import 'package:sidemesh_mobile/src/host_reconnect_scheduler.dart';
 import 'package:sidemesh_mobile/src/models.dart';
 import 'package:sidemesh_mobile/src/recent_sessions_live_store.dart';
 import 'package:sidemesh_mobile/src/session_local_store.dart';
@@ -48,6 +49,28 @@ void main() {
     expect(store.entries, hasLength(1));
     expect(store.entries.single.session.title, 'HTTP only');
     expect(store.confirmedHostIds, contains(host.id));
+  });
+
+  test('multiple stores keep independent reconnect registrations', () async {
+    final api = _FakeApiClient();
+    final first = RecentSessionsStore(
+      pollInterval: const Duration(hours: 1),
+      initialHttpFallbackDelay: const Duration(hours: 1),
+    );
+    final second = RecentSessionsStore(
+      pollInterval: const Duration(hours: 1),
+      initialHttpFallbackDelay: const Duration(hours: 1),
+    );
+
+    first.configure(hosts: const [host], api: api);
+    second.configure(hosts: const [host], api: api);
+    expect(HostReconnectScheduler.instance.registeredSlotCount(host.id), 2);
+
+    first.dispose();
+    expect(HostReconnectScheduler.instance.registeredSlotCount(host.id), 1);
+
+    second.dispose();
+    expect(HostReconnectScheduler.instance.registeredSlotCount(host.id), 0);
   });
 
   test(
@@ -366,6 +389,86 @@ void main() {
     },
   );
 
+  test(
+    'old credential HTTP and live callbacks cannot restore cleared sessions',
+    () async {
+      final oldFetch = Completer<List<SessionSummary>>();
+      final oldApi = _FakeApiClient()..fetchCompleter = oldFetch;
+      final newApi = _FakeApiClient();
+      final replacement = host.copyWith(
+        baseUrl: 'http://replacement.local:8787',
+        token: 'replacement-secret',
+      );
+      final store = RecentSessionsStore(
+        pollInterval: const Duration(hours: 1),
+        initialHttpFallbackDelay: const Duration(hours: 1),
+      );
+      addTearDown(store.dispose);
+
+      store.configure(hosts: const [host], api: oldApi);
+      final oldChannel = oldApi.liveChannelFor(host);
+      final oldRefresh = store.refresh();
+      await _settle();
+
+      store.configure(hosts: [replacement], api: newApi);
+      await SessionLocalStore.instance.waitForIdle();
+      await SessionLocalStore.instance.clearHost(host);
+
+      oldFetch.complete([_session('stale-http', title: 'Old HTTP')]);
+      oldChannel.addIncoming(
+        jsonEncode({
+          'type': 'snapshot',
+          'sessions': [_session('stale-live', title: 'Old live').toJson()],
+        }),
+      );
+      await oldRefresh;
+      await _settle();
+      await SessionLocalStore.instance.waitForIdle();
+
+      expect(store.entries, isEmpty);
+      expect(
+        await SessionLocalStore.instance.getRecentSessions(replacement),
+        isEmpty,
+      );
+    },
+  );
+
+  test('live snapshot wins over an older in-flight HTTP refresh', () async {
+    final oldFetch = Completer<List<SessionSummary>>();
+    final api = _FakeApiClient()..fetchCompleter = oldFetch;
+    final store = RecentSessionsStore(
+      pollInterval: const Duration(hours: 1),
+      initialHttpFallbackDelay: const Duration(hours: 1),
+    );
+    addTearDown(store.dispose);
+
+    store.configure(hosts: const [host], api: api);
+    final refresh = store.refresh();
+    await _settle();
+
+    api
+        .liveChannelFor(host)
+        .addIncoming(
+          jsonEncode({
+            'type': 'snapshot',
+            'sessions': [_session('live-new', title: 'Live new').toJson()],
+          }),
+        );
+    await _settle();
+    oldFetch.complete([_session('http-old', title: 'HTTP old')]);
+    await refresh;
+    await _settle();
+    await SessionLocalStore.instance.waitForIdle();
+
+    expect(store.entries.map((entry) => entry.session.id), ['live-new']);
+    expect(
+      (await SessionLocalStore.instance.getRecentSessions(host)).map(
+        (session) => session.id,
+      ),
+      ['live-new'],
+    );
+  });
+
   test('live upserts keep the recent cache capped at 40 sessions', () async {
     final now = DateTime.now();
     final snapshotSessions = List<SessionSummary>.generate(
@@ -466,6 +569,7 @@ class _FakeApiClient extends ApiClient {
   bool throwOnOpenSessionsLive = false;
   Duration fetchDelay = Duration.zero;
   Future<void> liveReady = Future<void>.value();
+  Completer<List<SessionSummary>>? fetchCompleter;
   int fetchSessionsCalls = 0;
   int openSessionsLiveCalls = 0;
 
@@ -475,6 +579,10 @@ class _FakeApiClient extends ApiClient {
     int? limit,
   }) async {
     fetchSessionsCalls++;
+    final pending = fetchCompleter;
+    if (pending != null) {
+      return pending.future;
+    }
     if (fetchDelay > Duration.zero) {
       await Future<void>.delayed(fetchDelay);
     }
@@ -488,13 +596,19 @@ class _FakeApiClient extends ApiClient {
       throw StateError('live sessions unavailable');
     }
     return _liveChannels.putIfAbsent(
-      host.id,
+      _hostKey(host),
       () => _FakeWebSocketChannel(ready: liveReady),
     );
   }
 
-  _FakeWebSocketChannel liveChannelFor(HostProfile host) => _liveChannels
-      .putIfAbsent(host.id, () => _FakeWebSocketChannel(ready: liveReady));
+  _FakeWebSocketChannel liveChannelFor(HostProfile host) =>
+      _liveChannels.putIfAbsent(
+        _hostKey(host),
+        () => _FakeWebSocketChannel(ready: liveReady),
+      );
+
+  String _hostKey(HostProfile host) =>
+      '${host.id}\u001f${host.baseUrl}\u001f${host.token}';
 }
 
 class _FakeWebSocketChannel extends StreamChannelMixin<dynamic>

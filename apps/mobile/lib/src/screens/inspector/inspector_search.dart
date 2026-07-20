@@ -131,15 +131,17 @@ class _SearchPanelState extends State<SearchPanel> {
   }
 
   List<SearchRecord> _filteredRecords() {
-    return widget.records.where((r) {
-      final kindOk = switch (_filter) {
-        _SearchFilter.all => true,
-        _SearchFilter.messages => r.kind == SearchRecordKind.message,
-        _SearchFilter.activities => r.kind == SearchRecordKind.activity,
-      };
-      if (!kindOk) return false;
-      return matchesSearchQuery(r.haystack, _query);
-    }).toList(growable: false);
+    return widget.records
+        .where((r) {
+          final kindOk = switch (_filter) {
+            _SearchFilter.all => true,
+            _SearchFilter.messages => r.kind == SearchRecordKind.message,
+            _SearchFilter.activities => r.kind == SearchRecordKind.activity,
+          };
+          if (!kindOk) return false;
+          return matchesSearchQuery(r.haystack, _query);
+        })
+        .toList(growable: false);
   }
 
   @override
@@ -199,7 +201,7 @@ class _SearchPanelState extends State<SearchPanel> {
                       decoration: InputDecoration(
                         isCollapsed: true,
                         border: InputBorder.none,
-                        hintText: 'Search this session',
+                        hintText: 'Search loaded transcript',
                         hintStyle: TextStyle(
                           color: colors.textTertiary,
                           fontSize: 14,
@@ -264,8 +266,7 @@ class _SearchPanelState extends State<SearchPanel> {
                 _SearchFilterChip(
                   label: 'Messages',
                   selected: _filter == _SearchFilter.messages,
-                  onTap: () =>
-                      setState(() => _filter = _SearchFilter.messages),
+                  onTap: () => setState(() => _filter = _SearchFilter.messages),
                 ),
                 const SizedBox(width: 6),
                 _SearchFilterChip(
@@ -380,9 +381,7 @@ class _SearchPanelEmptyState extends StatelessWidget {
     final hasQuery = query.isNotEmpty;
     return MeshEmptyState.compact(
       icon: hasQuery ? Icons.search_off_rounded : Icons.search_rounded,
-      title: hasQuery
-          ? 'No matches for "$query"'
-          : 'Search this session',
+      title: hasQuery ? 'No matches for "$query"' : 'Search this session',
       body: hasQuery
           ? 'Try another word or switch the filter.'
           : 'Search across $totalRecords loaded items.',
@@ -537,10 +536,12 @@ class _SnippetText extends StatelessWidget {
     final snippet = body.substring(start, end).replaceAll('\n', ' ');
     final visibleMatches = matches
         .where((match) => match.end > start && match.start < end)
-        .map((match) => SearchQueryMatchRange(
-              (match.start - start).clamp(0, snippet.length),
-              (match.end - start).clamp(0, snippet.length),
-            ))
+        .map(
+          (match) => SearchQueryMatchRange(
+            (match.start - start).clamp(0, snippet.length),
+            (match.end - start).clamp(0, snippet.length),
+          ),
+        )
         .where((match) => match.end > match.start)
         .toList(growable: false);
     final spans = <TextSpan>[];
@@ -573,10 +574,7 @@ class _SnippetText extends StatelessWidget {
     return RichText(
       maxLines: 2,
       overflow: TextOverflow.ellipsis,
-      text: TextSpan(
-        style: baseStyle,
-        children: spans,
-      ),
+      text: TextSpan(style: baseStyle, children: spans),
     );
   }
 }
@@ -617,9 +615,9 @@ class _SearchResultExpanded extends StatelessWidget {
           padding: const EdgeInsets.only(bottom: 4),
           child: RichText(
             text: TextSpan(
-              style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                color: colors.textSecondary,
-              ),
+              style: Theme.of(
+                context,
+              ).textTheme.bodySmall?.copyWith(color: colors.textSecondary),
               children: [
                 TextSpan(
                   text: '$label ',
@@ -683,10 +681,7 @@ class _SearchResultExpanded extends StatelessWidget {
       addLine('Saved file', activity.savedPath!);
     }
     if (activity.changes.isNotEmpty) {
-      addLine(
-        'Files',
-        activity.changes.map((c) => c.path).join('\n  '),
-      );
+      addLine('Files', activity.changes.map((c) => c.path).join('\n  '));
     }
     final output = (activity.output ?? '').trim();
     return Container(

@@ -421,6 +421,8 @@ class ApiClient {
     String sessionId, {
     int? messageLimit,
     int? activityLimit,
+    int? entryLimit,
+    String? beforeCursor,
   }) async {
     final queryParameters = <String, String>{};
     if (messageLimit != null) {
@@ -428,6 +430,12 @@ class ApiClient {
     }
     if (activityLimit != null) {
       queryParameters['activityLimit'] = '$activityLimit';
+    }
+    if (entryLimit != null) {
+      queryParameters['entryLimit'] = '$entryLimit';
+    }
+    if (beforeCursor != null && beforeCursor.isNotEmpty) {
+      queryParameters['beforeCursor'] = beforeCursor;
     }
     final response = await _get(
       host,
@@ -463,6 +471,7 @@ class ApiClient {
       '/api/sessions/$sessionId/events',
       queryParameters: {
         'since': '$since',
+        'page': 'true',
         if (baseUpdatedAt != null) 'baseUpdatedAt': '$baseUpdatedAt',
       },
       operation: 'catch up session events',

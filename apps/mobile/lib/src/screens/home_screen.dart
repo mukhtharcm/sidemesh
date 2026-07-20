@@ -81,11 +81,14 @@ class _SidemeshHomeScreenState extends State<SidemeshHomeScreen>
 
   final HostStore _store = HostStore();
   final ApiClient _api = ApiClient();
+  final RecentSessionsStore _recentSessionsStore = RecentSessionsStore();
   final AppVersionStore _appVersionStore = AppVersionStore.instance;
   final TextEditingController _searchController = TextEditingController();
   Timer? _searchDebounce;
   Timer? _heartbeatTimer;
   bool _heartbeatInFlight = false;
+  bool _hostMutationInFlight = false;
+  int _hostLoadGeneration = 0;
   static const Duration _heartbeatInterval = Duration(minutes: 5);
   List<HostProfile> _hosts = const [];
   bool _loading = true;
@@ -142,6 +145,7 @@ class _SidemeshHomeScreenState extends State<SidemeshHomeScreen>
     _appVersionStore.removeListener(_handleAppVersionChanged);
     _searchDebounce?.cancel();
     _stopHeartbeat();
+    _recentSessionsStore.dispose();
     _searchController.dispose();
     super.dispose();
   }
@@ -202,6 +206,7 @@ class _SidemeshHomeScreenState extends State<SidemeshHomeScreen>
   Future<void> _runHeartbeat() async {
     final hosts = _enabledHosts;
     if (_heartbeatInFlight || hosts.isEmpty) return;
+    final generation = _hostLoadGeneration;
     _heartbeatInFlight = true;
     try {
       final store = HostStatusStore.instance;
@@ -210,6 +215,15 @@ class _SidemeshHomeScreenState extends State<SidemeshHomeScreen>
         hosts.map((host) async {
           try {
             final node = await _api.fetchNode(host);
+            if (!mounted ||
+                generation != _hostLoadGeneration ||
+                _hostMutationInFlight ||
+                !_hosts.any(
+                  (current) =>
+                      _hostListSignature(current) == _hostListSignature(host),
+                )) {
+              return;
+            }
             store.markOnline(host.id);
             final previousNode = _hostNodeInfo[host.id];
             if (previousNode?.updateAvailable != node.updateAvailable ||
@@ -222,6 +236,15 @@ class _SidemeshHomeScreenState extends State<SidemeshHomeScreen>
             }
             _hostNodeInfo[host.id] = node;
           } catch (error) {
+            if (!mounted ||
+                generation != _hostLoadGeneration ||
+                _hostMutationInFlight ||
+                !_hosts.any(
+                  (current) =>
+                      _hostListSignature(current) == _hostListSignature(host),
+                )) {
+              return;
+            }
             store.markOffline(host.id, error: friendlyError(error));
             if (_hostNodeInfo.remove(host.id) != null) {
               nodesChanged = true;
@@ -232,7 +255,14 @@ class _SidemeshHomeScreenState extends State<SidemeshHomeScreen>
       );
       if (mounted && nodesChanged) setState(() {});
     } finally {
+      final rerunForCurrentHosts =
+          mounted &&
+          generation != _hostLoadGeneration &&
+          _enabledHosts.isNotEmpty;
       _heartbeatInFlight = false;
+      if (rerunForCurrentHosts) {
+        unawaited(_runHeartbeat());
+      }
     }
   }
 
@@ -258,8 +288,12 @@ class _SidemeshHomeScreenState extends State<SidemeshHomeScreen>
   }
 
   Future<void> _refreshHosts() async {
+    if (_hostMutationInFlight) return;
+    final generation = ++_hostLoadGeneration;
     final hosts = await _store.loadHosts();
-    if (!mounted) {
+    if (!mounted ||
+        _hostMutationInFlight ||
+        generation != _hostLoadGeneration) {
       return;
     }
     final hostIds = hosts.map((host) => host.id).toSet();
@@ -294,6 +328,7 @@ class _SidemeshHomeScreenState extends State<SidemeshHomeScreen>
     if (result == null) {
       return;
     }
+    if (_hostMutationInFlight) return;
     final exists = _hosts.any((item) => item.id == result.id);
     final previousHost = exists
         ? _hosts.firstWhere((item) => item.id == result.id)
@@ -301,27 +336,68 @@ class _SidemeshHomeScreenState extends State<SidemeshHomeScreen>
     final updated = exists
         ? _hosts.map((item) => item.id == result.id ? result : item).toList()
         : [..._hosts, result];
-    if (previousHost != null &&
-        (previousHost.baseUrl != result.baseUrl ||
-            previousHost.token != result.token)) {
-      _hostNodeInfo.remove(previousHost.id);
-      HostStatusStore.instance.clear(previousHost.id);
-      await SessionLocalStore.instance.clearHost(previousHost);
+    _hostMutationInFlight = true;
+    _hostLoadGeneration += 1;
+    try {
+      if (previousHost != null &&
+          (previousHost.baseUrl != result.baseUrl ||
+              previousHost.token != result.token)) {
+        final quiescedHosts = updated
+            .where((host) => host.id != previousHost.id)
+            .toList(growable: false);
+        setState(() => _hosts = quiescedHosts);
+        _hostNodeInfo.remove(previousHost.id);
+        HostStatusStore.instance.clear(previousHost.id);
+        _recentSessionsStore.configure(
+          hosts: quiescedHosts.where((host) => host.enabled).toList(),
+          api: _api,
+        );
+        ApprovalInboxStore.instance.configure(
+          hosts: quiescedHosts.where((host) => host.enabled).toList(),
+          api: _api,
+        );
+        await WidgetsBinding.instance.endOfFrame;
+        await SessionLocalStore.instance.waitForIdle();
+        await SessionLocalStore.instance.waitForLogIdle();
+        await SessionLocalStore.instance.clearHost(previousHost);
+      }
+      await _store.saveHosts(updated);
+    } finally {
+      _hostMutationInFlight = false;
+      await _refreshHosts();
     }
-    await _store.saveHosts(updated);
-    await _refreshHosts();
   }
 
   Future<void> _removeHost(HostProfile host) async {
+    if (_hostMutationInFlight) return;
     final updated = _hosts.where((item) => item.id != host.id).toList();
-    await SessionLocalStore.instance.clearHost(host);
-    _hostNodeInfo.remove(host.id);
-    HostStatusStore.instance.clear(host.id);
-    await _store.saveHosts(updated);
-    await _refreshHosts();
+    _hostMutationInFlight = true;
+    _hostLoadGeneration += 1;
+    try {
+      setState(() => _hosts = updated);
+      _recentSessionsStore.configure(
+        hosts: updated.where((item) => item.enabled).toList(growable: false),
+        api: _api,
+      );
+      ApprovalInboxStore.instance.configure(
+        hosts: updated.where((item) => item.enabled).toList(growable: false),
+        api: _api,
+      );
+      await WidgetsBinding.instance.endOfFrame;
+      await SessionLocalStore.instance.waitForIdle();
+      await SessionLocalStore.instance.waitForLogIdle();
+      await SessionLocalStore.instance.clearHost(host);
+      _hostNodeInfo.remove(host.id);
+      HostStatusStore.instance.clear(host.id);
+      await _store.saveHosts(updated);
+    } finally {
+      _hostMutationInFlight = false;
+      await _refreshHosts();
+    }
   }
 
   Future<void> _toggleHostEnabled(HostProfile host) async {
+    if (_hostMutationInFlight) return;
     final disabling = host.enabled;
     final updated = _hosts
         .map(
@@ -329,13 +405,19 @@ class _SidemeshHomeScreenState extends State<SidemeshHomeScreen>
               item.id == host.id ? item.copyWith(enabled: !item.enabled) : item,
         )
         .toList();
-    await _store.saveHosts(updated);
-    _hostNodeInfo.remove(host.id);
-    HostStatusStore.instance.clear(host.id);
-    if (disabling) {
-      await LiveActivityService.instance.clearPrimarySessionForHost(host.id);
+    _hostMutationInFlight = true;
+    _hostLoadGeneration += 1;
+    try {
+      await _store.saveHosts(updated);
+      _hostNodeInfo.remove(host.id);
+      HostStatusStore.instance.clear(host.id);
+      if (disabling) {
+        await LiveActivityService.instance.clearPrimarySessionForHost(host.id);
+      }
+    } finally {
+      _hostMutationInFlight = false;
+      await _refreshHosts();
     }
-    await _refreshHosts();
   }
 
   Route<void> _buildSessionRoute(
@@ -356,6 +438,7 @@ class _SidemeshHomeScreenState extends State<SidemeshHomeScreen>
         sessionDrawer: (ctx) => RecentPane(
           hosts: _hosts.where((h) => h.enabled).toList(),
           api: _api,
+          store: _recentSessionsStore,
           selectedSessionId: session.id,
           onOpenSession: (h, s) {
             // Close the drawer then replace the current session.
@@ -385,11 +468,7 @@ class _SidemeshHomeScreenState extends State<SidemeshHomeScreen>
       return;
     }
     final navigator = Navigator.of(context);
-    final route = _buildSessionRoute(
-      host,
-      session,
-      composerSeed: composerSeed,
-    );
+    final route = _buildSessionRoute(host, session, composerSeed: composerSeed);
     if (replaceCurrentRoute) {
       await navigator.pushReplacement<void, void>(route);
     } else {
@@ -630,6 +709,7 @@ class _SidemeshHomeScreenState extends State<SidemeshHomeScreen>
                         RecentPane(
                           hosts: enabledHosts,
                           api: _api,
+                          store: _recentSessionsStore,
                           query: _query,
                           hasSavedHosts: _hosts.isNotEmpty,
                           screenAwakeSourceKey: 'mobile-recent-sessions',
@@ -992,9 +1072,9 @@ class _HomeSearchField extends StatelessWidget {
               ),
             ),
             if (filters != null &&
-                    (onRunningOnlyChanged != null ||
-                        onUnreadOnlyChanged != null ||
-                        onFavoritesOnlyChanged != null)) ...[
+                (onRunningOnlyChanged != null ||
+                    onUnreadOnlyChanged != null ||
+                    onFavoritesOnlyChanged != null)) ...[
               const SizedBox(height: AppSpacing.sm),
               Wrap(
                 spacing: AppSpacing.sm,
@@ -1002,22 +1082,22 @@ class _HomeSearchField extends StatelessWidget {
                 children: [
                   _HomeSearchFilterToken(
                     icon: Icons.star_rounded,
-                      label: 'Favorites',
-                      selected: filters.favoritesOnly,
-                      onSelected: onFavoritesOnlyChanged,
-                    ),
-                    _HomeSearchFilterToken(
-                      icon: Icons.play_circle_outline_rounded,
-                      label: 'Running',
-                      selected: filters.runningOnly,
-                      onSelected: onRunningOnlyChanged,
-                    ),
-                    _HomeSearchFilterToken(
-                      icon: Icons.mark_chat_unread_rounded,
-                      label: 'Unread',
-                      selected: filters.unreadOnly,
-                      onSelected: onUnreadOnlyChanged,
-                    ),
+                    label: 'Favorites',
+                    selected: filters.favoritesOnly,
+                    onSelected: onFavoritesOnlyChanged,
+                  ),
+                  _HomeSearchFilterToken(
+                    icon: Icons.play_circle_outline_rounded,
+                    label: 'Running',
+                    selected: filters.runningOnly,
+                    onSelected: onRunningOnlyChanged,
+                  ),
+                  _HomeSearchFilterToken(
+                    icon: Icons.mark_chat_unread_rounded,
+                    label: 'Unread',
+                    selected: filters.unreadOnly,
+                    onSelected: onUnreadOnlyChanged,
+                  ),
                 ],
               ),
             ],
@@ -1073,9 +1153,7 @@ class _HomeSearchFilterToken extends StatelessWidget {
                 label,
                 style: Theme.of(context).textTheme.labelMedium?.copyWith(
                   color: selected ? colors.textPrimary : colors.textSecondary,
-                  fontWeight: selected
-                      ? AppWeights.title
-                      : AppWeights.emphasis,
+                  fontWeight: selected ? AppWeights.title : AppWeights.emphasis,
                 ),
               ),
             ],
@@ -1428,6 +1506,7 @@ class RecentPane extends StatefulWidget {
     required this.api,
     required this.onOpenSession,
     required this.onActiveCountChanged,
+    this.store,
     this.query = '',
     this.selectedSessionId,
     this.padding,
@@ -1441,6 +1520,7 @@ class RecentPane extends StatefulWidget {
 
   final List<HostProfile> hosts;
   final ApiClient api;
+  final RecentSessionsStore? store;
   final void Function(HostProfile host, SessionSummary session) onOpenSession;
   final ValueChanged<int> onActiveCountChanged;
   final String query;
@@ -1487,9 +1567,15 @@ String _hostListSignature(HostProfile host) {
 
 @immutable
 class _SessionGroup {
-  const _SessionGroup({required this.key, required this.title, required this.host, required this.entries});
+  const _SessionGroup({
+    required this.key,
+    required this.title,
+    required this.host,
+    required this.entries,
+  });
   final String key;
   final String title;
+
   /// Host all sessions in this group belong to.
   /// Groups are keyed by host-scoped gitCommonDir when available.
   final HostProfile host;
@@ -1501,7 +1587,8 @@ class _SessionGroup {
 
 class _RecentPaneState extends State<RecentPane> {
   final SessionLocalStore _localStore = SessionLocalStore.instance;
-  final RecentSessionsStore _store = RecentSessionsStore();
+  late RecentSessionsStore _store;
+  late bool _ownsStore;
 
   // Sidebar group collapse state — keys are group.key values.
   Set<String> _collapsedGroups = <String>{};
@@ -1517,6 +1604,8 @@ class _RecentPaneState extends State<RecentPane> {
   @override
   void initState() {
     super.initState();
+    _store = widget.store ?? RecentSessionsStore();
+    _ownsStore = widget.store == null;
     _localStore.ensureLoaded();
     SessionReadStore.instance.ensureLoaded();
     _store.addListener(_handleStoreChanged);
@@ -1579,10 +1668,7 @@ class _RecentPaneState extends State<RecentPane> {
     return _cwdBasename(stripped);
   }
 
-  int _compareRecentEntries(
-    RemoteSessionEntry left,
-    RemoteSessionEntry right,
-  ) {
+  int _compareRecentEntries(RemoteSessionEntry left, RemoteSessionEntry right) {
     final updatedCompare = right.session.updatedAt.compareTo(
       left.session.updatedAt,
     );
@@ -1629,12 +1715,14 @@ class _RecentPaneState extends State<RecentPane> {
         return a.compareTo(b);
       });
     return sortedKeys
-        .map((k) => _SessionGroup(
-          key: k,
-          title: _projectLabel(groups[k]!.first),
-          host: groups[k]!.first.host,
-          entries: groups[k]!,
-        ))
+        .map(
+          (k) => _SessionGroup(
+            key: k,
+            title: _projectLabel(groups[k]!.first),
+            host: groups[k]!.first.host,
+            entries: groups[k]!,
+          ),
+        )
         .toList();
   }
 
@@ -1643,13 +1731,24 @@ class _RecentPaneState extends State<RecentPane> {
     _searchDebounce?.cancel();
     _clearScreenAwakeSource(widget.screenAwakeSourceKey);
     _store.removeListener(_handleStoreChanged);
-    _store.dispose();
+    if (_ownsStore) {
+      _store.dispose();
+    }
     super.dispose();
   }
 
   @override
   void didUpdateWidget(covariant RecentPane oldWidget) {
     super.didUpdateWidget(oldWidget);
+    if (!identical(oldWidget.store, widget.store)) {
+      _store.removeListener(_handleStoreChanged);
+      if (_ownsStore) {
+        _store.dispose();
+      }
+      _store = widget.store ?? RecentSessionsStore();
+      _ownsStore = widget.store == null;
+      _store.addListener(_handleStoreChanged);
+    }
     if (oldWidget.screenAwakeSourceKey != widget.screenAwakeSourceKey) {
       _clearScreenAwakeSource(oldWidget.screenAwakeSourceKey);
       _syncScreenAwakeSource(_screenAwakeActiveEntryCount() > 0);
@@ -2131,7 +2230,8 @@ class _RecentPaneState extends State<RecentPane> {
           final collapsed = _collapsedGroups.contains(group.key);
           final headerIndex = current;
           final entriesStart = headerIndex + 1;
-          final entriesEnd = entriesStart + (collapsed ? 0 : group.entries.length);
+          final entriesEnd =
+              entriesStart + (collapsed ? 0 : group.entries.length);
           if (index == headerIndex) {
             return Padding(
               padding: EdgeInsets.only(
@@ -4598,7 +4698,9 @@ class _HostEditorSheetState extends State<HostEditorSheet> {
                             height: 32,
                           ),
                           suffixIcon: IconButton(
-                            tooltip: _tokenVisible ? 'Hide token' : 'Show token',
+                            tooltip: _tokenVisible
+                                ? 'Hide token'
+                                : 'Show token',
                             padding: EdgeInsets.zero,
                             icon: Icon(
                               _tokenVisible
@@ -4606,9 +4708,8 @@ class _HostEditorSheetState extends State<HostEditorSheet> {
                                   : Icons.visibility_rounded,
                               size: 18,
                             ),
-                            onPressed: () => setState(
-                              () => _tokenVisible = !_tokenVisible,
-                            ),
+                            onPressed: () =>
+                                setState(() => _tokenVisible = !_tokenVisible),
                           ),
                         ),
                       ),
@@ -4944,9 +5045,7 @@ class _HostEditorToggle extends StatelessWidget {
           decoration: BoxDecoration(
             color: value ? activeKnob : colors.surface,
             shape: BoxShape.circle,
-            border: Border.all(
-              color: value ? activeKnob : colors.border,
-            ),
+            border: Border.all(color: value ? activeKnob : colors.border),
           ),
         ),
       ),

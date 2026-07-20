@@ -117,6 +117,26 @@ describe("fake test provider", () => {
     assert.equal(paged.activities.length, 2);
     assert.equal(paged.totalMessages, log.totalMessages);
     assert.equal(paged.totalActivities, log.totalActivities);
+
+    const latestPage = await provider.readSessionLogPage(thread, { limit: 3 });
+    assert.equal(
+      latestPage.messages.length + latestPage.activities.length,
+      3,
+    );
+    assert.equal(latestPage.page?.hasMoreBefore, true);
+    assert.ok(latestPage.page?.beforeCursor);
+    const olderPage = await provider.readSessionLogPage(thread, {
+      limit: 3,
+      beforeCursor: latestPage.page?.beforeCursor,
+    });
+    assert.equal(
+      olderPage.messages.length + olderPage.activities.length,
+      3,
+    );
+    assert.notEqual(
+      olderPage.page?.beforeCursor,
+      latestPage.page?.beforeCursor,
+    );
   });
 
   it("supports session lifecycle operations without Codex", async () => {

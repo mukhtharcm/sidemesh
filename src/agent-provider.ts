@@ -60,6 +60,12 @@ export interface AgentSessionLogOptions {
   activityLimit?: number | null;
 }
 
+export interface AgentSessionLogPageOptions {
+  limit: number;
+  beforeCursor?: string | null;
+  cursorScope?: string;
+}
+
 export type AgentSessionInputItem =
   | {
       type: "text";
@@ -347,6 +353,10 @@ export interface AgentSessionHistoryProvider {
   readSessionLog(
     thread: ThreadRecord,
     options?: AgentSessionLogOptions,
+  ): Promise<SessionLogSnapshot>;
+  readSessionLogPage?(
+    thread: ThreadRecord,
+    options: AgentSessionLogPageOptions,
   ): Promise<SessionLogSnapshot>;
   readSessionRuntime(thread: ThreadRecord): Promise<SessionRuntimeSummary | null>;
 }

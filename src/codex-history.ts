@@ -193,123 +193,43 @@ async function scanRolloutFile(
 ): Promise<SessionLogSnapshot> {
   const messages: SessionMessage[] = [];
   const activities: SessionActivity[] = [];
-  let runtime: SessionRuntimeSummary | null = null;
-  const pendingTurnRuntime = new Map<string, SessionRuntimeSummary>();
   let totalMessages = 0;
   let totalActivities = 0;
-  let seq = 0;
-  const commandFunctionCalls = new Map<string, PendingCommandFunctionCall>();
-  const commandSessionCalls = new Map<string, PendingCommandFunctionCall>();
-  const stdinFunctionCalls = new Map<string, string>();
-  const countedActivityIds = new Set<string>();
+  const parser = new CodexHistoryParser({
+    includeMessages: options.includeMessages,
+    includeActivities: options.includeActivities,
+  });
   const file = createReadStream(rolloutPath, { encoding: "utf8" });
   const lines = readline.createInterface({ input: file, crlfDelay: Infinity });
 
   for await (const line of lines) {
-    const parsed = parseJsonLine(line);
-    if (!parsed) {
-      continue;
+    const result = parser.parseLine(line);
+    if (!result) continue;
+    if (result.message) {
+      totalMessages += 1;
+      appendBounded(messages, result.message, options.messageLimit ?? null);
     }
-
-    const nextRuntime = parseRuntime(parsed);
-    if (nextRuntime) {
-      if (nextRuntime.turnId) {
-        pendingTurnRuntime.set(
-          nextRuntime.turnId,
-          mergeRuntime(pendingTurnRuntime.get(nextRuntime.turnId) ?? null, nextRuntime),
-        );
-      } else {
-        runtime = mergeRuntime(runtime, nextRuntime);
-      }
-    }
-
-    const committedTurnId = resolveCommittedTurnId(parsed);
-    if (committedTurnId) {
-      const committed = pendingTurnRuntime.get(committedTurnId);
-      if (committed) {
-        runtime = mergeRuntime(runtime, {
-          ...committed,
-          updatedAt: parseTimestamp(parsed.timestamp),
-        });
-      }
-      pendingTurnRuntime.delete(committedTurnId);
-    }
-
-    const discardedTurnId = resolveDiscardedTurnId(parsed);
-    if (discardedTurnId) {
-      pendingTurnRuntime.delete(discardedTurnId);
-    }
-
-    if (options.includeMessages) {
-      const entry = parseMessage(parsed, seq);
-      if (entry) {
-        totalMessages += 1;
-        seq += 1;
-        appendBounded(messages, entry, options.messageLimit ?? null);
-      }
-    }
-
-    if (options.includeActivities) {
-      const commandFunctionCall = parseCommandFunctionCall(parsed, seq);
-      if (commandFunctionCall) {
-        commandFunctionCalls.set(commandFunctionCall.callId, commandFunctionCall);
-        const added = upsertBoundedActivity(
-          activities,
-          commandFunctionCall.activity,
-          options.activityLimit ?? null,
-        );
-        if (!countedActivityIds.has(commandFunctionCall.activity.id)) {
-          countedActivityIds.add(commandFunctionCall.activity.id);
-          totalActivities += 1;
-        }
-        if (added) {
-          seq += 1;
-        }
-        continue;
-      }
-
-      const stdinFunctionCall = parseStdinFunctionCall(parsed);
-      if (stdinFunctionCall) {
-        stdinFunctionCalls.set(stdinFunctionCall.callId, stdinFunctionCall.sessionId);
-        continue;
-      }
-
-      const commandFunctionOutput = parseCommandFunctionOutput(
-        parsed,
-        commandFunctionCalls,
-        commandSessionCalls,
-        stdinFunctionCalls,
+    if (result.activity) {
+      upsertBoundedActivity(
+        activities,
+        result.activity,
+        options.activityLimit ?? null,
+        result.isNewActivity,
       );
-      if (commandFunctionOutput) {
-        const wasCounted = countedActivityIds.has(commandFunctionOutput.id);
-        const added = upsertBoundedActivity(
-          activities,
-          commandFunctionOutput,
-          options.activityLimit ?? null,
-        );
-        if (!wasCounted) {
-          countedActivityIds.add(commandFunctionOutput.id);
-          totalActivities += 1;
-        }
-        if (added && !wasCounted) {
-          seq += 1;
-        }
-        continue;
-      }
-
-      const activity = parseActivity(parsed, seq);
-      if (activity) {
-        upsertBoundedActivity(activities, activity, options.activityLimit ?? null);
-        if (!countedActivityIds.has(activity.id)) {
-          countedActivityIds.add(activity.id);
-          totalActivities += 1;
-          seq += 1;
-        }
+      if (result.isNewActivity) {
+        totalActivities += 1;
       }
     }
   }
 
-  return { messages, activities, runtime, totalMessages, totalActivities, nextSeq: seq };
+  return {
+    messages,
+    activities,
+    runtime: parser.runtime,
+    totalMessages,
+    totalActivities,
+    nextSeq: parser.nextSeq,
+  };
 }
 
 async function findRolloutPath(sessionId: string, codexHomePath: string | null): Promise<string | null> {
@@ -902,14 +822,173 @@ function upsertBoundedActivity(
   activities: SessionActivity[],
   activity: SessionActivity,
   limit: number | null,
+  insertIfMissing = true,
 ): boolean {
   const existingIndex = activities.findIndex((item) => item.id === activity.id);
   if (existingIndex >= 0) {
     activities[existingIndex] = mergeActivity(activities[existingIndex], activity);
     return false;
   }
+  if (!insertIfMissing) {
+    return false;
+  }
   appendBounded(activities, activity, limit);
   return true;
+}
+
+export interface CodexHistoryParserResult {
+  message: SessionMessage | null;
+  activity: SessionActivity | null;
+  isNewActivity: boolean;
+}
+
+export class CodexHistoryParser {
+  public nextSeq = 0;
+  public runtime: SessionRuntimeSummary | null = null;
+
+  private readonly includeMessages: boolean;
+  private readonly includeActivities: boolean;
+  private readonly pendingTurnRuntime = new Map<
+    string,
+    SessionRuntimeSummary
+  >();
+  private readonly commandFunctionCalls = new Map<
+    string,
+    PendingCommandFunctionCall
+  >();
+  private readonly commandSessionCalls = new Map<
+    string,
+    PendingCommandFunctionCall
+  >();
+  private readonly stdinFunctionCalls = new Map<string, string>();
+  private readonly pendingActivitySeqs = new Map<string, number>();
+
+  constructor(options?: {
+    includeMessages?: boolean;
+    includeActivities?: boolean;
+  }) {
+    this.includeMessages = options?.includeMessages ?? true;
+    this.includeActivities = options?.includeActivities ?? true;
+  }
+
+  public get trackedActivityIdCount(): number {
+    return this.pendingActivitySeqs.size;
+  }
+
+  public parseLine(line: string): CodexHistoryParserResult | null {
+    const parsed = parseJsonLine(line);
+    if (!parsed) return null;
+
+    this.updateRuntime(parsed);
+    let message: SessionMessage | null = null;
+    if (this.includeMessages) {
+      message = parseMessage(parsed, this.nextSeq);
+      if (message) this.nextSeq += 1;
+    }
+
+    let activity: SessionActivity | null = null;
+    let isNewActivity = false;
+    if (this.includeActivities) {
+      const commandFunctionCall = parseCommandFunctionCall(
+        parsed,
+        this.nextSeq,
+      );
+      if (commandFunctionCall) {
+        this.commandFunctionCalls.set(
+          commandFunctionCall.callId,
+          commandFunctionCall,
+        );
+        activity = commandFunctionCall.activity;
+      } else {
+        const stdinFunctionCall = parseStdinFunctionCall(parsed);
+        if (stdinFunctionCall) {
+          this.stdinFunctionCalls.set(
+            stdinFunctionCall.callId,
+            stdinFunctionCall.sessionId,
+          );
+        } else {
+          activity =
+            parseCommandFunctionOutput(
+              parsed,
+              this.commandFunctionCalls,
+              this.commandSessionCalls,
+              this.stdinFunctionCalls,
+            ) ?? parseActivity(parsed, this.nextSeq);
+        }
+      }
+
+      if (activity) {
+        const pendingSeq = this.pendingActivitySeqs.get(activity.id);
+        if (pendingSeq != null) {
+          activity = { ...activity, seq: pendingSeq } as SessionActivity;
+        } else if (activity.seq >= this.nextSeq) {
+          isNewActivity = true;
+          this.nextSeq += 1;
+        }
+
+        if (isPendingActivityRecord(parsed, activity)) {
+          this.pendingActivitySeqs.set(activity.id, activity.seq);
+        } else {
+          this.pendingActivitySeqs.delete(activity.id);
+        }
+      }
+    }
+
+    return { message, activity, isNewActivity };
+  }
+
+  private updateRuntime(parsed: any): void {
+    const nextRuntime = parseRuntime(parsed);
+    if (nextRuntime) {
+      if (nextRuntime.turnId) {
+        this.pendingTurnRuntime.set(
+          nextRuntime.turnId,
+          mergeRuntime(
+            this.pendingTurnRuntime.get(nextRuntime.turnId) ?? null,
+            nextRuntime,
+          ),
+        );
+      } else {
+        this.runtime = mergeRuntime(this.runtime, nextRuntime);
+      }
+    }
+
+    const committedTurnId = resolveCommittedTurnId(parsed);
+    if (committedTurnId) {
+      const committed = this.pendingTurnRuntime.get(committedTurnId);
+      if (committed) {
+        this.runtime = mergeRuntime(this.runtime, {
+          ...committed,
+          updatedAt: parseTimestamp(parsed.timestamp),
+        });
+      }
+      this.pendingTurnRuntime.delete(committedTurnId);
+    }
+
+    const discardedTurnId = resolveDiscardedTurnId(parsed);
+    if (discardedTurnId) {
+      this.pendingTurnRuntime.delete(discardedTurnId);
+    }
+  }
+}
+
+function isPendingActivityRecord(
+  parsed: any,
+  activity: SessionActivity,
+): boolean {
+  if (parsed?.type === "event_msg") {
+    switch (parsed.payload?.type) {
+      case "web_search_begin":
+      case "image_generation_begin":
+        return true;
+      case "exec_command_end":
+      case "patch_apply_end":
+      case "web_search_end":
+      case "image_generation_end":
+        return false;
+    }
+  }
+  return activity.status === "in_progress";
 }
 
 function parseFunctionArguments(raw: unknown): Record<string, unknown> {
@@ -1194,16 +1273,39 @@ export function resolveDiscardedTurnId(parsed: any): string | null {
   return null;
 }
 
-function appendBounded<T>(entries: T[], next: T, limit: number | null): void {
+function appendBounded<T extends { id: string; createdAt: number; seq: number }>(
+  entries: T[],
+  next: T,
+  limit: number | null,
+): void {
   if (limit && limit > 0) {
     entries.push(next);
     if (entries.length > limit) {
-      entries.shift();
+      let oldestIndex = 0;
+      for (let index = 1; index < entries.length; index += 1) {
+        if (compareDatedSessionEntries(entries[index], entries[oldestIndex]) < 0) {
+          oldestIndex = index;
+        }
+      }
+      entries.splice(oldestIndex, 1);
     }
     return;
   }
 
   entries.push(next);
+}
+
+function compareDatedSessionEntries(
+  left: { id: string; createdAt: number; seq: number },
+  right: { id: string; createdAt: number; seq: number },
+): number {
+  if (left.createdAt !== right.createdAt) {
+    return left.createdAt - right.createdAt;
+  }
+  if (left.seq !== right.seq) {
+    return left.seq - right.seq;
+  }
+  return left.id === right.id ? 0 : left.id < right.id ? -1 : 1;
 }
 
 export function parseJsonLine(line: string): any | null {

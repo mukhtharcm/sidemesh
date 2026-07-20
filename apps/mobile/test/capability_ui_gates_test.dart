@@ -83,12 +83,7 @@ void main() {
 
     await _pumpApp(
       tester,
-      SessionScreen(
-        host: host,
-        session: session,
-        api: api,
-        desktopMode: true,
-      ),
+      SessionScreen(host: host, session: session, api: api, desktopMode: true),
       size: const Size(1180, 900),
     );
     await _pumpFrames(tester);
@@ -114,10 +109,7 @@ void main() {
     await tester.tap(find.text('Fake Balanced'));
     await _pumpFrames(tester);
 
-    final config = SessionTurnConfigStore.instance.configFor(
-      host,
-      session.id,
-    );
+    final config = SessionTurnConfigStore.instance.configFor(host, session.id);
     expect(config.isEmpty, isTrue);
 
     await tester.pumpWidget(const SizedBox.shrink());
@@ -127,7 +119,10 @@ void main() {
   testWidgets('desktop composer keeps typing area wide with model controls', (
     tester,
   ) async {
-    final session = _session('desktop-composer-width-session', provider: 'fake');
+    final session = _session(
+      'desktop-composer-width-session',
+      provider: 'fake',
+    );
     final api = _CapabilityFakeApi(
       _nodeForCapabilities(_fullCapabilities),
       models: const [_fakeModel],
@@ -159,9 +154,7 @@ void main() {
       final controller = InspectorController();
       final api = _WorkspaceBrowserCapabilityApi(
         _nodeForCapabilities(_minimalCapabilities),
-        files: const <String, String>{
-          '/repo/README.md': '# Workspace',
-        },
+        files: const <String, String>{'/repo/README.md': '# Workspace'},
       );
       addTearDown(controller.dispose);
       addTearDown(api.dispose);
@@ -209,12 +202,7 @@ void main() {
 
     await _pumpApp(
       tester,
-      SessionScreen(
-        host: host,
-        session: session,
-        api: api,
-        desktopMode: true,
-      ),
+      SessionScreen(host: host, session: session, api: api, desktopMode: true),
       size: const Size(1180, 900),
     );
     await _pumpFrames(tester);
@@ -306,12 +294,7 @@ void main() {
 
     await _pumpApp(
       tester,
-      SessionScreen(
-        host: host,
-        session: session,
-        api: api,
-        desktopMode: true,
-      ),
+      SessionScreen(host: host, session: session, api: api, desktopMode: true),
       size: const Size(1180, 900),
     );
     await _pumpFrames(tester);
@@ -337,10 +320,7 @@ void main() {
     await tester.tap(find.text('Low'));
     await _pumpFrames(tester);
 
-    final config = SessionTurnConfigStore.instance.configFor(
-      host,
-      session.id,
-    );
+    final config = SessionTurnConfigStore.instance.configFor(host, session.id);
     expect(config.model, isNull);
     expect(config.reasoningEffort, 'low');
 
@@ -1462,6 +1442,8 @@ class _CapabilityFakeApi extends ApiClient {
     String sessionId, {
     int? messageLimit,
     int? activityLimit,
+    int? entryLimit,
+    String? beforeCursor,
   }) async => SessionLog(
     session: _session(sessionId),
     messages: const [],

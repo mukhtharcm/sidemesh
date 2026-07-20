@@ -39,7 +39,9 @@ void main() {
 
       await tester.tap(find.byIcon(Icons.menu_rounded).hitTestable());
       await tester.pumpAndSettle();
-      await tester.tap(find.widgetWithText(ListTile, 'Session B').hitTestable());
+      await tester.tap(
+        find.widgetWithText(ListTile, 'Session B').hitTestable(),
+      );
       await _pumpFrames(tester);
 
       expect(find.text('Session B'), findsOneWidget);
@@ -65,7 +67,9 @@ void main() {
 
       await tester.tap(find.byIcon(Icons.menu_rounded).hitTestable());
       await tester.pumpAndSettle();
-      await tester.tap(find.widgetWithText(ListTile, 'Session B').hitTestable());
+      await tester.tap(
+        find.widgetWithText(ListTile, 'Session B').hitTestable(),
+      );
       await _pumpFrames(tester);
       expect(find.text('Session B'), findsOneWidget);
 
@@ -241,8 +245,13 @@ class _NavigationFakeApi extends ApiClient {
     String sessionId, {
     int? messageLimit,
     int? activityLimit,
+    int? entryLimit,
+    String? beforeCursor,
   }) async => SessionLog(
-    session: _session(sessionId, sessionId == 'session-a' ? 'Session A' : 'Session B'),
+    session: _session(
+      sessionId,
+      sessionId == 'session-a' ? 'Session A' : 'Session B',
+    ),
     messages: const [],
     activities: const [],
     pendingAction: null,

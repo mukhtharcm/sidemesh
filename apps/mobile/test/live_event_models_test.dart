@@ -84,47 +84,53 @@ void main() {
     expect(retry.errorMessage, 'Overloaded');
   });
 
-  test('LiveEvent stays compatible with unknown event types and extra keys', () {
-    final event = LiveEvent.fromJson({
-      'type': 'custom.provider_thing',
-      'sessionId': 'session-1',
-      'unexpected': {'nested': true},
-      'plan': [
-        {'step': 'Still parseable', 'status': 'pending'},
-        {'missing': 'fields'},
-      ],
-      'steeringPreview': ['alpha', 2, null],
-    });
+  test(
+    'LiveEvent stays compatible with unknown event types and extra keys',
+    () {
+      final event = LiveEvent.fromJson({
+        'type': 'custom.provider_thing',
+        'sessionId': 'session-1',
+        'unexpected': {'nested': true},
+        'plan': [
+          {'step': 'Still parseable', 'status': 'pending'},
+          {'missing': 'fields'},
+        ],
+        'steeringPreview': ['alpha', 2, null],
+      });
 
-    expect(event.type, 'custom.provider_thing');
-    expect(event.sessionId, 'session-1');
-    expect(event.plan, hasLength(1));
-    expect(event.plan!.single.step, 'Still parseable');
-    expect(event.steeringPreview, ['alpha']);
-  });
+      expect(event.type, 'custom.provider_thing');
+      expect(event.sessionId, 'session-1');
+      expect(event.plan, hasLength(1));
+      expect(event.plan!.single.step, 'Still parseable');
+      expect(event.steeringPreview, ['alpha']);
+    },
+  );
 
   test('SessionMessage preserves content blocks', () {
     final msg = SessionMessage(
       id: 'msg-1',
       role: 'assistant',
       text: 'Hello',
-      content: const [
-        ThinkingBlock('Step one. Step two.'),
-        TextBlock('Hello'),
-      ],
+      content: const [ThinkingBlock('Step one. Step two.'), TextBlock('Hello')],
       attachments: const [],
       createdAt: DateTime(2026, 1, 1),
       seq: 1,
     );
     expect(msg.content.length, 2);
-    expect((msg.content.first as ThinkingBlock).thinking, 'Step one. Step two.');
+    expect(
+      (msg.content.first as ThinkingBlock).thinking,
+      'Step one. Step two.',
+    );
 
     final json = msg.toJson();
     expect(json['content'], hasLength(2));
 
     final parsed = SessionMessage.fromJson(json);
     expect(parsed.content.length, 2);
-    expect((parsed.content.first as ThinkingBlock).thinking, 'Step one. Step two.');
+    expect(
+      (parsed.content.first as ThinkingBlock).thinking,
+      'Step one. Step two.',
+    );
   });
 
   test('SessionMessage derives content from text when absent in fromJson', () {
@@ -186,6 +192,12 @@ void main() {
         totalActivities: 0,
         returnedActivities: 0,
       ),
+      nextSeq: 42,
+      replayNextSeq: 45,
+      page: const SessionLogPageInfo(
+        beforeCursor: 'cursor-1',
+        hasMoreBefore: true,
+      ),
       latestPlanUpdate: latestPlanUpdate,
     );
 
@@ -194,6 +206,10 @@ void main() {
     expect(parsed.latestPlanUpdate?.seq, 7);
     expect(parsed.latestPlanUpdate?.plan, hasLength(2));
     expect(parsed.latestPlanUpdate?.plan?.last.step, 'Restore the plan');
+    expect(parsed.nextSeq, 42);
+    expect(parsed.replayNextSeq, 45);
+    expect(parsed.page?.beforeCursor, 'cursor-1');
+    expect(parsed.page?.hasMoreBefore, true);
 
     final clearLog = SessionLog.fromJson({
       ...log.toJson(),

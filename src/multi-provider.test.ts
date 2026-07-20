@@ -11,17 +11,23 @@ import type {
   AgentProviderEvents,
   AgentProviderLiveEvent,
   AgentSessionListOptions,
+  AgentSessionLogOptions,
   AgentSubmitInputRequest,
   AgentSubmitInputResult,
 } from "./agent-provider.js";
 import { MultiAgentProvider } from "./multi-provider.js";
-import type { SessionLogSnapshot } from "./types.js";
+import type {
+  SessionActivity,
+  SessionLogSnapshot,
+  SessionMessage,
+} from "./types.js";
 
 describe("MultiAgentProvider", () => {
   it("wraps session ids and routes reads and writes back to the owning provider", async () => {
     const codex = new StubProvider("codex", "Codex");
     const copilot = new StubProvider("copilot", "GitHub Copilot");
     codex.seedThread("codex-thread", "/repo/codex");
+    codex.seedSessionLog(3);
     copilot.seedThread("copilot-thread", "/repo/copilot");
 
     const provider = new MultiAgentProvider(
@@ -60,6 +66,31 @@ describe("MultiAgentProvider", () => {
     assert.ok(copilotThread);
     assert.match(codexThread.id, /^codex:/);
     assert.match(copilotThread.id, /^copilot:/);
+
+    await provider.readSessionLog(codexThread);
+    await provider.readSessionRuntime(codexThread);
+    assert.equal(codex.readSessionThreadCalls, 0);
+
+    const page = await provider.readSessionLogPage(codexThread, {
+      limit: 1,
+    });
+    assert.equal(page.page, undefined);
+    assert.deepEqual(page.messages, []);
+    assert.deepEqual(page.activities.map((activity) => activity.id), [
+      "activity-3",
+    ]);
+    assert.deepEqual(codex.lastReadSessionLogOptions, {
+      messageLimit: 1,
+      activityLimit: 1,
+    });
+    assert.equal(codex.readSessionThreadCalls, 0);
+    await assert.rejects(
+      provider.readSessionLogPage(codexThread, {
+        limit: 1,
+        beforeCursor: "opaque-cursor-from-an-unsupported-child",
+      }),
+      /does not support older transcript pages/,
+    );
 
     await provider.submitInput({
       sessionId: copilotThread.id,
@@ -296,6 +327,7 @@ class StubProvider
   extends EventEmitter<AgentProviderEvents>
   implements AgentProvider
 {
+  public readSessionThreadCalls = 0;
   public readonly capabilities: AgentProviderCapabilities = {
     sessions: {
       create: true,
@@ -356,6 +388,15 @@ class StubProvider
 
   public readonly createdSessions: AgentCreateSessionRequest[] = [];
   public lastSubmit: AgentSubmitInputRequest | null = null;
+  public lastReadSessionLogOptions: AgentSessionLogOptions | undefined;
+  public sessionLogSnapshot: SessionLogSnapshot = {
+    messages: [],
+    activities: [],
+    runtime: null,
+    totalMessages: 0,
+    totalActivities: 0,
+    nextSeq: 0,
+  };
   private readonly threads = new Map<string, ReturnType<typeof stubThread>>();
 
   public constructor(
@@ -371,6 +412,45 @@ class StubProvider
     overrides: Partial<ReturnType<typeof stubThread>> = {},
   ): void {
     this.threads.set(id, stubThread(id, cwd, this.kind, overrides));
+  }
+
+  public seedSessionLog(count: number): void {
+    const messages: SessionMessage[] = [];
+    const activities: SessionActivity[] = [];
+    for (let index = 1; index <= count; index += 1) {
+      messages.push({
+        id: `message-${index}`,
+        role: "assistant",
+        text: `message ${index}`,
+        content: [],
+        attachments: [],
+        createdAt: index * 2,
+        seq: index * 2,
+      });
+      activities.push({
+        id: `activity-${index}`,
+        type: "tool",
+        turnId: null,
+        createdAt: index * 2 + 1,
+        seq: index * 2 + 1,
+        status: "completed",
+        toolName: "stub",
+        title: `activity ${index}`,
+        args: null,
+        output: null,
+        result: null,
+        isError: null,
+        semantic: null,
+      });
+    }
+    this.sessionLogSnapshot = {
+      messages,
+      activities,
+      runtime: null,
+      totalMessages: messages.length,
+      totalActivities: activities.length,
+      nextSeq: count * 2 + 2,
+    };
   }
 
   public async start(): Promise<void> {}
@@ -389,6 +469,7 @@ class StubProvider
     id: string,
     _includeTurns: boolean,
   ): Promise<ReturnType<typeof stubThread>> {
+    this.readSessionThreadCalls += 1;
     const thread = this.threads.get(id);
     if (!thread) {
       throw new Error(`Unknown thread ${id}`);
@@ -402,15 +483,12 @@ class StubProvider
     return [...this.threads.values()];
   }
 
-  public async readSessionLog(): Promise<SessionLogSnapshot> {
-    return {
-      messages: [],
-      activities: [],
-      runtime: null,
-      totalMessages: 0,
-      totalActivities: 0,
-      nextSeq: 0,
-    };
+  public async readSessionLog(
+    _thread: ReturnType<typeof stubThread>,
+    options?: AgentSessionLogOptions,
+  ): Promise<SessionLogSnapshot> {
+    this.lastReadSessionLogOptions = options;
+    return this.sessionLogSnapshot;
   }
 
   public async readSessionRuntime() {

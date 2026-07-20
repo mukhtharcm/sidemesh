@@ -52,6 +52,7 @@ import type {
   RecentSessionsLiveEvent,
   SessionMessageAttachment,
   SessionMessage,
+  SessionLogSnapshot,
   SessionResourcesResponse,
   SessionRuntimeSummary,
   SessionResource,
@@ -115,6 +116,11 @@ import { startupSummaryLines } from "./startup-summary.js";
 import { getCodexRpcAuditSnapshot } from "./codex-rpc-audit.js";
 import { SessionReplayIndex } from "./session-replay-index.js";
 import { SessionSearchIndex, type SearchFilter } from "./session-search-index.js";
+import {
+  paginateSessionLogSnapshot,
+  SESSION_LOG_CURSOR_MAX_LENGTH,
+  SessionLogCursorError,
+} from "./session-log-pagination.js";
 import { saveConfig } from "./config.js";
 import { detectInstallInfo } from "./install-info.js";
 import { spawnSelfUpdater } from "./updater-spawn.js";
@@ -129,7 +135,6 @@ import {
   type JsonRouteResponse,
 } from "./hono-route-adapter.js";
 
-const SESSION_LOG_CACHE_LIMIT = 24;
 const SESSION_INPUT_DEDUPE_LIMIT = 500;
 const SESSION_INPUT_DEDUPE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const SESSION_INPUT_DEDUPE_FILE = "session-input-dedupe-v1.json";
@@ -145,6 +150,7 @@ const TERMINAL_LIVE_STATUS_GRACE_MS = 1_000;
 const RECENT_SESSION_RUNTIME_CONCURRENCY = 4;
 const SESSION_EVENT_DELTA_MAX_ITEMS = 220;
 const SESSION_EVENT_DELTA_MAX_BYTES = 256 * 1024;
+const SESSION_LOG_PAGE_MAX_ENTRIES = 200;
 const INSTALL_INFO_REFRESH_TTL_MS = 60_000;
 type SessionRuntimeListMode = "all" | "active" | "none";
 const HOST_CAPABILITIES: HostCapabilities = {
@@ -164,16 +170,6 @@ interface SessionRuntimeCacheEntry {
   threadUpdatedAt: number;
   runtime: SessionRuntimeSummary | null;
   promise?: Promise<SessionRuntimeSummary | null>;
-}
-
-interface SessionLogCacheEntry {
-  threadUpdatedAt: number;
-  messages: SessionMessage[];
-  activities: SessionActivity[];
-  runtime: SessionRuntimeSummary | null;
-  history: SessionHistorySummary;
-  nextSeq: number;
-  latestPlanUpdate: LatestPlanUpdate | null;
 }
 
 interface SessionHistorySummary {
@@ -283,7 +279,6 @@ export async function startServer(
     nodePath.join(config.stateDir, "search-index-v1.db"),
   );
   const runtimeCache = new Map<string, SessionRuntimeCacheEntry>();
-  const logCache = new Map<string, SessionLogCacheEntry>();
   const sessionRuntimeSignals = await loadSessionRuntimeSignalsState(
     nodePath.join(config.stateDir, SESSION_RUNTIME_SIGNALS_FILE),
   );
@@ -478,7 +473,6 @@ export async function startServer(
     activeTurns.delete(sessionId);
     unverifiedActiveTurns.delete(sessionId);
     liveActivities.delete(sessionId);
-    clearSessionLogCache(logCache, sessionId);
     clearActionsForSession(
       pendingActions,
       sessionId,
@@ -707,11 +701,6 @@ export async function startServer(
         updatedAt: Date.now(),
       });
     }
-    updateSessionLogCacheLatestPlanUpdate(
-      logCache,
-      sessionId,
-      latestPlanUpdateForSession(sessionId),
-    );
     persistSessionRuntimeSignalsEventually();
   }
 
@@ -797,14 +786,6 @@ export async function startServer(
         sessionIds.add(sessionId);
       }
     }
-    for (const key of logCache.keys()) {
-      const delimiterIndex = key.indexOf("::");
-      const sessionId = delimiterIndex >= 0 ? key.slice(0, delimiterIndex) : key;
-      if (isProviderSession(sessionId)) {
-        sessionIds.add(sessionId);
-      }
-    }
-
     await clearInterruptedSessionInputDedupe(interruptedTurnIds);
     recentSessionsCache.clear();
     for (const sessionId of sessionIds) {
@@ -822,7 +803,6 @@ export async function startServer(
       recoveredTerminalThreadStatuses.delete(sessionId);
       liveActivities.delete(sessionId);
       runtimeCache.delete(sessionId);
-      clearSessionLogCache(logCache, sessionId);
       clearActionsForSession(
         pendingActions,
         sessionId,
@@ -1199,17 +1179,12 @@ export async function startServer(
       case "runtime_updated": {
         const previousRuntime =
           runtimeCache.get(event.sessionId)?.runtime ??
-          logCache.get(event.sessionId)?.runtime ??
           null;
         const runtime = mergeRuntimeSummary(previousRuntime, event.runtime);
         runtimeCache.set(event.sessionId, {
           threadUpdatedAt: Date.now() / 1000,
           runtime,
         });
-        const cachedLog = logCache.get(event.sessionId);
-        if (cachedLog) {
-          cachedLog.runtime = runtime;
-        }
         broadcastLive(event.sessionId, {
           type: "runtime_updated",
           sessionId: event.sessionId,
@@ -1320,7 +1295,6 @@ export async function startServer(
           event.status === "errored" ? "errored" : "idle",
         );
         liveActivities.delete(event.sessionId);
-        clearSessionLogCache(logCache, event.sessionId);
         scheduleRecentSessionUpsert(event.sessionId, 0);
         void indexSessionForSearch(searchIndex, providerRuntime, event.sessionId).catch(() => {});
         // NOTE: do NOT reset sessionSeqCursor between turns — clients rely on
@@ -1551,7 +1525,6 @@ export async function startServer(
         recentSessions: recentSessionsCache.size,
         recentSessionBroadcastTimers: recentSessionBroadcastTimers.size,
         runtime: runtimeCache.size,
-        logs: logCache.size,
         replay: replayIndex.getStats(),
         activeTurns: activeTurns.size,
         pendingActions: pendingActions.size,
@@ -2023,46 +1996,131 @@ export async function startServer(
       const query = request.query as Record<string, unknown>;
       const messageLimit = asInteger(query.messageLimit);
       const activityLimit = asInteger(query.activityLimit);
-      const cacheKey = buildSessionLogCacheKey(
-        sessionId,
-        messageLimit,
-        activityLimit,
-      );
+      const entryLimit = asInteger(query.entryLimit);
+      const beforeCursor = asString(query.beforeCursor);
+      if (query.beforeCursor !== undefined && entryLimit === null) {
+        response.status(400).json({
+          error: "beforeCursor requires entryLimit",
+          code: "INVALID_SESSION_LOG_CURSOR",
+        });
+        return;
+      }
+      if (
+        query.beforeCursor !== undefined &&
+        (beforeCursor === null || beforeCursor.length === 0)
+      ) {
+        response.status(400).json({
+          error: "beforeCursor must be a non-empty string",
+          code: "INVALID_SESSION_LOG_CURSOR",
+        });
+        return;
+      }
+      if (
+        beforeCursor !== null &&
+        beforeCursor.length > SESSION_LOG_CURSOR_MAX_LENGTH
+      ) {
+        response.status(400).json({
+          error: "Invalid transcript history cursor.",
+          code: "INVALID_SESSION_LOG_CURSOR",
+        });
+        return;
+      }
+      if (
+        query.entryLimit !== undefined &&
+        (entryLimit === null ||
+          entryLimit < 1 ||
+          entryLimit > SESSION_LOG_PAGE_MAX_ENTRIES)
+      ) {
+        response.status(400).json({
+          error: `entryLimit must be between 1 and ${SESSION_LOG_PAGE_MAX_ENTRIES}`,
+        });
+        return;
+      }
       const session = await readSession(provider, sessionId, false);
       reconcileObservedThreadStatus(session.id, threadStatusPhase(session));
-      const log = await provider.readSessionLog!(session, {
-        messageLimit,
-        activityLimit,
-      });
+      const currentLiveActivities = liveActivityValues(
+        liveActivities.get(sessionId),
+      );
+      let log: SessionLogSnapshot;
+      try {
+        if (entryLimit !== null && hasProviderMethod(provider, "readSessionLogPage")) {
+          log = await provider.readSessionLogPage(session, {
+            limit: entryLimit,
+            beforeCursor,
+            cursorScope: sessionId,
+          });
+        } else {
+          if (beforeCursor !== null) {
+            throw new SessionLogCursorError(
+              "This provider does not support older transcript pages.",
+            );
+          }
+          const legacyLog = await provider.readSessionLog!(session, {
+            messageLimit: entryLimit ?? messageLimit,
+            activityLimit: entryLimit ?? activityLimit,
+          });
+          if (entryLimit !== null) {
+            const paged = paginateSessionLogSnapshot(sessionId, legacyLog, {
+              limit: entryLimit,
+            });
+            log = { ...paged, page: undefined };
+          } else {
+            log = legacyLog;
+          }
+        }
+      } catch (error) {
+        if (error instanceof SessionLogCursorError) {
+          response.status(error.status).json({
+            error: error.message,
+            code: error.code,
+          });
+          return;
+        }
+        throw error;
+      }
       const latestPlanUpdate = mergeLatestPlanUpdate(
         sessionId,
         log.latestPlanUpdate ?? null,
         latestPlanUpdateForSession(sessionId),
       );
-      ensureSeqCursor(
+      const snapshotNextSeq = nextSeqForLatestPlanUpdate(
+        log.nextSeq,
+        latestPlanUpdate,
+      );
+      const pagedActivityIds = new Set(
+        log.activities.map((activity) => activity.id),
+      );
+      const representedLiveActivityIds = log.page
+        ? pagedActivityIds
+        : new Set(currentLiveActivities.map((activity) => activity.id));
+      const replayNextSeq = rebaseLiveActivityReplaySeqs(
         sessionId,
-        nextSeqForLatestPlanUpdate(log.nextSeq, latestPlanUpdate),
+        liveActivities.get(sessionId),
+        representedLiveActivityIds,
+        snapshotNextSeq,
+        ensureSeqCursor,
+        allocSeq,
       );
-      const activities = mergeSessionActivities(
-        log.activities,
-        liveActivityValues(liveActivities.get(sessionId)),
-      );
+      // A provider-owned page cursor is anchored in persisted history. New
+      // live-only rows cannot be inserted into that page without either
+      // exceeding entryLimit or changing the opaque boundary. Merge in-place
+      // replacements only; WebSocket/event replay delivers new live rows.
+      const activities = log.page
+        ? mergeSessionActivities(
+            log.activities,
+            currentLiveActivities.filter((activity) =>
+              pagedActivityIds.has(activity.id)
+            ),
+          )
+        : mergeSessionActivities(log.activities, currentLiveActivities);
+      const totalActivities = Math.max(log.totalActivities, activities.length);
       const history = buildSessionHistorySummary(
         log.totalMessages,
         log.messages.length,
-        log.totalActivities,
-        log.activities.length,
+        totalActivities,
+        activities.length,
       );
 
-      setSessionLogCacheEntry(logCache, cacheKey, {
-        threadUpdatedAt: session.updatedAt,
-        messages: log.messages,
-        activities: log.activities,
-        runtime: log.runtime,
-        history,
-        nextSeq: log.nextSeq,
-        latestPlanUpdate,
-      });
       runtimeCache.set(session.id, {
         threadUpdatedAt: session.updatedAt,
         runtime: log.runtime,
@@ -2077,6 +2135,13 @@ export async function startServer(
         activities,
         pendingAction: findPendingActionForSession(pendingActions, sessionId),
         history,
+        // SessionLogSnapshot.nextSeq is the exclusive next-unused sequence.
+        // Mobile converts it to an inclusive replay cursor before calling
+        // /events, which prevents the first post-snapshot event from being
+        // skipped.
+        nextSeq: snapshotNextSeq,
+        replayNextSeq,
+        page: log.page,
         latestPlanUpdate,
       });
     }),
@@ -2115,6 +2180,7 @@ export async function startServer(
       const query = request.query as Record<string, unknown>;
       const since = asInteger(query.since) ?? 0;
       const baseUpdatedAt = asInteger(query.baseUpdatedAt);
+      const pageDelta = query.page === "true";
 
       const session = await readSession(provider, sessionId, false);
       reconcileObservedThreadStatus(session.id, threadStatusPhase(session));
@@ -2124,11 +2190,11 @@ export async function startServer(
       let nextSeq: number;
       let logRuntime: SessionRuntimeSummary | null;
       let logLatestPlanUpdate: LatestPlanUpdate | null;
+      const liveSessionActivities = liveActivities.get(sessionId);
 
       if (session.path && session.path.endsWith(".jsonl")) {
         try {
           const entry = await replayIndex.load(sessionId, session.path);
-          const liveSessionActivities = liveActivities.get(sessionId);
           if (hostCapabilities.sessions.search) {
             void indexSessionForSearch(searchIndex, providerRuntime, sessionId).catch(() => {
               // Ignore indexing errors for live sessions
@@ -2150,7 +2216,7 @@ export async function startServer(
             sessionId,
             latestPlanUpdateForSession(sessionId),
           );
-          nextSeq = nextSeqForLatestPlanUpdate(
+          nextSeq = replayCursorForLatestPlanUpdate(
             Math.max(delta.nextSeq, replayedActivities.highestSeq),
             logLatestPlanUpdate,
           );
@@ -2178,7 +2244,6 @@ export async function startServer(
             sessionId,
             nextSeqForLatestPlanUpdate(log.nextSeq, latestPlanUpdate),
           );
-          const liveSessionActivities = liveActivities.get(sessionId);
           const activities = mergeSessionActivities(
             log.activities,
             liveActivityValues(liveSessionActivities),
@@ -2195,7 +2260,7 @@ export async function startServer(
             if ((m.seq ?? 0) > highestSeq) highestSeq = m.seq ?? highestSeq;
           }
           logLatestPlanUpdate = latestPlanUpdate;
-          nextSeq = nextSeqForLatestPlanUpdate(highestSeq, latestPlanUpdate);
+          nextSeq = replayCursorForLatestPlanUpdate(highestSeq, latestPlanUpdate);
           logRuntime = log.runtime;
         }
       } else {
@@ -2209,7 +2274,6 @@ export async function startServer(
           sessionId,
           nextSeqForLatestPlanUpdate(log.nextSeq, latestPlanUpdate),
         );
-        const liveSessionActivities = liveActivities.get(sessionId);
         const activities = mergeSessionActivities(
           log.activities,
           liveActivityValues(liveSessionActivities),
@@ -2226,11 +2290,11 @@ export async function startServer(
           if ((m.seq ?? 0) > highestSeq) highestSeq = m.seq ?? highestSeq;
         }
         logLatestPlanUpdate = latestPlanUpdate;
-        nextSeq = nextSeqForLatestPlanUpdate(highestSeq, latestPlanUpdate);
+        nextSeq = replayCursorForLatestPlanUpdate(highestSeq, latestPlanUpdate);
         logRuntime = log.runtime;
       }
 
-      const latestPlanUpdate = isLatestPlanUpdateNewerThan(
+      let latestPlanUpdate = isLatestPlanUpdateNewerThan(
         logLatestPlanUpdate,
         since,
       )
@@ -2253,32 +2317,52 @@ export async function startServer(
         return;
       }
 
-      const eventDeltaSize = measureSessionEventDelta(
-        newMessages,
-        newActivities,
-        latestPlanUpdate,
-      );
-      if (
-        eventDeltaSize.items > SESSION_EVENT_DELTA_MAX_ITEMS ||
-        eventDeltaSize.bytes > SESSION_EVENT_DELTA_MAX_BYTES
-      ) {
-        response.status(410).json({
-          error: "stale_cursor",
-          reason: "delta_too_large",
+      let hasMore = false;
+      if (pageDelta) {
+        const boundedDelta = boundSessionEventDelta(
+          newMessages,
+          newActivities,
+          latestPlanUpdate,
+          liveSessionActivities,
           since,
-          nextSeq,
-          maxItems: SESSION_EVENT_DELTA_MAX_ITEMS,
-          maxBytes: SESSION_EVENT_DELTA_MAX_BYTES,
-          actualItems: eventDeltaSize.items,
-          actualBytes: eventDeltaSize.bytes,
-        });
-        return;
+        );
+        newMessages = boundedDelta.messages;
+        newActivities = boundedDelta.activities;
+        latestPlanUpdate = boundedDelta.latestPlanUpdate;
+        nextSeq = boundedDelta.nextSeq;
+        hasMore = boundedDelta.hasMore;
+      } else {
+        // Preserve the pre-pagination contract for released clients: an
+        // oversized gap returns stale_cursor so they fall back to their
+        // legacy, unpaged authoritative snapshot.
+        const eventDeltaSize = measureSessionEventDelta(
+          newMessages,
+          newActivities,
+          latestPlanUpdate,
+        );
+        if (
+          eventDeltaSize.items > SESSION_EVENT_DELTA_MAX_ITEMS ||
+          eventDeltaSize.bytes > SESSION_EVENT_DELTA_MAX_BYTES
+        ) {
+          response.status(410).json({
+            error: "stale_cursor",
+            reason: "delta_too_large",
+            since,
+            nextSeq,
+            maxItems: SESSION_EVENT_DELTA_MAX_ITEMS,
+            maxBytes: SESSION_EVENT_DELTA_MAX_BYTES,
+            actualItems: eventDeltaSize.items,
+            actualBytes: eventDeltaSize.bytes,
+          });
+          return;
+        }
       }
 
       response.json({
         sessionId,
         since,
         nextSeq,
+        hasMore,
         messages: newMessages,
         activities: newActivities,
         latestPlanUpdate,
@@ -2988,7 +3072,6 @@ export async function startServer(
         return;
       }
       const result = await provider.compactSession!(sessionId);
-      clearSessionLogCache(logCache, sessionId);
       response.json({ compacted: true, result: result ?? null });
       scheduleRecentSessionUpsert(sessionId, 0);
     }),
@@ -3084,7 +3167,6 @@ export async function startServer(
       recoveredTerminalThreadStatuses.delete(sessionId);
       liveThreadStatuses.delete(sessionId);
       liveActivities.delete(sessionId);
-      clearSessionLogCache(logCache, sessionId);
       sessionSeqCursor.delete(sessionId);
       response.json({ archived: true });
       broadcastRecentSessionRemove(sessionId);
@@ -4464,6 +4546,11 @@ function upsertLiveActivity(
     activity: merged,
     replaySeq: existing ? allocReplaySeq() : merged.seq,
   });
+  while (sessionActivities.size > SESSION_LOG_PAGE_MAX_ENTRIES) {
+    const oldestActivityId = sessionActivities.keys().next().value;
+    if (typeof oldestActivityId !== "string") break;
+    sessionActivities.delete(oldestActivityId);
+  }
   liveActivities.set(sessionId, sessionActivities);
   return merged;
 }
@@ -4582,6 +4669,31 @@ function filterActivitiesForReplay(
     activities: returned,
     highestSeq,
   };
+}
+
+function rebaseLiveActivityReplaySeqs(
+  sessionId: string,
+  sessionActivities: Map<string, LiveActivityEntry> | undefined,
+  representedActivityIds: ReadonlySet<string>,
+  minimumNextSeq: number,
+  ensureSeqCursor: (sessionId: string, minimum: number) => void,
+  allocSeq: (sessionId: string) => number,
+): number {
+  ensureSeqCursor(sessionId, minimumNextSeq);
+  let replayNextSeq = minimumNextSeq;
+  if (!sessionActivities) {
+    return replayNextSeq;
+  }
+  for (const [activityId, entry] of sessionActivities) {
+    if (representedActivityIds.has(activityId)) {
+      continue;
+    }
+    if (entry.replaySeq < minimumNextSeq) {
+      entry.replaySeq = allocSeq(sessionId);
+    }
+    replayNextSeq = Math.max(replayNextSeq, entry.replaySeq + 1);
+  }
+  return replayNextSeq;
 }
 
 function mapSession(
@@ -5044,52 +5156,6 @@ async function mapWithConcurrency<T, R>(
   return results;
 }
 
-function setSessionLogCacheEntry(
-  logCache: Map<string, SessionLogCacheEntry>,
-  cacheKey: string,
-  entry: SessionLogCacheEntry,
-): void {
-  if (logCache.has(cacheKey)) {
-    logCache.delete(cacheKey);
-  }
-  logCache.set(cacheKey, entry);
-
-  while (logCache.size > SESSION_LOG_CACHE_LIMIT) {
-    const oldest = logCache.keys().next().value;
-    if (!oldest) {
-      return;
-    }
-    logCache.delete(oldest);
-  }
-}
-
-function updateSessionLogCacheLatestPlanUpdate(
-  logCache: Map<string, SessionLogCacheEntry>,
-  sessionId: string,
-  latestPlanUpdate: LatestPlanUpdate | null,
-): void {
-  const prefix = `${sessionId}::`;
-  for (const [key, entry] of logCache) {
-    if (!key.startsWith(prefix)) {
-      continue;
-    }
-    entry.latestPlanUpdate = latestPlanUpdate;
-    entry.nextSeq = nextSeqForLatestPlanUpdate(entry.nextSeq, latestPlanUpdate);
-  }
-}
-
-function clearSessionLogCache(
-  logCache: Map<string, SessionLogCacheEntry>,
-  sessionId: string,
-): void {
-  const prefix = `${sessionId}::`;
-  for (const key of [...logCache.keys()]) {
-    if (key.startsWith(prefix)) {
-      logCache.delete(key);
-    }
-  }
-}
-
 function normalizeLatestPlanUpdate(
   latestPlanUpdate: LatestPlanUpdate | null | undefined,
   sessionId?: string,
@@ -5160,6 +5226,16 @@ function nextSeqForLatestPlanUpdate(
     return nextSeq;
   }
   return Math.max(nextSeq, latestPlanUpdate.seq + 1);
+}
+
+function replayCursorForLatestPlanUpdate(
+  replayCursor: number,
+  latestPlanUpdate: LatestPlanUpdate | null,
+): number {
+  if (latestPlanUpdate?.seq == null) {
+    return replayCursor;
+  }
+  return Math.max(replayCursor, latestPlanUpdate.seq);
 }
 
 async function loadSessionRuntimeSignalsState(
@@ -5243,14 +5319,6 @@ async function saveSessionRuntimeSignalsState(
     },
   );
   await rename(tmpPath, filePath);
-}
-
-function buildSessionLogCacheKey(
-  sessionId: string,
-  messageLimit: number | null,
-  activityLimit: number | null,
-): string {
-  return `${sessionId}::m${messageLimit ?? "all"}::a${activityLimit ?? "all"}`;
 }
 
 function buildSessionHistorySummary(
@@ -5585,6 +5653,103 @@ function measureSessionEventDelta(
       JSON.stringify({ messages, activities, latestPlanUpdate }),
       "utf8",
     ),
+  };
+}
+
+function boundSessionEventDelta(
+  messages: SessionMessage[],
+  activities: SessionActivity[],
+  latestPlanUpdate: LatestPlanUpdate | null,
+  liveActivities: Map<string, LiveActivityEntry> | undefined,
+  since: number,
+): {
+  messages: SessionMessage[];
+  activities: SessionActivity[];
+  latestPlanUpdate: LatestPlanUpdate | null;
+  nextSeq: number;
+  hasMore: boolean;
+} {
+  type Candidate =
+    | { kind: "message"; seq: number; id: string; value: SessionMessage }
+    | { kind: "activity"; seq: number; id: string; value: SessionActivity }
+    | { kind: "plan"; seq: number; id: string; value: LatestPlanUpdate };
+  const candidates: Candidate[] = [
+    ...messages.map((value) => ({
+      kind: "message" as const,
+      seq: value.seq,
+      id: value.id,
+      value,
+    })),
+    ...activities.map((value) => ({
+      kind: "activity" as const,
+      seq: Math.max(
+        value.seq,
+        liveActivities?.get(value.id)?.replaySeq ?? value.seq,
+      ),
+      id: value.id,
+      value,
+    })),
+    ...(latestPlanUpdate?.seq != null
+      ? [{
+          kind: "plan" as const,
+          seq: latestPlanUpdate.seq,
+          id: latestPlanUpdate.turnId ?? "",
+          value: latestPlanUpdate,
+        }]
+      : []),
+  ];
+  const kindRank = { activity: 0, message: 1, plan: 2 } as const;
+  candidates.sort((left, right) => {
+    if (left.seq !== right.seq) return left.seq - right.seq;
+    if (left.kind !== right.kind) {
+      return kindRank[left.kind] - kindRank[right.kind];
+    }
+    return left.id === right.id ? 0 : left.id < right.id ? -1 : 1;
+  });
+
+  const selectedMessages: SessionMessage[] = [];
+  const selectedActivities: SessionActivity[] = [];
+  let selectedPlan: LatestPlanUpdate | null = null;
+  let selectedCount = 0;
+  let nextSeq = since;
+  for (const candidate of candidates) {
+    const sharesSelectedCursor =
+      selectedCount > 0 && candidate.seq === nextSeq;
+    if (
+      selectedCount >= SESSION_EVENT_DELTA_MAX_ITEMS &&
+      !sharesSelectedCursor
+    ) {
+      break;
+    }
+    const nextMessages = candidate.kind === "message"
+      ? [...selectedMessages, candidate.value]
+      : selectedMessages;
+    const nextActivities = candidate.kind === "activity"
+      ? [...selectedActivities, candidate.value]
+      : selectedActivities;
+    const nextPlan = candidate.kind === "plan" ? candidate.value : selectedPlan;
+    const exceedsByteBudget =
+      measureSessionEventDelta(nextMessages, nextActivities, nextPlan).bytes >
+      SESSION_EVENT_DELTA_MAX_BYTES;
+    // A replay cursor cannot split events that share the same sequence. Also
+    // allow one indivisible oversized event so callers always make progress
+    // instead of looping between a 410 and a head snapshot that omits it.
+    if (exceedsByteBudget && selectedCount > 0 && !sharesSelectedCursor) {
+      break;
+    }
+    if (candidate.kind === "message") selectedMessages.push(candidate.value);
+    if (candidate.kind === "activity") selectedActivities.push(candidate.value);
+    if (candidate.kind === "plan") selectedPlan = candidate.value;
+    selectedCount += 1;
+    nextSeq = Math.max(nextSeq, candidate.seq);
+  }
+
+  return {
+    messages: selectedMessages,
+    activities: selectedActivities,
+    latestPlanUpdate: selectedPlan,
+    nextSeq,
+    hasMore: selectedCount < candidates.length,
   };
 }
 

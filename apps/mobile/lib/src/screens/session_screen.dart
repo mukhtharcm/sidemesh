@@ -79,6 +79,8 @@ part 'session_screen_preview.dart';
 
 enum _TranscriptFreshnessMode { cached, reconnecting, offline }
 
+enum _SessionPaginationMode { unknown, cursor, legacy }
+
 class SessionScreen extends StatefulWidget {
   const SessionScreen({
     super.key,
@@ -101,13 +103,16 @@ class SessionScreen extends StatefulWidget {
   final ApiClient api;
   final ValueChanged<SessionSummary>? onOpenSession;
   final VoidCallback? onArchived;
+
   /// Called when the user dismisses this session from the desktop detail pane.
   final VoidCallback? onClose;
   final SessionComposerSeed? initialComposerSeed;
+
   /// When provided (mobile only), a drawer that lets the user switch sessions
   /// without navigating back to the home screen. The drawer is opened via a
   /// leading ☰ button in the AppBar.
   final WidgetBuilder? sessionDrawer;
+
   /// Returns the user from the mobile session drawer to the owning session
   /// list screen instead of stepping through previously opened session routes.
   final VoidCallback? onReturnToSessionList;
@@ -226,7 +231,10 @@ class _DesktopSessionTitle extends StatelessWidget {
       children: [
         if (running) ...[const LivePulse(), const SizedBox(width: 9)],
         Expanded(child: titleContent),
-        if (running) ...[const SizedBox(width: 8), _DesktopSessionStatusBadge(running: running)],
+        if (running) ...[
+          const SizedBox(width: 8),
+          _DesktopSessionStatusBadge(running: running),
+        ],
       ],
     );
   }
@@ -272,7 +280,9 @@ class _DesktopSessionCommandBar extends StatelessWidget {
           children: [
             _DesktopGroupButton(
               icon: Icons.more_horiz_rounded,
-              tooltip: running ? 'Session actions (agent running)' : 'Session actions',
+              tooltip: running
+                  ? 'Session actions (agent running)'
+                  : 'Session actions',
               color: colors.textSecondary,
               onTap: onMore,
             ),
@@ -393,7 +403,6 @@ class _DesktopSessionStatusBadge extends StatelessWidget {
     );
   }
 }
-
 
 class _SessionBrowserPreviewDock extends StatelessWidget {
   const _SessionBrowserPreviewDock({
@@ -788,6 +797,9 @@ class _SessionScreenState extends State<SessionScreen>
   static const _initialActivityLimit = 80;
   static const _messagePageSize = 120;
   static const _activityPageSize = 80;
+  static const _timelinePageSize = 200;
+  static const _maxDeltaReplayPagesBeforeHead = 10;
+  static const _olderPageLoadThreshold = 500.0;
   static const _liveUpdateFlushInterval = Duration(milliseconds: 48);
   static const _sessionCacheWriteDebounce = Duration(milliseconds: 900);
   static const _failedSendRetryWindow = Duration(minutes: 10);
@@ -854,6 +866,18 @@ class _SessionScreenState extends State<SessionScreen>
   _DockedBrowserPreview? _dockedBrowserPreview;
   int _messageLimit = _initialMessageLimit;
   int _activityLimit = _initialActivityLimit;
+  _SessionPaginationMode _paginationMode = _SessionPaginationMode.unknown;
+  String? _beforeCursor;
+  bool _hasMoreBefore = false;
+  String? _olderLoadError;
+  int _timelineGeneration = 0;
+  int _olderPageRequestId = 0;
+  bool _hasAppliedHeadSnapshot = false;
+  bool _hasLoadedOlderCursorHistory = false;
+  bool _olderCursorNeedsRefresh = false;
+  Set<String>? _headPageActivityIds;
+  final Map<String, Future<SessionLog>> _headLogRequests =
+      <String, Future<SessionLog>>{};
   bool _running = false;
   bool _composerFocused = false;
   bool _loading = true;
@@ -887,6 +911,11 @@ class _SessionScreenState extends State<SessionScreen>
   bool _restoreComposerFocusOnResume = false;
   bool _keepSessionUnread = false;
   int? _lastEventSeq;
+  int? _persistableNextSeq;
+  int? _lastProviderSnapshotNextSeq;
+  int? _pendingHelloNextSeq;
+  Future<bool>? _deltaSyncFuture;
+  bool _deltaSyncInFlight = false;
   // Incremented whenever a fresh snapshot is requested so in-flight responses
   // from older requests can be discarded.
   int _snapshotRequestId = 0;
@@ -1100,17 +1129,19 @@ class _SessionScreenState extends State<SessionScreen>
   }
 
   Future<void> _bootstrapSnapshot() async {
-    final loadedCache = await _loadCachedSnapshot();
+    final cachedSnapshot = _loadCachedSnapshot();
+    final freshSnapshot = _loadSnapshot();
+    final loadedCache = await cachedSnapshot;
     if (!mounted || _disposed) {
       return;
     }
     if (loadedCache) {
       _queueInitialDesktopComposerFocus();
-      unawaited(_refreshSessionFreshness());
-      return;
     }
-    await _loadSnapshot();
-    _queueInitialDesktopComposerFocus();
+    await freshSnapshot;
+    if (!loadedCache) {
+      _queueInitialDesktopComposerFocus();
+    }
   }
 
   Future<void> _loadNodeInfo() async {
@@ -1268,7 +1299,10 @@ class _SessionScreenState extends State<SessionScreen>
             score: 0,
           );
           draftFileMentions.add(
-            _ComposerFileMention(file: file, tokenText: _fileMentionToken(file)),
+            _ComposerFileMention(
+              file: file,
+              tokenText: _fileMentionToken(file),
+            ),
           );
         default:
           continue;
@@ -1505,10 +1539,7 @@ class _SessionScreenState extends State<SessionScreen>
         },
         onOpenBrowser: () {
           if (!_supportsBrowserPreview) {
-            showAppSnackBar(
-              context,
-              'Browser is not available on this host.',
-            );
+            showAppSnackBar(context, 'Browser is not available on this host.');
             return;
           }
           unawaited(_openBrowserTabs());
@@ -1808,6 +1839,16 @@ class _SessionScreenState extends State<SessionScreen>
     final shouldShow = _scrollController.offset > 240;
     if (shouldShow != _showJumpToLatest.value) {
       _showJumpToLatest.value = shouldShow;
+    }
+    final position = _scrollController.position;
+    if (position.hasContentDimensions &&
+        position.pixels > 0 &&
+        position.maxScrollExtent - position.pixels < _olderPageLoadThreshold &&
+        _paginationMode == _SessionPaginationMode.cursor &&
+        _hasMoreBefore &&
+        !_loadingOlderHistory &&
+        _olderLoadError == null) {
+      unawaited(_loadOlderTranscript());
     }
   }
 
@@ -2369,7 +2410,7 @@ class _SessionScreenState extends State<SessionScreen>
   }
 
   void _reloadSnapshot() {
-    unawaited(_loadSnapshot(scrollToBottom: false));
+    unawaited(_loadSnapshot(scrollToBottom: false, resetPagination: true));
   }
 
   Future<void> _restartProvider() async {
@@ -2438,9 +2479,15 @@ class _SessionScreenState extends State<SessionScreen>
     if (!mounted || _disposed) {
       return;
     }
-    final applied = await _resyncDelta(
-      markTranscriptFresh: !needsSnapshotVerification,
-    );
+    if (needsSnapshotVerification) {
+      await _loadSnapshot(
+        messageLimit: _messageLimit,
+        activityLimit: _activityLimit,
+        scrollToBottom: false,
+      );
+      return;
+    }
+    final applied = await _resyncDelta(markTranscriptFresh: true);
     if (!mounted || _disposed) {
       return;
     }
@@ -2463,7 +2510,15 @@ class _SessionScreenState extends State<SessionScreen>
     int? messageLimit,
     int? activityLimit,
     bool scrollToBottom = true,
+    bool resetPagination = false,
   }) async {
+    if (resetPagination && mounted) {
+      setState(() {
+        _timelineGeneration += 1;
+        _olderPageRequestId += 1;
+        _loadingOlderHistory = false;
+      });
+    }
     final resolvedMessageLimit = messageLimit ?? _messageLimit;
     final resolvedActivityLimit = activityLimit ?? _activityLimit;
     final requestId = ++_snapshotRequestId;
@@ -2472,9 +2527,7 @@ class _SessionScreenState extends State<SessionScreen>
       setState(() => _snapshotRefreshing = true);
     }
     try {
-      final log = await widget.api.fetchLog(
-        widget.host,
-        widget.session.id,
+      final log = await _fetchHeadLog(
         messageLimit: resolvedMessageLimit,
         activityLimit: resolvedActivityLimit,
       );
@@ -2487,20 +2540,99 @@ class _SessionScreenState extends State<SessionScreen>
       // we'll replay them after the snapshot setState so they aren't clobbered.
       final bufferedEvents = List<LiveEvent>.from(_pendingLiveEvents);
       _pendingLiveEvents.clear();
-      final snapshotActivities = _mergeIncomingActivities(
+      final snapshotNextSeq = log.nextSeq;
+      final sequenceEpochReset =
+          snapshotNextSeq != null &&
+          _lastProviderSnapshotNextSeq != null &&
+          snapshotNextSeq < _lastProviderSnapshotNextSeq!;
+      final preserveCursorHistory =
+          !resetPagination &&
+          !sequenceEpochReset &&
+          log.page != null &&
+          _paginationMode == _SessionPaginationMode.cursor &&
+          _hasLoadedOlderCursorHistory;
+      final previousBeforeCursor = _beforeCursor;
+      final previousHasMoreBefore = _hasMoreBefore;
+      final previousHistory = _history;
+      final previousHistoryBannerDismissed = _historyBannerDismissed;
+      final headActivityIds = log.activities
+          .map((activity) => activity.id)
+          .toSet();
+      final snapshotMessages = preserveCursorHistory
+          ? (<String, SessionMessage>{
+              for (final message in _messages) message.id: message,
+              for (final message in log.messages) message.id: message,
+            }.values.toList()..sort((left, right) {
+              final byCreatedAt = left.createdAt.compareTo(right.createdAt);
+              if (byCreatedAt != 0) return byCreatedAt;
+              if (left.seq != right.seq) return left.seq.compareTo(right.seq);
+              return left.id.compareTo(right.id);
+            }))
+          : log.messages;
+      final mergedSnapshotActivities = _mergeIncomingActivities(
         _activities,
         log.activities,
-        mode: _ActivityMergeMode.snapshot,
+        mode: preserveCursorHistory
+            ? _ActivityMergeMode.incremental
+            : _ActivityMergeMode.snapshot,
       );
+      final snapshotActivities = log.page == null || preserveCursorHistory
+          ? mergedSnapshotActivities
+          : mergedSnapshotActivities
+                .where((activity) => headActivityIds.contains(activity.id))
+                .toList(growable: false);
+      final snapshotHistory = preserveCursorHistory
+          ? SessionLogHistorySummary(
+              isTruncated: previousHasMoreBefore,
+              totalMessages: math.max(
+                log.history?.totalMessages ??
+                    previousHistory?.totalMessages ??
+                    snapshotMessages.length,
+                math.max(
+                  previousHistory?.totalMessages ?? snapshotMessages.length,
+                  snapshotMessages.length,
+                ),
+              ),
+              returnedMessages: snapshotMessages.length,
+              totalActivities: math.max(
+                log.history?.totalActivities ??
+                    previousHistory?.totalActivities ??
+                    snapshotActivities.length,
+                math.max(
+                  previousHistory?.totalActivities ?? snapshotActivities.length,
+                  snapshotActivities.length,
+                ),
+              ),
+              returnedActivities: snapshotActivities.length,
+            )
+          : log.history;
       setState(() {
+        _timelineGeneration += 1;
+        _hasAppliedHeadSnapshot = true;
+        _headPageActivityIds = log.page == null ? null : headActivityIds;
         _session = log.session;
-        _messages = log.messages;
-        _optimisticMessages = _reconcileOptimisticMessages(log.messages);
+        _messages = snapshotMessages;
+        _optimisticMessages = _reconcileOptimisticMessages(snapshotMessages);
         _activities = snapshotActivities;
-        _history = log.history;
+        _history = snapshotHistory;
+        _paginationMode = log.page == null
+            ? _SessionPaginationMode.legacy
+            : _SessionPaginationMode.cursor;
+        _beforeCursor = preserveCursorHistory
+            ? previousBeforeCursor
+            : log.page?.beforeCursor;
+        _hasMoreBefore = preserveCursorHistory
+            ? previousHasMoreBefore
+            : log.page?.hasMoreBefore ?? (log.history?.isTruncated ?? false);
+        _hasLoadedOlderCursorHistory = preserveCursorHistory;
+        _olderCursorNeedsRefresh = false;
+        _olderLoadError = null;
+        _lastProviderSnapshotNextSeq = snapshotNextSeq;
         _messageLimit = resolvedMessageLimit;
         _activityLimit = resolvedActivityLimit;
-        _historyBannerDismissed = false;
+        _historyBannerDismissed = preserveCursorHistory
+            ? previousHistoryBannerDismissed
+            : false;
         _showingCachedSnapshot = false;
         _snapshotRefreshing = false;
         _showingPossiblyStaleSnapshot = false;
@@ -2525,19 +2657,26 @@ class _SessionScreenState extends State<SessionScreen>
         );
         // Seed lastSeq from the snapshot so subsequent resyncs can use the
         // cheap delta endpoint instead of re-downloading everything.
-        var highestSeq = _lastEventSeq ?? 0;
-        for (final m in log.messages) {
-          if (m.seq > highestSeq) highestSeq = m.seq;
+        int? highestObservedSeq;
+        for (final m in snapshotMessages) {
+          if (highestObservedSeq == null || m.seq > highestObservedSeq) {
+            highestObservedSeq = m.seq;
+          }
         }
         for (final a in snapshotActivities) {
-          if (a.seq > highestSeq) highestSeq = a.seq;
+          if (highestObservedSeq == null || a.seq > highestObservedSeq) {
+            highestObservedSeq = a.seq;
+          }
         }
-        if (restoredPlanSeq != null && restoredPlanSeq > highestSeq) {
-          highestSeq = restoredPlanSeq;
+        if (restoredPlanSeq != null &&
+            (highestObservedSeq == null ||
+                restoredPlanSeq > highestObservedSeq)) {
+          highestObservedSeq = restoredPlanSeq;
         }
-        if (highestSeq > 0) {
-          _lastEventSeq = highestSeq;
-        }
+        _replaceEventCursor(
+          inclusiveSeq: highestObservedSeq,
+          exclusiveNextSeq: snapshotNextSeq,
+        );
       });
       HostStatusStore.instance.markOnline(widget.host.id);
       unawaited(_dropResolvedPendingSends(log.messages));
@@ -2553,6 +2692,14 @@ class _SessionScreenState extends State<SessionScreen>
       for (final event in bufferedEvents) {
         _handleEvent(event);
       }
+      final replayNextSeq = log.replayNextSeq;
+      if (replayNextSeq != null) {
+        _pendingHelloNextSeq = math.max(
+          _pendingHelloNextSeq ?? 0,
+          replayNextSeq,
+        );
+      }
+      _flushPendingHelloCatchUp(forwardOnly: true);
       if (scrollToBottom) {
         await _scrollToBottom();
       }
@@ -2564,11 +2711,20 @@ class _SessionScreenState extends State<SessionScreen>
       setState(() {
         _loading = false;
         _snapshotRefreshing = false;
+        if (resetPagination) {
+          _olderCursorNeedsRefresh = true;
+          _olderLoadError = 'History changed. Retry to refresh older items.';
+        }
         if (_showingPossiblyStaleSnapshot) {
           _resumeSyncing = false;
           _resumeSyncFailed = true;
         }
       });
+      final bufferedEvents = List<LiveEvent>.from(_pendingLiveEvents);
+      _pendingLiveEvents.clear();
+      if (_snapshotInFlightRequestId == requestId) {
+        _snapshotInFlightRequestId = null;
+      }
       HostStatusStore.instance.markOffline(
         widget.host.id,
         error: friendlyError(error),
@@ -2577,9 +2733,42 @@ class _SessionScreenState extends State<SessionScreen>
         context,
         "Failed to load session: ${friendlyError(error)}",
       );
+      for (final event in bufferedEvents) {
+        _handleEvent(event);
+      }
+      _flushPendingHelloCatchUp(forwardOnly: true);
     } finally {
       if (_snapshotInFlightRequestId == requestId) {
         _snapshotInFlightRequestId = null;
+      }
+    }
+  }
+
+  Future<SessionLog> _fetchHeadLog({
+    required int messageLimit,
+    required int activityLimit,
+  }) async {
+    final entryLimit = _paginationMode == _SessionPaginationMode.legacy
+        ? null
+        : _timelinePageSize;
+    final key = '$messageLimit:$activityLimit:${entryLimit ?? 'legacy'}';
+    final existing = _headLogRequests[key];
+    if (existing != null) {
+      return existing;
+    }
+    final request = widget.api.fetchLog(
+      widget.host,
+      widget.session.id,
+      messageLimit: messageLimit,
+      activityLimit: activityLimit,
+      entryLimit: entryLimit,
+    );
+    _headLogRequests[key] = request;
+    try {
+      return await request;
+    } finally {
+      if (identical(_headLogRequests[key], request)) {
+        _headLogRequests.remove(key);
       }
     }
   }
@@ -2590,16 +2779,29 @@ class _SessionScreenState extends State<SessionScreen>
         widget.host,
         widget.session.id,
       );
-      if (!mounted || cached == null || _messages.isNotEmpty) {
+      if (!mounted || cached == null) {
         return false;
       }
       final log = cached.log;
+      if (_hasAppliedHeadSnapshot) {
+        _mergeLateCachedCommandActivities(log.activities);
+        return false;
+      }
+      if (_messages.isNotEmpty || _activities.isNotEmpty) {
+        return false;
+      }
       setState(() {
         _session = log.session;
         _messages = log.messages;
         _optimisticMessages = _reconcileOptimisticMessages(log.messages);
         _activities = _sortActivities(log.activities);
         _history = log.history;
+        _paginationMode = _SessionPaginationMode.unknown;
+        _beforeCursor = null;
+        _hasMoreBefore = false;
+        _hasLoadedOlderCursorHistory = false;
+        _headPageActivityIds = null;
+        _olderLoadError = null;
         // Permission prompts are live state. Restoring them from disk can show
         // stale approvals after the server already resolved or forgot them.
         _pendingAction = null;
@@ -2618,19 +2820,28 @@ class _SessionScreenState extends State<SessionScreen>
           log.latestPlanUpdate,
           fallbackCreatedAt: log.session.updatedAt,
         );
-        var highestSeq = _lastEventSeq ?? 0;
+        var highestObservedSeq = _lastEventSeq;
+        final cachedNextSeq = log.nextSeq;
+        _lastProviderSnapshotNextSeq = cachedNextSeq;
         for (final m in log.messages) {
-          if (m.seq > highestSeq) highestSeq = m.seq;
+          if (highestObservedSeq == null || m.seq > highestObservedSeq) {
+            highestObservedSeq = m.seq;
+          }
         }
         for (final a in log.activities) {
-          if (a.seq > highestSeq) highestSeq = a.seq;
+          if (highestObservedSeq == null || a.seq > highestObservedSeq) {
+            highestObservedSeq = a.seq;
+          }
         }
-        if (restoredPlanSeq != null && restoredPlanSeq > highestSeq) {
-          highestSeq = restoredPlanSeq;
+        if (restoredPlanSeq != null &&
+            (highestObservedSeq == null ||
+                restoredPlanSeq > highestObservedSeq)) {
+          highestObservedSeq = restoredPlanSeq;
         }
-        if (highestSeq > 0) {
-          _lastEventSeq = highestSeq;
-        }
+        _advanceEventCursor(
+          inclusiveSeq: highestObservedSeq,
+          exclusiveNextSeq: cachedNextSeq,
+        );
       });
       _refreshThinkingState();
       _markCurrentSessionSeen();
@@ -2639,6 +2850,35 @@ class _SessionScreenState extends State<SessionScreen>
       // Cached transcripts are best-effort. A fresh snapshot is already queued.
       return false;
     }
+  }
+
+  void _mergeLateCachedCommandActivities(
+    Iterable<SessionActivity> cachedActivities,
+  ) {
+    final currentById = <String, SessionActivity>{
+      for (final activity in _activities) activity.id: activity,
+    };
+    var changed = false;
+    for (final cached in cachedActivities) {
+      if (!_hasReadableCommandActivity(cached)) {
+        continue;
+      }
+      final headActivityIds = _headPageActivityIds;
+      if (headActivityIds != null && !headActivityIds.contains(cached.id)) {
+        continue;
+      }
+      final current = currentById[cached.id];
+      if (current == null || !_hasReadableCommandActivity(current)) {
+        currentById[cached.id] = cached;
+        changed = true;
+      }
+    }
+    if (!changed || !mounted || _disposed) {
+      return;
+    }
+    setState(() {
+      _activities = _sortActivities(currentById.values.toList());
+    });
   }
 
   void _applyFetchedSessionStatus(SessionStatus status) {
@@ -2673,6 +2913,40 @@ class _SessionScreenState extends State<SessionScreen>
     _snapshotRefreshing = false;
   }
 
+  void _advanceEventCursor({int? inclusiveSeq, int? exclusiveNextSeq}) {
+    var lastSeq = _lastEventSeq;
+    var nextSeq = _persistableNextSeq;
+    if (exclusiveNextSeq != null) {
+      nextSeq = math.max(nextSeq ?? 0, exclusiveNextSeq);
+      lastSeq = math.max(lastSeq ?? -1, exclusiveNextSeq - 1);
+    }
+    if (inclusiveSeq != null) {
+      lastSeq = math.max(lastSeq ?? -1, inclusiveSeq);
+      nextSeq = math.max(nextSeq ?? 0, inclusiveSeq + 1);
+    }
+    if (lastSeq != null) {
+      _lastEventSeq = lastSeq;
+    }
+    if (nextSeq != null) {
+      _persistableNextSeq = nextSeq;
+    }
+  }
+
+  void _replaceEventCursor({int? inclusiveSeq, int? exclusiveNextSeq}) {
+    int? lastSeq;
+    int? nextSeq;
+    if (exclusiveNextSeq != null) {
+      lastSeq = exclusiveNextSeq - 1;
+      nextSeq = exclusiveNextSeq;
+    }
+    if (inclusiveSeq != null) {
+      lastSeq = math.max(lastSeq ?? -1, inclusiveSeq);
+      nextSeq = math.max(nextSeq ?? 0, inclusiveSeq + 1);
+    }
+    _lastEventSeq = lastSeq;
+    _persistableNextSeq = nextSeq;
+  }
+
   Future<void> _refreshSessionFreshness({bool scrollToBottom = true}) async {
     final needsSnapshotVerification =
         _showingCachedSnapshot || _showingPossiblyStaleSnapshot;
@@ -2680,9 +2954,15 @@ class _SessionScreenState extends State<SessionScreen>
     if (!mounted || _disposed) {
       return;
     }
-    final applied = await _resyncDelta(
-      markTranscriptFresh: !needsSnapshotVerification,
-    );
+    if (needsSnapshotVerification) {
+      await _loadSnapshot(
+        messageLimit: _messageLimit,
+        activityLimit: _activityLimit,
+        scrollToBottom: scrollToBottom,
+      );
+      return;
+    }
+    final applied = await _resyncDelta(markTranscriptFresh: true);
     if (!mounted || _disposed || (applied && !needsSnapshotVerification)) {
       return;
     }
@@ -2717,102 +2997,171 @@ class _SessionScreenState extends State<SessionScreen>
 
   /// Cheap catchup using the events endpoint. Returns true if the delta
   /// was applied; false if we should fall back to a full snapshot.
-  Future<bool> _resyncDelta({bool markTranscriptFresh = true}) async {
-    final last = _lastEventSeq;
-    if (last == null) return false;
-    try {
-      final baseUpdatedAt = _session?.updatedAt.millisecondsSinceEpoch;
-      final delta = await widget.api.fetchEvents(
-        widget.host,
-        widget.session.id,
-        since: last,
-        baseUpdatedAt: baseUpdatedAt,
-      );
-      if (!mounted) return true;
-      final latestPlanUpdate = delta.latestPlanUpdate;
-      if (delta.messages.isEmpty &&
-          delta.activities.isEmpty &&
-          latestPlanUpdate == null &&
-          delta.pendingAction == null &&
-          delta.session == null) {
-        if (markTranscriptFresh &&
-            (_showingCachedSnapshot || _showingPossiblyStaleSnapshot)) {
-          setState(_markTranscriptFreshAfterDelta);
-        }
-        HostStatusStore.instance.markOnline(widget.host.id);
-        return true;
+  Future<bool> _resyncDelta({bool markTranscriptFresh = true}) {
+    final inFlight = _deltaSyncFuture;
+    if (inFlight != null) return inFlight;
+    final initialSince = _lastEventSeq;
+    if (initialSince == null) return Future<bool>.value(false);
+
+    final generation = _timelineGeneration;
+    _deltaSyncInFlight = true;
+    late final Future<bool> future;
+    future = _drainEventDelta(
+      initialSince: initialSince,
+      generation: generation,
+      markTranscriptFresh: markTranscriptFresh,
+    ).whenComplete(() {
+      if (!identical(_deltaSyncFuture, future)) return;
+      _deltaSyncFuture = null;
+      _deltaSyncInFlight = false;
+      if (!mounted || _disposed || _snapshotInFlight) return;
+      final bufferedEvents = List<LiveEvent>.from(_pendingLiveEvents);
+      _pendingLiveEvents.clear();
+      for (final event in bufferedEvents) {
+        _handleEvent(event);
       }
-      setState(() {
-        final previousMessages = _messages;
-        final previousActivities = _activities;
-        var mergedMessages = _messages;
-        var mergedActivities = _activities;
-        var nextRunning = _running;
-        if (delta.session != null) {
-          _session = delta.session!;
-          nextRunning = delta.session!.isActive;
+      _flushPendingHelloCatchUp(forwardOnly: true);
+    });
+    _deltaSyncFuture = future;
+    return future;
+  }
+
+  Future<bool> _drainEventDelta({
+    required int initialSince,
+    required int generation,
+    required bool markTranscriptFresh,
+  }) async {
+    var cursor = initialSince;
+    var pagesApplied = 0;
+    try {
+      while (mounted && !_disposed) {
+        final baseUpdatedAt = _session?.updatedAt.millisecondsSinceEpoch;
+        final delta = await widget.api.fetchEvents(
+          widget.host,
+          widget.session.id,
+          since: cursor,
+          baseUpdatedAt: baseUpdatedAt,
+        );
+        if (!mounted || _disposed) return true;
+        if (generation != _timelineGeneration) {
+          // A newer authoritative head replaced the state while this request
+          // was in flight; its response is now the source of truth.
+          return true;
         }
-        if (delta.messages.isNotEmpty) {
-          final byId = <String, SessionMessage>{
-            for (final m in _messages) m.id: m,
-          };
-          for (final m in delta.messages) {
-            byId[m.id] = m;
+        if (delta.nextSeq < cursor ||
+            (delta.hasMore && delta.nextSeq == cursor)) {
+          return false;
+        }
+        final markFreshAfterThisPage =
+            markTranscriptFresh && !delta.hasMore;
+        final latestPlanUpdate = delta.latestPlanUpdate;
+        if (delta.messages.isEmpty &&
+            delta.activities.isEmpty &&
+            latestPlanUpdate == null &&
+            delta.pendingAction == null &&
+            delta.session == null) {
+          _advanceEventCursor(inclusiveSeq: delta.nextSeq);
+          if (markFreshAfterThisPage &&
+              (_showingCachedSnapshot || _showingPossiblyStaleSnapshot)) {
+            setState(_markTranscriptFreshAfterDelta);
           }
-          mergedMessages = byId.values.toList()
-            ..sort((a, b) {
-              if (a.seq != b.seq) return a.seq.compareTo(b.seq);
-              return a.createdAt.compareTo(b.createdAt);
-            });
+        } else {
+          setState(() {
+            final previousMessages = _messages;
+            final previousActivities = _activities;
+            var mergedMessages = _messages;
+            var mergedActivities = _activities;
+            var nextRunning = _running;
+            if (delta.session != null) {
+              _session = delta.session!;
+              nextRunning = delta.session!.isActive;
+            }
+            if (delta.messages.isNotEmpty) {
+              final byId = <String, SessionMessage>{
+                for (final m in _messages) m.id: m,
+              };
+              for (final m in delta.messages) {
+                byId[m.id] = m;
+              }
+              mergedMessages = byId.values.toList()
+                ..sort((a, b) {
+                  final byCreatedAt = a.createdAt.compareTo(b.createdAt);
+                  if (byCreatedAt != 0) return byCreatedAt;
+                  if (a.seq != b.seq) return a.seq.compareTo(b.seq);
+                  return a.id.compareTo(b.id);
+                });
+            }
+            if (delta.activities.isNotEmpty) {
+              mergedActivities = _mergeIncomingActivities(
+                _activities,
+                delta.activities,
+                mode: _ActivityMergeMode.incremental,
+              );
+            }
+            _messages = mergedMessages;
+            _activities = mergedActivities;
+            _history = _updatedHistoryAfterDelta(
+              previous: _history,
+              previousMessages: previousMessages,
+              mergedMessages: mergedMessages,
+              previousActivities: previousActivities,
+              mergedActivities: mergedActivities,
+            );
+            _optimisticMessages = _reconcileOptimisticMessages(mergedMessages);
+            final restoredPlanSeq = _restoreLatestPlanUpdate(
+              latestPlanUpdate,
+              fallbackCreatedAt: delta.session?.updatedAt ?? DateTime.now(),
+            );
+            // The events endpoint returns the server's current pending-action
+            // snapshot, so a null here clears any older displayed action.
+            _pendingAction = delta.pendingAction;
+            _running = nextRunning;
+            if (!nextRunning || _hasPersistedLiveAssistant(mergedMessages)) {
+              _clearLiveAssistantMessage();
+            }
+            _awaitingAssistantReply =
+                nextRunning &&
+                _liveAssistantText.isEmpty &&
+                _pendingAction == null;
+            _advanceEventCursor(
+              inclusiveSeq: math.max(
+                delta.nextSeq,
+                restoredPlanSeq ?? delta.nextSeq,
+              ),
+            );
+            if (markFreshAfterThisPage) {
+              _markTranscriptFreshAfterDelta();
+            }
+          });
+          _refreshThinkingState();
+          _syncSessionLiveActivity();
+          _markCurrentSessionSeen();
         }
-        if (delta.activities.isNotEmpty) {
-          mergedActivities = _mergeIncomingActivities(
-            _activities,
-            delta.activities,
-            mode: _ActivityMergeMode.incremental,
+        _persistCurrentSessionLog();
+        HostStatusStore.instance.markOnline(widget.host.id);
+        pagesApplied += 1;
+        if (!delta.hasMore) {
+          final pendingHelloNextSeq = _pendingHelloNextSeq;
+          final bufferedForwardProgress = _pendingLiveEvents.any(
+            (event) => event.seq != null && event.seq! > initialSince,
           );
+          if (pendingHelloNextSeq != null &&
+              pendingHelloNextSeq < initialSince + 1 &&
+              !bufferedForwardProgress) {
+            return false;
+          }
+          return true;
         }
-        _messages = mergedMessages;
-        _activities = mergedActivities;
-        _history = _updatedHistoryAfterDelta(
-          previous: _history,
-          previousMessages: previousMessages,
-          mergedMessages: mergedMessages,
-          previousActivities: previousActivities,
-          mergedActivities: mergedActivities,
-        );
-        _optimisticMessages = _reconcileOptimisticMessages(mergedMessages);
-        final restoredPlanSeq = _restoreLatestPlanUpdate(
-          latestPlanUpdate,
-          fallbackCreatedAt: delta.session?.updatedAt ?? DateTime.now(),
-        );
-        // The events endpoint returns the server's current pending-action
-        // snapshot, so a null here means any previously shown action is gone.
-        _pendingAction = delta.pendingAction;
-        _running = nextRunning;
-        if (!nextRunning || _hasPersistedLiveAssistant(mergedMessages)) {
-          _clearLiveAssistantMessage();
+        if (pagesApplied >= _maxDeltaReplayPagesBeforeHead) {
+          return false;
         }
-        _awaitingAssistantReply =
-            nextRunning && _liveAssistantText.isEmpty && _pendingAction == null;
-        final highestSeq = math.max(
-          delta.nextSeq,
-          restoredPlanSeq ?? delta.nextSeq,
-        );
-        if (highestSeq > (_lastEventSeq ?? 0)) {
-          _lastEventSeq = highestSeq;
-        }
-        if (markTranscriptFresh) {
-          _markTranscriptFreshAfterDelta();
-        }
-      });
-      _refreshThinkingState();
-      _syncSessionLiveActivity();
-      _markCurrentSessionSeen();
-      _persistCurrentSessionLog();
-      HostStatusStore.instance.markOnline(widget.host.id);
+        cursor = delta.nextSeq;
+      }
       return true;
     } catch (_) {
+      if (generation != _timelineGeneration) {
+        return true;
+      }
       HostStatusStore.instance.markOffline(widget.host.id);
       return false;
     }
@@ -2825,19 +3174,70 @@ class _SessionScreenState extends State<SessionScreen>
     if (session == null) {
       return;
     }
+    final cachedWindow = _latestTranscriptCacheWindow();
+    final currentHistory = _history;
+    final cachedHistory = SessionLogHistorySummary(
+      isTruncated:
+          (currentHistory?.totalMessages ?? _messages.length) >
+              cachedWindow.messages.length ||
+          (currentHistory?.totalActivities ?? _activities.length) >
+              cachedWindow.activities.length,
+      totalMessages: math.max(
+        currentHistory?.totalMessages ?? _messages.length,
+        _messages.length,
+      ),
+      returnedMessages: cachedWindow.messages.length,
+      totalActivities: math.max(
+        currentHistory?.totalActivities ?? _activities.length,
+        _activities.length,
+      ),
+      returnedActivities: cachedWindow.activities.length,
+    );
     unawaited(
       SessionLocalStore.instance.saveSessionLog(
         widget.host,
         SessionLog(
           session: session,
-          messages: _messages,
-          activities: _activities,
+          messages: cachedWindow.messages,
+          activities: cachedWindow.activities,
           pendingAction: null,
-          history: _history,
+          history: cachedHistory,
+          nextSeq: _persistableNextSeq,
           latestPlanUpdate: _latestPlanUpdateForCache(),
         ),
       ),
     );
+  }
+
+  ({List<SessionMessage> messages, List<SessionActivity> activities})
+  _latestTranscriptCacheWindow() {
+    final timeline =
+        <_TimelineEntry>[
+          ..._messages.map(_TimelineEntry.message),
+          ..._activities.map(_TimelineEntry.activity),
+        ]..sort((left, right) {
+          final byCreatedAt = left.createdAt.compareTo(right.createdAt);
+          if (byCreatedAt != 0) return byCreatedAt;
+          if (left.seq != right.seq) return left.seq.compareTo(right.seq);
+          final leftKind = left.kind == _TimelineEntryKind.activity ? 0 : 1;
+          final rightKind = right.kind == _TimelineEntryKind.activity ? 0 : 1;
+          if (leftKind != rightKind) return leftKind.compareTo(rightKind);
+          return left.keyId.compareTo(right.keyId);
+        });
+    final start = math.max(0, timeline.length - _timelinePageSize);
+    final messages = <SessionMessage>[];
+    final activities = <SessionActivity>[];
+    for (final entry in timeline.skip(start)) {
+      final message = entry.message;
+      if (message != null) {
+        messages.add(message);
+      }
+      final activity = entry.activity;
+      if (activity != null) {
+        activities.add(activity);
+      }
+    }
+    return (messages: messages, activities: activities);
   }
 
   void _schedulePersistCurrentSessionLog() {
@@ -2885,6 +3285,14 @@ class _SessionScreenState extends State<SessionScreen>
   }
 
   Future<void> _loadOlderTranscript() async {
+    if (_paginationMode == _SessionPaginationMode.cursor) {
+      if (_olderCursorNeedsRefresh) {
+        await _loadSnapshot(scrollToBottom: false, resetPagination: true);
+        return;
+      }
+      await _loadOlderCursorPage();
+      return;
+    }
     final history = _history;
     if (_loadingOlderHistory || history == null || !history.isTruncated) {
       return;
@@ -2918,6 +3326,130 @@ class _SessionScreenState extends State<SessionScreen>
     }
   }
 
+  Future<void> _loadOlderCursorPage() async {
+    final requestCursor = _beforeCursor;
+    if (_loadingOlderHistory ||
+        !_hasMoreBefore ||
+        requestCursor == null ||
+        requestCursor.isEmpty) {
+      return;
+    }
+
+    final requestId = ++_olderPageRequestId;
+    final generation = _timelineGeneration;
+    setState(() {
+      _loadingOlderHistory = true;
+      _olderLoadError = null;
+    });
+    try {
+      final log = await widget.api.fetchLog(
+        widget.host,
+        widget.session.id,
+        messageLimit: _initialMessageLimit,
+        activityLimit: _initialActivityLimit,
+        entryLimit: _timelinePageSize,
+        beforeCursor: requestCursor,
+      );
+      if (!mounted ||
+          _disposed ||
+          requestId != _olderPageRequestId ||
+          generation != _timelineGeneration ||
+          requestCursor != _beforeCursor) {
+        return;
+      }
+      final page = log.page;
+      if (page == null) {
+        throw StateError('This host does not support transcript pagination.');
+      }
+      final returnedEntries = log.messages.length + log.activities.length;
+      if (page.hasMoreBefore &&
+          (returnedEntries == 0 ||
+              page.beforeCursor == null ||
+              page.beforeCursor!.isEmpty ||
+              page.beforeCursor == requestCursor)) {
+        throw StateError('The host returned an invalid transcript page.');
+      }
+
+      final messagesById = <String, SessionMessage>{
+        for (final message in log.messages) message.id: message,
+        for (final message in _messages) message.id: message,
+      };
+      final mergedMessages = messagesById.values.toList()
+        ..sort((left, right) {
+          final byCreatedAt = left.createdAt.compareTo(right.createdAt);
+          if (byCreatedAt != 0) return byCreatedAt;
+          if (left.seq != right.seq) return left.seq.compareTo(right.seq);
+          return left.id.compareTo(right.id);
+        });
+      final activitiesById = <String, SessionActivity>{
+        for (final activity in log.activities) activity.id: activity,
+        for (final activity in _activities) activity.id: activity,
+      };
+      final mergedActivities = _sortActivities(activitiesById.values.toList());
+      final previousHistory = _history;
+      final pageHistory = log.history;
+      setState(() {
+        _messages = mergedMessages;
+        _activities = mergedActivities;
+        _optimisticMessages = _reconcileOptimisticMessages(mergedMessages);
+        _beforeCursor = page.beforeCursor;
+        _hasMoreBefore = page.hasMoreBefore;
+        _hasLoadedOlderCursorHistory = true;
+        _history = SessionLogHistorySummary(
+          isTruncated: page.hasMoreBefore,
+          totalMessages: math.max(
+            pageHistory?.totalMessages ??
+                previousHistory?.totalMessages ??
+                mergedMessages.length,
+            mergedMessages.length,
+          ),
+          returnedMessages: mergedMessages.length,
+          totalActivities: math.max(
+            pageHistory?.totalActivities ??
+                previousHistory?.totalActivities ??
+                mergedActivities.length,
+            mergedActivities.length,
+          ),
+          returnedActivities: mergedActivities.length,
+        );
+        _historyBannerDismissed = false;
+        _loadingOlderHistory = false;
+        _olderLoadError = null;
+      });
+      _refreshThinkingState();
+      _markCurrentSessionSeen();
+      _persistCurrentSessionLog();
+      HostStatusStore.instance.markOnline(widget.host.id);
+    } catch (error) {
+      if (!mounted || _disposed || requestId != _olderPageRequestId) {
+        return;
+      }
+      if (error is ApiException && error.statusCode == 410) {
+        setState(() {
+          _loadingOlderHistory = false;
+          _olderLoadError = null;
+          _olderCursorNeedsRefresh = true;
+        });
+        await _loadSnapshot(scrollToBottom: false, resetPagination: true);
+        return;
+      }
+      setState(() {
+        _loadingOlderHistory = false;
+        _olderLoadError = friendlyError(error);
+      });
+      if (error is! ApiException || error.statusCode >= 500) {
+        HostStatusStore.instance.markOffline(
+          widget.host.id,
+          error: friendlyError(error),
+        );
+      }
+    } finally {
+      if (mounted && requestId == _olderPageRequestId && _loadingOlderHistory) {
+        setState(() => _loadingOlderHistory = false);
+      }
+    }
+  }
+
   int _nextHistoryLimit({
     required int current,
     required int pageSize,
@@ -2940,18 +3472,27 @@ class _SessionScreenState extends State<SessionScreen>
       final channel = widget.api.openLive(widget.host, widget.session.id);
       _channel = channel;
       _subscription = channel.stream.listen(
-        _handleRawEvent,
-        onError: (_) => _scheduleReconnect(),
-        onDone: () {
-          if (!_disposed) _scheduleReconnect();
+        (raw) {
+          if (!identical(_channel, channel)) return;
+          _handleRawEvent(raw);
         },
+        onError: (_) => _scheduleReconnectIfCurrent(channel),
+        onDone: () => _scheduleReconnectIfCurrent(channel),
         cancelOnError: false,
       );
-      // Successful connect — reset the backoff counter. If the stream dies
-      // immediately onDone will re-arm it.
-      HostReconnectScheduler.instance.markConnected(
-        widget.host.id,
-        _reconnectSlotId,
+      unawaited(
+        channel.ready
+            .then((_) {
+              if (_disposed || !identical(_channel, channel)) return;
+              HostReconnectScheduler.instance.markConnected(
+                widget.host.id,
+                _reconnectSlotId,
+              );
+            })
+            .catchError((Object _) {
+              _scheduleReconnectIfCurrent(channel);
+              return null;
+            }),
       );
     } catch (_) {
       _channel = null;
@@ -2989,15 +3530,20 @@ class _SessionScreenState extends State<SessionScreen>
     );
   }
 
+  void _scheduleReconnectIfCurrent(WebSocketChannel channel) {
+    if (!identical(_channel, channel)) return;
+    _scheduleReconnect();
+  }
+
   void _handleEvent(LiveEvent event) {
     if (!mounted || event.sessionId != widget.session.id) {
       return;
     }
 
-    // If a snapshot is in flight, queue non-hello events so the snapshot's
-    // setState can't clobber them. They'll be replayed when the snapshot
-    // completes.
-    if (_snapshotInFlight && event.type != 'hello') {
+    // Queue live events while an authoritative snapshot or paged HTTP replay
+    // is in flight. Replaying them afterward prevents an older HTTP response
+    // from clobbering a newer WebSocket update to the same state.
+    if ((_snapshotInFlight || _deltaSyncInFlight) && event.type != 'hello') {
       _pendingLiveEvents.add(event);
       return;
     }
@@ -3007,33 +3553,18 @@ class _SessionScreenState extends State<SessionScreen>
     if (event.type == 'hello') {
       unawaited(_loadSkills(forceReload: true));
       final nextSeq = event.nextSeq;
-      final last = _lastEventSeq;
-      if (nextSeq != null && last != null && nextSeq > last + 1) {
-        // We missed events while disconnected; try the cheap delta first,
-        // fall back to a full snapshot if that fails.
-        unawaited(() async {
-          final needsSnapshotVerification =
-              _showingCachedSnapshot || _showingPossiblyStaleSnapshot;
-          final applied = await _resyncDelta(
-            markTranscriptFresh: !needsSnapshotVerification,
-          );
-          if (mounted && (!applied || needsSnapshotVerification)) {
-            await _loadSnapshot(
-              messageLimit: _messageLimit,
-              activityLimit: _activityLimit,
-              scrollToBottom: false,
-            );
-          }
-        }());
+      if (_snapshotInFlight || _deltaSyncInFlight) {
+        if (nextSeq != null) {
+          _pendingHelloNextSeq = math.max(_pendingHelloNextSeq ?? 0, nextSeq);
+        }
+        return;
       }
+      _catchUpForHello(nextSeq);
       return;
     }
     final seq = event.seq;
     if (seq != null) {
-      final last = _lastEventSeq;
-      if (last == null || seq > last) {
-        _lastEventSeq = seq;
-      }
+      _advanceEventCursor(inclusiveSeq: seq);
     }
 
     switch (event.type) {
@@ -3251,6 +3782,44 @@ class _SessionScreenState extends State<SessionScreen>
       case 'error':
         break;
     }
+  }
+
+  void _flushPendingHelloCatchUp({bool forwardOnly = false}) {
+    final nextSeq = _pendingHelloNextSeq;
+    _pendingHelloNextSeq = null;
+    if (nextSeq != null) {
+      _catchUpForHello(nextSeq, allowEpochReset: !forwardOnly);
+    }
+  }
+
+  void _catchUpForHello(int? nextSeq, {bool allowEpochReset = true}) {
+    final last = _lastEventSeq;
+    if (nextSeq == null || last == null) {
+      return;
+    }
+    if (nextSeq < last + 1) {
+      if (allowEpochReset) {
+        unawaited(_loadSnapshot(scrollToBottom: false, resetPagination: true));
+      }
+      return;
+    }
+    if (nextSeq == last + 1) return;
+    // We missed events while disconnected; try the cheap delta first,
+    // fall back to a full snapshot if that fails.
+    unawaited(() async {
+      final needsSnapshotVerification =
+          _showingCachedSnapshot || _showingPossiblyStaleSnapshot;
+      final applied = await _resyncDelta(
+        markTranscriptFresh: !needsSnapshotVerification,
+      );
+      if (mounted && (!applied || needsSnapshotVerification)) {
+        await _loadSnapshot(
+          messageLimit: _messageLimit,
+          activityLimit: _activityLimit,
+          scrollToBottom: false,
+        );
+      }
+    }());
   }
 
   void _appendTimelineRuntimeEvent(
@@ -5326,9 +5895,7 @@ class _SessionScreenState extends State<SessionScreen>
   }
 
   bool _composerThinkingCustomized(SessionSummary session) {
-    return _cleanComposerLabel(
-          _composerTurnConfig(session).reasoningEffort,
-        ) !=
+    return _cleanComposerLabel(_composerTurnConfig(session).reasoningEffort) !=
         null;
   }
 
@@ -5478,10 +6045,7 @@ class _SessionScreenState extends State<SessionScreen>
       orElse: () => defaultModel,
     );
     if (selectedModel.isAutoModel) {
-      showAppSnackBar(
-        context,
-        'This model manages thinking automatically.',
-      );
+      showAppSnackBar(context, 'This model manages thinking automatically.');
       return;
     }
     final options = selectedModel.supportedReasoningEfforts;
@@ -5725,10 +6289,7 @@ class _SessionScreenState extends State<SessionScreen>
                     dialogContext.colors.textPrimary,
                   ),
                 ),
-                child: ClipRRect(
-                  borderRadius: AppShapes.dialog,
-                  child: sheet,
-                ),
+                child: ClipRRect(borderRadius: AppShapes.dialog, child: sheet),
               ),
             ),
           ),
@@ -6199,11 +6760,9 @@ class _SessionScreenState extends State<SessionScreen>
   }
 
   void _upsertActivity(SessionActivity activity) {
-    _activities = _mergeIncomingActivities(
-      _activities,
-      [activity],
-      mode: _ActivityMergeMode.incremental,
-    );
+    _activities = _mergeIncomingActivities(_activities, [
+      activity,
+    ], mode: _ActivityMergeMode.incremental);
   }
 
   List<SessionActivity> _sortActivities(List<SessionActivity> activities) {
@@ -6211,7 +6770,8 @@ class _SessionScreenState extends State<SessionScreen>
     sorted.sort((left, right) {
       final byCreatedAt = left.createdAt.compareTo(right.createdAt);
       if (byCreatedAt != 0) return byCreatedAt;
-      return left.seq.compareTo(right.seq);
+      if (left.seq != right.seq) return left.seq.compareTo(right.seq);
+      return left.id.compareTo(right.id);
     });
     return sorted;
   }
@@ -6338,7 +6898,11 @@ class _SessionScreenState extends State<SessionScreen>
         ]..sort((left, right) {
           final byCreatedAt = left.createdAt.compareTo(right.createdAt);
           if (byCreatedAt != 0) return byCreatedAt;
-          return left.seq.compareTo(right.seq);
+          if (left.seq != right.seq) return left.seq.compareTo(right.seq);
+          final leftKind = left.kind == _TimelineEntryKind.activity ? 0 : 1;
+          final rightKind = right.kind == _TimelineEntryKind.activity ? 0 : 1;
+          if (leftKind != rightKind) return leftKind.compareTo(rightKind);
+          return left.keyId.compareTo(right.keyId);
         });
 
     _entriesMessagesRef = _messages;
@@ -6397,8 +6961,7 @@ class _SessionScreenState extends State<SessionScreen>
     final first = activities.first;
     final changes = _aggregateFileChangeChanges(activities);
     return SessionActivity(
-      id:
-          'file-change-group:${first.turnId ?? first.id}:${activities.length}:${activities.last.id}',
+      id: 'file-change-group:${first.turnId ?? first.id}:${activities.length}:${activities.last.id}',
       type: first.type,
       createdAt: first.createdAt,
       seq: first.seq,
@@ -6963,7 +7526,8 @@ class _SessionScreenState extends State<SessionScreen>
       controlsCustomized: controlsCustomized,
     );
     final String? selected;
-    final restoreComposerFocus = _shouldRestoreComposerFocusAfterDesktopOverlay();
+    final restoreComposerFocus =
+        _shouldRestoreComposerFocusAfterDesktopOverlay();
     if (widget.desktopMode) {
       final anchorRect = _desktopPopoverAnchorRect(anchorContext);
       selected = await showDialog<String>(
@@ -7018,10 +7582,8 @@ class _SessionScreenState extends State<SessionScreen>
         showDragHandle: false,
         useSafeArea: true,
         isScrollControlled: true,
-        builder: (context) => _SessionActionSheet(
-          session: session,
-          groups: groups,
-        ),
+        builder: (context) =>
+            _SessionActionSheet(session: session, groups: groups),
       );
     }
     if (!mounted || selected == null) {
@@ -7071,11 +7633,16 @@ class _SessionScreenState extends State<SessionScreen>
     );
     final freshnessMode = _transcriptFreshnessMode;
     final showHistoryBanner =
-        (_history?.isTruncated ?? false) && !_historyBannerDismissed;
+        (_paginationMode == _SessionPaginationMode.cursor
+            ? _hasMoreBefore
+            : (_history?.isTruncated ?? false)) &&
+        _history != null &&
+        !_historyBannerDismissed;
     final showStopPill = isCompact && _running && _supportsSessionInterrupt;
     final showWaitingState = !_loading && timelineEntries.isEmpty && _running;
-    final freshnessTopPadding =
-        widget.desktopMode && _pendingAction == null ? 8.0 : 0.0;
+    final freshnessTopPadding = widget.desktopMode && _pendingAction == null
+        ? 8.0
+        : 0.0;
     final bodyContent = Column(
       children: [
         if (_pendingAction != null)
@@ -7121,7 +7688,10 @@ class _SessionScreenState extends State<SessionScreen>
                       )
                     else
                       RefreshIndicator(
-                        onRefresh: () => _loadSnapshot(scrollToBottom: false),
+                        onRefresh: () => _loadSnapshot(
+                          scrollToBottom: false,
+                          resetPagination: true,
+                        ),
                         edgeOffset: 0,
                         displacement: 28,
                         child: SelectionArea(
@@ -7148,6 +7718,7 @@ class _SessionScreenState extends State<SessionScreen>
                                   child: _HistoryTruncationCard(
                                     history: _history!,
                                     loading: _loadingOlderHistory,
+                                    error: _olderLoadError,
                                     onLoadOlderHistory: _loadOlderTranscript,
                                     onDismiss: () => setState(
                                       () => _historyBannerDismissed = true,
@@ -7309,7 +7880,7 @@ class _SessionScreenState extends State<SessionScreen>
               queueUpdated: _latestQueueUpdate,
               autoRetryUpdated: _latestAutoRetryUpdate,
             ),
-        ),
+          ),
         _ComposerStatusStrip(thinking: _thinkingNotifier),
         ListenableBuilder(
           listenable: _turnConfigStore,
@@ -7386,8 +7957,7 @@ class _SessionScreenState extends State<SessionScreen>
     final resourcesOpenInInspector = _isResourcesInspectorOpen(inspectorScope);
     final terminalOpenInInspector = _isTerminalInspectorOpen(inspectorScope);
     final browserOpenInInspector = _isBrowserInspectorOpen(inspectorScope);
-    final browserOpen =
-        browserOpenInInspector || _dockedBrowserPreview != null;
+    final browserOpen = browserOpenInInspector || _dockedBrowserPreview != null;
     // All layouts get the same compact info strip: status dot, host·folder,
     // provider badge, git chip, context %, pinned count, ℹ️ tap for details.
     // Desktop uses it as a subtitle since the title row has no room for meta.
@@ -7440,9 +8010,7 @@ class _SessionScreenState extends State<SessionScreen>
                     ),
                     const Divider(height: 1),
                     // Session list
-                    Expanded(
-                      child: Builder(builder: widget.sessionDrawer!),
-                    ),
+                    Expanded(child: Builder(builder: widget.sessionDrawer!)),
                   ],
                 ),
               ),
