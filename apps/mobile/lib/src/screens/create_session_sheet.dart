@@ -1739,22 +1739,33 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
                     ),
                   ),
                   const SizedBox(width: 8),
-                  FilledButton(
-                    key: const ValueKey('create-session-send-button'),
-                    onPressed: canSend ? _submit : null,
-                    style: FilledButton.styleFrom(
-                      minimumSize: const Size.square(44),
-                      maximumSize: const Size.square(44),
-                      padding: EdgeInsets.zero,
-                      shape: const CircleBorder(),
+                  Semantics(
+                    label: 'Send message and create session',
+                    button: true,
+                    enabled: canSend,
+                    excludeSemantics: true,
+                    child: Tooltip(
+                      message: 'Send',
+                      child: FilledButton(
+                        key: const ValueKey('create-session-send-button'),
+                        onPressed: canSend ? _submit : null,
+                        style: FilledButton.styleFrom(
+                          minimumSize: const Size.square(44),
+                          maximumSize: const Size.square(44),
+                          padding: EdgeInsets.zero,
+                          shape: const CircleBorder(),
+                        ),
+                        child: _submitting
+                            ? const SizedBox(
+                                width: 18,
+                                height: 18,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                ),
+                              )
+                            : const Icon(Icons.arrow_upward_rounded),
+                      ),
                     ),
-                    child: _submitting
-                        ? const SizedBox(
-                            width: 18,
-                            height: 18,
-                            child: CircularProgressIndicator(strokeWidth: 2),
-                          )
-                        : const Icon(Icons.arrow_upward_rounded),
                   ),
                 ],
               ),
@@ -1782,10 +1793,12 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
 
   String _draftContextSummary() {
     final parts = <String>[
+      widget.host.label,
       _providerName,
-      if (_supportsModels && _supportsModelOverride) _modelLabel,
       if (widget.seed?.basedOnCurrentSession ?? false)
-        'Settings copied · New chat',
+        'Settings copied · No history'
+      else if (_supportsModels && _supportsModelOverride)
+        _modelLabel,
     ];
     return parts.join(' · ');
   }
