@@ -89,7 +89,7 @@ const CODEX_PROVIDER_DEFINITION: AgentProviderDefinition = {
     "SIDEMESH_CODEX_BIN",
     "SIDEMESH_PROVIDER_COMMAND",
   ],
-  supportedApprovalPolicies: ["untrusted", "on-failure", "on-request", "never"],
+  supportedApprovalPolicies: ["untrusted", "on-request", "never"],
 
   create(config) {
     const codex = expectCodexProviderConfig(config);
