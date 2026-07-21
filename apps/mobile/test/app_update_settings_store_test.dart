@@ -124,12 +124,17 @@ void main() {
 }
 
 class _FakeAppUpdateSettingsService implements AppUpdateSettingsService {
-  _FakeAppUpdateSettingsService({
+  factory _FakeAppUpdateSettingsService({
     required AppUpdateSettings initial,
     AppUpdateSettings? afterCheck,
-    this.failFirstFetch = false,
-  }) : _current = initial,
-       _afterCheck = afterCheck;
+    bool failFirstFetch = false,
+  }) => _FakeAppUpdateSettingsService._(initial, afterCheck, failFirstFetch);
+
+  _FakeAppUpdateSettingsService._(
+    this._current,
+    this._afterCheck,
+    this.failFirstFetch,
+  );
 
   AppUpdateSettings _current;
   final AppUpdateSettings? _afterCheck;

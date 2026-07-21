@@ -46,8 +46,10 @@ class AppVersionStore extends ChangeNotifier {
     : _loader = loader ?? _loadFromPlatform;
 
   @visibleForTesting
-  AppVersionStore.forTesting({required AppVersionLoader loader})
-    : _loader = loader;
+  factory AppVersionStore.forTesting({required AppVersionLoader loader}) =>
+      AppVersionStore._withLoader(loader);
+
+  AppVersionStore._withLoader(this._loader);
 
   static AppVersionStore instance = AppVersionStore._();
 
