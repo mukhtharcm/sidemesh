@@ -222,6 +222,10 @@ specific agent provider.
   startup-critical local storage paths in this app.
 - **Flutter flavors**: Build/run commands must include `--flavor dev` or
   `--flavor prod`.
+- **TestFlight resume**: If App Store Connect accepts the IPA but a later
+  metadata or internal-distribution step fails, rerun `Deploy to TestFlight`
+  with `resume_existing_build` enabled. It resolves the exact committed
+  pubspec version/build without rebuilding or uploading a duplicate binary.
 - **Flutter web**: The browser entry point is `apps/mobile/lib/main_web.dart`.
   Build it with `npm run mobile:web:build`; the hosted client only accepts
   remote daemon URLs over HTTPS/WSS. Browser WebSocket authentication uses the
