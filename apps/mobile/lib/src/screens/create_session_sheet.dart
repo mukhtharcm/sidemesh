@@ -58,8 +58,7 @@ class CreateSessionDraftSeed {
           (runtimeServiceTier == null ? null : runtimeServiceTier == 'fast'),
       approval:
           policy.approval ?? ApprovalPolicy.fromWire(runtime?.approvalPolicy),
-      sandbox:
-          policy.sandbox ?? SandboxMode.fromWire(runtime?.sandboxMode),
+      sandbox: policy.sandbox ?? SandboxMode.fromWire(runtime?.sandboxMode),
       networkAccess: policy.networkAccess ?? runtime?.networkAccess,
       basedOnCurrentSession: true,
     );
@@ -1584,63 +1583,67 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
   Widget _buildDraftContextCard(BuildContext context) {
     final colors = context.colors;
     final cwd = _currentCwd ?? 'Choose a folder';
-    return MeshSurface(
+    return Material(
       key: const ValueKey('new-session-context-card'),
-      tone: MeshSurfaceTone.muted,
-      radius: AppRadii.control,
-      width: double.infinity,
-      onTap: _submitting ? null : _toggleAdvanced,
-      padding: const EdgeInsets.fromLTRB(12, 9, 10, 9),
-      child: Row(
-        children: [
-          Icon(Icons.folder_open_rounded, size: 19, color: colors.accent),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  cwd,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                    color: colors.textPrimary,
-                    fontWeight: AppWeights.emphasis,
-                  ),
-                ),
-                const SizedBox(height: 2),
-                Text(
-                  _draftContextSummary(),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: Theme.of(
-                    context,
-                  ).textTheme.bodySmall?.copyWith(color: colors.textSecondary),
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(width: 6),
-          if (_draftUsesBroadPermissions)
-            Semantics(
-              label: 'Broad permissions are active. Open settings to review.',
-              excludeSemantics: true,
-              child: Tooltip(
-                message: 'Broad permissions are active',
-                child: Icon(
-                  Icons.shield_rounded,
-                  size: 18,
-                  color: colors.danger,
+      color: Colors.transparent,
+      child: InkWell(
+        borderRadius: AppShapes.input,
+        onTap: _submitting ? null : _toggleAdvanced,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(8, 8, 6, 8),
+          child: Row(
+            children: [
+              Icon(
+                Icons.folder_open_rounded,
+                size: 18,
+                color: colors.textSecondary,
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      cwd,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                        color: colors.textPrimary,
+                        fontWeight: AppWeights.emphasis,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      _draftContextSummary(),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color: colors.textSecondary,
+                      ),
+                    ),
+                  ],
                 ),
               ),
-            )
-          else
-            Icon(
-              Icons.chevron_right_rounded,
-              size: 20,
-              color: colors.textTertiary,
-            ),
-        ],
+              const SizedBox(width: 6),
+              if (_draftUsesBroadPermissions)
+                Semantics(
+                  label:
+                      'Broad permissions are active. Open settings to review.',
+                  excludeSemantics: true,
+                  child: Tooltip(
+                    message: 'Broad permissions are active',
+                    child: Icon(
+                      Icons.shield_rounded,
+                      size: 18,
+                      color: colors.danger,
+                    ),
+                  ),
+                )
+              else
+                Icon(Icons.tune_rounded, size: 18, color: colors.textTertiary),
+            ],
+          ),
+        ),
       ),
     );
   }
@@ -1690,7 +1693,7 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
             ),
             const SizedBox(height: 12),
             Text(
-              'Start a new session',
+              'What should the agent work on?',
               textAlign: TextAlign.center,
               style: Theme.of(context).textTheme.titleMedium?.copyWith(
                 color: colors.textPrimary,
@@ -1699,7 +1702,7 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
             ),
             const SizedBox(height: 5),
             Text(
-              'Send a message to create it.',
+              'The session starts when you send your first message.',
               textAlign: TextAlign.center,
               style: Theme.of(
                 context,
@@ -1730,9 +1733,12 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
         child: Center(
           child: ConstrainedBox(
             constraints: const BoxConstraints(maxWidth: 920),
-            child: MeshSurface(
-              tone: MeshSurfaceTone.elevated,
-              radius: AppRadii.control,
+            child: Container(
+              decoration: BoxDecoration(
+                color: colors.surface,
+                borderRadius: AppShapes.card,
+                border: Border.all(color: colors.border),
+              ),
               padding: const EdgeInsets.fromLTRB(14, 5, 6, 5),
               child: Row(
                 crossAxisAlignment: CrossAxisAlignment.end,
@@ -1814,7 +1820,7 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
       widget.host.label,
       _providerName,
       if (widget.seed?.basedOnCurrentSession ?? false)
-        'Settings copied · No history'
+        'Copied setup · No conversation history'
       else if (_supportsModels && _supportsModelOverride)
         _modelLabel,
     ];

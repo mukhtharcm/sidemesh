@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../models.dart';
 import '../provider_labels.dart';
 import '../theme/app_colors.dart';
+import '../theme/app_tokens.dart';
 
 class AgentProviderBadge extends StatelessWidget {
   const AgentProviderBadge({
@@ -30,23 +31,14 @@ class AgentProviderBadge extends StatelessWidget {
     final fontSize = compact ? 10.5 : 11.2;
     final iconSize = compact ? 11.0 : 12.0;
 
-    return Container(
-      padding: EdgeInsets.symmetric(
-        horizontal: compact ? 7 : 8,
-        vertical: compact ? 3 : 5,
-      ),
-      decoration: BoxDecoration(
-        color: bg,
-        borderRadius: BorderRadius.circular(999),
-        border: Border.all(color: border),
-      ),
-      child: Row(
+    if (compact) {
+      return Row(
         mainAxisSize: MainAxisSize.min,
         children: [
           Icon(Icons.hub_rounded, size: iconSize, color: fg),
-          SizedBox(width: compact ? 4 : 5),
+          const SizedBox(width: 4),
           ConstrainedBox(
-            constraints: BoxConstraints(maxWidth: compact ? 92 : 160),
+            constraints: const BoxConstraints(maxWidth: 92),
             child: Text(
               label,
               maxLines: 1,
@@ -54,7 +46,36 @@ class AgentProviderBadge extends StatelessWidget {
               style: Theme.of(context).textTheme.labelSmall?.copyWith(
                 color: fg,
                 fontSize: fontSize,
-                fontWeight: FontWeight.w700,
+                fontWeight: AppWeights.emphasis,
+              ),
+            ),
+          ),
+        ],
+      );
+    }
+
+    return Container(
+      padding: EdgeInsets.symmetric(horizontal: 8, vertical: 5),
+      decoration: BoxDecoration(
+        color: bg,
+        borderRadius: AppShapes.badge,
+        border: Border.all(color: border),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(Icons.hub_rounded, size: iconSize, color: fg),
+          const SizedBox(width: 5),
+          ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 160),
+            child: Text(
+              label,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                color: fg,
+                fontSize: fontSize,
+                fontWeight: AppWeights.emphasis,
               ),
             ),
           ),

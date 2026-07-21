@@ -83,12 +83,7 @@ void main() {
 
     await _pumpApp(
       tester,
-      SessionScreen(
-        host: host,
-        session: session,
-        api: api,
-        desktopMode: true,
-      ),
+      SessionScreen(host: host, session: session, api: api, desktopMode: true),
       size: const Size(1180, 900),
     );
     await _pumpFrames(tester);
@@ -114,10 +109,7 @@ void main() {
     await tester.tap(find.text('Fake Balanced'));
     await _pumpFrames(tester);
 
-    final config = SessionTurnConfigStore.instance.configFor(
-      host,
-      session.id,
-    );
+    final config = SessionTurnConfigStore.instance.configFor(host, session.id);
     expect(config.isEmpty, isTrue);
 
     await tester.pumpWidget(const SizedBox.shrink());
@@ -127,7 +119,10 @@ void main() {
   testWidgets('desktop composer keeps typing area wide with model controls', (
     tester,
   ) async {
-    final session = _session('desktop-composer-width-session', provider: 'fake');
+    final session = _session(
+      'desktop-composer-width-session',
+      provider: 'fake',
+    );
     final api = _CapabilityFakeApi(
       _nodeForCapabilities(_fullCapabilities),
       models: const [_fakeModel],
@@ -159,9 +154,7 @@ void main() {
       final controller = InspectorController();
       final api = _WorkspaceBrowserCapabilityApi(
         _nodeForCapabilities(_minimalCapabilities),
-        files: const <String, String>{
-          '/repo/README.md': '# Workspace',
-        },
+        files: const <String, String>{'/repo/README.md': '# Workspace'},
       );
       addTearDown(controller.dispose);
       addTearDown(api.dispose);
@@ -209,12 +202,7 @@ void main() {
 
     await _pumpApp(
       tester,
-      SessionScreen(
-        host: host,
-        session: session,
-        api: api,
-        desktopMode: true,
-      ),
+      SessionScreen(host: host, session: session, api: api, desktopMode: true),
       size: const Size(1180, 900),
     );
     await _pumpFrames(tester);
@@ -306,12 +294,7 @@ void main() {
 
     await _pumpApp(
       tester,
-      SessionScreen(
-        host: host,
-        session: session,
-        api: api,
-        desktopMode: true,
-      ),
+      SessionScreen(host: host, session: session, api: api, desktopMode: true),
       size: const Size(1180, 900),
     );
     await _pumpFrames(tester);
@@ -337,10 +320,7 @@ void main() {
     await tester.tap(find.text('Low'));
     await _pumpFrames(tester);
 
-    final config = SessionTurnConfigStore.instance.configFor(
-      host,
-      session.id,
-    );
+    final config = SessionTurnConfigStore.instance.configFor(host, session.id);
     expect(config.model, isNull);
     expect(config.reasoningEffort, 'low');
 
@@ -1065,9 +1045,9 @@ void main() {
     await _pumpFrames(tester);
 
     expect(find.byType(Dialog), findsNothing);
-    expect(find.text('Start a new session'), findsOneWidget);
+    expect(find.text('What should the agent work on?'), findsOneWidget);
     expect(
-      find.textContaining('Settings copied · No history'),
+      find.textContaining('Copied setup · No conversation history'),
       findsOneWidget,
     );
     expect(
@@ -1091,33 +1071,25 @@ void main() {
       lessThanOrEqualTo(64),
     );
     expect(
-      tester
-          .getSize(find.byKey(const ValueKey('create-session-send-button'))),
+      tester.getSize(find.byKey(const ValueKey('create-session-send-button'))),
       const Size.square(48),
     );
 
     tester.view.viewInsets = const FakeViewPadding(bottom: 320);
     await _pumpFrames(tester);
-    expect(find.text('Start a new session'), findsNothing);
+    expect(find.text('What should the agent work on?'), findsNothing);
     expect(
-      tester
-          .getRect(find.byKey(const ValueKey('new-session-composer')))
-          .bottom,
+      tester.getRect(find.byKey(const ValueKey('new-session-composer'))).bottom,
       lessThanOrEqualTo(581),
     );
     tester.view.resetViewInsets();
     await _pumpFrames(tester);
 
-    await tester.tap(
-      find.byKey(const ValueKey('new-session-settings-button')),
-    );
+    await tester.tap(find.byKey(const ValueKey('new-session-settings-button')));
     await _pumpFrames(tester);
     expect(find.text('Network access'), findsOneWidget);
     expect(find.text('Session settings'), findsOneWidget);
-    expect(
-      find.byKey(const ValueKey('new-session-composer')),
-      findsNothing,
-    );
+    expect(find.byKey(const ValueKey('new-session-composer')), findsNothing);
 
     await tester.tap(find.byTooltip('Back to new session'));
     await _pumpFrames(tester);
@@ -1127,9 +1099,7 @@ void main() {
       'Start from the inherited setup.',
     );
     await tester.pump();
-    final sendButton = find.byKey(
-      const ValueKey('create-session-send-button'),
-    );
+    final sendButton = find.byKey(const ValueKey('create-session-send-button'));
     expect(tester.widget<FilledButton>(sendButton).onPressed, isNotNull);
     await tester.ensureVisible(sendButton);
     await tester.tap(sendButton);
@@ -1151,9 +1121,7 @@ void main() {
   testWidgets('new session confirms before discarding an unsent message', (
     tester,
   ) async {
-    final api = _CapabilityFakeApi(
-      _nodeForCapabilities(_minimalCapabilities),
-    );
+    final api = _CapabilityFakeApi(_nodeForCapabilities(_minimalCapabilities));
     addTearDown(api.dispose);
     Future<SessionSummary?>? launch;
 
@@ -1188,7 +1156,7 @@ void main() {
     expect(find.text('Discard new session?'), findsOneWidget);
     await tester.tap(find.widgetWithText(TextButton, 'Cancel'));
     await _pumpFrames(tester);
-    expect(find.text('Start a new session'), findsOneWidget);
+    expect(find.text('What should the agent work on?'), findsOneWidget);
 
     await tester.pageBack();
     await _pumpFrames(tester);
@@ -1196,7 +1164,7 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(await launch, isNull);
-    expect(find.text('Start a new session'), findsNothing);
+    expect(find.text('What should the agent work on?'), findsNothing);
   });
 
   testWidgets('host detail exposes provider contract metadata', (tester) async {

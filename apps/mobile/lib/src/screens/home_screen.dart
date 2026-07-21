@@ -381,11 +381,7 @@ class _SidemeshHomeScreenState extends State<SidemeshHomeScreen>
       return;
     }
     final navigator = Navigator.of(context);
-    final route = _buildSessionRoute(
-      host,
-      session,
-      composerSeed: composerSeed,
-    );
+    final route = _buildSessionRoute(host, session, composerSeed: composerSeed);
     if (replaceCurrentRoute) {
       await navigator.pushReplacement<void, void>(route);
     } else {
@@ -793,9 +789,9 @@ class _HomeStickyHeader extends StatelessWidget {
     return Padding(
       padding: const EdgeInsets.fromLTRB(
         AppSpacing.lg,
-        AppSpacing.sm,
+        AppSpacing.xs,
         AppSpacing.md,
-        AppSpacing.sm,
+        AppSpacing.xs,
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -809,11 +805,10 @@ class _HomeStickyHeader extends StatelessWidget {
                   children: [
                     Text(
                       tab.title,
-                      style: Theme.of(context).textTheme.headlineSmall
-                          ?.copyWith(
-                            color: colors.textPrimary,
-                            fontWeight: AppWeights.title,
-                          ),
+                      style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                        color: colors.textPrimary,
+                        fontWeight: AppWeights.title,
+                      ),
                     ),
                   ],
                 ),
@@ -876,7 +871,7 @@ class _HomeStickyHeader extends StatelessWidget {
               ),
             ],
           ),
-          const SizedBox(height: AppSpacing.md),
+          const SizedBox(height: AppSpacing.sm),
           AnimatedSwitcher(
             duration: const Duration(milliseconds: 220),
             child: searchVisible
@@ -930,7 +925,7 @@ class _HomeSearchField extends StatelessWidget {
               decoration: InputDecoration(
                 isDense: true,
                 filled: true,
-                fillColor: colors.surface,
+                fillColor: colors.surfaceMuted,
                 hintText: hintText,
                 hintStyle: TextStyle(color: colors.textTertiary, fontSize: 14),
                 prefixIcon: Icon(
@@ -958,47 +953,52 @@ class _HomeSearchField extends StatelessWidget {
                   vertical: 10,
                 ),
                 border: OutlineInputBorder(
-                  borderRadius: AppShapes.pill,
+                  borderRadius: AppShapes.input,
                   borderSide: BorderSide(color: colors.border),
                 ),
                 enabledBorder: OutlineInputBorder(
-                  borderRadius: AppShapes.pill,
-                  borderSide: BorderSide(color: colors.border),
+                  borderRadius: AppShapes.input,
+                  borderSide: BorderSide(
+                    color: colors.border.withValues(alpha: 0.72),
+                  ),
                 ),
                 focusedBorder: OutlineInputBorder(
-                  borderRadius: AppShapes.pill,
+                  borderRadius: AppShapes.input,
                   borderSide: BorderSide(color: colors.accent, width: 1.2),
                 ),
               ),
             ),
             if (filters != null &&
-                    (onRunningOnlyChanged != null ||
-                        onUnreadOnlyChanged != null ||
-                        onFavoritesOnlyChanged != null)) ...[
+                (onRunningOnlyChanged != null ||
+                    onUnreadOnlyChanged != null ||
+                    onFavoritesOnlyChanged != null)) ...[
               const SizedBox(height: AppSpacing.sm),
-              Wrap(
-                spacing: AppSpacing.sm,
-                runSpacing: AppSpacing.xs,
-                children: [
-                  _HomeSearchFilterToken(
-                    icon: Icons.star_rounded,
+              SingleChildScrollView(
+                scrollDirection: Axis.horizontal,
+                child: Row(
+                  children: [
+                    _HomeSearchFilterToken(
+                      icon: Icons.star_rounded,
                       label: 'Favorites',
                       selected: filters.favoritesOnly,
                       onSelected: onFavoritesOnlyChanged,
                     ),
+                    const SizedBox(width: AppSpacing.xs),
                     _HomeSearchFilterToken(
                       icon: Icons.play_circle_outline_rounded,
                       label: 'Running',
                       selected: filters.runningOnly,
                       onSelected: onRunningOnlyChanged,
                     ),
+                    const SizedBox(width: AppSpacing.xs),
                     _HomeSearchFilterToken(
                       icon: Icons.mark_chat_unread_rounded,
                       label: 'Unread',
                       selected: filters.unreadOnly,
                       onSelected: onUnreadOnlyChanged,
                     ),
-                ],
+                  ],
+                ),
               ),
             ],
           ],
@@ -1029,19 +1029,20 @@ class _HomeSearchFilterToken extends StatelessWidget {
     return Material(
       color: Colors.transparent,
       child: InkWell(
-        borderRadius: BorderRadius.circular(AppRadii.control),
+        borderRadius: AppShapes.badge,
         onTap: enabled ? () => onSelected!(!selected) : null,
         child: AnimatedContainer(
-          duration: const Duration(milliseconds: 140),
-          curve: Curves.easeOutCubic,
-          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+          duration: AppMotion.quick,
+          curve: AppMotion.standard,
+          constraints: const BoxConstraints(minHeight: 40),
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
           decoration: BoxDecoration(
-            color: selected ? colors.accentMuted : colors.surface,
-            borderRadius: BorderRadius.circular(AppRadii.control),
+            color: selected ? colors.accentMuted : Colors.transparent,
+            borderRadius: AppShapes.badge,
             border: Border.all(
               color: selected
                   ? colors.accent.withValues(alpha: 0.34)
-                  : colors.border,
+                  : Colors.transparent,
             ),
           ),
           child: Row(
@@ -1053,9 +1054,7 @@ class _HomeSearchFilterToken extends StatelessWidget {
                 label,
                 style: Theme.of(context).textTheme.labelMedium?.copyWith(
                   color: selected ? colors.textPrimary : colors.textSecondary,
-                  fontWeight: selected
-                      ? AppWeights.title
-                      : AppWeights.emphasis,
+                  fontWeight: selected ? AppWeights.title : AppWeights.emphasis,
                 ),
               ),
             ],
@@ -1083,9 +1082,9 @@ class _MeshNavBar extends StatelessWidget {
   Widget build(BuildContext context) {
     final colors = context.colors;
     return Container(
-      padding: const EdgeInsets.fromLTRB(14, 8, 14, 14),
+      padding: const EdgeInsets.fromLTRB(12, 6, 12, 10),
       decoration: BoxDecoration(
-        color: colors.canvas,
+        color: colors.surface,
         border: Border(top: BorderSide(color: colors.border)),
       ),
       child: SafeArea(
@@ -1104,29 +1103,31 @@ class _MeshNavBar extends StatelessWidget {
                     borderRadius: AppShapes.input,
                     onTap: () => onTap(index),
                     child: AnimatedContainer(
-                      duration: const Duration(milliseconds: 220),
-                      curve: Curves.easeOut,
-                      padding: const EdgeInsets.symmetric(vertical: 10),
-                      decoration: BoxDecoration(
-                        color: selected
-                            ? colors.accentMuted
-                            : Colors.transparent,
-                        borderRadius: AppShapes.input,
-                        border: Border.all(
-                          color: selected
-                              ? colors.accent.withValues(alpha: 0.4)
-                              : Colors.transparent,
-                        ),
-                      ),
+                      duration: AppMotion.reveal,
+                      curve: AppMotion.standard,
+                      padding: const EdgeInsets.symmetric(vertical: 7),
                       child: Column(
                         mainAxisSize: MainAxisSize.min,
                         children: [
+                          AnimatedContainer(
+                            duration: AppMotion.quick,
+                            curve: AppMotion.standard,
+                            width: selected ? 24 : 8,
+                            height: 3,
+                            decoration: BoxDecoration(
+                              color: selected
+                                  ? colors.accent
+                                  : Colors.transparent,
+                              borderRadius: AppShapes.badge,
+                            ),
+                          ),
+                          const SizedBox(height: 5),
                           _NavIconWithBadge(
                             icon: selected ? tab.selectedIcon : tab.icon,
                             selected: selected,
                             badge: badge,
                           ),
-                          const SizedBox(height: 4),
+                          const SizedBox(height: 3),
                           Text(
                             tab.title,
                             style: Theme.of(context).textTheme.labelSmall
@@ -1467,9 +1468,15 @@ String _hostListSignature(HostProfile host) {
 
 @immutable
 class _SessionGroup {
-  const _SessionGroup({required this.key, required this.title, required this.host, required this.entries});
+  const _SessionGroup({
+    required this.key,
+    required this.title,
+    required this.host,
+    required this.entries,
+  });
   final String key;
   final String title;
+
   /// Host all sessions in this group belong to.
   /// Groups are keyed by host-scoped gitCommonDir when available.
   final HostProfile host;
@@ -1559,10 +1566,7 @@ class _RecentPaneState extends State<RecentPane> {
     return _cwdBasename(stripped);
   }
 
-  int _compareRecentEntries(
-    RemoteSessionEntry left,
-    RemoteSessionEntry right,
-  ) {
+  int _compareRecentEntries(RemoteSessionEntry left, RemoteSessionEntry right) {
     final updatedCompare = right.session.updatedAt.compareTo(
       left.session.updatedAt,
     );
@@ -1609,12 +1613,14 @@ class _RecentPaneState extends State<RecentPane> {
         return a.compareTo(b);
       });
     return sortedKeys
-        .map((k) => _SessionGroup(
-          key: k,
-          title: _projectLabel(groups[k]!.first),
-          host: groups[k]!.first.host,
-          entries: groups[k]!,
-        ))
+        .map(
+          (k) => _SessionGroup(
+            key: k,
+            title: _projectLabel(groups[k]!.first),
+            host: groups[k]!.first.host,
+            entries: groups[k]!,
+          ),
+        )
         .toList();
   }
 
@@ -2111,7 +2117,8 @@ class _RecentPaneState extends State<RecentPane> {
           final collapsed = _collapsedGroups.contains(group.key);
           final headerIndex = current;
           final entriesStart = headerIndex + 1;
-          final entriesEnd = entriesStart + (collapsed ? 0 : group.entries.length);
+          final entriesEnd =
+              entriesStart + (collapsed ? 0 : group.entries.length);
           if (index == headerIndex) {
             return Padding(
               padding: EdgeInsets.only(
@@ -2129,9 +2136,7 @@ class _RecentPaneState extends State<RecentPane> {
           if (!collapsed && index >= entriesStart && index < entriesEnd) {
             final entry = group.entries[index - entriesStart];
             return Padding(
-              padding: EdgeInsets.only(
-                bottom: widget.dense ? 2 : AppSpacing.sm,
-              ),
+              padding: EdgeInsets.only(bottom: widget.dense ? 2 : 0),
               child: _buildSessionRow(entry, showBranchLabel: true),
             );
           }
@@ -4578,7 +4583,9 @@ class _HostEditorSheetState extends State<HostEditorSheet> {
                             height: 32,
                           ),
                           suffixIcon: IconButton(
-                            tooltip: _tokenVisible ? 'Hide token' : 'Show token',
+                            tooltip: _tokenVisible
+                                ? 'Hide token'
+                                : 'Show token',
                             padding: EdgeInsets.zero,
                             icon: Icon(
                               _tokenVisible
@@ -4586,9 +4593,8 @@ class _HostEditorSheetState extends State<HostEditorSheet> {
                                   : Icons.visibility_rounded,
                               size: 18,
                             ),
-                            onPressed: () => setState(
-                              () => _tokenVisible = !_tokenVisible,
-                            ),
+                            onPressed: () =>
+                                setState(() => _tokenVisible = !_tokenVisible),
                           ),
                         ),
                       ),
@@ -4924,9 +4930,7 @@ class _HostEditorToggle extends StatelessWidget {
           decoration: BoxDecoration(
             color: value ? activeKnob : colors.surface,
             shape: BoxShape.circle,
-            border: Border.all(
-              color: value ? activeKnob : colors.border,
-            ),
+            border: Border.all(color: value ? activeKnob : colors.border),
           ),
         ),
       ),

@@ -269,8 +269,8 @@ class _Composer extends StatelessWidget {
     );
 
     final barRow = AnimatedContainer(
-      duration: const Duration(milliseconds: 150),
-      curve: Curves.easeOutCubic,
+      duration: AppMotion.quick,
+      curve: AppMotion.standard,
       decoration: BoxDecoration(
         color: colors.composerBackground,
         borderRadius: BorderRadius.circular(isDesktop ? 10 : AppRadii.control),
@@ -308,8 +308,8 @@ class _Composer extends StatelessWidget {
             // Lives *above* the context shelf so it overlays the conversation
             // list visually without being clipped by the pill.
             AnimatedSize(
-              duration: const Duration(milliseconds: 150),
-              curve: Curves.easeOut,
+              duration: AppMotion.quick,
+              curve: AppMotion.standard,
               child: (supportsSkillInput && activeSkillQuery != null)
                   ? Padding(
                       padding: const EdgeInsets.fromLTRB(14, 8, 14, 0),
@@ -326,8 +326,8 @@ class _Composer extends StatelessWidget {
 
             // ── Zone 3b: File suggestion tray ──────────────────────────────
             AnimatedSize(
-              duration: const Duration(milliseconds: 150),
-              curve: Curves.easeOut,
+              duration: AppMotion.quick,
+              curve: AppMotion.standard,
               child: activeFileQuery != null
                   ? Padding(
                       padding: const EdgeInsets.fromLTRB(14, 8, 14, 0),
@@ -345,8 +345,8 @@ class _Composer extends StatelessWidget {
             // ── Zone 2: Context shelf ──────────────────────────────────────
             // Horizontal scroll row of flat chips; smoothly animates in/out.
             AnimatedSize(
-              duration: const Duration(milliseconds: 200),
-              curve: Curves.easeInOut,
+              duration: AppMotion.reveal,
+              curve: AppMotion.standard,
               child: hasContext
                   ? _ComposerContextShelf(
                       attachments: attachments,
@@ -428,11 +428,7 @@ class _ComposerContextShelf extends StatelessWidget {
                     gaplessPlayback: true,
                   ),
                 )
-              : Icon(
-                  Icons.image_rounded,
-                  size: 14,
-                  color: shelfSecondary,
-                ),
+              : Icon(Icons.image_rounded, size: 14, color: shelfSecondary),
           label: a.name,
           // Show file size as sublabel only on desktop where space allows.
           sublabel: isDesktop ? _formatByteCount(a.byteLength) : null,
@@ -440,11 +436,7 @@ class _ComposerContextShelf extends StatelessWidget {
         ),
       for (final s in skills)
         _ComposerShelfChip(
-          icon: Icon(
-            Icons.auto_awesome_rounded,
-            size: 14,
-            color: shelfAccent,
-          ),
+          icon: Icon(Icons.auto_awesome_rounded, size: 14, color: shelfAccent),
           label: s.tokenText,
           onRemove: () => onRemoveSkill(s.skill.path),
         ),
@@ -460,8 +452,7 @@ class _ComposerContextShelf extends StatelessWidget {
           label: _fileShelfLabel(
             f.file,
             showParent:
-                duplicateFileNames.contains(_fileNameKey(f.file)) &&
-                !isDesktop,
+                duplicateFileNames.contains(_fileNameKey(f.file)) && !isDesktop,
           ),
           sublabel: isDesktop ? _compactFileParentPath(f.file) : null,
           onRemove: () => onRemoveFile(f.file.path),
@@ -551,10 +542,7 @@ class _ComposerShelfChip extends StatelessWidget {
                       ),
                       Text(
                         sublabel!,
-                        style: monoStyle(
-                          color: secondary,
-                          fontSize: 10,
-                        ),
+                        style: monoStyle(color: secondary, fontSize: 10),
                       ),
                     ],
                   )
@@ -574,11 +562,7 @@ class _ComposerShelfChip extends StatelessWidget {
             borderRadius: AppShapes.pill,
             child: Padding(
               padding: const EdgeInsets.all(3),
-              child: Icon(
-                Icons.close_rounded,
-                size: 14,
-                color: iconForeground,
-              ),
+              child: Icon(Icons.close_rounded, size: 14, color: iconForeground),
             ),
           ),
         ],
@@ -671,19 +655,11 @@ class _ComposerPlusButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colors = context.colors;
-    final background = Color.alphaBlend(
-      colors.surfaceMuted.withValues(alpha: 0.56),
-      colors.composerBackground,
-    );
+    final background = colors.composerBackground;
     final iconColor = visibleUiColorOn(
       colors,
       background: background,
       preferred: colors.textSecondary,
-    );
-    final borderColor = visibleBorderOn(
-      colors,
-      background: background,
-      preferred: colors.border,
     );
     return Tooltip(
       message: 'Add',
@@ -699,16 +675,8 @@ class _ComposerPlusButton extends StatelessWidget {
               child: Container(
                 width: 38,
                 height: 38,
-                decoration: BoxDecoration(
-                  color: colors.surfaceMuted.withValues(alpha: 0.56),
-                  borderRadius: AppShapes.badge,
-                  border: Border.all(color: borderColor),
-                ),
-                child: Icon(
-                  Icons.add_rounded,
-                  color: iconColor,
-                  size: 20,
-                ),
+                alignment: Alignment.center,
+                child: Icon(Icons.add_rounded, color: iconColor, size: 20),
               ),
             ),
           ),
@@ -782,10 +750,7 @@ class _ComposerModelButton extends StatelessWidget {
     final hitPadding = compact ? 3.0 : 0.0;
     final background = customized
         ? colors.accentMuted
-        : Color.alphaBlend(
-            colors.surfaceMuted.withValues(alpha: 0.56),
-            colors.composerBackground,
-          );
+        : colors.composerBackground;
     final iconColor = visibleUiColorOn(
       colors,
       background: background,
@@ -807,11 +772,7 @@ class _ComposerModelButton extends StatelessWidget {
             background: background,
             preferred: colors.accent,
           )
-        : visibleBorderOn(
-            colors,
-            background: background,
-            preferred: colors.border,
-          );
+        : Colors.transparent;
     return Tooltip(
       message: detail == null ? tooltipLabel : '$tooltipLabel: $detail',
       child: Material(
@@ -822,8 +783,8 @@ class _ComposerModelButton extends StatelessWidget {
           child: Padding(
             padding: EdgeInsets.symmetric(vertical: hitPadding),
             child: AnimatedContainer(
-              duration: const Duration(milliseconds: 140),
-              curve: Curves.easeOutCubic,
+              duration: AppMotion.quick,
+              curve: AppMotion.standard,
               constraints: BoxConstraints(
                 maxWidth: maxWidth,
                 minHeight: minHeight,
@@ -833,20 +794,14 @@ class _ComposerModelButton extends StatelessWidget {
                 vertical: compact ? 7 : 6,
               ),
               decoration: BoxDecoration(
-                color: customized
-                    ? colors.accentMuted
-                    : colors.surfaceMuted.withValues(alpha: 0.56),
+                color: customized ? colors.accentMuted : Colors.transparent,
                 borderRadius: AppShapes.badge,
                 border: Border.all(color: borderColor),
               ),
               child: Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  Icon(
-                    icon,
-                    size: compact ? 14 : 15,
-                    color: iconColor,
-                  ),
+                  Icon(icon, size: compact ? 14 : 15, color: iconColor),
                   const SizedBox(width: 6),
                   Flexible(
                     child: Text(
@@ -909,7 +864,10 @@ class _SendButton extends StatelessWidget {
         final bgColor = sending
             ? colors.surfaceMuted
             : (canSend ? colors.accent : colors.surfaceMuted);
-        final activeForeground = readableActionForeground(colors, colors.accent);
+        final activeForeground = readableActionForeground(
+          colors,
+          colors.accent,
+        );
         final quietForeground = visibleUiColorOn(
           colors,
           background: colors.surfaceMuted,
@@ -938,9 +896,7 @@ class _SendButton extends StatelessWidget {
                   decoration: BoxDecoration(
                     color: bgColor,
                     borderRadius: BorderRadius.circular(radius),
-                    border: showActive
-                        ? null
-                        : Border.all(color: quietBorder),
+                    border: showActive ? null : Border.all(color: quietBorder),
                   ),
                   alignment: Alignment.center,
                   child: sending
@@ -955,9 +911,7 @@ class _SendButton extends StatelessWidget {
                       : Icon(
                           Icons.arrow_upward_rounded,
                           size: compact ? 19 : 22,
-                          color: canSend
-                              ? activeForeground
-                              : quietForeground,
+                          color: canSend ? activeForeground : quietForeground,
                         ),
                 ),
               ),
@@ -1408,10 +1362,7 @@ String _fileDisplayName(FsSearchResult file) {
   return slash < 0 ? path : path.substring(slash + 1);
 }
 
-String _compactFileParentPath(
-  FsSearchResult file, {
-  int maxSegments = 3,
-}) {
+String _compactFileParentPath(FsSearchResult file, {int maxSegments = 3}) {
   final parent = _fileParentPath(file.path);
   if (parent.isEmpty) {
     return 'workspace root';
