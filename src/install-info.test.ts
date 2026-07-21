@@ -50,7 +50,7 @@ describe("detectInstallInfo", () => {
     assert.equal(info.latestVersion, null);
   });
 
-  it("tracks bleeding-edge git installs against origin/main", async () => {
+  it("tracks bleeding-edge git installs against the CI-verified ref", async () => {
     const dir = await mkdtemp(nodePath.join(tmpdir(), "sidemesh-install-test-"));
     const origin = nodePath.join(dir, "origin.git");
     const repo = nodePath.join(dir, "repo");
@@ -74,6 +74,11 @@ describe("detectInstallInfo", () => {
     await execFileAsync("git", ["push", "-u", "origin", "main"], {
       cwd: repo,
     });
+    await execFileAsync(
+      "git",
+      ["push", "origin", "HEAD:refs/heads/bleeding-edge"],
+      { cwd: repo },
+    );
 
     const info = await detectInstallInfo({
       packageRoot: repo,
@@ -85,10 +90,48 @@ describe("detectInstallInfo", () => {
     assert.match(info.currentCommitSha ?? "", /^[0-9a-f]{40}$/);
     assert.equal(info.latestCommitSha, info.currentCommitSha);
     assert.equal(info.updateAvailable, false);
-    assert.match(info.updateCommand ?? "", /git fetch origin main/);
+    assert.match(
+      info.updateCommand ?? "",
+      /git fetch origin refs\/heads\/bleeding-edge/,
+    );
     assert.match(info.updateCommand ?? "", /git merge --ff-only FETCH_HEAD/);
     assert.match(info.updateCommand ?? "", /npm ci/);
     assert.doesNotMatch(info.updateCommand ?? "", /npm install/);
+
+    await writeFile(nodePath.join(repo, "README.md"), "unverified main\n");
+    await execFileAsync("git", ["add", "README.md"], { cwd: repo });
+    await execFileAsync("git", ["commit", "-m", "candidate"], { cwd: repo });
+    const { stdout: candidateStdout } = await execFileAsync(
+      "git",
+      ["rev-parse", "HEAD"],
+      { cwd: repo },
+    );
+    const candidateSha = candidateStdout.trim();
+    await execFileAsync("git", ["push", "origin", "main"], { cwd: repo });
+    await execFileAsync("git", ["reset", "--hard", "HEAD^"], { cwd: repo });
+
+    const beforeVerification = await detectInstallInfo({
+      packageRoot: repo,
+      config: { updateChannel: "bleeding-edge" },
+    });
+    assert.equal(beforeVerification.latestCommitSha, info.currentCommitSha);
+    assert.equal(beforeVerification.updateAvailable, false);
+
+    await execFileAsync(
+      "git",
+      ["push", "origin", `${candidateSha}:refs/heads/bleeding-edge`],
+      { cwd: repo },
+    );
+    const afterVerification = await detectInstallInfo({
+      packageRoot: repo,
+      config: { updateChannel: "bleeding-edge" },
+    });
+    assert.equal(afterVerification.latestCommitSha, candidateSha);
+    assert.notEqual(
+      afterVerification.latestCommitSha,
+      afterVerification.currentCommitSha,
+    );
+    assert.equal(afterVerification.updateAvailable, true);
   });
 
   it("falls back to unknown when package.json is missing", async () => {

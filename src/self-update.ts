@@ -20,7 +20,11 @@ import type { LaunchdPaths } from "./launchd-service.js";
 import type { ServicePaths } from "./systemd-service.js";
 import type { TermuxServicePaths } from "./termux-service.js";
 import { assertGitCheckoutClean } from "./update-preflight.js";
-import { detectInstallInfo, resolveNpmExecutable } from "./install-info.js";
+import {
+  BLEEDING_EDGE_GIT_REF,
+  detectInstallInfo,
+  resolveNpmExecutable,
+} from "./install-info.js";
 import {
   startDaemon,
   stopDaemon,
@@ -333,6 +337,10 @@ export async function runSelfUpdate(
     }
 
     try {
+      await patchUpdateStatus(config.stateDir, status.id, {
+        phase: "stopping",
+        cutoverStarted: true,
+      });
       await appendLog(logPath, `[self-update] Stopping daemon...`);
       if (managedService) {
         await stopManagedService(
@@ -614,7 +622,11 @@ async function runAtomicManagedGitUpdate(
   let candidateDir: string | null = null;
   let targetCommitSha: string | null = null;
   let cutoverStarted = false;
+  const currentCommitSha = options.info.currentCommitSha;
   try {
+    if (currentCommitSha === null) {
+      throw new Error("Atomic Git update requires the active commit SHA.");
+    }
     const [realStateDir, realPackageDir] = await Promise.all([
       realpath(options.config.stateDir),
       realpath(options.packageDir),
@@ -635,6 +647,7 @@ async function runAtomicManagedGitUpdate(
         packageDir: options.packageDir,
         releaseRoot,
         logPath: options.logPath,
+        currentCommitSha,
       },
       dependencies,
     );
@@ -643,9 +656,27 @@ async function runAtomicManagedGitUpdate(
     await patchUpdateStatus(options.config.stateDir, options.updateId, {
       targetCommitSha,
     });
+    if (candidate.alreadyActive) {
+      await appendLog(
+        options.logPath,
+        `[self-update] Verified commit ${targetCommitSha} is already active.`,
+      );
+      return {
+        result: {
+          success: true,
+          oldVersion: options.info.packageVersion,
+          newVersion: options.info.packageVersion,
+          restored: false,
+          logPath: options.logPath,
+          error: null,
+        },
+        installedCommitSha: targetCommitSha,
+      };
+    }
 
     await patchUpdateStatus(options.config.stateDir, options.updateId, {
       phase: "stopping",
+      cutoverStarted: true,
     });
     cutoverStarted = true;
     await appendLog(options.logPath, `[self-update] Stopping daemon for cutover...`);
@@ -844,12 +875,17 @@ async function stageBleedingEdgeRelease(
     packageDir: string;
     releaseRoot: string;
     logPath: string;
+    currentCommitSha: string;
   },
   dependencies: SelfUpdateDependencies,
-): Promise<{ packageDir: string; commitSha: string }> {
+): Promise<{
+  packageDir: string;
+  commitSha: string;
+  alreadyActive: boolean;
+}> {
   await runLoggedCommand(
     "git",
-    ["fetch", "origin", "main"],
+    ["fetch", "origin", BLEEDING_EDGE_GIT_REF],
     options.packageDir,
     options.logPath,
     UPDATE_COMMAND_TIMEOUT_MS,
@@ -866,6 +902,37 @@ async function stageBleedingEdgeRelease(
   const commitSha = stdout.trim().toLowerCase();
   if (!/^[0-9a-f]{40}$/.test(commitSha)) {
     throw new Error(`Fetched update target is not a full Git commit SHA: ${commitSha}`);
+  }
+  if (!/^[0-9a-f]{40}$/.test(options.currentCommitSha)) {
+    throw new Error(
+      `Active release is not a full Git commit SHA: ${options.currentCommitSha}`,
+    );
+  }
+  if (commitSha === options.currentCommitSha) {
+    return {
+      packageDir: options.packageDir,
+      commitSha,
+      alreadyActive: true,
+    };
+  }
+  try {
+    await runLoggedCommand(
+      "git",
+      [
+        "merge-base",
+        "--is-ancestor",
+        options.currentCommitSha,
+        commitSha,
+      ],
+      options.packageDir,
+      options.logPath,
+      10_000,
+      dependencies,
+    );
+  } catch {
+    throw new Error(
+      `Refusing to replace ${options.currentCommitSha} with non-descendant verified commit ${commitSha}.`,
+    );
   }
 
   const candidateDir = nodePath.join(options.releaseRoot, commitSha);
@@ -913,7 +980,7 @@ async function stageBleedingEdgeRelease(
     );
     const cliPath = nodePath.join(candidateDir, "dist", "cli.js");
     await access(cliPath, fsConstants.R_OK);
-    return { packageDir: candidateDir, commitSha };
+    return { packageDir: candidateDir, commitSha, alreadyActive: false };
   } catch (error) {
     if (worktreeCreated) {
       await removeReleaseWorktree(

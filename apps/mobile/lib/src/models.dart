@@ -171,7 +171,7 @@ class NodeInfo {
   String get currentInstallLabel {
     if (usesBleedingEdgeTrack) {
       final sha = shortCurrentCommitSha;
-      return sha == null ? 'main' : 'main@$sha';
+      return sha == null ? 'Early access' : 'Early access@$sha';
     }
     final version = packageVersion;
     if (version != null && version.isNotEmpty) {
@@ -183,7 +183,7 @@ class NodeInfo {
   String get latestInstallLabel {
     if (usesBleedingEdgeTrack) {
       final sha = shortLatestCommitSha;
-      return sha == null ? 'latest main' : 'main@$sha';
+      return sha == null ? 'latest verified build' : 'verified@$sha';
     }
     final version = latestVersion;
     if (version != null && version.isNotEmpty) {
@@ -193,7 +193,7 @@ class NodeInfo {
   }
 
   String get updateBadgeLabel =>
-      usesBleedingEdgeTrack ? 'New commits on main' : 'Update available';
+      usesBleedingEdgeTrack ? 'Verified update available' : 'Update available';
 
   bool supportsHostCapability(String section, String feature) {
     return hostCapabilities.supports(section, feature);
@@ -311,6 +311,86 @@ class UpdateInfo {
     installType: _stringOrNull(json['installType']),
     updateSupported: json['updateSupported'] == true,
   );
+}
+
+class UpdateOperation {
+  const UpdateOperation({
+    required this.id,
+    required this.state,
+    required this.phase,
+    required this.channel,
+    required this.startedAt,
+    required this.updatedAt,
+    this.finishedAt,
+    required this.previousVersion,
+    this.previousCommitSha,
+    this.targetVersion,
+    this.targetCommitSha,
+    this.installedVersion,
+    this.installedCommitSha,
+    required this.cutoverStarted,
+    required this.restored,
+    this.error,
+    this.logPath,
+  });
+
+  final String id;
+  final String state;
+  final String phase;
+  final String channel;
+  final int startedAt;
+  final int updatedAt;
+  final int? finishedAt;
+  final String previousVersion;
+  final String? previousCommitSha;
+  final String? targetVersion;
+  final String? targetCommitSha;
+  final String? installedVersion;
+  final String? installedCommitSha;
+  final bool cutoverStarted;
+  final bool restored;
+  final String? error;
+  final String? logPath;
+
+  bool get isInProgress => state == 'queued' || state == 'running';
+  bool get isSucceeded => state == 'succeeded';
+  bool get isFailed => state == 'failed';
+  bool get isTerminal => isSucceeded || isFailed;
+  DateTime get startedDateTime =>
+      DateTime.fromMillisecondsSinceEpoch(startedAt);
+  DateTime get updatedDateTime =>
+      DateTime.fromMillisecondsSinceEpoch(updatedAt);
+  DateTime? get finishedDateTime => finishedAt == null
+      ? null
+      : DateTime.fromMillisecondsSinceEpoch(finishedAt!);
+  String? get shortTargetCommitSha => _shortSha(targetCommitSha);
+  String? get shortInstalledCommitSha => _shortSha(installedCommitSha);
+
+  static UpdateOperation? fromJsonValue(Object? value) {
+    if (value is! Map<String, dynamic>) return null;
+    return UpdateOperation.fromJson(value);
+  }
+
+  factory UpdateOperation.fromJson(Map<String, dynamic> json) =>
+      UpdateOperation(
+        id: _stringValue(json['id']),
+        state: _stringValue(json['state']),
+        phase: _stringValue(json['phase']),
+        channel: _stringOrNull(json['channel']) ?? 'stable',
+        startedAt: _intValue(json['startedAt']),
+        updatedAt: _intValue(json['updatedAt']),
+        finishedAt: _intOrNull(json['finishedAt']),
+        previousVersion: _stringValue(json['previousVersion']),
+        previousCommitSha: _stringOrNull(json['previousCommitSha']),
+        targetVersion: _stringOrNull(json['targetVersion']),
+        targetCommitSha: _stringOrNull(json['targetCommitSha']),
+        installedVersion: _stringOrNull(json['installedVersion']),
+        installedCommitSha: _stringOrNull(json['installedCommitSha']),
+        cutoverStarted: json['cutoverStarted'] == true,
+        restored: json['restored'] == true,
+        error: _stringOrNull(json['error']),
+        logPath: _stringOrNull(json['logPath']),
+      );
 }
 
 class ProviderMetadata {
