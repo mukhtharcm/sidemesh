@@ -6,15 +6,18 @@ const packageRoot = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
   "..",
 );
-const piNodeModules = path.join(
+const piPackageRoot = path.join(
   packageRoot,
   "node_modules",
   "@earendil-works",
   "pi-coding-agent",
+);
+const piNodeModules = path.join(
+  piPackageRoot,
   "node_modules",
 );
 const piManifest = JSON.parse(
-  await readFile(path.join(piNodeModules, "..", "package.json"), "utf8"),
+  await readFile(path.join(piPackageRoot, "package.json"), "utf8"),
 );
 if (piManifest.version !== "0.80.3") {
   throw new Error(
