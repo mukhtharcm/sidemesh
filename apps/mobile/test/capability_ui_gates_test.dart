@@ -1058,31 +1058,61 @@ void main() {
           child: const Text('New session'),
         ),
       ),
-      size: const Size(900, 1000),
+      size: const Size(430, 900),
     );
 
     await tester.tap(find.text('New session'));
     await _pumpFrames(tester);
 
     expect(find.byType(Dialog), findsNothing);
-    expect(find.text('What should the agent work on?'), findsOneWidget);
-    expect(
-      find.text(
-        'Based on the current session. Conversation history is not copied.',
-      ),
-      findsOneWidget,
-    );
+    expect(find.text('Start a new session'), findsOneWidget);
+    expect(find.textContaining('Settings copied · New chat'), findsOneWidget);
     expect(find.text('Start session'), findsNothing);
     expect(
       find.byKey(const ValueKey('create-session-send-button')),
       findsOneWidget,
     );
+    expect(
+      tester.getSize(find.byKey(const ValueKey('new-session-composer'))).height,
+      lessThanOrEqualTo(82),
+    );
+    expect(
+      tester
+          .getSize(find.byKey(const ValueKey('new-session-context-card')))
+          .height,
+      lessThanOrEqualTo(64),
+    );
+    expect(
+      tester
+          .getSize(find.byKey(const ValueKey('create-session-send-button'))),
+      const Size.square(48),
+    );
+
+    tester.view.viewInsets = const FakeViewPadding(bottom: 320);
+    await _pumpFrames(tester);
+    expect(find.text('Start a new session'), findsNothing);
+    expect(
+      tester
+          .getRect(find.byKey(const ValueKey('new-session-composer')))
+          .bottom,
+      lessThanOrEqualTo(581),
+    );
+    tester.view.resetViewInsets();
+    await _pumpFrames(tester);
 
     await tester.tap(
       find.byKey(const ValueKey('new-session-settings-button')),
     );
     await _pumpFrames(tester);
     expect(find.text('Network access'), findsOneWidget);
+    expect(find.text('Session settings'), findsOneWidget);
+    expect(
+      find.byKey(const ValueKey('new-session-composer')),
+      findsNothing,
+    );
+
+    await tester.tap(find.byTooltip('Back to new session'));
+    await _pumpFrames(tester);
 
     await tester.enterText(
       find.byKey(const ValueKey('create-session-prompt-field')),
@@ -1150,7 +1180,7 @@ void main() {
     expect(find.text('Discard new session?'), findsOneWidget);
     await tester.tap(find.widgetWithText(TextButton, 'Cancel'));
     await _pumpFrames(tester);
-    expect(find.text('What should the agent work on?'), findsOneWidget);
+    expect(find.text('Start a new session'), findsOneWidget);
 
     await tester.pageBack();
     await _pumpFrames(tester);
@@ -1158,7 +1188,7 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(await launch, isNull);
-    expect(find.text('What should the agent work on?'), findsNothing);
+    expect(find.text('Start a new session'), findsNothing);
   });
 
   testWidgets('host detail exposes provider contract metadata', (tester) async {
@@ -1279,6 +1309,7 @@ Future<void> _pumpApp(
   addTearDown(() {
     tester.view.resetPhysicalSize();
     tester.view.resetDevicePixelRatio();
+    tester.view.resetViewInsets();
   });
 
   final palette = ThemeVariant.codexAmber;

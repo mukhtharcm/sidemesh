@@ -1501,121 +1501,83 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
   Widget _buildDraftPage(BuildContext context) {
     final colors = context.colors;
     final hasPrompt = _promptController.text.trim().isNotEmpty;
-    final canPop = _allowPop || !hasPrompt;
+    final canPop = !_showAdvanced && (_allowPop || !hasPrompt);
     return PopScope<SessionSummary>(
       canPop: canPop,
       onPopInvokedWithResult: (didPop, result) {
-        if (!didPop) {
-          unawaited(_confirmDiscardDraft());
+        if (didPop) return;
+        if (_showAdvanced) {
+          _toggleAdvanced();
+          return;
         }
+        unawaited(_confirmDiscardDraft());
       },
       child: Scaffold(
         backgroundColor: colors.canvas,
         appBar: AppBar(
-          titleSpacing: 0,
-          title: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const Text('New session'),
-              Text(
-                '${widget.host.label} · $_providerName',
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                  color: colors.textSecondary,
-                  fontWeight: AppWeights.body,
-                ),
-              ),
-            ],
-          ),
+          leading: _showAdvanced
+              ? IconButton(
+                  tooltip: 'Back to new session',
+                  onPressed: _submitting ? null : _toggleAdvanced,
+                  icon: const Icon(Icons.arrow_back_rounded),
+                )
+              : null,
+          title: Text(_showAdvanced ? 'Session settings' : 'New session'),
           actions: [
-            IconButton(
-              key: const ValueKey('new-session-settings-button'),
-              tooltip: _showAdvanced
-                  ? 'Hide session settings'
-                  : 'Session settings',
-              onPressed: _submitting ? null : _toggleAdvanced,
-              icon: Icon(
-                _showAdvanced ? Icons.tune_rounded : Icons.tune_outlined,
+            if (!_showAdvanced)
+              IconButton(
+                key: const ValueKey('new-session-settings-button'),
+                tooltip: 'Session settings',
+                onPressed: _submitting ? null : _toggleAdvanced,
+                icon: const Icon(Icons.tune_rounded),
               ),
-            ),
+            const SizedBox(width: 4),
           ],
         ),
         body: SafeArea(
           top: false,
-          child: Column(
-            children: [
-              Expanded(
-                child: LayoutBuilder(
-                  builder: (context, constraints) {
-                    return SingleChildScrollView(
-                      padding: const EdgeInsets.fromLTRB(16, 14, 16, 20),
-                      child: Center(
-                        child: ConstrainedBox(
-                          constraints: BoxConstraints(
-                            maxWidth: 920,
-                            minHeight: (constraints.maxHeight - 34)
-                                .clamp(0.0, double.infinity)
-                                .toDouble(),
-                          ),
-                          child: Column(
-                            children: [
-                              if (widget.seed?.basedOnCurrentSession ?? false)
-                                _buildInheritedNotice(context),
-                              if (widget.seed?.basedOnCurrentSession ?? false)
-                                const SizedBox(height: 10),
-                              _showAdvanced
-                                  ? _buildDraftSettings(context)
-                                  : _buildDraftContextCard(context),
-                              const SizedBox(height: 32),
-                              _buildDraftEmptyState(context),
-                              const SizedBox(height: 32),
-                            ],
-                          ),
-                        ),
-                      ),
-                    );
-                  },
-                ),
-              ),
-              if (_error != null)
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(16, 0, 16, 10),
-                  child: ConstrainedBox(
-                    constraints: const BoxConstraints(maxWidth: 920),
-                    child: _ErrorPanel(message: _error!),
-                  ),
-                ),
-              _buildDraftComposer(context),
-            ],
-          ),
+          child: _showAdvanced
+              ? _buildDraftSettings(context)
+              : _buildDraftConversation(context),
         ),
       ),
     );
   }
 
-  Widget _buildInheritedNotice(BuildContext context) {
-    final colors = context.colors;
-    return MeshSurface(
-      tone: MeshSurfaceTone.muted,
-      radius: AppRadii.control,
-      width: double.infinity,
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
-      child: Row(
-        children: [
-          Icon(Icons.call_split_rounded, size: 17, color: colors.accent),
-          const SizedBox(width: 9),
-          Expanded(
-            child: Text(
-              'Based on the current session. Conversation history is not copied.',
-              style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                color: colors.textSecondary,
+  Widget _buildDraftConversation(BuildContext context) {
+    final keyboardVisible = MediaQuery.viewInsetsOf(context).bottom > 0;
+    return Column(
+      children: [
+        Expanded(
+          child: Center(
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 920),
+              child: Column(
+                children: [
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+                    child: _buildDraftContextCard(context),
+                  ),
+                  Expanded(
+                    child: keyboardVisible
+                        ? const SizedBox.shrink()
+                        : _buildDraftEmptyState(context),
+                  ),
+                ],
               ),
             ),
           ),
-        ],
-      ),
+        ),
+        if (_error != null)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 920),
+              child: _ErrorPanel(message: _error!),
+            ),
+          ),
+        _buildDraftComposer(context),
+      ],
     );
   }
 
@@ -1628,10 +1590,10 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
       radius: AppRadii.control,
       width: double.infinity,
       onTap: _submitting ? null : _toggleAdvanced,
-      padding: const EdgeInsets.fromLTRB(12, 10, 10, 10),
+      padding: const EdgeInsets.fromLTRB(12, 9, 10, 9),
       child: Row(
         children: [
-          Icon(Icons.folder_open_rounded, size: 18, color: colors.accent),
+          Icon(Icons.folder_open_rounded, size: 19, color: colors.accent),
           const SizedBox(width: 10),
           Expanded(
             child: Column(
@@ -1648,75 +1610,85 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
                 ),
                 const SizedBox(height: 2),
                 Text(
-                  _launchSummaryText(),
+                  _draftContextSummary(),
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
-                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                    color: colors.textSecondary,
-                  ),
+                  style: Theme.of(
+                    context,
+                  ).textTheme.bodySmall?.copyWith(color: colors.textSecondary),
                 ),
               ],
             ),
           ),
-          const SizedBox(width: 8),
-          Icon(Icons.tune_rounded, size: 18, color: colors.accent),
+          const SizedBox(width: 6),
+          Icon(
+            Icons.chevron_right_rounded,
+            size: 20,
+            color: colors.textTertiary,
+          ),
         ],
       ),
     );
   }
 
   Widget _buildDraftSettings(BuildContext context) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        _buildPrimaryPanel(context, includeTask: false),
-        const SizedBox(height: 12),
-        _buildAdvancedPanel(context),
-      ],
+    return SingleChildScrollView(
+      padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
+      child: Center(
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 720),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Text(
+                'These settings apply when you send the first message.',
+                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                  color: context.colors.textSecondary,
+                ),
+              ),
+              const SizedBox(height: 16),
+              _buildPrimaryPanel(context, includeTask: false),
+              const SizedBox(height: 12),
+              _buildAdvancedPanel(context, showCollapseControl: false),
+            ],
+          ),
+        ),
+      ),
     );
   }
 
   Widget _buildDraftEmptyState(BuildContext context) {
     final colors = context.colors;
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 24),
-      child: Column(
-        children: [
-          Container(
-            width: 52,
-            height: 52,
-            decoration: BoxDecoration(
-              color: colors.accentMuted,
-              shape: BoxShape.circle,
-              border: Border.all(
-                color: colors.accent.withValues(alpha: 0.25),
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(24, 32, 24, 56),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              Icons.chat_bubble_outline_rounded,
+              color: colors.textTertiary,
+              size: 28,
+            ),
+            const SizedBox(height: 12),
+            Text(
+              'Start a new session',
+              textAlign: TextAlign.center,
+              style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                color: colors.textPrimary,
+                fontWeight: AppWeights.title,
               ),
             ),
-            alignment: Alignment.center,
-            child: Icon(
-              Icons.chat_bubble_outline_rounded,
-              color: colors.accent,
-              size: 24,
+            const SizedBox(height: 5),
+            Text(
+              'Send a message to create it.',
+              textAlign: TextAlign.center,
+              style: Theme.of(
+                context,
+              ).textTheme.bodySmall?.copyWith(color: colors.textSecondary),
             ),
-          ),
-          const SizedBox(height: 14),
-          Text(
-            'What should the agent work on?',
-            textAlign: TextAlign.center,
-            style: Theme.of(context).textTheme.titleMedium?.copyWith(
-              color: colors.textPrimary,
-              fontWeight: AppWeights.title,
-            ),
-          ),
-          const SizedBox(height: 5),
-          Text(
-            'Your first message will create and start the session.',
-            textAlign: TextAlign.center,
-            style: Theme.of(context).textTheme.bodySmall?.copyWith(
-              color: colors.textSecondary,
-            ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
@@ -1727,65 +1699,65 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
         !_submitting &&
         _promptController.text.trim().isNotEmpty &&
         _currentCwd != null;
-    return Container(
-      width: double.infinity,
-      decoration: BoxDecoration(
-        color: colors.canvas,
-        border: Border(top: BorderSide(color: colors.border)),
-      ),
-      padding: const EdgeInsets.fromLTRB(16, 10, 16, 12),
-      child: Center(
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 920),
-          child: MeshSurface(
-            tone: MeshSurfaceTone.elevated,
-            radius: AppRadii.control,
-            padding: const EdgeInsets.fromLTRB(12, 10, 10, 10),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                TextField(
-                  key: const ValueKey('create-session-prompt-field'),
-                  controller: _promptController,
-                  autofocus: true,
-                  minLines: 1,
-                  maxLines: 6,
-                  textCapitalization: TextCapitalization.sentences,
-                  decoration: const InputDecoration(
-                    border: InputBorder.none,
-                    enabledBorder: InputBorder.none,
-                    focusedBorder: InputBorder.none,
-                    filled: false,
-                    hintText: 'Tell the agent what to work on…',
-                    contentPadding: EdgeInsets.symmetric(horizontal: 2),
-                  ),
-                ),
-                const SizedBox(height: 8),
-                Row(
-                  children: [
-                    Expanded(
-                      child: Wrap(
-                        spacing: 7,
-                        runSpacing: 7,
-                        children: _draftComposerPills(),
+    return SafeArea(
+      top: false,
+      child: Container(
+        key: const ValueKey('new-session-composer'),
+        width: double.infinity,
+        decoration: BoxDecoration(
+          color: colors.canvas,
+          border: Border(top: BorderSide(color: colors.border)),
+        ),
+        padding: const EdgeInsets.fromLTRB(14, 6, 14, 8),
+        child: Center(
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 920),
+            child: MeshSurface(
+              tone: MeshSurfaceTone.elevated,
+              radius: AppRadii.control,
+              padding: const EdgeInsets.fromLTRB(14, 5, 6, 5),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.end,
+                children: [
+                  Expanded(
+                    child: TextField(
+                      key: const ValueKey('create-session-prompt-field'),
+                      controller: _promptController,
+                      autofocus: true,
+                      minLines: 1,
+                      maxLines: 5,
+                      textCapitalization: TextCapitalization.sentences,
+                      decoration: const InputDecoration(
+                        border: InputBorder.none,
+                        enabledBorder: InputBorder.none,
+                        focusedBorder: InputBorder.none,
+                        filled: false,
+                        hintText: 'Message the agent',
+                        isDense: true,
+                        contentPadding: EdgeInsets.symmetric(vertical: 10),
                       ),
                     ),
-                    const SizedBox(width: 10),
-                    FilledButton.icon(
-                      key: const ValueKey('create-session-send-button'),
-                      onPressed: canSend ? _submit : null,
-                      icon: _submitting
-                          ? const SizedBox(
-                              width: 16,
-                              height: 16,
-                              child: CircularProgressIndicator(strokeWidth: 2),
-                            )
-                          : const Icon(Icons.arrow_upward_rounded),
-                      label: const Text('Send'),
+                  ),
+                  const SizedBox(width: 8),
+                  FilledButton(
+                    key: const ValueKey('create-session-send-button'),
+                    onPressed: canSend ? _submit : null,
+                    style: FilledButton.styleFrom(
+                      minimumSize: const Size.square(44),
+                      maximumSize: const Size.square(44),
+                      padding: EdgeInsets.zero,
+                      shape: const CircleBorder(),
                     ),
-                  ],
-                ),
-              ],
+                    child: _submitting
+                        ? const SizedBox(
+                            width: 18,
+                            height: 18,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : const Icon(Icons.arrow_upward_rounded),
+                  ),
+                ],
+              ),
             ),
           ),
         ),
@@ -1808,46 +1780,14 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
     Navigator.of(context).pop();
   }
 
-  List<Widget> _draftComposerPills() {
-    return [
-      MeshPill(
-        label: _providerPillLabel,
-        icon: Icons.smart_toy_rounded,
-        tone: MeshPillTone.neutral,
-      ),
-      if (_supportsModels && _supportsModelOverride)
-        MeshPill(
-          label: _modelLabel,
-          icon: Icons.memory_rounded,
-          tone: _selectedModel == null && _inheritedModel == null
-              ? MeshPillTone.neutral
-              : MeshPillTone.accent,
-        ),
-      if (_supportsFastMode && _effectiveFastMode)
-        const MeshPill(
-          label: 'fast',
-          icon: Icons.bolt_rounded,
-          tone: MeshPillTone.warning,
-        ),
-      if (_supportsApprovalPolicy)
-        MeshPill(
-          label: _effectiveApproval.label,
-          icon: Icons.verified_user_rounded,
-          tone: _effectiveApproval == ApprovalPolicy.never
-              ? MeshPillTone.danger
-              : MeshPillTone.neutral,
-        ),
-      if (_supportsSandboxMode)
-        MeshPill(
-          label: _effectiveSandbox.label,
-          icon: _effectiveSandbox == SandboxMode.dangerFullAccess
-              ? Icons.lock_open_rounded
-              : Icons.folder_special_rounded,
-          tone: _effectiveSandbox == SandboxMode.dangerFullAccess
-              ? MeshPillTone.danger
-              : MeshPillTone.neutral,
-        ),
+  String _draftContextSummary() {
+    final parts = <String>[
+      _providerName,
+      if (_supportsModels && _supportsModelOverride) _modelLabel,
+      if (widget.seed?.basedOnCurrentSession ?? false)
+        'Settings copied · New chat',
     ];
+    return parts.join(' · ');
   }
 
   Widget _buildHeader(BuildContext context) {
@@ -1903,10 +1843,7 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
     );
   }
 
-  Widget _buildPrimaryPanel(
-    BuildContext context, {
-    bool includeTask = true,
-  }) {
+  Widget _buildPrimaryPanel(BuildContext context, {bool includeTask = true}) {
     final colors = context.colors;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -2041,7 +1978,10 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
     return parts.join(' · ');
   }
 
-  Widget _buildAdvancedPanel(BuildContext context) {
+  Widget _buildAdvancedPanel(
+    BuildContext context, {
+    bool showCollapseControl = true,
+  }) {
     final effectiveReasoning = _effectiveReasoningEffort;
     String? reasoningDescription;
     for (final option in _supportedReasoningOptions) {
@@ -2063,11 +2003,13 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
             title: 'Session setup',
             subtitle:
                 'Only the options available for $_providerName are shown here.',
-            trailing: IconButton(
-              tooltip: 'Hide advanced',
-              onPressed: _submitting ? null : _toggleAdvanced,
-              icon: const Icon(Icons.expand_less_rounded),
-            ),
+            trailing: showCollapseControl
+                ? IconButton(
+                    tooltip: 'Hide advanced',
+                    onPressed: _submitting ? null : _toggleAdvanced,
+                    icon: const Icon(Icons.expand_less_rounded),
+                  )
+                : null,
           ),
           const SizedBox(height: 14),
           LaunchOptionsForm(
