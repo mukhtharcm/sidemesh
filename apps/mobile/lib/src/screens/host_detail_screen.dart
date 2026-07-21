@@ -2,7 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 
-import '../api_client.dart' show ApiClient, friendlyError;
+import '../api_client.dart' show ApiClient, ApiException, friendlyError;
 import '../app_version_store.dart';
 import '../mobile_client_version_policy.dart';
 import '../models.dart';
@@ -52,7 +52,7 @@ String _releaseTrackLabel(String value) {
 
 String _releaseTrackDetail(String value) {
   return value == 'bleeding-edge'
-      ? 'Early access · newest changes'
+      ? 'Early access · newest CI-verified changes'
       : 'Stable · tagged releases';
 }
 
@@ -792,7 +792,7 @@ class _NodeCard extends StatelessWidget {
               if (node.updateAvailable)
                 MeshPill(
                   label: node.usesBleedingEdgeTrack
-                      ? 'New commits on main'
+                      ? 'Verified Early access update'
                       : 'Update: ${node.latestInstallLabel} available',
                   icon: Icons.system_update_alt_rounded,
                   tone: MeshPillTone.warning,
@@ -2286,10 +2286,17 @@ class _HostManagementCard extends StatefulWidget {
 }
 
 class _HostManagementCardState extends State<_HostManagementCard> {
+  static const Duration _updateStatusPollInterval = Duration(seconds: 2);
+  static const Duration _recentUpdateWindow = Duration(minutes: 10);
+
   bool _updating = false;
   bool _restartingDaemon = false;
   bool _restartingProvider = false;
   bool _savingUpdateChannel = false;
+  bool _pollingUpdateStatus = false;
+  int _updateStatusPollFailures = 0;
+  Timer? _updateStatusTimer;
+  UpdateOperation? _updateOperation;
 
   DateTime? _updateStartedAt;
   String? _updatePreviousVersion;
@@ -2302,6 +2309,9 @@ class _HostManagementCardState extends State<_HostManagementCard> {
   void initState() {
     super.initState();
     _selectedUpdateChannel = widget.node.updateChannel;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) unawaited(_restoreUpdateStatus());
+    });
   }
 
   @override
@@ -2311,6 +2321,22 @@ class _HostManagementCardState extends State<_HostManagementCard> {
         oldWidget.node.updateChannel != widget.node.updateChannel) {
       _selectedUpdateChannel = widget.node.updateChannel;
     }
+    if (oldWidget.host.id != widget.host.id) {
+      _updateStatusTimer?.cancel();
+      _updateStatusTimer = null;
+      _updateStatusPollFailures = 0;
+      _updateOperation = null;
+      _updateStartedAt = null;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) unawaited(_restoreUpdateStatus());
+      });
+    }
+  }
+
+  @override
+  void dispose() {
+    _updateStatusTimer?.cancel();
+    super.dispose();
   }
 
   bool get _supportsRestart => widget.node
@@ -2326,6 +2352,98 @@ class _HostManagementCardState extends State<_HostManagementCard> {
       _selectedUpdateChannel == 'bleeding-edge';
 
   String get _providerDisplayName => widget.node.providerDisplayName;
+
+  Future<void> _restoreUpdateStatus() async {
+    final hostId = widget.host.id;
+    try {
+      final operation = await widget.api.fetchUpdateStatus(widget.host);
+      if (!mounted || widget.host.id != hostId || operation == null) return;
+      final lastChanged =
+          operation.finishedDateTime ?? operation.updatedDateTime;
+      if (!operation.isInProgress &&
+          DateTime.now().difference(lastChanged) > _recentUpdateWindow) {
+        return;
+      }
+      _applyUpdateOperation(operation);
+    } catch (error) {
+      if (!mounted || widget.host.id != hostId) return;
+      if (_shouldRetryUpdateStatus(error)) {
+        // The app may have reopened during daemon cutover. Retry transient
+        // connection failures long enough to recover the persisted operation.
+        _startUpdateStatusPolling();
+      }
+      // Older daemons return 404. Keep their legacy inference fallback.
+    }
+  }
+
+  void _applyUpdateOperation(UpdateOperation operation) {
+    if (!mounted) return;
+    setState(() {
+      _updateStatusPollFailures = 0;
+      _updateOperation = operation;
+      _updateStartedAt = operation.startedDateTime;
+      _updatePreviousVersion = operation.previousVersion;
+      _updatePreviousCommitSha = operation.previousCommitSha;
+      _updateTargetLabel = _targetUpdateLabelForOperation(operation);
+      _updateChannelAtStart = operation.channel;
+    });
+    if (operation.isInProgress) {
+      _startUpdateStatusPolling();
+    } else {
+      _updateStatusTimer?.cancel();
+      _updateStatusTimer = null;
+    }
+  }
+
+  void _startUpdateStatusPolling() {
+    _updateStatusTimer ??= Timer.periodic(
+      _updateStatusPollInterval,
+      (_) => unawaited(_pollUpdateStatus()),
+    );
+    unawaited(_pollUpdateStatus());
+  }
+
+  Future<void> _pollUpdateStatus() async {
+    if (_pollingUpdateStatus) return;
+    _pollingUpdateStatus = true;
+    final hostId = widget.host.id;
+    try {
+      final operation = await widget.api.fetchUpdateStatus(widget.host);
+      if (!mounted || widget.host.id != hostId) return;
+      if (operation == null) {
+        _updateStatusPollFailures = 0;
+        _updateStatusTimer?.cancel();
+        _updateStatusTimer = null;
+        return;
+      }
+      _applyUpdateOperation(operation);
+      if (operation.isTerminal) {
+        try {
+          await widget.onRefresh();
+        } catch (_) {
+          // The persisted operation is authoritative even if node refresh fails.
+        }
+      }
+    } catch (error) {
+      if (!mounted || widget.host.id != hostId) return;
+      if (_updateOperation == null) {
+        _updateStatusPollFailures += 1;
+      }
+      if (!_shouldRetryUpdateStatus(error) || _updateStatusPollFailures >= 30) {
+        _updateStatusTimer?.cancel();
+        _updateStatusTimer = null;
+      }
+      // Connection failures are expected while the daemon switches releases.
+      // Once an operation is known, keep polling until its terminal result.
+    } finally {
+      _pollingUpdateStatus = false;
+    }
+  }
+
+  bool _shouldRetryUpdateStatus(Object error) {
+    if (error is! ApiException) return true;
+    return const {408, 429, 500, 502, 503, 504}.contains(error.statusCode);
+  }
 
   Future<void> _restartProvider() async {
     if (_restartingProvider) return;
@@ -2371,7 +2489,7 @@ class _HostManagementCardState extends State<_HostManagementCard> {
           icon: Icons.system_update_rounded,
           title: 'Choose release track',
           description:
-              'Stable gets tagged releases. Early access gets the newest changes.',
+              'Stable gets tagged releases. Early access gets the newest CI-verified changes.',
           maxWidth: 560,
           maxHeightFactor: 0.44,
           child: ListView(
@@ -2396,7 +2514,7 @@ class _HostManagementCardState extends State<_HostManagementCard> {
                 radius: AppRadii.control,
                 leading: Icon(Icons.science_rounded, color: colors.accent),
                 title: const Text('Early access'),
-                subtitle: const Text('Newest changes'),
+                subtitle: const Text('Newest CI-verified changes'),
                 trailing: _selectedUpdateChannel == 'bleeding-edge'
                     ? Icon(Icons.check_rounded, color: colors.accent)
                     : null,
@@ -2526,18 +2644,22 @@ class _HostManagementCardState extends State<_HostManagementCard> {
 
     setState(() => _updating = true);
     try {
-      await widget.api.updateDaemon(
+      final operation = await widget.api.updateDaemon(
         widget.host,
         updateChannel: _selectedUpdateChannel,
       );
       if (!mounted) return;
-      setState(() {
-        _updateStartedAt = DateTime.now();
-        _updatePreviousVersion = widget.node.packageVersion;
-        _updatePreviousCommitSha = widget.node.currentCommitSha;
-        _updateTargetLabel = _targetUpdateLabel();
-        _updateChannelAtStart = _selectedUpdateChannel;
-      });
+      if (operation != null) {
+        _applyUpdateOperation(operation);
+      } else {
+        setState(() {
+          _updateStartedAt = DateTime.now();
+          _updatePreviousVersion = widget.node.packageVersion;
+          _updatePreviousCommitSha = widget.node.currentCommitSha;
+          _updateTargetLabel = _targetUpdateLabel();
+          _updateChannelAtStart = _selectedUpdateChannel;
+        });
+      }
       showAppSnackBar(context, 'Starting Sidemesh update…');
     } catch (e) {
       if (!mounted) return;
@@ -2570,6 +2692,20 @@ class _HostManagementCardState extends State<_HostManagementCard> {
     final latestVersion = widget.node.latestVersion;
     if (latestVersion != null && latestVersion.isNotEmpty) {
       return 'v$latestVersion';
+    }
+    return 'latest version';
+  }
+
+  String _targetUpdateLabelForOperation(UpdateOperation operation) {
+    if (operation.channel == 'bleeding-edge') {
+      final sha = operation.shortTargetCommitSha;
+      return sha == null
+          ? 'latest verified Early access build'
+          : 'verified Early access build $sha';
+    }
+    final version = operation.targetVersion;
+    if (version != null && version.isNotEmpty) {
+      return 'v${version.replaceFirst(RegExp(r'^v'), '')}';
     }
     return 'latest version';
   }
@@ -2659,9 +2795,16 @@ class _HostManagementCardState extends State<_HostManagementCard> {
                   updateChannel:
                       _updateChannelAtStart ?? widget.node.updateChannel,
                   currentNode: widget.node,
-                  onDismiss: () => setState(() => _updateStartedAt = null),
+                  operation: _updateOperation,
+                  onDismiss: () => setState(() {
+                    _updateOperation = null;
+                    _updateStartedAt = null;
+                  }),
                   onRetry: () {
-                    setState(() => _updateStartedAt = null);
+                    setState(() {
+                      _updateOperation = null;
+                      _updateStartedAt = null;
+                    });
                     unawaited(_updateDaemon());
                   },
                 ),
@@ -2702,8 +2845,14 @@ class _HostManagementCardState extends State<_HostManagementCard> {
                   icon: _updateIcon,
                   label: 'Update Sidemesh',
                   detail: _updateDetail(),
-                  busy: _updating || widget.checkingUpdateInfo,
-                  onTap: isOffline || _updateStartedAt != null
+                  busy:
+                      _updating ||
+                      widget.checkingUpdateInfo ||
+                      (_updateOperation?.isInProgress ?? false),
+                  onTap:
+                      isOffline ||
+                          _updateStartedAt != null ||
+                          (_updateOperation?.isInProgress ?? false)
                       ? null
                       : () => unawaited(_updateDaemon()),
                 ),
@@ -2733,6 +2882,7 @@ class _UpdateProgressBanner extends StatelessWidget {
     required this.previousCommitSha,
     required this.updateChannel,
     required this.currentNode,
+    required this.operation,
     required this.onDismiss,
     required this.onRetry,
   });
@@ -2744,12 +2894,28 @@ class _UpdateProgressBanner extends StatelessWidget {
   final String? previousCommitSha;
   final String updateChannel;
   final NodeInfo currentNode;
+  final UpdateOperation? operation;
   final VoidCallback onDismiss;
   final VoidCallback onRetry;
 
   @override
   Widget build(BuildContext context) {
     final colors = context.colors;
+    final persistedOperation = operation;
+    if (persistedOperation != null) {
+      if (persistedOperation.isSucceeded) {
+        return _buildSuccess(
+          context,
+          colors,
+          _operationSuccessLabel(persistedOperation),
+        );
+      }
+      if (persistedOperation.isFailed) {
+        return _buildOperationFailure(context, colors, persistedOperation);
+      }
+      return _buildOperationProgress(context, colors, persistedOperation);
+    }
+
     final status = HostStatusStore.instance.statusFor(hostId);
     final elapsed = DateTime.now().difference(startedAt);
 
@@ -2789,6 +2955,88 @@ class _UpdateProgressBanner extends StatelessWidget {
       return 'v$version';
     }
     return currentNode.currentInstallLabel;
+  }
+
+  String _operationSuccessLabel(UpdateOperation operation) {
+    if (operation.channel == 'bleeding-edge') {
+      final sha = operation.shortInstalledCommitSha;
+      return sha == null ? 'verified Early access build' : 'Early access $sha';
+    }
+    final version = operation.installedVersion;
+    if (version != null && version.isNotEmpty) {
+      return 'v${version.replaceFirst(RegExp(r'^v'), '')}';
+    }
+    return currentNode.currentInstallLabel;
+  }
+
+  Widget _buildOperationProgress(
+    BuildContext context,
+    AppColors colors,
+    UpdateOperation operation,
+  ) {
+    final (title, subtitle) = switch (operation.phase) {
+      'queued' => ('Update queued…', 'Waiting for the updater to start'),
+      'preflight' => ('Checking update…', 'Validating the installed daemon'),
+      'staging' => (
+        'Installing ${targetLabel ?? 'verified update'}…',
+        'The current daemon stays online during this step',
+      ),
+      'stopping' => ('Preparing cutover…', 'Stopping the previous daemon'),
+      'switching' => ('Switching releases…', 'Updating the service launcher'),
+      'starting' => ('Starting the new release…', 'Reconnecting shortly'),
+      'verifying' => (
+        'Verifying the new release…',
+        'Waiting for a health check',
+      ),
+      'rolling_back' => (
+        'Restoring the previous release…',
+        'The candidate did not pass verification',
+      ),
+      _ => ('Updating Sidemesh…', 'Current phase: ${operation.phase}'),
+    };
+    return _buildRow(
+      context,
+      colors: colors,
+      icon: operation.phase == 'rolling_back'
+          ? Icons.restore_rounded
+          : Icons.update_rounded,
+      iconColor: operation.phase == 'rolling_back'
+          ? colors.warning
+          : colors.accent,
+      title: title,
+      subtitle: subtitle,
+      showSpinner: true,
+    );
+  }
+
+  Widget _buildOperationFailure(
+    BuildContext context,
+    AppColors colors,
+    UpdateOperation operation,
+  ) {
+    final restoredDetail = operation.restored
+        ? 'Previous release restored and healthy.'
+        : 'Automatic restore could not be verified.';
+    final error = operation.error;
+    final subtitle = error == null || error.isEmpty
+        ? '$restoredDetail Tap to try again.'
+        : '$restoredDetail $error Tap to retry.';
+    return InkWell(
+      onTap: onRetry,
+      child: _buildRow(
+        context,
+        colors: colors,
+        icon: operation.restored
+            ? Icons.restore_rounded
+            : Icons.error_outline_rounded,
+        iconColor: operation.restored ? colors.warning : colors.danger,
+        title: operation.restored
+            ? 'Update failed — previous release restored'
+            : 'Update and rollback need attention',
+        subtitle: subtitle,
+        showDismiss: true,
+      ),
+    );
   }
 
   Widget _buildUpdating(BuildContext context, AppColors colors) {

@@ -20,7 +20,11 @@ import type { LaunchdPaths } from "./launchd-service.js";
 import type { ServicePaths } from "./systemd-service.js";
 import type { TermuxServicePaths } from "./termux-service.js";
 import { assertGitCheckoutClean } from "./update-preflight.js";
-import { detectInstallInfo, resolveNpmExecutable } from "./install-info.js";
+import {
+  BLEEDING_EDGE_GIT_REF,
+  detectInstallInfo,
+  resolveNpmExecutable,
+} from "./install-info.js";
 import {
   startDaemon,
   stopDaemon,
@@ -849,7 +853,7 @@ async function stageBleedingEdgeRelease(
 ): Promise<{ packageDir: string; commitSha: string }> {
   await runLoggedCommand(
     "git",
-    ["fetch", "origin", "main"],
+    ["fetch", "origin", BLEEDING_EDGE_GIT_REF],
     options.packageDir,
     options.logPath,
     UPDATE_COMMAND_TIMEOUT_MS,
