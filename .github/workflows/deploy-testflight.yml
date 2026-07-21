@@ -475,15 +475,26 @@ jobs:
           ASC_PRIVATE_KEY_B64: ${{ secrets.ASC_KEY_BASE64 }}
         run: |
           groups_json="$(asc testflight groups list --app "${{ steps.asc_app.outputs.app_id }}" --output json)"
-          internal_groups="$(printf '%s' "$groups_json" | jq -r '[.data[] | select(.attributes.isInternalGroup == true) | .id] | join(",")')"
-          if [[ -z "$internal_groups" ]]; then
+          internal_group_count="$(printf '%s' "$groups_json" | jq '[.data[] | select(.attributes.isInternalGroup == true)] | length')"
+          if (( internal_group_count == 0 )); then
             echo "No internal TestFlight groups found; skipping distribution."
+            exit 0
+          fi
+
+          automatic_group_names="$(printf '%s' "$groups_json" | jq -r '[.data[] | select(.attributes.isInternalGroup == true and .attributes.hasAccessToAllBuilds == true) | .attributes.name] | join(", ")')"
+          if [[ -n "$automatic_group_names" ]]; then
+            echo "Build is automatically available to: $automatic_group_names"
+          fi
+
+          manual_groups="$(printf '%s' "$groups_json" | jq -r '[.data[] | select(.attributes.isInternalGroup == true and .attributes.hasAccessToAllBuilds != true) | .id] | join(",")')"
+          if [[ -z "$manual_groups" ]]; then
+            echo "All internal TestFlight groups have automatic build access; no manual assignment is needed."
             exit 0
           fi
 
           asc builds add-groups \
             --build-id "${{ steps.testflight_build.outputs.build_id }}" \
-            --group "$internal_groups"
+            --group "$manual_groups"
 
       - name: Upload IPA artifact
         uses: actions/upload-artifact@v4
