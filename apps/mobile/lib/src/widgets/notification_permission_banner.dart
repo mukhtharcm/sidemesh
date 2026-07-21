@@ -149,7 +149,7 @@ class _BannerBody extends StatelessWidget {
         ),
         IconButton(
           tooltip: 'Dismiss',
-          constraints: const BoxConstraints.tightFor(width: 40, height: 40),
+          constraints: const BoxConstraints.tightFor(width: 44, height: 44),
           visualDensity: VisualDensity.compact,
           onPressed: onDismiss,
           icon: Icon(Icons.close_rounded, color: colors.textSecondary),
