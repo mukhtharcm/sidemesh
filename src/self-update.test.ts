@@ -384,7 +384,8 @@ describe("runSelfUpdate", () => {
     assert.ok(buildIndex >= 0 && stopIndex > buildIndex);
     assert.ok(commandCalls.some(
       ({ file, args, cwd }) =>
-        file === "git" && args.join(" ") === "fetch origin main" &&
+        file === "git" &&
+        args.join(" ") === "fetch origin refs/heads/bleeding-edge" &&
         cwd === packageDir,
     ));
     assert.equal(commandCalls.some(

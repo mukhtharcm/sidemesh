@@ -17,6 +17,7 @@ import {
 import type { NodeConfig, UpdateChannel } from "./types.js";
 
 const execFileAsync = promisify(execFile);
+export const BLEEDING_EDGE_GIT_REF = "refs/heads/bleeding-edge";
 
 export type InstallType = "git" | "npm-global" | "npm-local" | "unknown";
 
@@ -84,7 +85,7 @@ export async function detectInstallInfo(
       const npmCommand = shellQuote(resolveNpmExecutable());
       updateCommand =
         updateChannel === "bleeding-edge"
-          ? `git fetch origin main && (git checkout main || git checkout -b main --track origin/main) && git merge-base --is-ancestor HEAD FETCH_HEAD && git merge --ff-only FETCH_HEAD && ${npmCommand} ci && ${npmCommand} run build`
+          ? `git fetch origin ${BLEEDING_EDGE_GIT_REF} && git merge-base --is-ancestor HEAD FETCH_HEAD && git merge --ff-only FETCH_HEAD && ${npmCommand} ci && ${npmCommand} run build`
           : `git pull --ff-only && ${npmCommand} ci && ${npmCommand} run build`;
       break;
     }
@@ -180,10 +181,12 @@ async function checkLatestVersion(
         try {
           const { stdout } = await execFileAsync(
             "git",
-            ["ls-remote", "origin", "main"],
+            ["ls-remote", "origin", BLEEDING_EDGE_GIT_REF],
             { cwd: packageRoot, encoding: "utf8", timeout: 10_000 },
           );
-          const match = /^([0-9a-f]{40})\s+refs\/heads\/main$/m.exec(stdout);
+          const match = /^([0-9a-f]{40})\s+refs\/heads\/bleeding-edge$/m.exec(
+            stdout,
+          );
           return {
             latestVersion: null,
             latestCommitSha: match?.[1] ?? null,

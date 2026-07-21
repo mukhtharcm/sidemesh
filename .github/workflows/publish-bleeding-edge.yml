@@ -1,0 +1,74 @@
+name: Publish Bleeding Edge
+
+on:
+  workflow_run:
+    workflows:
+      - CI
+    types:
+      - completed
+
+permissions: {}
+
+concurrency:
+  group: publish-bleeding-edge
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: Advance verified commit
+    if: >-
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'push' &&
+      github.event.workflow_run.head_branch == 'main' &&
+      github.event.workflow_run.head_repository.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout trusted default branch
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Advance Bleeding Edge to the verified commit
+        env:
+          CANDIDATE_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          # workflow_run has a write token, so do not check out or execute code
+          # from CANDIDATE_SHA. This step only advances a Git ref after CI.
+          if [[ ! "$CANDIDATE_SHA" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "Refusing invalid CI commit SHA: $CANDIDATE_SHA" >&2
+            exit 1
+          fi
+
+          git fetch --no-tags origin \
+            +refs/heads/main:refs/remotes/origin/main
+
+          if ! git merge-base --is-ancestor "$CANDIDATE_SHA" origin/main; then
+            echo "Verified commit is not on the current main branch." >&2
+            exit 1
+          fi
+
+          published_sha="$(git ls-remote --heads origin refs/heads/bleeding-edge | awk '{print $1}')"
+          if [[ -n "$published_sha" ]]; then
+            if [[ ! "$published_sha" =~ ^[0-9a-f]{40}$ ]]; then
+              echo "Remote Bleeding Edge ref is invalid: $published_sha" >&2
+              exit 1
+            fi
+            if [[ "$published_sha" == "$CANDIDATE_SHA" ]]; then
+              echo "Bleeding Edge already points to $CANDIDATE_SHA."
+              exit 0
+            fi
+
+            git fetch --no-tags origin \
+              +refs/heads/bleeding-edge:refs/remotes/origin/bleeding-edge
+            if ! git merge-base --is-ancestor "$published_sha" "$CANDIDATE_SHA"; then
+              echo "Skipping an out-of-order CI completion ($CANDIDATE_SHA)."
+              exit 0
+            fi
+          fi
+
+          git push origin "$CANDIDATE_SHA:refs/heads/bleeding-edge"
+          echo "Published CI-verified Bleeding Edge commit $CANDIDATE_SHA."
