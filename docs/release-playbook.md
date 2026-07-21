@@ -172,7 +172,9 @@ Current workflows:
   a later metadata or distribution step fails, rerun it with
   `resume_existing_build` enabled. The
   workflow resolves the exact committed version/build and resumes without
-  rebuilding or uploading another binary.
+  rebuilding or uploading another binary. Internal groups with automatic build
+  access need no explicit assignment; only manual internal groups are attached
+  through the API.
 - `Deploy Website`: deploys the static `web/` marketing site and Pages
   Functions to Cloudflare Pages when `web/**` changes on `main`.
 - `Publish npm Package`: publishes the daemon package to npm on manual dispatch

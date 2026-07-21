@@ -226,6 +226,8 @@ specific agent provider.
   metadata or internal-distribution step fails, rerun `Deploy to TestFlight`
   with `resume_existing_build` enabled. It resolves the exact committed
   pubspec version/build without rebuilding or uploading a duplicate binary.
+  Internal groups whose `hasAccessToAllBuilds` flag is true already receive the
+  build and must not be passed to the manual group-assignment API.
 - **Flutter web**: The browser entry point is `apps/mobile/lib/main_web.dart`.
   Build it with `npm run mobile:web:build`; the hosted client only accepts
   remote daemon URLs over HTTPS/WSS. Browser WebSocket authentication uses the
