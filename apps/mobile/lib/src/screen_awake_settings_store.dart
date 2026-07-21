@@ -2,12 +2,14 @@ import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 class ScreenAwakeSettingsStore extends ChangeNotifier {
-  ScreenAwakeSettingsStore._({String prefsKey = _defaultPrefsKey})
-    : _prefsKey = prefsKey;
+  ScreenAwakeSettingsStore._() : _prefsKey = _defaultPrefsKey;
 
   @visibleForTesting
-  ScreenAwakeSettingsStore.forTesting({String prefsKey = _defaultPrefsKey})
-    : _prefsKey = prefsKey;
+  factory ScreenAwakeSettingsStore.forTesting({
+    String prefsKey = _defaultPrefsKey,
+  }) => ScreenAwakeSettingsStore._withPrefsKey(prefsKey);
+
+  ScreenAwakeSettingsStore._withPrefsKey(this._prefsKey);
 
   static final ScreenAwakeSettingsStore instance = ScreenAwakeSettingsStore._();
 

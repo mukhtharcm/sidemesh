@@ -40,11 +40,12 @@ class _PendingRecentMutation {
 class RecentSessionsStore extends ChangeNotifier {
   static const int _maxSessionsPerHost = 40;
 
-  RecentSessionsStore({
+  factory RecentSessionsStore({
     Duration pollInterval = const Duration(seconds: 90),
     Duration initialHttpFallbackDelay = const Duration(milliseconds: 1600),
-  }) : _pollInterval = pollInterval,
-       _initialHttpFallbackDelay = initialHttpFallbackDelay;
+  }) => RecentSessionsStore._(pollInterval, initialHttpFallbackDelay);
+
+  RecentSessionsStore._(this._pollInterval, this._initialHttpFallbackDelay);
 
   final Duration _pollInterval;
   final Duration _initialHttpFallbackDelay;
