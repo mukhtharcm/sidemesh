@@ -384,7 +384,15 @@ describe("runSelfUpdate", () => {
     assert.ok(buildIndex >= 0 && stopIndex > buildIndex);
     assert.ok(commandCalls.some(
       ({ file, args, cwd }) =>
-        file === "git" && args.join(" ") === "fetch origin main" &&
+        file === "git" &&
+        args.join(" ") === "fetch origin refs/heads/bleeding-edge" &&
+        cwd === packageDir,
+    ));
+    assert.ok(commandCalls.some(
+      ({ file, args, cwd }) =>
+        file === "git" &&
+        args.join(" ") ===
+          `merge-base --is-ancestor ${currentCommitSha} ${targetCommitSha}` &&
         cwd === packageDir,
     ));
     assert.equal(commandCalls.some(
@@ -396,6 +404,105 @@ describe("runSelfUpdate", () => {
     assert.equal(status?.targetCommitSha, targetCommitSha);
     assert.equal(status?.installedCommitSha, targetCommitSha);
     assert.equal(await pathExistsForTest(activeReleaseDir), true);
+  });
+
+  it("rejects a verified target that would downgrade the active release", {
+    skip: process.platform !== "linux",
+  }, async () => {
+    const dir = await mkdtemp(nodePath.join(tmpdir(), "sidemesh-self-update-test-"));
+    const packageDir = nodePath.join(dir, "package");
+    const config = createConfig(dir);
+    const currentCommitSha = "c".repeat(40);
+    const targetCommitSha = "b".repeat(40);
+    let serviceStopped = false;
+
+    await mkdir(packageDir, { recursive: true });
+    const result = await runSelfUpdate(
+      { config, packageDir, managedService: "sidemesh" },
+      {
+        detectInstallInfo: async () => createAtomicGitInstallInfo(
+          packageDir,
+          currentCommitSha,
+          targetCommitSha,
+        ),
+        runCommand: async (file, args) => {
+          if (file === "git" && args[0] === "rev-parse") {
+            return { stdout: `${targetCommitSha}\n`, stderr: "" };
+          }
+          if (file === "git" && args[0] === "merge-base") {
+            throw new Error("not an ancestor");
+          }
+          if (file === "systemctl" && args[0] === "stop") {
+            serviceStopped = true;
+          }
+          return { stdout: "", stderr: "" };
+        },
+        resolveInstalledServicePaths: async (options) => ({
+          serviceName: options.serviceName ?? "sidemesh",
+          packageDir: options.packageDir,
+          nodeBin: options.nodeBin,
+          unitPath: nodePath.join(dir, "sidemesh.service"),
+          envPath: nodePath.join(dir, "sidemesh.env"),
+          launcherPath: nodePath.join(dir, "sidemesh.sh"),
+        }),
+        isSystemdServiceEnabled: async () => true,
+      },
+    );
+
+    assert.equal(result.success, false);
+    assert.equal(result.restored, false);
+    assert.equal(serviceStopped, false);
+    assert.match(result.error ?? "", /non-descendant verified commit/);
+    const status = await readUpdateStatus(config.stateDir);
+    assert.equal(status?.state, "failed");
+    assert.equal(status?.phase, "completed");
+  });
+
+  it("treats an already-active verified commit as a successful no-op", {
+    skip: process.platform !== "linux",
+  }, async () => {
+    const dir = await mkdtemp(nodePath.join(tmpdir(), "sidemesh-self-update-test-"));
+    const packageDir = nodePath.join(dir, "package");
+    const config = createConfig(dir);
+    const currentCommitSha = "d".repeat(40);
+    let serviceStopped = false;
+
+    await mkdir(packageDir, { recursive: true });
+    const result = await runSelfUpdate(
+      { config, packageDir, managedService: "sidemesh" },
+      {
+        detectInstallInfo: async () => createAtomicGitInstallInfo(
+          packageDir,
+          currentCommitSha,
+          currentCommitSha,
+        ),
+        runCommand: async (file, args) => {
+          if (file === "git" && args[0] === "rev-parse") {
+            return { stdout: `${currentCommitSha}\n`, stderr: "" };
+          }
+          if (file === "systemctl" && args[0] === "stop") {
+            serviceStopped = true;
+          }
+          return { stdout: "", stderr: "" };
+        },
+        resolveInstalledServicePaths: async (options) => ({
+          serviceName: options.serviceName ?? "sidemesh",
+          packageDir: options.packageDir,
+          nodeBin: options.nodeBin,
+          unitPath: nodePath.join(dir, "sidemesh.service"),
+          envPath: nodePath.join(dir, "sidemesh.env"),
+          launcherPath: nodePath.join(dir, "sidemesh.sh"),
+        }),
+        isSystemdServiceEnabled: async () => true,
+      },
+    );
+
+    assert.equal(result.success, true);
+    assert.equal(result.newVersion, "0.1.0");
+    assert.equal(serviceStopped, false);
+    const status = await readUpdateStatus(config.stateDir);
+    assert.equal(status?.state, "succeeded");
+    assert.equal(status?.installedCommitSha, currentCommitSha);
   });
 
   it("restores the previous managed release when candidate health fails", {

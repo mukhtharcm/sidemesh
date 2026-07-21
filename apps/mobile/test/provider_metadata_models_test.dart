@@ -76,9 +76,9 @@ void main() {
     expect(node.updateChannel, 'bleeding-edge');
     expect(node.shortCurrentCommitSha, 'a1b2c3d');
     expect(node.shortLatestCommitSha, 'b1c2d3e');
-    expect(node.currentInstallLabel, 'main@a1b2c3d');
-    expect(node.latestInstallLabel, 'main@b1c2d3e');
-    expect(node.updateBadgeLabel, 'New commits on main');
+    expect(node.currentInstallLabel, 'Early access@a1b2c3d');
+    expect(node.latestInstallLabel, 'verified@b1c2d3e');
+    expect(node.updateBadgeLabel, 'Verified update available');
     expect(node.recommendedMobileClientVersion, '1.2.0');
     expect(node.minimumMobileClientVersion, '1.1.0');
     expect(node.advertisesMobileClientVersionHints, isTrue);
@@ -177,51 +177,85 @@ void main() {
     expect(patched.shortCurrentCommitSha, 'a1b2c3d');
     expect(patched.shortLatestCommitSha, 'b1c2d3e');
     expect(patched.updateAvailable, isTrue);
-    expect(patched.updateBadgeLabel, 'New commits on main');
+    expect(patched.updateBadgeLabel, 'Verified update available');
     expect(patched.recommendedMobileClientVersion, '1.2.0');
     expect(patched.minimumMobileClientVersion, '1.0.0');
   });
 
-  test('NodeInfo falls back to providerCapabilities when defaultProviderCapabilities is absent', () {
-    // Regression test for legacy daemon compatibility. Older daemons may
-    // send only providerCapabilities before defaultProviderCapabilities
-    // was introduced. New clients should still work.
-    final node = NodeInfo.fromJson({
-      'label': 'Legacy daemon',
-      'hostname': 'macbook.local',
-      'platform': 'darwin',
-      'codexVersion': 'codex-cli 0.124.0',
-      'provider': 'codex',
-      'providerName': 'Codex',
-      'providerVersion': 'codex-cli 0.124.0',
-      'providerConfig': {'kind': 'codex', 'command': 'codex'},
-      'providerCapabilities': {
-        'sessions': {'create': true, 'searchSessions': true},
-      },
-      'hostCapabilities': {
-        'workspace': {'filesystem': true},
-      },
-      'supportedProviders': [
-        {
-          'kind': 'codex',
-          'displayName': 'Codex',
-          'defaultCommand': 'codex',
-          'capabilities': {
-            'sessions': {'create': true},
-          },
-        },
-      ],
+  test('UpdateOperation parses authoritative updater phases and results', () {
+    final operation = UpdateOperation.fromJson({
+      'id': 'update-1',
+      'state': 'failed',
+      'phase': 'completed',
+      'channel': 'bleeding-edge',
+      'startedAt': 1000,
+      'updatedAt': 2000,
+      'finishedAt': 3000,
+      'previousVersion': '0.2.2',
+      'previousCommitSha': 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+      'targetCommitSha': 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+      'installedVersion': '0.2.2',
+      'installedCommitSha': 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+      'cutoverStarted': true,
+      'restored': true,
+      'error': 'candidate health check failed',
+      'logPath': '/tmp/update.log',
     });
 
-    expect(node.provider, 'codex');
-    expect(node.providerCapabilities.supports('sessions', 'create'), isTrue);
-    expect(
-      node.defaultProviderCapabilities.supports('sessions', 'searchSessions'),
-      isTrue,
-    );
-    expect(node.supportsHostCapability('workspace', 'filesystem'), isTrue);
-    expect(node.supportedProviders, hasLength(1));
+    expect(operation.isTerminal, isTrue);
+    expect(operation.isFailed, isTrue);
+    expect(operation.isInProgress, isFalse);
+    expect(operation.restored, isTrue);
+    expect(operation.cutoverStarted, isTrue);
+    expect(operation.shortTargetCommitSha, 'bbbbbbb');
+    expect(operation.shortInstalledCommitSha, 'aaaaaaa');
+    expect(operation.startedDateTime.millisecondsSinceEpoch, 1000);
+    expect(operation.finishedDateTime?.millisecondsSinceEpoch, 3000);
   });
+
+  test(
+    'NodeInfo falls back to providerCapabilities when defaultProviderCapabilities is absent',
+    () {
+      // Regression test for legacy daemon compatibility. Older daemons may
+      // send only providerCapabilities before defaultProviderCapabilities
+      // was introduced. New clients should still work.
+      final node = NodeInfo.fromJson({
+        'label': 'Legacy daemon',
+        'hostname': 'macbook.local',
+        'platform': 'darwin',
+        'codexVersion': 'codex-cli 0.124.0',
+        'provider': 'codex',
+        'providerName': 'Codex',
+        'providerVersion': 'codex-cli 0.124.0',
+        'providerConfig': {'kind': 'codex', 'command': 'codex'},
+        'providerCapabilities': {
+          'sessions': {'create': true, 'searchSessions': true},
+        },
+        'hostCapabilities': {
+          'workspace': {'filesystem': true},
+        },
+        'supportedProviders': [
+          {
+            'kind': 'codex',
+            'displayName': 'Codex',
+            'defaultCommand': 'codex',
+            'capabilities': {
+              'sessions': {'create': true},
+            },
+          },
+        ],
+      });
+
+      expect(node.provider, 'codex');
+      expect(node.providerCapabilities.supports('sessions', 'create'), isTrue);
+      expect(
+        node.defaultProviderCapabilities.supports('sessions', 'searchSessions'),
+        isTrue,
+      );
+      expect(node.supportsHostCapability('workspace', 'filesystem'), isTrue);
+      expect(node.supportedProviders, hasLength(1));
+    },
+  );
 
   test('ProviderMetadata drops malformed provider entries', () {
     final metadata = ProviderMetadata.fromJson({

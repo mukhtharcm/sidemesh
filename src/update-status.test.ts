@@ -55,8 +55,23 @@ describe("update status persistence", () => {
     assert.equal(running.startedAt, 100);
     assert.equal(running.updatedAt, 200);
     assert.equal(running.phase, "staging");
+    assert.equal(running.cutoverStarted, false);
     assert.deepEqual(await readUpdateStatus(stateDir), running);
     assert.equal((await stat(updateStatusPath(stateDir))).mode & 0o777, 0o600);
+  });
+
+  it("defaults legacy status records to no cutover", async () => {
+    const stateDir = await mkdtemp(nodePath.join(tmpdir(), "sidemesh-update-status-"));
+    const queued = createQueuedUpdateStatus(
+      installInfo("/opt/sidemesh"),
+      "bleeding-edge",
+      { id: "legacy-update", now: 100 },
+    );
+    const legacy = { ...queued } as Partial<typeof queued>;
+    delete legacy.cutoverStarted;
+    await writeFile(updateStatusPath(stateDir), `${JSON.stringify(legacy)}\n`);
+
+    assert.equal((await readUpdateStatus(stateDir))?.cutoverStarted, false);
   });
 
   it("rejects corrupted status files", async () => {

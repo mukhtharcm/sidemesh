@@ -234,14 +234,30 @@ class ApiClient {
     );
   }
 
-  Future<void> updateDaemon(HostProfile host, {String? updateChannel}) async {
-    await _post(
+  Future<UpdateOperation?> updateDaemon(
+    HostProfile host, {
+    String? updateChannel,
+  }) async {
+    final response = await _post(
       host,
       '/api/admin/update',
       body: {if ((updateChannel ?? '').isNotEmpty) 'channel': updateChannel},
       timeout: const Duration(seconds: 15),
       operation: 'update daemon',
     );
+    final decoded = _decodeObject(response);
+    return UpdateOperation.fromJsonValue(decoded['update']);
+  }
+
+  Future<UpdateOperation?> fetchUpdateStatus(HostProfile host) async {
+    final response = await _get(
+      host,
+      '/api/admin/update-status',
+      timeout: _quickReadTimeout,
+      operation: 'check update status',
+    );
+    final decoded = _decodeObject(response);
+    return UpdateOperation.fromJsonValue(decoded['update']);
   }
 
   Future<void> setUpdateChannel(HostProfile host, String updateChannel) async {
@@ -1238,7 +1254,8 @@ String? browserHostUrlIssue(String raw) {
   final uri = Uri.tryParse(raw.trim());
   if (uri == null || uri.scheme.toLowerCase() != 'http') return null;
   final hostname = uri.host.toLowerCase();
-  final loopback = hostname == 'localhost' ||
+  final loopback =
+      hostname == 'localhost' ||
       hostname == '127.0.0.1' ||
       hostname == '::1' ||
       hostname.endsWith('.localhost');

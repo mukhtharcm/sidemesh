@@ -111,11 +111,25 @@ hosts.
 ### Managed Bleeding Edge Updates
 
 On a service-managed Git install, the Bleeding Edge channel uses atomic release
-directories instead of mutating the live checkout. The updater fetches and pins
-the target commit, creates a detached worktree under
+directories instead of mutating the live checkout. It targets the rolling
+`refs/heads/bleeding-edge` branch, never unverified `main`. The
+`Publish Bleeding Edge` workflow advances that branch only after the `CI`
+workflow succeeds for a push to this repository's `main` branch. Out-of-order
+workflow completions cannot move it backward.
+
+The publisher is a privileged `workflow_run` workflow. It checks out only the
+trusted default branch and never checks out or executes the candidate commit;
+the candidate SHA is used solely as a validated Git ref target. Keep those
+constraints intact when changing the workflow.
+
+The updater fetches and pins the verified target commit, creates a detached
+worktree under
 `<stateDir>/releases/<commit-sha>`, runs `npm ci` and the production build while
 the old daemon remains online, then switches the service wrapper. It considers
-the update successful only after the new daemon passes its health check.
+the update successful only after the new daemon passes its health check. It
+refuses non-descendant targets before cutover, so the channel cannot downgrade
+or jump to an unrelated release; selecting an already-active target is a safe
+no-op.
 
 If cutover or verification fails, the updater rewrites the wrapper to the
 previous package directory, starts it, and verifies that the previous daemon is
@@ -125,7 +139,9 @@ the active Git checkout; nested worktrees are rejected.
 
 The authenticated `GET /api/admin/update-status` endpoint exposes the latest
 operation and its phase (`staging`, `stopping`, `switching`, `starting`,
-`verifying`, or `rolling_back`). The update status and lock files live in the
+`verifying`, or `rolling_back`). Its `cutoverStarted` and `restored` fields let
+clients distinguish a safe pre-cutover failure from a verified rollback or a
+rollback that needs attention. The update status and lock files live in the
 state directory with private permissions. Stable-channel and unmanaged updates
 continue to use the in-place path and require a clean tracked Git checkout.
 
@@ -133,8 +149,11 @@ continue to use the in-place path and require a clean tracked Git checkout.
 
 Current workflows:
 
-- `CI`: runs server typecheck/tests/build/package dry-run plus focused Flutter
-  tests and analysis on pull requests and `main`.
+- `CI`: runs server typecheck/tests/build/package dry-run plus full Flutter
+  tests, analysis, and web compilation on pull requests and `main`.
+- `Publish Bleeding Edge`: after a successful `CI` push run on this repository's
+  `main`, monotonically advances `refs/heads/bleeding-edge` to that verified
+  commit. It does not execute candidate code with its write token.
 - `Mobile Artifacts`: manual workflow that builds an Android debug APK, a macOS
   debug app, and an iOS simulator app. These are unsigned development artifacts.
 - `Release macOS App`: manual workflow that builds the Flutter macOS app,
