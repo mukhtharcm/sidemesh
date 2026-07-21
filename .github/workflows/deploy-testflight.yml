@@ -2,6 +2,12 @@ name: Deploy to TestFlight
 
 on:
   workflow_dispatch:
+    inputs:
+      resume_existing_build:
+        description: "Resume metadata and internal distribution for the committed version/build without rebuilding or uploading."
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: read
@@ -260,6 +266,7 @@ jobs:
         run: python3 scripts/generate-release-notes.py
 
       - name: Validate TestFlight version/build
+        if: inputs.resume_existing_build != true
         id: resolve_build_number
         env:
           ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
@@ -270,6 +277,7 @@ jobs:
         run: python3 scripts/resolve-build-number.py
 
       - name: Build IPA
+        if: inputs.resume_existing_build != true
         working-directory: apps/mobile
         run: |
           flutter build ipa \
@@ -280,6 +288,7 @@ jobs:
             --export-options-plist=ios/ExportOptions.plist
 
       - name: Upload build to App Store Connect
+        if: inputs.resume_existing_build != true
         id: upload_build
         env:
           ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
@@ -306,10 +315,19 @@ jobs:
             --platform IOS \
             --wait
 
+      - name: Resolve TestFlight build
+        id: testflight_build
+        env:
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_PRIVATE_KEY_B64: ${{ secrets.ASC_KEY_BASE64 }}
+          BUILD_VERSION: ${{ steps.version.outputs.version }}
+          BUILD_NUMBER: ${{ steps.resolve_build_number.outputs.build_number || steps.version.outputs.build_number }}
+        run: |
           build_json="$(asc builds info --app "${{ steps.asc_app.outputs.app_id }}" --version "$BUILD_VERSION" --build-number "$BUILD_NUMBER" --platform IOS --output json)"
           build_id="$(printf '%s' "$build_json" | jq -r '.id // .data.id // empty')"
           if [[ -z "$build_id" ]]; then
-            echo "Could not resolve the uploaded build ID for $BUILD_VERSION ($BUILD_NUMBER)." >&2
+            echo "Could not resolve the TestFlight build ID for $BUILD_VERSION ($BUILD_NUMBER)." >&2
             exit 1
           fi
 
@@ -326,7 +344,16 @@ jobs:
           version_json="$(asc versions list --app "${{ steps.asc_app.outputs.app_id }}" --version "$BUILD_VERSION" --platform IOS --output json)"
           version_id="$(printf '%s' "$version_json" | jq -r '.data[0].id // empty')"
           if [[ -z "$version_id" ]]; then
-            create_json="$(asc versions create --app "${{ steps.asc_app.outputs.app_id }}" --version "$BUILD_VERSION" --platform IOS --output json)"
+            set +e
+            create_json="$(asc versions create --app "${{ steps.asc_app.outputs.app_id }}" --version "$BUILD_VERSION" --platform IOS --output json 2>"$RUNNER_TEMP/asc-version-create-error.log")"
+            create_status=$?
+            set -e
+            if (( create_status != 0 )); then
+              echo "::warning::App Store version $BUILD_VERSION could not be created; continuing with TestFlight distribution."
+              cat "$RUNNER_TEMP/asc-version-create-error.log" >&2
+              echo "version_id=" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
             version_id="$(printf '%s' "$create_json" | jq -r '.id // .data.id // empty')"
             if [[ -z "$version_id" ]]; then
               echo "Could not resolve the App Store version ID for $BUILD_VERSION." >&2
@@ -340,6 +367,7 @@ jobs:
           echo "version_id=$version_id" >> "$GITHUB_OUTPUT"
 
       - name: Attach uploaded build to the App Store version
+        if: steps.asc_version.outputs.version_id != ''
         env:
           ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
           ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
@@ -347,16 +375,17 @@ jobs:
         run: |
           version_json="$(asc versions view --version-id "${{ steps.asc_version.outputs.version_id }}" --include-build --output json)"
           current_build_id="$(printf '%s' "$version_json" | jq -r '.buildId // .data.buildId // .data.attributes.buildId // empty')"
-          if [[ "$current_build_id" == "${{ steps.upload_build.outputs.build_id }}" ]]; then
+          if [[ "$current_build_id" == "${{ steps.testflight_build.outputs.build_id }}" ]]; then
             echo "Uploaded build is already attached to version ${{ steps.version.outputs.version }}."
             exit 0
           fi
 
           asc versions attach-build \
             --version-id "${{ steps.asc_version.outputs.version_id }}" \
-            --build "${{ steps.upload_build.outputs.build_id }}"
+            --build "${{ steps.testflight_build.outputs.build_id }}"
 
       - name: Sync release notes onto the App Store version
+        if: steps.asc_version.outputs.version_id != ''
         env:
           ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
           ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
@@ -440,7 +469,6 @@ jobs:
         run: python3 scripts/set-app-category.py
 
       - name: Add uploaded build to internal TestFlight groups
-        continue-on-error: true
         env:
           ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
           ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
@@ -454,7 +482,7 @@ jobs:
           fi
 
           asc builds add-groups \
-            --build-id "${{ steps.upload_build.outputs.build_id }}" \
+            --build-id "${{ steps.testflight_build.outputs.build_id }}" \
             --group "$internal_groups"
 
       - name: Upload IPA artifact
@@ -478,6 +506,7 @@ jobs:
             echo "- Flavor: prod"
             echo "- App bundle: dev.sidemesh.mobile"
             echo "- Extension bundle: dev.sidemesh.mobile.LiveActivityExtension"
+            echo "- Resumed existing build: ${{ inputs.resume_existing_build }}"
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Clean up signing files
