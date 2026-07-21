@@ -11,17 +11,70 @@ import '../search_query.dart';
 import '../session_local_store.dart';
 import '../session_message_seed_store.dart';
 import '../session_policy_store.dart';
+import '../session_turn_config_store.dart';
 import '../theme/app_colors.dart';
 import '../theme/color_contrast.dart';
 import '../theme/app_theme.dart';
-import '../widgets/app_snackbar.dart';
 import '../theme/app_tokens.dart';
+import '../widgets/app_dialogs.dart';
+import '../widgets/app_snackbar.dart';
 import '../widgets/app_sheets.dart';
 import '../widgets/launch_controls.dart';
 import '../widgets/launch_options_form.dart';
 import '../widgets/mesh_widgets.dart';
 
-enum CreateSessionPresentation { sheet, dialog }
+enum CreateSessionPresentation { sheet, dialog, page }
+
+@immutable
+class CreateSessionDraftSeed {
+  const CreateSessionDraftSeed({
+    this.provider,
+    this.model,
+    this.mode,
+    this.reasoningEffort,
+    this.fastMode,
+    this.approval,
+    this.sandbox,
+    this.networkAccess,
+    this.basedOnCurrentSession = false,
+  });
+
+  factory CreateSessionDraftSeed.fromSession({
+    required SessionSummary session,
+    required SessionTurnConfig turnConfig,
+    required SessionPolicy policy,
+  }) {
+    final runtime = session.runtime;
+    final runtimeServiceTier = _trimmedOrNull(runtime?.serviceTier);
+    return CreateSessionDraftSeed(
+      provider: session.provider,
+      model: _trimmedOrNull(turnConfig.model) ?? _trimmedOrNull(runtime?.model),
+      mode: _trimmedOrNull(turnConfig.mode) ?? _trimmedOrNull(runtime?.mode),
+      reasoningEffort:
+          _trimmedOrNull(turnConfig.reasoningEffort) ??
+          _trimmedOrNull(runtime?.reasoningEffort),
+      fastMode:
+          turnConfig.fastMode ??
+          (runtimeServiceTier == null ? null : runtimeServiceTier == 'fast'),
+      approval:
+          policy.approval ?? ApprovalPolicy.fromWire(runtime?.approvalPolicy),
+      sandbox:
+          policy.sandbox ?? SandboxMode.fromWire(runtime?.sandboxMode),
+      networkAccess: policy.networkAccess ?? runtime?.networkAccess,
+      basedOnCurrentSession: true,
+    );
+  }
+
+  final String? provider;
+  final String? model;
+  final String? mode;
+  final String? reasoningEffort;
+  final bool? fastMode;
+  final ApprovalPolicy? approval;
+  final SandboxMode? sandbox;
+  final bool? networkAccess;
+  final bool basedOnCurrentSession;
+}
 
 String _hostEndpointLabel(String baseUrl) {
   final uri = Uri.tryParse(baseUrl.trim());
@@ -47,34 +100,17 @@ Future<SessionSummary?> showCreateSessionLauncher(
   required HostProfile host,
   required ApiClient api,
   String? initialCwd,
+  CreateSessionDraftSeed? seed,
 }) {
-  final isDialog = MediaQuery.sizeOf(context).width >= 760;
-  if (isDialog) {
-    return showDialog<SessionSummary>(
-      context: context,
-      barrierColor: Colors.black.withValues(alpha: 0.36),
-      builder: (dialogContext) => Dialog(
-        backgroundColor: Colors.transparent,
-        insetPadding: const EdgeInsets.symmetric(horizontal: 40, vertical: 40),
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 920, maxHeight: 820),
-          child: CreateSessionSheet(
-            host: host,
-            api: api,
-            initialCwd: initialCwd,
-            presentation: CreateSessionPresentation.dialog,
-          ),
-        ),
+  return Navigator.of(context).push<SessionSummary>(
+    MaterialPageRoute<SessionSummary>(
+      builder: (routeContext) => CreateSessionSheet(
+        host: host,
+        api: api,
+        initialCwd: initialCwd,
+        seed: seed,
+        presentation: CreateSessionPresentation.page,
       ),
-    );
-  }
-  return showModalBottomSheet<SessionSummary>(
-    context: context,
-    isScrollControlled: true,
-    backgroundColor: Colors.transparent,
-    builder: (sheetContext) => FractionallySizedBox(
-      heightFactor: 0.94,
-      child: CreateSessionSheet(host: host, api: api, initialCwd: initialCwd),
     ),
   );
 }
@@ -266,12 +302,14 @@ class CreateSessionSheet extends StatefulWidget {
     required this.host,
     required this.api,
     this.initialCwd,
+    this.seed,
     this.presentation = CreateSessionPresentation.sheet,
   });
 
   final HostProfile host;
   final ApiClient api;
   final String? initialCwd;
+  final CreateSessionDraftSeed? seed;
   final CreateSessionPresentation presentation;
 
   @override
@@ -301,6 +339,7 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
   bool _providerModesUseFallback = false;
   bool _fastMode = false;
   bool _webSearch = false;
+  bool _networkAccess = false;
   bool _reasoningTouched = false;
   bool _fastModeTouched = false;
   bool _approvalTouched = false;
@@ -308,6 +347,7 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
   bool _webSearchTouched = false;
   bool _showAdvanced = false;
   bool _submitting = false;
+  bool _allowPop = false;
   bool _loadingNode = false;
   String? _error;
   String? _nodeError;
@@ -318,19 +358,31 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
   String? _providerModesLoadedForProvider;
   String? _profilesLoadedForCwd;
   String? _selectedProviderKind;
+  String? _inheritedModel;
 
   @override
   void initState() {
     super.initState();
     final defaults = CreateSessionDefaultsStore.instance.defaults;
+    final seed = widget.seed;
     _cwdController = TextEditingController(text: widget.initialCwd ?? '');
     _promptController = TextEditingController();
     _profileController = TextEditingController();
-    _approval = defaults.approval;
-    _sandbox = defaults.sandbox;
-    _fastMode = defaults.fastMode;
+    _approval = seed?.approval ?? defaults.approval;
+    _sandbox = seed?.sandbox ?? defaults.sandbox;
+    _fastMode = seed?.fastMode ?? defaults.fastMode;
     _webSearch = defaults.webSearch;
+    _networkAccess = seed?.networkAccess ?? false;
+    _selectedProviderKind = _trimmedOrNull(seed?.provider);
+    _inheritedModel = _trimmedOrNull(seed?.model);
+    _mode = _trimmedOrNull(seed?.mode);
+    _reasoningEffort = _trimmedOrNull(seed?.reasoningEffort);
+    _reasoningTouched = _reasoningEffort != null;
+    _fastModeTouched = seed?.fastMode != null;
+    _approvalTouched = seed?.approval != null;
+    _sandboxTouched = seed?.sandbox != null;
     _cwdController.addListener(_handleCwdChanged);
+    _promptController.addListener(_handlePromptChanged);
     unawaited(_loadNodeInfo());
   }
 
@@ -339,9 +391,17 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
     _cwdController
       ..removeListener(_handleCwdChanged)
       ..dispose();
-    _promptController.dispose();
+    _promptController
+      ..removeListener(_handlePromptChanged)
+      ..dispose();
     _profileController.dispose();
     super.dispose();
+  }
+
+  void _handlePromptChanged() {
+    if (mounted && widget.presentation == CreateSessionPresentation.page) {
+      setState(() {});
+    }
   }
 
   ModelCatalogEntry? get _defaultModelEntry {
@@ -366,6 +426,7 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
   ModelCatalogEntry? get _controlModel {
     final selected = _selectedModel;
     if (selected != null) return selected;
+    if (_trimmedOrNull(_inheritedModel) != null) return null;
     if (_profileToSubmit != null) return _profileModelEntry;
     return _defaultModelEntry;
   }
@@ -455,6 +516,9 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
 
   bool get _supportsWebSearch => _supports('runtimeControls', 'webSearch');
 
+  bool get _supportsNetworkAccess =>
+      _supports('runtimeControls', 'networkAccess');
+
   bool _supports(String section, String feature) {
     final node = _nodeInfo;
     if (node == null) return true;
@@ -505,6 +569,8 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
   String get _modelLabel {
     final selected = _selectedModel;
     if (selected != null) return selected.displayName;
+    final inheritedModel = _trimmedOrNull(_inheritedModel);
+    if (inheritedModel != null) return inheritedModel;
     final profile = _selectedProfile;
     final profileModel = _trimmedOrNull(profile?.model);
     if (profile != null && profileModel != null) {
@@ -531,6 +597,10 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
     final selected = _selectedModel;
     if (selected != null && selected.description.trim().isNotEmpty) {
       return selected.description.trim();
+    }
+    final inheritedModel = _trimmedOrNull(_inheritedModel);
+    if (inheritedModel != null) {
+      return 'Inherited from the current session.';
     }
     final profile = _selectedProfile;
     final profileModel = _trimmedOrNull(profile?.model);
@@ -597,6 +667,12 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
       return null;
     }
     return _trimmedOrNull(_reasoningEffort);
+  }
+
+  bool? get _networkAccessToSubmit {
+    if (!_supportsNetworkAccess) return null;
+    if (_effectiveSandbox == SandboxMode.dangerFullAccess) return null;
+    return _networkAccess;
   }
 
   String? get _modeToSubmit {
@@ -819,6 +895,9 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
       _webSearch = false;
       _webSearchTouched = false;
     }
+    if (!_supportsNetworkAccess) {
+      _networkAccess = false;
+    }
   }
 
   void _selectProvider(String? providerKind) {
@@ -827,6 +906,7 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
       return;
     }
     _selectedProviderKind = normalized;
+    _inheritedModel = null;
     _selectProfile(null);
     _selectedModel = null;
     _models = const <ModelCatalogEntry>[];
@@ -1015,6 +1095,16 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
             }
           }
           _selectedModel = refreshedSelection;
+        } else {
+          final inheritedModel = _trimmedOrNull(_inheritedModel);
+          if (inheritedModel != null) {
+            for (final entry in models) {
+              if (entry.model == inheritedModel) {
+                _selectedModel = entry;
+                break;
+              }
+            }
+          }
         }
         _coerceCurrentModelOptions();
       });
@@ -1093,6 +1183,7 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
   void _coerceCurrentModelOptions() {
     final model = _controlModel;
     if (model == null) {
+      if (_trimmedOrNull(_inheritedModel) != null) return;
       _reasoningEffort = null;
       _fastMode = false;
       _reasoningTouched = false;
@@ -1129,6 +1220,7 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
         offset: normalized.length,
       );
     }
+    _inheritedModel = null;
     _selectedModel = null;
     _models = const <ModelCatalogEntry>[];
     _modelsError = null;
@@ -1255,6 +1347,7 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
 
     setState(() {
       _selectedModel = result.model;
+      _inheritedModel = result.model?.model;
       final model = _controlModel;
       if (model == null || model.isAutoModel) {
         _reasoningEffort = null;
@@ -1308,12 +1401,15 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
         cwd: cwd,
         prompt: prompt,
         provider: _selectedProviderKindOrDefault,
-        model: _supportsModelOverride ? _selectedModel?.model : null,
+        model: _supportsModelOverride
+            ? _selectedModel?.model ?? _inheritedModel
+            : null,
         mode: _modeToSubmit,
         reasoningEffort: _reasoningToSubmit,
         fastMode: _fastModeToSubmit,
         approvalPolicy: _approvalPolicyToSubmit,
         sandboxMode: _sandboxModeToSubmit,
+        networkAccess: _networkAccessToSubmit,
         webSearch: _webSearchToSubmit,
         profile: _supportsProfiles ? _profileToSubmit : null,
       );
@@ -1332,6 +1428,9 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
         ),
       );
       if (!mounted) return;
+      if (widget.presentation == CreateSessionPresentation.page) {
+        setState(() => _allowPop = true);
+      }
       Navigator.of(context).pop(session);
     } catch (error) {
       if (!mounted) return;
@@ -1344,6 +1443,9 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
 
   @override
   Widget build(BuildContext context) {
+    if (widget.presentation == CreateSessionPresentation.page) {
+      return _buildDraftPage(context);
+    }
     final isDialog = widget.presentation == CreateSessionPresentation.dialog;
     final bottom = isDialog ? 0.0 : MediaQuery.viewInsetsOf(context).bottom;
     final maxHeight = (MediaQuery.sizeOf(context).height - 80)
@@ -1394,6 +1496,358 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
         ),
       ),
     );
+  }
+
+  Widget _buildDraftPage(BuildContext context) {
+    final colors = context.colors;
+    final hasPrompt = _promptController.text.trim().isNotEmpty;
+    final canPop = _allowPop || !hasPrompt;
+    return PopScope<SessionSummary>(
+      canPop: canPop,
+      onPopInvokedWithResult: (didPop, result) {
+        if (!didPop) {
+          unawaited(_confirmDiscardDraft());
+        }
+      },
+      child: Scaffold(
+        backgroundColor: colors.canvas,
+        appBar: AppBar(
+          titleSpacing: 0,
+          title: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Text('New session'),
+              Text(
+                '${widget.host.label} · $_providerName',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                  color: colors.textSecondary,
+                  fontWeight: AppWeights.body,
+                ),
+              ),
+            ],
+          ),
+          actions: [
+            IconButton(
+              key: const ValueKey('new-session-settings-button'),
+              tooltip: _showAdvanced
+                  ? 'Hide session settings'
+                  : 'Session settings',
+              onPressed: _submitting ? null : _toggleAdvanced,
+              icon: Icon(
+                _showAdvanced ? Icons.tune_rounded : Icons.tune_outlined,
+              ),
+            ),
+          ],
+        ),
+        body: SafeArea(
+          top: false,
+          child: Column(
+            children: [
+              Expanded(
+                child: LayoutBuilder(
+                  builder: (context, constraints) {
+                    return SingleChildScrollView(
+                      padding: const EdgeInsets.fromLTRB(16, 14, 16, 20),
+                      child: Center(
+                        child: ConstrainedBox(
+                          constraints: BoxConstraints(
+                            maxWidth: 920,
+                            minHeight: (constraints.maxHeight - 34)
+                                .clamp(0.0, double.infinity)
+                                .toDouble(),
+                          ),
+                          child: Column(
+                            children: [
+                              if (widget.seed?.basedOnCurrentSession ?? false)
+                                _buildInheritedNotice(context),
+                              if (widget.seed?.basedOnCurrentSession ?? false)
+                                const SizedBox(height: 10),
+                              _showAdvanced
+                                  ? _buildDraftSettings(context)
+                                  : _buildDraftContextCard(context),
+                              const SizedBox(height: 32),
+                              _buildDraftEmptyState(context),
+                              const SizedBox(height: 32),
+                            ],
+                          ),
+                        ),
+                      ),
+                    );
+                  },
+                ),
+              ),
+              if (_error != null)
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 0, 16, 10),
+                  child: ConstrainedBox(
+                    constraints: const BoxConstraints(maxWidth: 920),
+                    child: _ErrorPanel(message: _error!),
+                  ),
+                ),
+              _buildDraftComposer(context),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildInheritedNotice(BuildContext context) {
+    final colors = context.colors;
+    return MeshSurface(
+      tone: MeshSurfaceTone.muted,
+      radius: AppRadii.control,
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
+      child: Row(
+        children: [
+          Icon(Icons.call_split_rounded, size: 17, color: colors.accent),
+          const SizedBox(width: 9),
+          Expanded(
+            child: Text(
+              'Based on the current session. Conversation history is not copied.',
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                color: colors.textSecondary,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildDraftContextCard(BuildContext context) {
+    final colors = context.colors;
+    final cwd = _currentCwd ?? 'Choose a folder';
+    return MeshSurface(
+      key: const ValueKey('new-session-context-card'),
+      tone: MeshSurfaceTone.muted,
+      radius: AppRadii.control,
+      width: double.infinity,
+      onTap: _submitting ? null : _toggleAdvanced,
+      padding: const EdgeInsets.fromLTRB(12, 10, 10, 10),
+      child: Row(
+        children: [
+          Icon(Icons.folder_open_rounded, size: 18, color: colors.accent),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  cwd,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                    color: colors.textPrimary,
+                    fontWeight: AppWeights.emphasis,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  _launchSummaryText(),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: colors.textSecondary,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 8),
+          Icon(Icons.tune_rounded, size: 18, color: colors.accent),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildDraftSettings(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        _buildPrimaryPanel(context, includeTask: false),
+        const SizedBox(height: 12),
+        _buildAdvancedPanel(context),
+      ],
+    );
+  }
+
+  Widget _buildDraftEmptyState(BuildContext context) {
+    final colors = context.colors;
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 24),
+      child: Column(
+        children: [
+          Container(
+            width: 52,
+            height: 52,
+            decoration: BoxDecoration(
+              color: colors.accentMuted,
+              shape: BoxShape.circle,
+              border: Border.all(
+                color: colors.accent.withValues(alpha: 0.25),
+              ),
+            ),
+            alignment: Alignment.center,
+            child: Icon(
+              Icons.chat_bubble_outline_rounded,
+              color: colors.accent,
+              size: 24,
+            ),
+          ),
+          const SizedBox(height: 14),
+          Text(
+            'What should the agent work on?',
+            textAlign: TextAlign.center,
+            style: Theme.of(context).textTheme.titleMedium?.copyWith(
+              color: colors.textPrimary,
+              fontWeight: AppWeights.title,
+            ),
+          ),
+          const SizedBox(height: 5),
+          Text(
+            'Your first message will create and start the session.',
+            textAlign: TextAlign.center,
+            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+              color: colors.textSecondary,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildDraftComposer(BuildContext context) {
+    final colors = context.colors;
+    final canSend =
+        !_submitting &&
+        _promptController.text.trim().isNotEmpty &&
+        _currentCwd != null;
+    return Container(
+      width: double.infinity,
+      decoration: BoxDecoration(
+        color: colors.canvas,
+        border: Border(top: BorderSide(color: colors.border)),
+      ),
+      padding: const EdgeInsets.fromLTRB(16, 10, 16, 12),
+      child: Center(
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 920),
+          child: MeshSurface(
+            tone: MeshSurfaceTone.elevated,
+            radius: AppRadii.control,
+            padding: const EdgeInsets.fromLTRB(12, 10, 10, 10),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                TextField(
+                  key: const ValueKey('create-session-prompt-field'),
+                  controller: _promptController,
+                  autofocus: true,
+                  minLines: 1,
+                  maxLines: 6,
+                  textCapitalization: TextCapitalization.sentences,
+                  decoration: const InputDecoration(
+                    border: InputBorder.none,
+                    enabledBorder: InputBorder.none,
+                    focusedBorder: InputBorder.none,
+                    filled: false,
+                    hintText: 'Tell the agent what to work on…',
+                    contentPadding: EdgeInsets.symmetric(horizontal: 2),
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Row(
+                  children: [
+                    Expanded(
+                      child: Wrap(
+                        spacing: 7,
+                        runSpacing: 7,
+                        children: _draftComposerPills(),
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    FilledButton.icon(
+                      key: const ValueKey('create-session-send-button'),
+                      onPressed: canSend ? _submit : null,
+                      icon: _submitting
+                          ? const SizedBox(
+                              width: 16,
+                              height: 16,
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            )
+                          : const Icon(Icons.arrow_upward_rounded),
+                      label: const Text('Send'),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _confirmDiscardDraft() async {
+    if (_submitting) return;
+    final confirmed = await showMeshConfirmDialog(
+      context,
+      icon: Icons.delete_outline_rounded,
+      title: 'Discard new session?',
+      description: 'Your unsent message will be lost.',
+      confirmLabel: 'Discard',
+      danger: true,
+    );
+    if (!mounted || !confirmed) return;
+    setState(() => _allowPop = true);
+    Navigator.of(context).pop();
+  }
+
+  List<Widget> _draftComposerPills() {
+    return [
+      MeshPill(
+        label: _providerPillLabel,
+        icon: Icons.smart_toy_rounded,
+        tone: MeshPillTone.neutral,
+      ),
+      if (_supportsModels && _supportsModelOverride)
+        MeshPill(
+          label: _modelLabel,
+          icon: Icons.memory_rounded,
+          tone: _selectedModel == null && _inheritedModel == null
+              ? MeshPillTone.neutral
+              : MeshPillTone.accent,
+        ),
+      if (_supportsFastMode && _effectiveFastMode)
+        const MeshPill(
+          label: 'fast',
+          icon: Icons.bolt_rounded,
+          tone: MeshPillTone.warning,
+        ),
+      if (_supportsApprovalPolicy)
+        MeshPill(
+          label: _effectiveApproval.label,
+          icon: Icons.verified_user_rounded,
+          tone: _effectiveApproval == ApprovalPolicy.never
+              ? MeshPillTone.danger
+              : MeshPillTone.neutral,
+        ),
+      if (_supportsSandboxMode)
+        MeshPill(
+          label: _effectiveSandbox.label,
+          icon: _effectiveSandbox == SandboxMode.dangerFullAccess
+              ? Icons.lock_open_rounded
+              : Icons.folder_special_rounded,
+          tone: _effectiveSandbox == SandboxMode.dangerFullAccess
+              ? MeshPillTone.danger
+              : MeshPillTone.neutral,
+        ),
+    ];
   }
 
   Widget _buildHeader(BuildContext context) {
@@ -1449,7 +1903,10 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
     );
   }
 
-  Widget _buildPrimaryPanel(BuildContext context) {
+  Widget _buildPrimaryPanel(
+    BuildContext context, {
+    bool includeTask = true,
+  }) {
     final colors = context.colors;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -1500,27 +1957,29 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
             ),
           ),
         ),
-        const SizedBox(height: 10),
-        LaunchFieldFrame(
-          icon: Icons.keyboard_command_key_rounded,
-          label: 'Task',
-          alignTop: true,
-          child: TextField(
-            key: const ValueKey('create-session-prompt-field'),
-            controller: _promptController,
-            minLines: 5,
-            maxLines: 10,
-            decoration: const InputDecoration(
-              border: InputBorder.none,
-              enabledBorder: InputBorder.none,
-              focusedBorder: InputBorder.none,
-              filled: false,
-              isDense: true,
-              hintText: 'Tell the agent what to work on...',
-              contentPadding: EdgeInsets.zero,
+        if (includeTask) ...[
+          const SizedBox(height: 10),
+          LaunchFieldFrame(
+            icon: Icons.keyboard_command_key_rounded,
+            label: 'Task',
+            alignTop: true,
+            child: TextField(
+              key: const ValueKey('create-session-prompt-field'),
+              controller: _promptController,
+              minLines: 5,
+              maxLines: 10,
+              decoration: const InputDecoration(
+                border: InputBorder.none,
+                enabledBorder: InputBorder.none,
+                focusedBorder: InputBorder.none,
+                filled: false,
+                isDense: true,
+                hintText: 'Tell the agent what to work on...',
+                contentPadding: EdgeInsets.zero,
+              ),
             ),
           ),
-        ),
+        ],
       ],
     );
   }
@@ -1573,6 +2032,10 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
       if (_supportsModels && _supportsModelOverride) _modelLabel,
       if (_supportsApprovalPolicy) _effectiveApproval.label,
       if (_supportsSandboxMode) _effectiveSandbox.label,
+      if (_supportsNetworkAccess &&
+          _networkAccess &&
+          _effectiveSandbox != SandboxMode.dangerFullAccess)
+        'network',
       if (_supportsWebSearch && _effectiveWebSearch) 'web search',
     ];
     return parts.join(' · ');
@@ -1614,6 +2077,9 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
               supportsSandboxMode: _supportsSandboxMode,
               supportsFastMode: false,
               supportsWebSearch: _supportsWebSearch,
+              supportsNetworkAccess:
+                  _supportsNetworkAccess &&
+                  _effectiveSandbox != SandboxMode.dangerFullAccess,
               supportsSessionMode: _supportsMode,
               approvalOptions: _approvalOptions,
             ),
@@ -1623,6 +2089,7 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
               sandbox: _effectiveSandbox,
               fastMode: _effectiveFastMode,
               webSearch: _effectiveWebSearch,
+              networkAccess: _networkAccess,
               sessionMode: _modeToSubmit,
             ),
             onApprovalChanged: (policy) => setState(() {
@@ -1636,6 +2103,9 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
             onWebSearchChanged: (next) => setState(() {
               _webSearch = next;
               _webSearchTouched = true;
+            }),
+            onNetworkAccessChanged: (next) => setState(() {
+              _networkAccess = next;
             }),
             onSessionModeChanged: (mode) => setState(() {
               _mode = mode;
@@ -1929,7 +2399,7 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
         MeshPill(
           label: _modelLabel,
           icon: Icons.memory_rounded,
-          tone: _selectedModel == null
+          tone: _selectedModel == null && _inheritedModel == null
               ? MeshPillTone.neutral
               : MeshPillTone.accent,
         ),
@@ -1967,6 +2437,14 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
         const MeshPill(
           label: 'web search',
           icon: Icons.public_rounded,
+          tone: MeshPillTone.info,
+        ),
+      if (_supportsNetworkAccess &&
+          _networkAccess &&
+          _effectiveSandbox != SandboxMode.dangerFullAccess)
+        const MeshPill(
+          label: 'network',
+          icon: Icons.wifi_rounded,
           tone: MeshPillTone.info,
         ),
     ];
