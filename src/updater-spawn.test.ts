@@ -72,6 +72,7 @@ describe("spawnSelfUpdater", () => {
     const config = createConfig("/tmp/sidemesh-updater");
     const packageDir = "/opt/sidemesh";
     const calls: string[][] = [];
+    let preflightCalls = 0;
 
     const runOnce = async (now: number) => {
       await spawnSelfUpdater(
@@ -82,7 +83,12 @@ describe("spawnSelfUpdater", () => {
           now: () => now,
           detectInstallInfo: async () =>
             createInstallInfo(packageDir, { managedService: true }),
-          execFile: async (_file, args) => {
+          execFile: async (file, args) => {
+            if (file === "git") {
+              preflightCalls += 1;
+              return { stdout: "", stderr: "" };
+            }
+            assert.equal(file, "systemd-run");
             calls.push(args);
             return { stdout: "", stderr: "" };
           },
@@ -96,6 +102,7 @@ describe("spawnSelfUpdater", () => {
     await runOnce(1001);
     await runOnce(1002);
 
+    assert.equal(preflightCalls, 2);
     assert.equal(calls.length, 2);
     assert.match(calls[0]![0]!, /^--unit=sidemesh-self-update-/);
     assert.match(calls[1]![0]!, /^--unit=sidemesh-self-update-/);
@@ -119,7 +126,10 @@ describe("spawnSelfUpdater", () => {
             platform: "linux",
             detectInstallInfo: async () =>
               createInstallInfo("/opt/sidemesh", { managedService: true }),
-            execFile: async () => {
+            execFile: async (file) => {
+              if (file === "git") {
+                return { stdout: "", stderr: "" };
+              }
               throw new Error("Unit sidemesh-self-update.service already exists");
             },
             spawnDetached: () => {
@@ -145,7 +155,10 @@ describe("spawnSelfUpdater", () => {
         platform: "linux",
         detectInstallInfo: async () =>
           createInstallInfo("/opt/sidemesh", { managedService: false }),
-        execFile: async () => {
+        execFile: async (file) => {
+          if (file === "git") {
+            return { stdout: "", stderr: "" };
+          }
           throw new Error("systemd-run should not be called");
         },
         spawnDetached: (file, args, env) => {
@@ -184,7 +197,10 @@ describe("spawnSelfUpdater", () => {
           platform: "linux",
           detectInstallInfo: async () =>
             createInstallInfo("/opt/sidemesh", { managedService: true }),
-          execFile: async () => {
+          execFile: async (file) => {
+            if (file === "git") {
+              return { stdout: "", stderr: "" };
+            }
             throw new Error("systemd-run should not be called for Termux");
           },
           spawnDetached: (_file, args) => {
@@ -211,5 +227,41 @@ describe("spawnSelfUpdater", () => {
       "sidemesh",
       "--yes",
     ]);
+  });
+
+  it("rejects dirty git installs before spawning an updater", async () => {
+    const config = createConfig("/tmp/sidemesh-updater");
+    let systemdRunCalls = 0;
+    let detachedCalls = 0;
+
+    await assert.rejects(
+      () =>
+        spawnSelfUpdater(
+          config,
+          { updateChannel: "bleeding-edge" },
+          {
+            platform: "linux",
+            detectInstallInfo: async () =>
+              createInstallInfo("/opt/sidemesh", { managedService: true }),
+            execFile: async (file) => {
+              if (file === "git") {
+                return {
+                  stdout: " M package-lock.json\n",
+                  stderr: "",
+                };
+              }
+              systemdRunCalls += 1;
+              return { stdout: "", stderr: "" };
+            },
+            spawnDetached: () => {
+              detachedCalls += 1;
+            },
+          },
+        ),
+      /Git update blocked by tracked local changes: package-lock\.json/,
+    );
+
+    assert.equal(systemdRunCalls, 0);
+    assert.equal(detachedCalls, 0);
   });
 });

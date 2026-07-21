@@ -2631,11 +2631,7 @@ describe("POST /api/admin/update", () => {
       config: NodeConfig;
       options: { updateChannel?: NodeConfig["updateChannel"] | null };
     }> = [];
-    let exitCode: number | null = null;
-    let resolveExit: (() => void) | null = null;
-    const exited = new Promise<void>((resolve) => {
-      resolveExit = resolve;
-    });
+    let exitCalls = 0;
 
     const server = await startServer(config, undefined, {
       detectInstallInfo: async (packageRootOrOptions = {}) => {
@@ -2654,8 +2650,8 @@ describe("POST /api/admin/update", () => {
         spawnedCalls.push({ config: spawnConfig, options });
       },
       exitProcess: (code = 0) => {
-        exitCode = code;
-        resolveExit?.();
+        assert.equal(code, 0);
+        exitCalls += 1;
         return undefined as never;
       },
     });
@@ -2676,16 +2672,6 @@ describe("POST /api/admin/update", () => {
       assert.equal(res.statusCode, 200);
       assert.deepEqual(res.body, { ok: true, message: "daemon is updating" });
 
-      await Promise.race([
-        exited,
-        new Promise<never>((_, reject) =>
-          setTimeout(
-            () => reject(new Error("timed out waiting for updater spawn")),
-            2_000,
-          ),
-        ),
-      ]);
-
       assert.deepEqual(detectedChannels, ["stable", "bleeding-edge"]);
       assert.equal(spawnedCalls.length, 1);
       assert.equal(spawnedCalls[0]?.config.updateChannel, "bleeding-edge");
@@ -2696,11 +2682,9 @@ describe("POST /api/admin/update", () => {
         await readFile(config.configPath, "utf8"),
       ) as { updateChannel?: string };
       assert.equal(persisted.updateChannel, "bleeding-edge");
-      assert.equal(exitCode, 0);
+      assert.equal(exitCalls, 0);
     } finally {
-      if (exitCode === null) {
-        await server.close();
-      }
+      await server.close();
       await rm(stateDir, { recursive: true, force: true });
     }
   });

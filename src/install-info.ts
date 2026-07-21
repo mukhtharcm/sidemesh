@@ -84,8 +84,8 @@ export async function detectInstallInfo(
       const npmCommand = shellQuote(resolveNpmExecutable());
       updateCommand =
         updateChannel === "bleeding-edge"
-          ? `(git checkout main || git checkout -b main --track origin/main) && git pull origin main && ${npmCommand} install && ${npmCommand} run build`
-          : `git pull && ${npmCommand} install && ${npmCommand} run build`;
+          ? `git fetch origin main && (git checkout main || git checkout -b main --track origin/main) && git merge-base --is-ancestor HEAD FETCH_HEAD && git merge --ff-only FETCH_HEAD && ${npmCommand} ci && ${npmCommand} run build`
+          : `git pull --ff-only && ${npmCommand} ci && ${npmCommand} run build`;
       break;
     }
     case "npm-global": {

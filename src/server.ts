@@ -1661,14 +1661,6 @@ export async function startServer(
       });
 
       response.json({ ok: true, message: "daemon is updating" });
-
-      setTimeout(async () => {
-        try {
-          await runningServerRef!.close();
-        } finally {
-          dependencies.exitProcess(0);
-        }
-      }, 100);
     }),
   );
 
