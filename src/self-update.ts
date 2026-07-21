@@ -11,6 +11,7 @@ import { isTermuxEnvironment } from "./host-environment.js";
 import type { LaunchdPaths } from "./launchd-service.js";
 import type { ServicePaths } from "./systemd-service.js";
 import type { TermuxServicePaths } from "./termux-service.js";
+import { assertGitCheckoutClean } from "./update-preflight.js";
 import { detectInstallInfo } from "./install-info.js";
 import {
   startDaemon,
@@ -41,6 +42,7 @@ import {
 } from "./termux-service.js";
 
 const execFileAsync = promisify(execFile);
+const UPDATE_COMMAND_TIMEOUT_MS = 10 * 60_000;
 
 export interface SelfUpdateOptions {
   config: NodeConfig;
@@ -191,6 +193,23 @@ export async function runSelfUpdate(
         logPath,
         error: `Update not supported for install type: ${info.installType}`,
       };
+    }
+
+    if (info.installType === "git" && !dryRun) {
+      try {
+        await assertGitCheckoutClean(packageDir, dependencies.runCommand);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        await appendLog(logPath, `[self-update] ERROR: ${message}`);
+        return {
+          success: false,
+          oldVersion,
+          newVersion: null,
+          restored: false,
+          logPath,
+          error: message,
+        };
+      }
     }
 
     const managedServiceInstalled = managedService
@@ -446,7 +465,12 @@ async function runUpdateCommand(
   if (!info.updateCommand) {
     return;
   }
-  await runShellCommand(info.updateCommand, packageDir, logPath, 120_000);
+  await runShellCommand(
+    info.updateCommand,
+    packageDir,
+    logPath,
+    UPDATE_COMMAND_TIMEOUT_MS,
+  );
 }
 
 async function runShellCommand(
