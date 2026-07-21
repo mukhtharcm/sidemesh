@@ -1,5 +1,12 @@
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
+import {
+  access,
+  mkdir,
+  mkdtemp,
+  readFile,
+  symlink,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import nodePath from "node:path";
 import { describe, it } from "node:test";
@@ -7,6 +14,7 @@ import { describe, it } from "node:test";
 import { detectInstallInfo, type InstallInfo } from "./install-info.js";
 import { runSelfUpdate } from "./self-update.js";
 import type { NodeConfig } from "./types.js";
+import { readUpdateStatus } from "./update-status.js";
 
 function createConfig(dir: string): NodeConfig {
   return {
@@ -67,6 +75,30 @@ function createInstallInfo(
     isManagedService: true,
     serviceName: "sidemesh",
   };
+}
+
+function createAtomicGitInstallInfo(
+  packageRoot: string,
+  currentCommitSha: string,
+  latestCommitSha: string,
+): InstallInfo {
+  return {
+    ...createInstallInfo(packageRoot, "bleeding-edge"),
+    currentCommitSha,
+    latestCommitSha,
+    installType: "git",
+    updateCommand: "unused by atomic updates",
+    restoreCommand: `git checkout ${currentCommitSha}`,
+  };
+}
+
+async function pathExistsForTest(path: string): Promise<boolean> {
+  try {
+    await access(path);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 describe("runSelfUpdate", () => {
@@ -257,6 +289,239 @@ describe("runSelfUpdate", () => {
 
     const log = await readFile(result.logPath, "utf8");
     assert.match(log, /Git update blocked by tracked local changes/);
+  });
+
+  it("stages and builds a bleeding-edge release before atomic cutover", {
+    skip: process.platform !== "linux",
+  }, async () => {
+    const dir = await mkdtemp(nodePath.join(tmpdir(), "sidemesh-self-update-test-"));
+    const packageDir = nodePath.join(dir, "package");
+    const config = createConfig(dir);
+    const currentCommitSha = "a".repeat(40);
+    const targetCommitSha = "b".repeat(40);
+    const activeReleaseDir = nodePath.join(
+      config.stateDir,
+      "releases",
+      currentCommitSha,
+    );
+    const candidateDir = nodePath.join(config.stateDir, "releases", targetCommitSha);
+    const initialInfo = createAtomicGitInstallInfo(
+      packageDir,
+      currentCommitSha,
+      targetCommitSha,
+    );
+    const commandCalls: Array<{ file: string; args: string[]; cwd?: string }> = [];
+    const wrapperPackageDirs: string[] = [];
+
+    await mkdir(activeReleaseDir, { recursive: true });
+    await symlink(activeReleaseDir, packageDir, "dir");
+    const result = await runSelfUpdate(
+      { config, packageDir, managedService: "sidemesh" },
+      {
+        detectInstallInfo: async (packageRootOrOptions = {}) => {
+          const options = typeof packageRootOrOptions === "string"
+            ? { packageRoot: packageRootOrOptions }
+            : packageRootOrOptions;
+          return options.packageRoot === candidateDir
+            ? {
+                ...initialInfo,
+                packageRoot: candidateDir,
+                packageVersion: "0.2.0",
+                currentCommitSha: targetCommitSha,
+              }
+            : initialInfo;
+        },
+        runCommand: async (file, args, options = {}) => {
+          commandCalls.push({ file, args, cwd: options.cwd });
+          if (file === "git" && args[0] === "rev-parse") {
+            return { stdout: `${targetCommitSha}\n`, stderr: "" };
+          }
+          if (file === "git" && args[0] === "worktree" && args[1] === "add") {
+            await mkdir(candidateDir, { recursive: true });
+          }
+          if (args[0] === "run" && args[1] === "build") {
+            await mkdir(nodePath.join(candidateDir, "dist"), { recursive: true });
+            await writeFile(nodePath.join(candidateDir, "dist", "cli.js"), "built\n");
+          }
+          return { stdout: "", stderr: "" };
+        },
+        resolveInstalledServicePaths: async (options) => ({
+          serviceName: options.serviceName ?? "sidemesh",
+          packageDir: options.packageDir,
+          nodeBin: options.nodeBin,
+          unitPath: nodePath.join(dir, "sidemesh.service"),
+          envPath: nodePath.join(dir, "sidemesh.env"),
+          launcherPath: nodePath.join(dir, "sidemesh.sh"),
+        }),
+        isSystemdServiceEnabled: async () => true,
+        readSystemdUnitLimits: async () => ({ memoryHigh: "2G", memoryMax: null }),
+        isSystemdServiceWrapperStale: async () => false,
+        installSystemdService: async (_config, options) => {
+          wrapperPackageDirs.push(options.packageDir);
+          return {
+            serviceName: options.serviceName ?? "sidemesh",
+            packageDir: options.packageDir,
+            nodeBin: options.nodeBin,
+            unitPath: options.unitPath ?? nodePath.join(dir, "sidemesh.service"),
+            envPath: options.envPath ?? nodePath.join(dir, "sidemesh.env"),
+            launcherPath: options.launcherPath ?? nodePath.join(dir, "sidemesh.sh"),
+          };
+        },
+        pause: async () => undefined,
+        waitForDaemonHealth: async () => true,
+      },
+    );
+
+    assert.equal(result.success, true);
+    assert.equal(result.newVersion, "0.2.0");
+    assert.deepEqual(wrapperPackageDirs, [candidateDir]);
+    const buildIndex = commandCalls.findIndex(
+      ({ args }) => args[0] === "run" && args[1] === "build",
+    );
+    const stopIndex = commandCalls.findIndex(
+      ({ file, args }) => file === "systemctl" && args[0] === "stop",
+    );
+    assert.ok(buildIndex >= 0 && stopIndex > buildIndex);
+    assert.ok(commandCalls.some(
+      ({ file, args, cwd }) =>
+        file === "git" && args.join(" ") === "fetch origin main" &&
+        cwd === packageDir,
+    ));
+    assert.equal(commandCalls.some(
+      ({ file, args }) => file === "git" && args[0] === "status",
+    ), false);
+    const status = await readUpdateStatus(config.stateDir);
+    assert.equal(status?.state, "succeeded");
+    assert.equal(status?.phase, "completed");
+    assert.equal(status?.targetCommitSha, targetCommitSha);
+    assert.equal(status?.installedCommitSha, targetCommitSha);
+    assert.equal(await pathExistsForTest(activeReleaseDir), true);
+  });
+
+  it("restores the previous managed release when candidate health fails", {
+    skip: process.platform !== "linux",
+  }, async () => {
+    const dir = await mkdtemp(nodePath.join(tmpdir(), "sidemesh-self-update-test-"));
+    const packageDir = nodePath.join(dir, "package");
+    const config = createConfig(dir);
+    const currentCommitSha = "c".repeat(40);
+    const targetCommitSha = "d".repeat(40);
+    const candidateDir = nodePath.join(config.stateDir, "releases", targetCommitSha);
+    const initialInfo = createAtomicGitInstallInfo(
+      packageDir,
+      currentCommitSha,
+      targetCommitSha,
+    );
+    const lifecycleCalls: string[] = [];
+    const wrapperPackageDirs: string[] = [];
+    let healthCalls = 0;
+
+    await mkdir(packageDir, { recursive: true });
+    const result = await runSelfUpdate(
+      { config, packageDir, managedService: "sidemesh" },
+      {
+        detectInstallInfo: async () => initialInfo,
+        runCommand: async (file, args) => {
+          if (file === "git" && args[0] === "rev-parse") {
+            return { stdout: `${targetCommitSha}\n`, stderr: "" };
+          }
+          if (file === "git" && args[0] === "worktree" && args[1] === "add") {
+            await mkdir(candidateDir, { recursive: true });
+          }
+          if (args[0] === "run" && args[1] === "build") {
+            await mkdir(nodePath.join(candidateDir, "dist"), { recursive: true });
+            await writeFile(nodePath.join(candidateDir, "dist", "cli.js"), "built\n");
+          }
+          if (file === "systemctl") {
+            lifecycleCalls.push(args[0] ?? "unknown");
+          }
+          return { stdout: "", stderr: "" };
+        },
+        resolveInstalledServicePaths: async (options) => ({
+          serviceName: options.serviceName ?? "sidemesh",
+          packageDir: options.packageDir,
+          nodeBin: options.nodeBin,
+          unitPath: nodePath.join(dir, "sidemesh.service"),
+          envPath: nodePath.join(dir, "sidemesh.env"),
+          launcherPath: nodePath.join(dir, "sidemesh.sh"),
+        }),
+        isSystemdServiceEnabled: async () => true,
+        readSystemdUnitLimits: async () => ({ memoryHigh: null, memoryMax: null }),
+        isSystemdServiceWrapperStale: async () => false,
+        installSystemdService: async (_config, options) => {
+          wrapperPackageDirs.push(options.packageDir);
+          return {
+            serviceName: options.serviceName ?? "sidemesh",
+            packageDir: options.packageDir,
+            nodeBin: options.nodeBin,
+            unitPath: options.unitPath ?? nodePath.join(dir, "sidemesh.service"),
+            envPath: options.envPath ?? nodePath.join(dir, "sidemesh.env"),
+            launcherPath: options.launcherPath ?? nodePath.join(dir, "sidemesh.sh"),
+          };
+        },
+        pause: async () => undefined,
+        waitForDaemonHealth: async () => {
+          healthCalls += 1;
+          return healthCalls > 1;
+        },
+      },
+    );
+
+    assert.equal(result.success, false);
+    assert.equal(result.restored, true);
+    assert.match(result.error ?? "", /did not become healthy/);
+    assert.deepEqual(wrapperPackageDirs, [candidateDir, packageDir]);
+    assert.deepEqual(lifecycleCalls, ["stop", "start", "stop", "start"]);
+    const status = await readUpdateStatus(config.stateDir);
+    assert.equal(status?.state, "failed");
+    assert.equal(status?.restored, true);
+    assert.equal(status?.installedCommitSha, currentCommitSha);
+    assert.equal(await pathExistsForTest(candidateDir), false);
+  });
+
+  it("refuses to create atomic release worktrees inside the active checkout", {
+    skip: process.platform !== "linux",
+  }, async () => {
+    const dir = await mkdtemp(nodePath.join(tmpdir(), "sidemesh-self-update-test-"));
+    const packageDir = nodePath.join(dir, "package");
+    const config = {
+      ...createConfig(dir),
+      stateDir: nodePath.join(packageDir, "state"),
+    };
+    const currentCommitSha = "e".repeat(40);
+    const targetCommitSha = "f".repeat(40);
+    let commandCalls = 0;
+    await mkdir(packageDir, { recursive: true });
+
+    const result = await runSelfUpdate(
+      { config, packageDir, managedService: "sidemesh" },
+      {
+        detectInstallInfo: async () => createAtomicGitInstallInfo(
+          packageDir,
+          currentCommitSha,
+          targetCommitSha,
+        ),
+        resolveInstalledServicePaths: async (options) => ({
+          serviceName: options.serviceName ?? "sidemesh",
+          packageDir: options.packageDir,
+          nodeBin: options.nodeBin,
+          unitPath: nodePath.join(dir, "sidemesh.service"),
+          envPath: nodePath.join(dir, "sidemesh.env"),
+          launcherPath: nodePath.join(dir, "sidemesh.sh"),
+        }),
+        isSystemdServiceEnabled: async () => true,
+        runCommand: async () => {
+          commandCalls += 1;
+          return { stdout: "", stderr: "" };
+        },
+      },
+    );
+
+    assert.equal(result.success, false);
+    assert.match(result.error ?? "", /outside the active Git checkout/);
+    assert.equal(commandCalls, 0);
+    const status = await readUpdateStatus(config.stateDir);
+    assert.equal(status?.state, "failed");
   });
 
   it("reinstalls a stale managed service wrapper after update", {
