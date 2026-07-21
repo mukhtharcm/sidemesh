@@ -1621,11 +1621,25 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
             ),
           ),
           const SizedBox(width: 6),
-          Icon(
-            Icons.chevron_right_rounded,
-            size: 20,
-            color: colors.textTertiary,
-          ),
+          if (_draftUsesBroadPermissions)
+            Semantics(
+              label: 'Broad permissions are active. Open settings to review.',
+              excludeSemantics: true,
+              child: Tooltip(
+                message: 'Broad permissions are active',
+                child: Icon(
+                  Icons.shield_rounded,
+                  size: 18,
+                  color: colors.danger,
+                ),
+              ),
+            )
+          else
+            Icon(
+              Icons.chevron_right_rounded,
+              size: 20,
+              color: colors.textTertiary,
+            ),
         ],
       ),
     );
@@ -1802,6 +1816,10 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
     ];
     return parts.join(' · ');
   }
+
+  bool get _draftUsesBroadPermissions =>
+      _effectiveApproval == ApprovalPolicy.never ||
+      _effectiveSandbox == SandboxMode.dangerFullAccess;
 
   Widget _buildHeader(BuildContext context) {
     final colors = context.colors;
