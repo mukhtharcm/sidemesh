@@ -265,7 +265,7 @@ ThemeData _buildTheme(
       backgroundColor: palette.surfaceMuted,
       side: BorderSide(color: palette.border),
       labelStyle: textTheme.labelMedium?.copyWith(color: palette.textPrimary),
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(999)),
+      shape: RoundedRectangleBorder(borderRadius: AppShapes.badge),
     ),
   );
 }

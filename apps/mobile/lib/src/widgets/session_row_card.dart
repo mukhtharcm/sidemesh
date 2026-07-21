@@ -48,6 +48,7 @@ class SessionRowCard extends StatelessWidget {
     this.dense = false,
     this.query = '',
     this.showHost = true,
+
     /// When set, replaces the default "host · workspace" secondary line in
     /// the dense sidebar variant. Used by grouped views to show the git
     /// branch name instead of the folder (which is already the group header).
@@ -140,10 +141,10 @@ class SessionRowCard extends StatelessWidget {
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
                               style: theme.textTheme.bodyMedium?.copyWith(
-                                    fontWeight: AppWeights.body,
-                                    height: 1.25,
-                                    color: colors.textPrimary,
-                                  ),
+                                fontWeight: AppWeights.body,
+                                height: 1.25,
+                                color: colors.textPrimary,
+                              ),
                             ),
                           ),
                         ],
@@ -157,9 +158,9 @@ class SessionRowCard extends StatelessWidget {
                               // "host · workspace" line when we're inside a
                               // grouped view (e.g. show branch name instead).
                               secondaryLabel ??
-                              (showHost
-                                  ? '${host.label} · $workspaceLabel'
-                                  : workspaceLabel),
+                                  (showHost
+                                      ? '${host.label} · $workspaceLabel'
+                                      : workspaceLabel),
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
                               style: theme.textTheme.bodySmall?.copyWith(
@@ -243,8 +244,7 @@ class SessionRowCard extends StatelessWidget {
                           ? Icons.star_rounded
                           : Icons.star_outline_rounded,
                       size: 15,
-                      color:
-                          favorite ? colors.warning : colors.textTertiary,
+                      color: favorite ? colors.warning : colors.textTertiary,
                     ),
                   ),
                 ),
@@ -257,11 +257,16 @@ class SessionRowCard extends StatelessWidget {
 
     // ── Mobile / full-width variant ──────────────────────────────────────────
     final statusBadge = _sessionStatusBadge(session);
-    return MeshSurface(
-      onTap: onTap,
-      selected: selected,
-      padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
-      borderColor: selected ? colors.accent : null,
+    final content = AnimatedContainer(
+      duration: AppMotion.quick,
+      curve: AppMotion.standard,
+      padding: const EdgeInsets.fromLTRB(12, 11, 4, 11),
+      decoration: BoxDecoration(
+        color: selected
+            ? colors.accentMuted.withValues(alpha: 0.52)
+            : Colors.transparent,
+        border: Border(bottom: BorderSide(color: colors.border)),
+      ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -379,65 +384,103 @@ class SessionRowCard extends StatelessWidget {
         ],
       ),
     );
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        hoverColor: colors.surfaceMuted.withValues(alpha: 0.62),
+        splashColor: colors.accent.withValues(alpha: 0.08),
+        child: content,
+      ),
+    );
   }
 }
 
 // ── Private helpers ──────────────────────────────────────────────────────────
 
-MeshStatusBadge? _sessionStatusBadge(SessionSummary session) {
+Widget? _sessionStatusBadge(SessionSummary session) {
   final status = session.status;
   return switch (status) {
-    'waiting_for_approval' || 'pendingApproval' => const MeshStatusBadge(
-        label: 'approval',
-        tone: MeshStatusTone.approval,
-        icon: Icons.verified_user_outlined,
-        compact: true,
-      ),
-    'waiting_for_input' => const MeshStatusBadge(
-        label: 'waiting',
-        tone: MeshStatusTone.waiting,
-        icon: Icons.question_answer_outlined,
-        compact: true,
-      ),
-    'queued' => const MeshStatusBadge(
-        label: 'queued',
-        tone: MeshStatusTone.queued,
-        icon: Icons.schedule_rounded,
-        compact: true,
-      ),
-    'blocked' => const MeshStatusBadge(
-        label: 'blocked',
-        tone: MeshStatusTone.waiting,
-        icon: Icons.pause_circle_outline_rounded,
-        compact: true,
-      ),
-    'failed' || 'errored' => const MeshStatusBadge(
-        label: 'failed',
-        tone: MeshStatusTone.danger,
-        icon: Icons.error_outline_rounded,
-        compact: true,
-      ),
-    'stale' => const MeshStatusBadge(
-        label: 'stale',
-        tone: MeshStatusTone.stale,
-        icon: Icons.history_toggle_off_rounded,
-        compact: true,
-      ),
-    'active' || 'running' => const MeshStatusBadge(
-        label: 'running',
-        tone: MeshStatusTone.running,
-        live: true,
-        compact: true,
-      ),
-    _ => session.isActive
-        ? const MeshStatusBadge(
-            label: 'running',
-            tone: MeshStatusTone.running,
-            live: true,
-            compact: true,
-          )
-        : null,
+    'waiting_for_approval' || 'pendingApproval' => const _SessionStatusLabel(
+      label: 'approval',
+      tone: MeshStatusTone.approval,
+      icon: Icons.verified_user_outlined,
+    ),
+    'waiting_for_input' => const _SessionStatusLabel(
+      label: 'waiting',
+      tone: MeshStatusTone.waiting,
+      icon: Icons.question_answer_outlined,
+    ),
+    'queued' => const _SessionStatusLabel(
+      label: 'queued',
+      tone: MeshStatusTone.queued,
+      icon: Icons.schedule_rounded,
+    ),
+    'blocked' => const _SessionStatusLabel(
+      label: 'blocked',
+      tone: MeshStatusTone.waiting,
+      icon: Icons.pause_circle_outline_rounded,
+    ),
+    'failed' || 'errored' => const _SessionStatusLabel(
+      label: 'failed',
+      tone: MeshStatusTone.danger,
+      icon: Icons.error_outline_rounded,
+    ),
+    'stale' => const _SessionStatusLabel(
+      label: 'stale',
+      tone: MeshStatusTone.stale,
+      icon: Icons.history_toggle_off_rounded,
+    ),
+    'active' || 'running' => const _SessionStatusLabel(
+      label: 'running',
+      tone: MeshStatusTone.running,
+      live: true,
+    ),
+    _ =>
+      session.isActive
+          ? const _SessionStatusLabel(
+              label: 'running',
+              tone: MeshStatusTone.running,
+              live: true,
+            )
+          : null,
   };
+}
+
+class _SessionStatusLabel extends StatelessWidget {
+  const _SessionStatusLabel({
+    required this.label,
+    required this.tone,
+    this.icon,
+    this.live = false,
+  });
+
+  final String label;
+  final MeshStatusTone tone;
+  final IconData? icon;
+  final bool live;
+
+  @override
+  Widget build(BuildContext context) {
+    final color = meshStatusBadgeColors(context.colors, tone).foreground;
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        if (live)
+          LivePulse(color: color)
+        else if (icon != null)
+          Icon(icon, size: 13, color: color),
+        const SizedBox(width: AppSpacing.xs),
+        Text(
+          label,
+          style: Theme.of(context).textTheme.labelSmall?.copyWith(
+            color: color,
+            fontWeight: AppWeights.emphasis,
+          ),
+        ),
+      ],
+    );
+  }
 }
 
 class _SubAgentBadge extends StatelessWidget {

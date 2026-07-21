@@ -49,7 +49,7 @@ class MeshPill extends StatelessWidget {
       ),
       decoration: BoxDecoration(
         color: bg,
-        borderRadius: BorderRadius.circular(999),
+        borderRadius: AppShapes.badge,
         border: Border.all(color: border),
       ),
       child: Row(
@@ -184,8 +184,8 @@ class MeshSurface extends StatelessWidget {
     final borderRadius = BorderRadius.circular(radius);
 
     final content = AnimatedContainer(
-      duration: const Duration(milliseconds: 140),
-      curve: Curves.easeOutCubic,
+      duration: AppMotion.quick,
+      curve: AppMotion.standard,
       width: width,
       decoration: BoxDecoration(
         color: bg,
@@ -1326,12 +1326,14 @@ class MeshIconButton extends StatelessWidget {
     this.tooltip,
     this.color,
     this.semanticLabel,
+    this.framed = true,
   });
 
   final IconData icon;
   final VoidCallback onTap;
   final String? tooltip;
   final Color? color;
+  final bool framed;
 
   /// Accessibility label surfaced to screen readers. Defaults to [tooltip].
   final String? semanticLabel;
@@ -1340,22 +1342,29 @@ class MeshIconButton extends StatelessWidget {
   Widget build(BuildContext context) {
     final colors = context.colors;
     final label = semanticLabel ?? tooltip;
-    final button = Semantics(
-      label: label,
-      button: true,
-      child: MeshSurface(
-        onTap: onTap,
-        padding: EdgeInsets.zero,
-        radius: AppRadii.control,
-        child: SizedBox(
-          width: 44,
-          height: 44,
-          child: Center(
-            child: Icon(icon, size: 18, color: color ?? colors.textSecondary),
-          ),
-        ),
+    final content = SizedBox(
+      width: 44,
+      height: 44,
+      child: Center(
+        child: Icon(icon, size: 18, color: color ?? colors.textSecondary),
       ),
     );
+    final interactive = framed
+        ? MeshSurface(
+            onTap: onTap,
+            padding: EdgeInsets.zero,
+            radius: AppRadii.control,
+            child: content,
+          )
+        : Material(
+            color: Colors.transparent,
+            child: InkWell(
+              borderRadius: AppShapes.input,
+              onTap: onTap,
+              child: content,
+            ),
+          );
+    final button = Semantics(label: label, button: true, child: interactive);
     if (tooltip == null) {
       return button;
     }
