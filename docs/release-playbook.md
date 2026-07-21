@@ -165,10 +165,14 @@ Current workflows:
   prod flavor from the committed `apps/mobile/pubspec.yaml` version. It now
   installs `asc` via `rudrankriyam/setup-asc@v1`, resolves the app by bundle
   ID, uploads the IPA with `asc builds upload`, waits for processing, resolves
-  the exact build ID, ensures the matching App Store version exists, attaches
-  that build, syncs release notes, and distributes it to internal TestFlight
-  groups. It is intentionally not tied to tags so server releases do not spend
-  macOS CI minutes.
+  the exact build ID, prepares and attaches a matching App Store version when
+  App Store Connect permits it, syncs release notes, and distributes the build
+  to internal TestFlight groups. It is intentionally not tied to tags so
+  server releases do not spend macOS CI minutes. If Apple accepts a binary but
+  a later metadata or distribution step fails, rerun it with
+  `resume_existing_build` enabled. The
+  workflow resolves the exact committed version/build and resumes without
+  rebuilding or uploading another binary.
 - `Deploy Website`: deploys the static `web/` marketing site and Pages
   Functions to Cloudflare Pages when `web/**` changes on `main`.
 - `Publish npm Package`: publishes the daemon package to npm on manual dispatch
