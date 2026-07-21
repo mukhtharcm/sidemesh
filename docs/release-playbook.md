@@ -162,9 +162,13 @@ Current workflows:
   when `publish_release` is enabled. It uses the committed
   `apps/mobile/pubspec.yaml` version.
 - `Deploy to TestFlight`: manual workflow that builds and uploads the signed iOS
-  prod flavor from the committed `apps/mobile/pubspec.yaml` version. It is
-  intentionally not tied to tags so server releases do not spend macOS CI
-  minutes.
+  prod flavor from the committed `apps/mobile/pubspec.yaml` version. It now
+  installs `asc` via `rudrankriyam/setup-asc@v1`, resolves the app by bundle
+  ID, uploads the IPA with `asc builds upload`, waits for processing, resolves
+  the exact build ID, ensures the matching App Store version exists, attaches
+  that build, syncs release notes, and distributes it to internal TestFlight
+  groups. It is intentionally not tied to tags so server releases do not spend
+  macOS CI minutes.
 - `Deploy Website`: deploys the static `web/` marketing site and Pages
   Functions to Cloudflare Pages when `web/**` changes on `main`.
 - `Publish npm Package`: publishes the daemon package to npm on manual dispatch
@@ -213,7 +217,7 @@ Before running TestFlight or macOS release workflows, bump and commit the mobile
 version in a PR:
 
 ```bash
-npm run mobile:version -- 1.1.1+1
+npm run mobile:version -- 1.2.0+4
 ```
 
 The bump script refuses version downgrades and refuses reused or lower build
@@ -224,7 +228,9 @@ derive app versions from git tags.
 The TestFlight workflow also checks App Store Connect before upload. It fails
 if the committed pubspec version is older than an existing App Store Connect
 version, or if the committed build number is not greater than the latest
-uploaded build for the same version.
+uploaded build for the same version. After the build is signed, the workflow
+uses `asc` with the existing App Store Connect API key secrets instead of
+`xcrun altool` plus repo-local ASC polling/distribution glue.
 
 The macOS workflow checks the existing production Sparkle appcast before
 publishing a new appcast. It refuses to replace the feed with an older version,

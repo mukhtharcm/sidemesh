@@ -8,6 +8,10 @@ permissions:
 
 env:
   FLUTTER_VERSION: "3.44.7"
+  ASC_BUNDLE_ID: "dev.sidemesh.mobile"
+  ASC_BYPASS_KEYCHAIN: "1"
+  ASC_DEFAULT_OUTPUT: "json"
+  ASC_NO_UPDATE: "1"
 
 jobs:
   build-and-deploy:
@@ -18,6 +22,11 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Set up App Store Connect CLI
+        uses: rudrankriyam/setup-asc@v1
+        with:
+          version: 1.4.1
 
       - name: Verify required secrets
         env:
@@ -51,59 +60,27 @@ jobs:
             exit 1
           fi
 
-      - name: Verify App Store Connect app record
+      - name: Resolve App Store Connect app record
+        id: asc_app
         env:
           ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
-          ASC_KEY_BASE64: ${{ secrets.ASC_KEY_BASE64 }}
           ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_PRIVATE_KEY_B64: ${{ secrets.ASC_KEY_BASE64 }}
         run: |
-          node << 'NODE'
-          const crypto = require("crypto");
+          apps_json="$(asc apps list --bundle-id "$ASC_BUNDLE_ID" --output json)"
+          app_count="$(printf '%s' "$apps_json" | jq '.data | length')"
+          if [[ "$app_count" -eq 0 ]]; then
+            echo "No App Store Connect app record exists for $ASC_BUNDLE_ID." >&2
+            echo "Create the app once in App Store Connect, then rerun this workflow." >&2
+            exit 1
+          fi
 
-          const bundleId = "dev.sidemesh.mobile";
-          const keyId = process.env.ASC_KEY_ID;
-          const issuerId = process.env.ASC_ISSUER_ID;
-          const privateKey = Buffer.from(process.env.ASC_KEY_BASE64, "base64").toString("utf8");
+          app_id="$(printf '%s' "$apps_json" | jq -r '.data[0].id')"
+          app_name="$(printf '%s' "$apps_json" | jq -r '.data[0].attributes.name')"
+          app_bundle_id="$(printf '%s' "$apps_json" | jq -r '.data[0].attributes.bundleId')"
 
-          const encode = (value) =>
-            Buffer.from(typeof value === "string" ? value : JSON.stringify(value)).toString("base64url");
-
-          const now = Math.floor(Date.now() / 1000);
-          const header = { alg: "ES256", kid: keyId, typ: "JWT" };
-          const payload = { iss: issuerId, iat: now, exp: now + 1200, aud: "appstoreconnect-v1" };
-          const unsigned = `${encode(header)}.${encode(payload)}`;
-          const signer = crypto.createSign("SHA256");
-          signer.update(unsigned);
-          signer.end();
-          const signature = signer.sign({ key: privateKey, dsaEncoding: "ieee-p1363" }).toString("base64url");
-          const token = `${unsigned}.${signature}`;
-
-          (async () => {
-            const response = await fetch(
-              `https://api.appstoreconnect.apple.com/v1/apps?filter[bundleId]=${encodeURIComponent(bundleId)}`,
-              { headers: { Authorization: `Bearer ${token}` } },
-            );
-            const body = await response.json();
-
-            if (!response.ok) {
-              console.error(`App Store Connect preflight failed: ${response.status} ${response.statusText}`);
-              console.error(JSON.stringify(body, null, 2));
-              process.exit(1);
-            }
-
-            if (!Array.isArray(body.data) || body.data.length === 0) {
-              console.error(`No App Store Connect app record exists for ${bundleId}.`);
-              console.error("Create the app once in App Store Connect, then rerun this workflow.");
-              process.exit(1);
-            }
-
-            const app = body.data[0].attributes;
-            console.log(`Found App Store Connect app record: ${app.name} (${app.bundleId})`);
-          })().catch((error) => {
-            console.error(error);
-            process.exit(1);
-          });
-          NODE
+          echo "app_id=$app_id" >> "$GITHUB_OUTPUT"
+          echo "Resolved App Store Connect app: $app_name ($app_bundle_id, $app_id)"
 
       - name: Select Xcode 26
         uses: maxim-lobanov/setup-xcode@v1
@@ -302,20 +279,123 @@ jobs:
             --build-number="${{ steps.resolve_build_number.outputs.build_number || steps.version.outputs.build_number }}" \
             --export-options-plist=ios/ExportOptions.plist
 
-      - name: Upload to TestFlight
+      - name: Upload build to App Store Connect
+        id: upload_build
         env:
           ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
-          ASC_KEY_BASE64: ${{ secrets.ASC_KEY_BASE64 }}
           ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_PRIVATE_KEY_B64: ${{ secrets.ASC_KEY_BASE64 }}
+          BUILD_VERSION: ${{ steps.version.outputs.version }}
+          BUILD_NUMBER: ${{ steps.resolve_build_number.outputs.build_number || steps.version.outputs.build_number }}
         run: |
-          mkdir -p "$HOME/.private_keys"
-          echo -n "$ASC_KEY_BASE64" | base64 --decode -o "$HOME/.private_keys/AuthKey_${ASC_KEY_ID}.p8"
+          shopt -s nullglob
+          ipa_files=(apps/mobile/build/ios/ipa/*.ipa)
+          if (( ${#ipa_files[@]} != 1 )); then
+            echo "Expected exactly one IPA artifact, found ${#ipa_files[@]}." >&2
+            exit 1
+          fi
 
-          xcrun altool --upload-app \
-            --type ios \
-            --file apps/mobile/build/ios/ipa/*.ipa \
-            --apiKey "$ASC_KEY_ID" \
-            --apiIssuer "$ASC_ISSUER_ID"
+          ipa_path="${ipa_files[0]}"
+          echo "ipa_path=$ipa_path" >> "$GITHUB_OUTPUT"
+
+          asc builds upload \
+            --app "${{ steps.asc_app.outputs.app_id }}" \
+            --ipa "$ipa_path" \
+            --version "$BUILD_VERSION" \
+            --build-number "$BUILD_NUMBER" \
+            --platform IOS \
+            --wait
+
+          build_json="$(asc builds info --app "${{ steps.asc_app.outputs.app_id }}" --version "$BUILD_VERSION" --build-number "$BUILD_NUMBER" --platform IOS --output json)"
+          build_id="$(printf '%s' "$build_json" | jq -r '.id // .data.id // empty')"
+          if [[ -z "$build_id" ]]; then
+            echo "Could not resolve the uploaded build ID for $BUILD_VERSION ($BUILD_NUMBER)." >&2
+            exit 1
+          fi
+
+          echo "build_id=$build_id" >> "$GITHUB_OUTPUT"
+
+      - name: Ensure App Store version exists
+        id: asc_version
+        env:
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_PRIVATE_KEY_B64: ${{ secrets.ASC_KEY_BASE64 }}
+          BUILD_VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          version_json="$(asc versions list --app "${{ steps.asc_app.outputs.app_id }}" --version "$BUILD_VERSION" --platform IOS --output json)"
+          version_id="$(printf '%s' "$version_json" | jq -r '.data[0].id // empty')"
+          if [[ -z "$version_id" ]]; then
+            create_json="$(asc versions create --app "${{ steps.asc_app.outputs.app_id }}" --version "$BUILD_VERSION" --platform IOS --output json)"
+            version_id="$(printf '%s' "$create_json" | jq -r '.id // .data.id // empty')"
+            if [[ -z "$version_id" ]]; then
+              echo "Could not resolve the App Store version ID for $BUILD_VERSION." >&2
+              exit 1
+            fi
+            echo "Created App Store version $BUILD_VERSION ($version_id)"
+          else
+            echo "App Store version $BUILD_VERSION already exists ($version_id)"
+          fi
+
+          echo "version_id=$version_id" >> "$GITHUB_OUTPUT"
+
+      - name: Attach uploaded build to the App Store version
+        env:
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_PRIVATE_KEY_B64: ${{ secrets.ASC_KEY_BASE64 }}
+        run: |
+          version_json="$(asc versions view --version-id "${{ steps.asc_version.outputs.version_id }}" --include-build --output json)"
+          current_build_id="$(printf '%s' "$version_json" | jq -r '.buildId // .data.buildId // .data.attributes.buildId // empty')"
+          if [[ "$current_build_id" == "${{ steps.upload_build.outputs.build_id }}" ]]; then
+            echo "Uploaded build is already attached to version ${{ steps.version.outputs.version }}."
+            exit 0
+          fi
+
+          asc versions attach-build \
+            --version-id "${{ steps.asc_version.outputs.version_id }}" \
+            --build "${{ steps.upload_build.outputs.build_id }}"
+
+      - name: Sync release notes onto the App Store version
+        env:
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_PRIVATE_KEY_B64: ${{ secrets.ASC_KEY_BASE64 }}
+        run: |
+          if [[ ! -s release-notes.txt ]]; then
+            echo "No release-notes.txt generated; skipping What's New sync."
+            exit 0
+          fi
+
+          release_notes="$(cat release-notes.txt)"
+          version_locale_json="$(asc localizations list --version "${{ steps.asc_version.outputs.version_id }}" --output json)"
+          version_locale="$(printf '%s' "$version_locale_json" | jq -r '.data[0].attributes.locale // empty')"
+
+          if [[ -n "$version_locale" ]]; then
+            asc apps info edit \
+              --version-id "${{ steps.asc_version.outputs.version_id }}" \
+              --locale "$version_locale" \
+              --whats-new "$release_notes"
+            exit 0
+          fi
+
+          app_info_json="$(asc localizations list --app "${{ steps.asc_app.outputs.app_id }}" --type app-info --locale "en-US" --output json)"
+          description="$(printf '%s' "$app_info_json" | jq -r '.data[0].attributes.description // empty')"
+          keywords="$(printf '%s' "$app_info_json" | jq -r '.data[0].attributes.keywords // empty')"
+          support_url="$(printf '%s' "$app_info_json" | jq -r '.data[0].attributes.supportUrl // empty')"
+
+          if [[ -z "$description" || -z "$keywords" || -z "$support_url" ]]; then
+            echo "Skipping What's New sync because the app is missing submit-required en-US metadata." >&2
+            exit 0
+          fi
+
+          asc apps info edit \
+            --version-id "${{ steps.asc_version.outputs.version_id }}" \
+            --locale "en-US" \
+            --description "$description" \
+            --keywords "$keywords" \
+            --support-url "$support_url" \
+            --whats-new "$release_notes"
 
       - name: Update App Store Connect metadata
         env:
@@ -343,10 +423,10 @@ jobs:
           SIDEMESH_REVIEW_CONTACT_FIRST: ${{ vars.SIDEMESH_REVIEW_CONTACT_FIRST }}
           SIDEMESH_REVIEW_CONTACT_LAST: ${{ vars.SIDEMESH_REVIEW_CONTACT_LAST }}
           SIDEMESH_REVIEW_CONTACT_EMAIL: ${{ vars.SIDEMESH_REVIEW_CONTACT_EMAIL }}
-          SIDEMESH_REVIEW_CONTCT_PHONE: ${{ vars.SIDEMESH_REVIEW_CONTCT_PHONE }}
+          SIDEMESH_REVIEW_CONTACT_PHONE: ${{ vars.SIDEMESH_REVIEW_CONTACT_PHONE }}
           SIDEMESH_REVIEW_DEMO_ACCOUNT: ${{ vars.SIDEMESH_REVIEW_DEMO_ACCOUNT }}
           SIDEMESH_REVIEW_DEMO_PASSWORD: ${{ vars.SIDEMESH_REVIEW_DEMO_PASSWORD }}
-          SIDEMESH_REVIE_NOTES: ${{ vars.SIDEMESH_REVIEW_NOTES }}
+          SIDEMESH_REVIEW_NOTES: ${{ vars.SIDEMESH_REVIEW_NOTES }}
         run: python3 scripts/set-app-review-details.py
 
       - name: Set app category
@@ -359,15 +439,23 @@ jobs:
           SIDEMESH_SECONDARY_CATEGORY: ${{ vars.SIDEMESH_SECONDARY_CATEGORY }}
         run: python3 scripts/set-app-category.py
 
-      - name: Add build to TestFlight beta groups
+      - name: Add uploaded build to internal TestFlight groups
         continue-on-error: true
         env:
           ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
-          ASC_KEY_BASE64: ${{ secrets.ASC_KEY_BASE64 }}
           ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
-          BUILD_VERSION: ${{ steps.version.outputs.version }}
-          BUILD_NUMBER: ${{ steps.resolve_build_number.outputs.build_number || steps.version.outputs.build_number }}
-        run: python3 scripts/add-build-to-beta-groups.py
+          ASC_PRIVATE_KEY_B64: ${{ secrets.ASC_KEY_BASE64 }}
+        run: |
+          groups_json="$(asc testflight groups list --app "${{ steps.asc_app.outputs.app_id }}" --output json)"
+          internal_groups="$(printf '%s' "$groups_json" | jq -r '[.data[] | select(.attributes.isInternalGroup == true) | .id] | join(",")')"
+          if [[ -z "$internal_groups" ]]; then
+            echo "No internal TestFlight groups found; skipping distribution."
+            exit 0
+          fi
+
+          asc builds add-groups \
+            --build-id "${{ steps.upload_build.outputs.build_id }}" \
+            --group "$internal_groups"
 
       - name: Upload IPA artifact
         uses: actions/upload-artifact@v4
@@ -399,4 +487,3 @@ jobs:
           rm -f "$RUNNER_TEMP"/sidemesh-ios-distribution.p12
           rm -f "$RUNNER_TEMP"/sidemesh-appstore-app.mobileprovision
           rm -f "$RUNNER_TEMP"/sidemesh-appstore-live-activity-extension.mobileprovision
-          rm -rf "$HOME/.private_keys"
