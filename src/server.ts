@@ -119,6 +119,10 @@ import { saveConfig } from "./config.js";
 import { detectInstallInfo } from "./install-info.js";
 import { spawnSelfUpdater } from "./updater-spawn.js";
 import {
+  readUpdateStatus,
+  UpdateAlreadyInProgressError,
+} from "./update-status.js";
+import {
   jsonRoute,
   type HonoServerEnv,
   type JsonRouteRequest,
@@ -218,12 +222,14 @@ export interface RunningServer {
 interface StartServerDependencies {
   detectInstallInfo: typeof detectInstallInfo;
   spawnSelfUpdater: typeof spawnSelfUpdater;
+  readUpdateStatus: typeof readUpdateStatus;
   exitProcess(code?: number): never;
 }
 
 const DEFAULT_START_SERVER_DEPENDENCIES: StartServerDependencies = {
   detectInstallInfo,
   spawnSelfUpdater,
+  readUpdateStatus,
   exitProcess: (code = 0) => process.exit(code),
 };
 
@@ -1478,6 +1484,16 @@ export async function startServer(
     }),
   );
 
+  app.get(
+    "/api/admin/update-status",
+    asyncRoute(async (_request, response) => {
+      response.json({
+        ok: true,
+        update: await dependencies.readUpdateStatus(runtimeConfig.stateDir),
+      });
+    }),
+  );
+
   app.get("/api/providers", jsonRoute((_request, response) => {
     response.json({
       currentProvider: providerRuntime.defaultProviderKind,
@@ -1656,11 +1672,23 @@ export async function startServer(
         return;
       }
 
-      await dependencies.spawnSelfUpdater(runtimeConfig, {
-        updateChannel: requestedChannel,
-      });
+      let update;
+      try {
+        update = await dependencies.spawnSelfUpdater(runtimeConfig, {
+          updateChannel: requestedChannel,
+        });
+      } catch (error) {
+        if (error instanceof UpdateAlreadyInProgressError) {
+          response.status(409).json({
+            error: error.message,
+            updateId: error.updateId,
+          });
+          return;
+        }
+        throw error;
+      }
 
-      response.json({ ok: true, message: "daemon is updating" });
+      response.json({ ok: true, message: "daemon is updating", update });
     }),
   );
 

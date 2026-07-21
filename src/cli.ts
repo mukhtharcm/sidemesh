@@ -152,12 +152,14 @@ export async function main(argv = process.argv): Promise<void> {
       .description("update the Sidemesh daemon to the latest version")
       .option("--package-dir <path>", "Sidemesh package directory")
       .option("--managed-service <name>", "managed service name (e.g. sidemesh)")
+      .option("--update-id <id>", "reserved update operation ID")
       .option("--dry-run", "show what would be updated without doing it")
       .option("-y, --yes", "do not prompt before updating")
       .action(async (options: {
         config?: string;
         packageDir?: string;
         managedService?: string;
+        updateId?: string;
         dryRun?: boolean;
         yes?: boolean;
       }) => {
@@ -170,6 +172,7 @@ export async function main(argv = process.argv): Promise<void> {
           config,
           packageDir: options.packageDir ?? null,
           managedService: options.managedService ?? null,
+          updateId: options.updateId ?? null,
           dryRun: options.dryRun === true,
         });
         if (result.success) {

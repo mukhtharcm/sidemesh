@@ -335,7 +335,7 @@ async function isSystemdServiceActive(): Promise<boolean> {
   }
 }
 
-function resolveNpmExecutable(): string {
+export function resolveNpmExecutable(): string {
   const npmBin = nodePath.join(
     nodePath.dirname(process.execPath),
     process.platform === "win32" ? "npm.cmd" : "npm",

@@ -19,6 +19,11 @@ import { WebSocket } from "ws";
 
 import type { InstallInfo } from "./install-info.js";
 import { startServer, type RunningServer } from "./server.js";
+import {
+  createQueuedUpdateStatus,
+  UpdateAlreadyInProgressError,
+  type UpdateStatus,
+} from "./update-status.js";
 import type { FakeCapabilityProfile, NodeConfig } from "./types.js";
 import {
   FAKE_PROVIDER_CAPABILITIES,
@@ -118,6 +123,13 @@ function makeInstallInfo(
     isManagedService: false,
     serviceName: null,
   };
+}
+
+function makeUpdateStatus(
+  info: InstallInfo,
+  id = "update-1",
+): UpdateStatus {
+  return createQueuedUpdateStatus(info, info.updateChannel, { id, now: 100 });
 }
 
 function request(options: http.RequestOptions & { body?: string }): Promise<{
@@ -2648,6 +2660,9 @@ describe("POST /api/admin/update", () => {
       },
       spawnSelfUpdater: async (spawnConfig, options = {}) => {
         spawnedCalls.push({ config: spawnConfig, options });
+        return makeUpdateStatus(
+          makeInstallInfo(packageDir, spawnConfig.updateChannel),
+        );
       },
       exitProcess: (code = 0) => {
         assert.equal(code, 0);
@@ -2670,7 +2685,13 @@ describe("POST /api/admin/update", () => {
       });
 
       assert.equal(res.statusCode, 200);
-      assert.deepEqual(res.body, { ok: true, message: "daemon is updating" });
+      assert.deepEqual(res.body, {
+        ok: true,
+        message: "daemon is updating",
+        update: makeUpdateStatus(
+          makeInstallInfo(packageDir, "bleeding-edge"),
+        ),
+      });
 
       assert.deepEqual(detectedChannels, ["stable", "bleeding-edge"]);
       assert.equal(spawnedCalls.length, 1);
@@ -2733,6 +2754,69 @@ describe("POST /api/admin/update", () => {
         method: "GET",
       });
       assert.equal(health.statusCode, 200);
+    } finally {
+      await server.close();
+      await rm(stateDir, { recursive: true, force: true });
+    }
+  });
+
+  it("returns 409 with the active update ID for concurrent requests", async () => {
+    const stateDir = await mkdtemp(nodePath.join(tmpdir(), "sidemesh-server-test-"));
+    const config = makeConfig(stateDir);
+    const server = await startServer(config, undefined, {
+      detectInstallInfo: async () => makeInstallInfo(stateDir),
+      spawnSelfUpdater: async () => {
+        throw new UpdateAlreadyInProgressError("update-active");
+      },
+    });
+
+    try {
+      const res = await request({
+        hostname: "127.0.0.1",
+        port: server.port,
+        path: "/api/admin/update",
+        method: "POST",
+        headers: {
+          Authorization: "Bearer " + config.token,
+          "Content-Type": "application/json",
+        },
+        body: "{}",
+      });
+
+      assert.equal(res.statusCode, 409);
+      assert.deepEqual(res.body, {
+        error: "Update update-active is already in progress",
+        updateId: "update-active",
+      });
+    } finally {
+      await server.close();
+      await rm(stateDir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("GET /api/admin/update-status", () => {
+  it("returns the latest persistent update operation", async () => {
+    const stateDir = await mkdtemp(nodePath.join(tmpdir(), "sidemesh-server-test-"));
+    const config = makeConfig(stateDir);
+    const info = makeInstallInfo(stateDir, "bleeding-edge");
+    const update = makeUpdateStatus(info, "update-status-1");
+    const server = await startServer(config, undefined, {
+      detectInstallInfo: async () => info,
+      readUpdateStatus: async () => update,
+    });
+
+    try {
+      const res = await request({
+        hostname: "127.0.0.1",
+        port: server.port,
+        path: "/api/admin/update-status",
+        method: "GET",
+        headers: { Authorization: "Bearer " + config.token },
+      });
+
+      assert.equal(res.statusCode, 200);
+      assert.deepEqual(res.body, { ok: true, update });
     } finally {
       await server.close();
       await rm(stateDir, { recursive: true, force: true });

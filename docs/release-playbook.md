@@ -108,6 +108,27 @@ process, update the checkout, rebuild, and start it again manually.
 App-driven restart and self-update are recommended only on service-managed
 hosts.
 
+### Managed Bleeding Edge Updates
+
+On a service-managed Git install, the Bleeding Edge channel uses atomic release
+directories instead of mutating the live checkout. The updater fetches and pins
+the target commit, creates a detached worktree under
+`<stateDir>/releases/<commit-sha>`, runs `npm ci` and the production build while
+the old daemon remains online, then switches the service wrapper. It considers
+the update successful only after the new daemon passes its health check.
+
+If cutover or verification fails, the updater rewrites the wrapper to the
+previous package directory, starts it, and verifies that the previous daemon is
+healthy. It keeps the current and previous release worktrees and removes older
+ones after a later successful update. The state directory must resolve outside
+the active Git checkout; nested worktrees are rejected.
+
+The authenticated `GET /api/admin/update-status` endpoint exposes the latest
+operation and its phase (`staging`, `stopping`, `switching`, `starting`,
+`verifying`, or `rolling_back`). The update status and lock files live in the
+state directory with private permissions. Stable-channel and unmanaged updates
+continue to use the in-place path and require a clean tracked Git checkout.
+
 ## GitHub Actions Builds
 
 Current workflows:
