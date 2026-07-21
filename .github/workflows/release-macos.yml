@@ -15,7 +15,7 @@ permissions:
 env:
   APP_NAME: Sidemesh
   BUNDLE_IDENTIFIER: com.sidemesh.sidemeshMobile
-  FLUTTER_VERSION: "3.41.7"
+  FLUTTER_VERSION: "3.44.7"
   HAS_SIGNING_SECRETS: ${{ secrets.BUILD_CERTIFICATE_BASE64 != '' && secrets.P12_PASSWORD != '' && secrets.KEYCHAIN_PASSWORD != '' && secrets.SIGNING_IDENTITY != '' }}
   HAS_NOTARY_SECRETS: ${{ secrets.APPLE_ID != '' && secrets.APP_SPECIFIC_PASSWORD != '' && secrets.TEAM_ID != '' }}
   HAS_SPARKLE_SECRETS: ${{ secrets.SPARKLE_PRIVATE_KEY_BASE64 != '' && secrets.SPARKLE_PUBLIC_ED_KEY != '' }}

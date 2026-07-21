@@ -208,8 +208,11 @@ class AppUpdateSettingsStore extends ChangeNotifier {
     : _service = service ?? MethodChannelAppUpdateSettingsService();
 
   @visibleForTesting
-  AppUpdateSettingsStore.forTesting({required AppUpdateSettingsService service})
-    : _service = service;
+  AppUpdateSettingsStore.forTesting({
+    required AppUpdateSettingsService service,
+  }) : this._withService(service);
+
+  AppUpdateSettingsStore._withService(this._service);
 
   static final AppUpdateSettingsStore instance = AppUpdateSettingsStore._();
 

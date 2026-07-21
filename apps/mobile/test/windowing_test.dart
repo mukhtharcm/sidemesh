@@ -402,7 +402,9 @@ void main() {
 
 class _FakeWindowPlatform implements SidemeshWindowPlatform {
   _FakeWindowPlatform({required List<_FakeWindowHandle> windows})
-    : _windows = windows;
+    : this._(windows);
+
+  _FakeWindowPlatform._(this._windows);
 
   final List<_FakeWindowHandle> _windows;
   final List<String> createdArguments = <String>[];

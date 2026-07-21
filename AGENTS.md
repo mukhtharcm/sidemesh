@@ -77,7 +77,7 @@ apps/mobile/lib/src/
 | Layer | Runtime / Language | Key Tools |
 |-------|------------------|-----------|
 | Daemon | Node.js 22.19+, TypeScript 6.x | `tsx`, `tsc`, `node:test` |
-| Client | Flutter 3.41.7 (stable), Dart | `flutter test`, `flutter analyze` |
+| Client | Flutter 3.44.7 (stable), Dart 3.12 | `flutter test`, `flutter analyze` |
 | Web | Vanilla HTML/JS | Cloudflare Pages |
 
 TypeScript: `strict`, ES2022, `NodeNext` module resolution. **No linter or
