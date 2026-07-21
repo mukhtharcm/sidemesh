@@ -47,8 +47,61 @@ Session history:
 - `listSessionThreads`
 - `readSessionThread`
 - `readSessionLog`
+- `readSessionLogPage` (optional additive paging support)
 - `readSessionRuntime`
 - `listRecentUnindexedSessionThreads`
+
+`readSessionLogPage` pages one unified chronological stream of messages and
+activities. Its `limit` is the combined entry count, not a separate allowance
+for each record type. Providers own the opaque, session-scoped backward cursor;
+the daemon and client must not interpret it. A cursor identifies the immutable
+entry immediately after the requested older page, so appending newer entries
+does not move an existing boundary. Invalid cursors fail closed instead of
+silently returning the newest page.
+
+Backward history cursors and forward replay cursors are deliberately separate.
+Provider `SessionLogSnapshot.nextSeq` is the exclusive next-unused transcript
+sequence. Message and activity rows share this one sequence namespace, and a
+provider must not assign the same `seq` to two distinct transcript rows. The
+HTTP log response preserves that baseline as `nextSeq`; clients
+subtract one to obtain the inclusive `since` cursor used by event replay. The
+host may also return a larger exclusive `replayNextSeq` when it has rebased
+live-only activity updates above persisted history. Clients must immediately
+catch up in that case. By contrast, `SessionEventsDelta.nextSeq` is the highest
+inclusive replay sequence applied by that delta. None of these values may be
+used as a `beforeCursor`. Providers that do not implement page reads continue
+to serve the legacy bounded `readSessionLog` response without page metadata.
+
+New clients opt into bounded forward replay with `GET .../events?page=true`.
+Such responses may set `hasMore: true`; the client must keep requesting from
+that response's inclusive `nextSeq` until `hasMore` is false, even if a newer
+WebSocket event advances its in-memory high-water mark during the drain. The
+opt-in preserves compatibility with older clients, which receive the original
+`stale_cursor` response for an oversized gap and recover through their legacy
+authoritative snapshot path. One indivisible event may exceed the byte target
+so a paged replay can always make forward progress.
+
+The paging contract bounds daemon-to-client payloads and client-side retained
+history. It does not by itself guarantee provider-native source paging: an
+adapter may still need to scan or fetch its underlying transcript to construct
+a page. Adapters should use native cursors, byte-offset indexes, or incremental
+persistent indexes when their source supports them, and must document when the
+source API only offers full-history reads.
+
+Current adapter limitations are explicit:
+
+- Codex streams the rollout JSONL from the beginning for a cold head read and
+  retains bounded result rows, but older pages currently reconstruct the full
+  normalized transcript before slicing.
+- OpenCode's current `listMessages` API returns the full message collection;
+  page construction happens after that fetch.
+- Copilot, Pi, and ACPX expose or hydrate complete provider session state before
+  Sidemesh applies its page boundary.
+- The fake provider pages its in-memory deterministic transcript.
+
+Consequently, this contract reduces wire size, JSON decoding, widget work, and
+client/cache growth today. Provider-native or persistent source indexes remain
+required to make cold initial reads and long backward walks sublinear.
 
 Session lifecycle:
 

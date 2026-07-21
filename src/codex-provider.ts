@@ -17,11 +17,16 @@ import {
   type AgentProvider,
   type AgentProviderCapabilities,
   type AgentProviderEvents,
+  type AgentSessionLogPageOptions,
   type AgentSessionLogOptions,
   type AgentSessionActivityDraft,
   type AgentSubmitInputRequest,
   type AgentSubmitInputResult,
 } from "./agent-provider.js";
+import {
+  paginateSessionLogSnapshot,
+  validateSessionLogCursor,
+} from "./session-log-pagination.js";
 import {
   normalizePendingActionDecision,
   parsePendingActionElicitationResponse,
@@ -253,6 +258,27 @@ public async health(): Promise<boolean> {
       this.runtimeHome,
       options.messageLimit ?? null,
       options.activityLimit ?? null,
+    );
+  }
+
+  public async readSessionLogPage(
+    thread: ThreadRecord,
+    options: AgentSessionLogPageOptions,
+  ): Promise<SessionLogSnapshot> {
+    const cursorScope = options.cursorScope ?? thread.id;
+    if (options.beforeCursor) {
+      validateSessionLogCursor(options.beforeCursor, cursorScope);
+    }
+    const snapshot = await this.readSessionLog(
+      thread,
+      options.beforeCursor
+        ? {}
+        : { messageLimit: options.limit, activityLimit: options.limit },
+    );
+    return paginateSessionLogSnapshot(
+      cursorScope,
+      snapshot,
+      options,
     );
   }
 

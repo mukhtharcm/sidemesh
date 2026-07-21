@@ -41,12 +41,17 @@ import {
   type AgentSessionActivityDraft,
   type AgentSessionInputItem,
   type AgentSessionListOptions,
+  type AgentSessionLogPageOptions,
   type AgentSessionLogOptions,
   type AgentSessionResumeOptions,
   type AgentSubmitInputRequest,
   type AgentSubmitInputResult,
   type AgentSkillListOptions,
 } from "./agent-provider.js";
+import {
+  paginateSessionLogSnapshot,
+  validateSessionLogCursor,
+} from "./session-log-pagination.js";
 import type {
   ModelSummary,
   SessionActivity,
@@ -388,6 +393,27 @@ export class PiAgentProvider
       totalActivities: state.activities.size,
       nextSeq: state.nextSeq,
     };
+  }
+
+  public async readSessionLogPage(
+    thread: ThreadRecord,
+    options: AgentSessionLogPageOptions,
+  ): Promise<SessionLogSnapshot> {
+    const cursorScope = options.cursorScope ?? thread.id;
+    if (options.beforeCursor) {
+      validateSessionLogCursor(options.beforeCursor, cursorScope);
+    }
+    const snapshot = await this.readSessionLog(
+      thread,
+      options.beforeCursor
+        ? {}
+        : { messageLimit: options.limit, activityLimit: options.limit },
+    );
+    return paginateSessionLogSnapshot(
+      cursorScope,
+      snapshot,
+      options,
+    );
   }
 
   public async readSessionRuntime(
@@ -3990,11 +4016,25 @@ function cloneRuntime(
   return runtime ? JSON.parse(JSON.stringify(runtime)) : null;
 }
 
-function limitTail<T>(items: T[], limit: number | null): T[] {
+function limitTail<T extends { id: string; createdAt: number; seq: number }>(
+  items: T[],
+  limit: number | null,
+): T[] {
   if (!limit || limit <= 0 || items.length <= limit) {
     return [...items];
   }
-  return items.slice(items.length - limit);
+  return [...items]
+    .sort(compareDatedSessionEntries)
+    .slice(items.length - limit);
+}
+
+function compareDatedSessionEntries(
+  left: { id: string; createdAt: number; seq: number },
+  right: { id: string; createdAt: number; seq: number },
+): number {
+  if (left.createdAt !== right.createdAt) return left.createdAt - right.createdAt;
+  if (left.seq !== right.seq) return left.seq - right.seq;
+  return left.id === right.id ? 0 : left.id < right.id ? -1 : 1;
 }
 
 function stringValue(value: unknown): string | undefined {

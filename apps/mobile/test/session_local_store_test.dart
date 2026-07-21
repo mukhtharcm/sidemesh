@@ -368,6 +368,193 @@ void main() {
     expect(recents, isEmpty);
     expect(cachedLog, isNull);
   });
+
+  test(
+    'session log cache keeps only the latest unified timeline page',
+    () async {
+      final store = SessionLocalStore.instance;
+      final now = DateTime.now();
+      final messages = List<SessionMessage>.generate(
+        250,
+        (index) => SessionMessage(
+          id: 'message-${index + 1}',
+          role: 'assistant',
+          text: 'message ${index + 1}',
+          attachments: const <SessionMessageAttachment>[],
+          createdAt: now.add(Duration(milliseconds: index)),
+          seq: index + 1,
+        ),
+      );
+      messages.add(
+        SessionMessage(
+          id: 'newest-by-created-at',
+          role: 'assistant',
+          text: 'newest timestamp despite an older sequence',
+          attachments: const <SessionMessageAttachment>[],
+          createdAt: now.add(const Duration(days: 1)),
+          seq: 0,
+        ),
+      );
+      await store.saveSessionLog(
+        host,
+        SessionLog(
+          session: _summary('large-session'),
+          messages: messages,
+          activities: const [],
+          pendingAction: null,
+          history: const SessionLogHistorySummary(
+            isTruncated: false,
+            totalMessages: 251,
+            returnedMessages: 251,
+            totalActivities: 0,
+            returnedActivities: 0,
+          ),
+          nextSeq: 250,
+          page: const SessionLogPageInfo(
+            beforeCursor: 'must-not-be-cached',
+            hasMoreBefore: true,
+          ),
+        ),
+      );
+
+      final cached = await store.loadSessionLog(host, 'large-session');
+      expect(cached, isNotNull);
+      expect(cached!.log.messages, hasLength(200));
+      expect(cached.log.messages.first.id, 'message-52');
+      expect(cached.log.messages.last.id, 'newest-by-created-at');
+      expect(cached.log.history?.isTruncated, true);
+      expect(cached.log.history?.returnedMessages, 200);
+      expect(cached.log.nextSeq, 250);
+      expect(cached.log.page, isNull);
+    },
+  );
+
+  test('clearHost removes cached transcripts with session summaries', () async {
+    final store = SessionLocalStore.instance;
+    await store.upsertSessions(host, [_summary('s1')]);
+    await store.saveSessionLog(host, _log('s1'));
+
+    await store.clearHost(host);
+
+    expect(await store.getRecentSessions(host), isEmpty);
+    expect(await store.loadSessionLog(host, 's1'), isNull);
+  });
+
+  test(
+    'session logs are isolated by a non-secret host credential hash',
+    () async {
+      const replacementCredentials = HostProfile(
+        id: 'host-1',
+        label: 'MacBook',
+        baseUrl: 'https://replacement.example.test',
+        token: 'replacement-secret',
+      );
+      final store = SessionLocalStore.instance;
+      await store.saveSessionLog(
+        host,
+        _log('credential-session', title: 'Original credentials'),
+      );
+
+      expect(
+        await store.loadSessionLog(
+          replacementCredentials,
+          'credential-session',
+        ),
+        isNull,
+      );
+
+      await store.saveSessionLog(
+        replacementCredentials,
+        _log('credential-session', title: 'Replacement credentials'),
+      );
+      expect(
+        (await store.loadSessionLog(
+          host,
+          'credential-session',
+        ))?.log.session.title,
+        'Original credentials',
+      );
+      expect(
+        (await store.loadSessionLog(
+          replacementCredentials,
+          'credential-session',
+        ))?.log.session.title,
+        'Replacement credentials',
+      );
+
+      final prefs = await SharedPreferences.getInstance();
+      final logKeys = prefs
+          .getKeys()
+          .where(
+            (key) => key.startsWith('sidemesh_cached_session_log_v1:host-1:'),
+          )
+          .toList(growable: false);
+      expect(logKeys, hasLength(2));
+      expect(
+        logKeys,
+        contains(
+          'sidemesh_cached_session_log_v1:host-1:'
+          '29518f50968a677314857c8591acffe1cd2163adea7fd10a8c8b7ca8e6f39748:'
+          'credential-session',
+        ),
+      );
+      expect(
+        logKeys,
+        contains(
+          'sidemesh_cached_session_log_v1:host-1:'
+          '06fae73e8e7ccc206983d94fdf2282534d5f869c0823a46cfe45163b99cb0a1d:'
+          'credential-session',
+        ),
+      );
+      expect(
+        logKeys,
+        everyElement(
+          matches(
+            RegExp(
+              r'^sidemesh_cached_session_log_v1:host-1:[0-9a-f]{64}:credential-session$',
+            ),
+          ),
+        ),
+      );
+      expect(logKeys.join(), isNot(contains(host.token)));
+      expect(logKeys.join(), isNot(contains(replacementCredentials.token)));
+      expect(logKeys.join(), isNot(contains(host.baseUrl)));
+      expect(logKeys.join(), isNot(contains(replacementCredentials.baseUrl)));
+
+      await store.clearHostLogs(host);
+      expect(await store.loadSessionLog(host, 'credential-session'), isNull);
+      expect(
+        await store.loadSessionLog(
+          replacementCredentials,
+          'credential-session',
+        ),
+        isNull,
+      );
+    },
+  );
+
+  test(
+    'concurrent transcript saves complete before a queued host clear',
+    () async {
+      final store = SessionLocalStore.instance;
+      final saves = List<Future<void>>.generate(
+        30,
+        (index) => store.saveSessionLog(host, _log('concurrent-$index')),
+      );
+
+      await Future.wait([...saves, store.clearHostLogs(host)]);
+      await store.waitForLogIdle();
+
+      final prefs = await SharedPreferences.getInstance();
+      expect(
+        prefs.getKeys().where(
+          (key) => key.startsWith('sidemesh_cached_session_log_v1:host-1:'),
+        ),
+        isEmpty,
+      );
+      expect(prefs.getString('sidemesh_cached_session_log_index_v1'), isNull);
+    },
+  );
 }
 
 SessionSummary _summary(
@@ -395,10 +582,10 @@ SessionSummary _summary(
   );
 }
 
-SessionLog _log(String sessionId) {
+SessionLog _log(String sessionId, {String title = 'Session'}) {
   final now = DateTime.now();
   return SessionLog(
-    session: _summary(sessionId),
+    session: _summary(sessionId, title: title),
     messages: [
       SessionMessage(
         id: 'message-1',

@@ -12,12 +12,17 @@ import {
   type AgentProviderEvents,
   type AgentProviderLiveEvent,
   type AgentSessionListOptions,
+  type AgentSessionLogPageOptions,
   type AgentSessionLogOptions,
   type AgentSessionResumeOptions,
   type AgentSubmitInputRequest,
   type AgentSubmitInputResult,
 } from "./agent-provider.js";
 import type { PendingActionResponseInput } from "./approvals.js";
+import {
+  paginateSessionLogSnapshot,
+  SessionLogCursorError,
+} from "./session-log-pagination.js";
 import type {
   AgentProviderConfig,
   AgentProviderKind,
@@ -213,11 +218,7 @@ export class MultiAgentProvider
     options?: AgentSessionLogOptions,
   ): Promise<SessionLogSnapshot> {
     const resolved = this.resolveSessionId(thread.id);
-    const childThread = await requireProviderMethod(
-      resolved.provider,
-      "readSessionThread",
-      "session history",
-    ).call(resolved.provider, resolved.rawId, false);
+    const childThread = { ...thread, id: resolved.rawId };
     return requireProviderMethod(
       resolved.provider,
       "readSessionLog",
@@ -225,15 +226,45 @@ export class MultiAgentProvider
     ).call(resolved.provider, childThread, options);
   }
 
+  public async readSessionLogPage(
+    thread: ThreadRecord,
+    options: AgentSessionLogPageOptions,
+  ): Promise<SessionLogSnapshot> {
+    const resolved = this.resolveSessionId(thread.id);
+    const childThread = { ...thread, id: resolved.rawId };
+    const childOptions = {
+      ...options,
+      cursorScope: options.cursorScope ?? thread.id,
+    };
+    if (hasProviderMethod(resolved.provider, "readSessionLogPage")) {
+      return resolved.provider.readSessionLogPage(childThread, childOptions);
+    }
+    if (options.beforeCursor) {
+      throw new SessionLogCursorError(
+        "This provider does not support older transcript pages.",
+      );
+    }
+    const snapshot = await requireProviderMethod(
+      resolved.provider,
+      "readSessionLog",
+      "session transcript",
+    ).call(resolved.provider, childThread, {
+      messageLimit: options.limit,
+      activityLimit: options.limit,
+    });
+    const paged = paginateSessionLogSnapshot(
+      childOptions.cursorScope,
+      snapshot,
+      { limit: options.limit },
+    );
+    return { ...paged, page: undefined };
+  }
+
   public async readSessionRuntime(
     thread: ThreadRecord,
   ): Promise<SessionRuntimeSummary | null> {
     const resolved = this.resolveSessionId(thread.id);
-    const childThread = await requireProviderMethod(
-      resolved.provider,
-      "readSessionThread",
-      "session history",
-    ).call(resolved.provider, resolved.rawId, false);
+    const childThread = { ...thread, id: resolved.rawId };
     return requireProviderMethod(
       resolved.provider,
       "readSessionRuntime",

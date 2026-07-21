@@ -2836,6 +2836,9 @@ class SessionLog {
     required this.activities,
     required this.pendingAction,
     required this.history,
+    this.nextSeq,
+    this.replayNextSeq,
+    this.page,
     this.latestPlanUpdate,
   });
 
@@ -2844,6 +2847,9 @@ class SessionLog {
   final List<SessionActivity> activities;
   final PendingAction? pendingAction;
   final SessionLogHistorySummary? history;
+  final int? nextSeq;
+  final int? replayNextSeq;
+  final SessionLogPageInfo? page;
   final LiveEvent? latestPlanUpdate;
 
   factory SessionLog.fromJson(Map<String, dynamic> json) {
@@ -2877,6 +2883,15 @@ class SessionLog {
           : SessionLogHistorySummary.fromJson(
               json['history'] as Map<String, dynamic>,
             ),
+      nextSeq: json['nextSeq'] == null ? null : _intValue(json['nextSeq']),
+      replayNextSeq: json['replayNextSeq'] == null
+          ? null
+          : _intValue(json['replayNextSeq']),
+      page: json['page'] == null
+          ? null
+          : SessionLogPageInfo.fromJson(
+              (json['page'] as Map<dynamic, dynamic>).cast<String, dynamic>(),
+            ),
       latestPlanUpdate: normalizedPlanUpdate,
     );
   }
@@ -2887,7 +2902,33 @@ class SessionLog {
     'activities': activities.map((item) => item.toJson()).toList(),
     'pendingAction': pendingAction?.toJson(),
     'history': history?.toJson(),
+    'nextSeq': nextSeq,
+    'replayNextSeq': replayNextSeq,
+    'page': page?.toJson(),
     'latestPlanUpdate': latestPlanUpdate?.toJson(),
+  };
+}
+
+class SessionLogPageInfo {
+  const SessionLogPageInfo({
+    required this.beforeCursor,
+    required this.hasMoreBefore,
+  });
+
+  final String? beforeCursor;
+  final bool hasMoreBefore;
+
+  factory SessionLogPageInfo.fromJson(Map<String, dynamic> json) =>
+      SessionLogPageInfo(
+        beforeCursor: json['beforeCursor'] is String
+            ? json['beforeCursor'] as String
+            : null,
+        hasMoreBefore: _boolValue(json['hasMoreBefore']),
+      );
+
+  Map<String, dynamic> toJson() => {
+    'beforeCursor': beforeCursor,
+    'hasMoreBefore': hasMoreBefore,
   };
 }
 
@@ -2896,6 +2937,7 @@ class SessionEventsDelta {
     required this.sessionId,
     required this.since,
     required this.nextSeq,
+    this.hasMore = false,
     required this.messages,
     required this.activities,
     required this.latestPlanUpdate,
@@ -2906,6 +2948,7 @@ class SessionEventsDelta {
   final String sessionId;
   final int since;
   final int nextSeq;
+  final bool hasMore;
   final List<SessionMessage> messages;
   final List<SessionActivity> activities;
   final LiveEvent? latestPlanUpdate;
@@ -2918,6 +2961,7 @@ class SessionEventsDelta {
     sessionId: _stringValue(json['sessionId']),
     since: _intValue(json['since']),
     nextSeq: _intValue(json['nextSeq']),
+    hasMore: _boolValue(json['hasMore']),
     messages: (json['messages'] as List<dynamic>? ?? [])
         .map((item) => SessionMessage.fromJson(item as Map<String, dynamic>))
         .toList(),

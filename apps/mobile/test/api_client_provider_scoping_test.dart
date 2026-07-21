@@ -79,6 +79,101 @@ void main() {
     },
   );
 
+  test(
+    'ApiClient sends unified transcript page parameters with legacy limits',
+    () async {
+      Uri? requested;
+      final api = ApiClient(
+        client: MockClient((request) async {
+          requested = request.url;
+          return http.Response(
+            jsonEncode({
+              'session': {
+                'id': 'session-1',
+                'title': 'Session',
+                'preview': '',
+                'cwd': '/repo',
+                'createdAt': 0,
+                'updatedAt': 0,
+                'source': 'fake',
+                'provider': null,
+                'status': 'idle',
+                'runtime': null,
+                'gitInfo': null,
+              },
+              'messages': [],
+              'activities': [],
+              'pendingAction': null,
+              'history': null,
+              'nextSeq': 7,
+              'page': {'beforeCursor': 'opaque cursor', 'hasMoreBefore': true},
+            }),
+            200,
+            headers: {'content-type': 'application/json'},
+          );
+        }),
+      );
+
+      final log = await api.fetchLog(
+        host,
+        'session-1',
+        messageLimit: 120,
+        activityLimit: 80,
+        entryLimit: 200,
+        beforeCursor: 'opaque cursor',
+      );
+
+      expect(requested?.path, '/api/sessions/session-1/log');
+      expect(requested?.queryParameters, {
+        'messageLimit': '120',
+        'activityLimit': '80',
+        'entryLimit': '200',
+        'beforeCursor': 'opaque cursor',
+      });
+      expect(log.nextSeq, 7);
+      expect(log.page?.beforeCursor, 'opaque cursor');
+    },
+  );
+
+  test('ApiClient opts into paged event replay', () async {
+    Uri? requested;
+    final api = ApiClient(
+      client: MockClient((request) async {
+        requested = request.url;
+        return http.Response(
+          jsonEncode({
+            'sessionId': 'session-1',
+            'since': 7,
+            'nextSeq': 8,
+            'hasMore': true,
+            'messages': [],
+            'activities': [],
+            'latestPlanUpdate': null,
+            'pendingAction': null,
+            'session': null,
+          }),
+          200,
+          headers: {'content-type': 'application/json'},
+        );
+      }),
+    );
+
+    final delta = await api.fetchEvents(
+      host,
+      'session-1',
+      since: 7,
+      baseUpdatedAt: 123,
+    );
+
+    expect(requested?.path, '/api/sessions/session-1/events');
+    expect(requested?.queryParameters, {
+      'since': '7',
+      'page': 'true',
+      'baseUpdatedAt': '123',
+    });
+    expect(delta.hasMore, isTrue);
+  });
+
   test('ApiClient keeps filesystem helpers host-scoped', () async {
     final requests = <Uri>[];
     final api = ApiClient(
@@ -126,28 +221,36 @@ void main() {
     }
   });
 
-  test('ApiClient sends file search sessionId and limit in the JSON body', () async {
-    late Map<String, dynamic> body;
-    final api = ApiClient(
-      client: MockClient((request) async {
-        expect(request.url.path, '/api/fs/search');
-        body = jsonDecode(request.body) as Map<String, dynamic>;
-        return http.Response(
-          '{"files":[]}',
-          200,
-          headers: {'content-type': 'application/json'},
-        );
-      }),
-    );
+  test(
+    'ApiClient sends file search sessionId and limit in the JSON body',
+    () async {
+      late Map<String, dynamic> body;
+      final api = ApiClient(
+        client: MockClient((request) async {
+          expect(request.url.path, '/api/fs/search');
+          body = jsonDecode(request.body) as Map<String, dynamic>;
+          return http.Response(
+            '{"files":[]}',
+            200,
+            headers: {'content-type': 'application/json'},
+          );
+        }),
+      );
 
-    await api.searchFiles(host, query: 'server', sessionId: 'session-1', limit: 25);
+      await api.searchFiles(
+        host,
+        query: 'server',
+        sessionId: 'session-1',
+        limit: 25,
+      );
 
-    expect(body['query'], 'server');
-    expect(body['sessionId'], 'session-1');
-    expect(body['limit'], 25);
-    expect(body.containsKey('sessionId?'), isFalse);
-    expect(body.containsKey('limit?'), isFalse);
-  });
+      expect(body['query'], 'server');
+      expect(body['sessionId'], 'session-1');
+      expect(body['limit'], 25);
+      expect(body.containsKey('sessionId?'), isFalse);
+      expect(body.containsKey('limit?'), isFalse);
+    },
+  );
 
   test('ApiClient sends browser preview targetUrl when provided', () async {
     late Map<String, dynamic> body;
