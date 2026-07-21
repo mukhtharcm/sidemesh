@@ -52,25 +52,21 @@ class _SidemeshHomeScreenState extends State<SidemeshHomeScreen>
   static const _tabs = [
     _TabDef(
       title: 'Recent',
-      subtitle: 'Pick up where your agents left off',
       icon: Icons.schedule_rounded,
       selectedIcon: Icons.schedule_rounded,
     ),
     _TabDef(
       title: 'Inbox',
-      subtitle: 'Approvals and pending replies in one place',
       icon: Icons.all_inbox_rounded,
       selectedIcon: Icons.all_inbox_rounded,
     ),
     _TabDef(
       title: 'Usage',
-      subtitle: 'Limits, versions, and host health',
       icon: Icons.speed_rounded,
       selectedIcon: Icons.speed_rounded,
     ),
     _TabDef(
       title: 'Hosts',
-      subtitle: 'Machines you can reach from this device',
       icon: Icons.hub_rounded,
       selectedIcon: Icons.hub_rounded,
     ),
@@ -745,13 +741,11 @@ class RecentSessionFilters {
 class _TabDef {
   const _TabDef({
     required this.title,
-    required this.subtitle,
     required this.icon,
     required this.selectedIcon,
   });
 
   final String title;
-  final String subtitle;
   final IconData icon;
   final IconData selectedIcon;
 }
@@ -799,7 +793,7 @@ class _HomeStickyHeader extends StatelessWidget {
     return Padding(
       padding: const EdgeInsets.fromLTRB(
         AppSpacing.lg,
-        AppSpacing.md,
+        AppSpacing.sm,
         AppSpacing.md,
         AppSpacing.sm,
       ),
@@ -807,20 +801,12 @@ class _HomeStickyHeader extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
+            crossAxisAlignment: CrossAxisAlignment.center,
             children: [
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(
-                      'Sidemesh',
-                      style: Theme.of(context).textTheme.labelLarge?.copyWith(
-                        color: colors.textSecondary,
-                        fontWeight: AppWeights.emphasis,
-                      ),
-                    ),
-                    const SizedBox(height: 6),
                     Text(
                       tab.title,
                       style: Theme.of(context).textTheme.headlineSmall
@@ -829,18 +815,21 @@ class _HomeStickyHeader extends StatelessWidget {
                             fontWeight: AppWeights.title,
                           ),
                     ),
-                    const SizedBox(height: 4),
-                    Text(
-                      tab.subtitle,
-                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                        color: colors.textSecondary,
-                        height: 1.4,
-                      ),
-                    ),
                   ],
                 ),
               ),
               const SizedBox(width: AppSpacing.sm),
+              FilledButton.icon(
+                onPressed: primaryAction.onTap,
+                style: FilledButton.styleFrom(
+                  minimumSize: const Size(0, 44),
+                  padding: const EdgeInsets.symmetric(horizontal: 14),
+                  visualDensity: VisualDensity.compact,
+                ),
+                icon: Icon(primaryAction.icon, size: 18),
+                label: Text(primaryAction.label),
+              ),
+              const SizedBox(width: AppSpacing.xs),
               PopupMenuButton<_HomeHeaderMenuAction>(
                 tooltip: 'More',
                 onSelected: (action) {
@@ -886,15 +875,6 @@ class _HomeStickyHeader extends StatelessWidget {
                 ),
               ),
             ],
-          ),
-          const SizedBox(height: AppSpacing.md),
-          Align(
-            alignment: Alignment.centerLeft,
-            child: FilledButton.icon(
-              onPressed: primaryAction.onTap,
-              icon: Icon(primaryAction.icon, size: 18),
-              label: Text(primaryAction.label),
-            ),
           ),
           const SizedBox(height: AppSpacing.md),
           AnimatedSwitcher(
