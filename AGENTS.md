@@ -341,6 +341,13 @@ daemon from a shell or tool spawned by the daemon itself. Instead:
 Until such a unit exists, the human operator must run the restart manually from
 a separate SSH session after confirming the build succeeded.
 
+Managed Bleeding Edge self-updates are staged as detached Git worktrees under
+`SIDEMESH_STATE_DIR/releases/<sha>`. That release root must resolve outside the
+active checkout. The updater builds before stopping the old daemon, switches
+the service wrapper, health-checks the candidate, and rewrites the wrapper to
+the previous package directory on rollback. Keep service-install helpers able
+to target an explicit package directory; the atomic updater depends on that.
+
 ## Quick References
 
 - Provider contract: `docs/provider-adapter-contract.md`
