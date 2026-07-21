@@ -1442,9 +1442,12 @@ describe("Copilot provider", () => {
         input: [{ type: "text", text: "crash partial", text_elements: [] }],
         overrides: emptyOverrides(),
       });
-      await settleProviderWrites();
 
       const statePath = nodePath.join(stateDir, "sessions.json");
+      await waitForAsync(async () => {
+        const persisted = await readFile(statePath, "utf8");
+        return persisted.includes("copilot says: crash partial");
+      });
       const validState = await readFile(statePath, "utf8");
       await writeFile(statePath, "{", "utf8");
       const restoreState = new Promise<void>((resolve, reject) => {
@@ -2731,6 +2734,19 @@ async function waitFor(
   while (!predicate()) {
     if (Date.now() - start > timeoutMs) {
       throw new Error("Timed out waiting for test condition.");
+    }
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+}
+
+async function waitForAsync(
+  predicate: () => Promise<boolean>,
+  timeoutMs = 2_000,
+): Promise<void> {
+  const start = Date.now();
+  while (!(await predicate())) {
+    if (Date.now() - start > timeoutMs) {
+      throw new Error("Timed out waiting for async test condition.");
     }
     await new Promise((resolve) => setTimeout(resolve, 5));
   }
