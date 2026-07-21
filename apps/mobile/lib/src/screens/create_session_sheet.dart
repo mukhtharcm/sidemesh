@@ -1663,7 +1663,11 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
               const SizedBox(height: 16),
               _buildPrimaryPanel(context, includeTask: false),
               const SizedBox(height: 12),
-              _buildAdvancedPanel(context, showCollapseControl: false),
+              _buildAdvancedPanel(
+                context,
+                showCollapseControl: false,
+                wrapInSurface: false,
+              ),
             ],
           ),
         ),
@@ -2012,6 +2016,7 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
   Widget _buildAdvancedPanel(
     BuildContext context, {
     bool showCollapseControl = true,
+    bool wrapInSurface = true,
   }) {
     final effectiveReasoning = _effectiveReasoningEffort;
     String? reasoningDescription;
@@ -2022,115 +2027,117 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
       }
     }
 
+    final content = Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _PanelHeading(
+          icon: Icons.tune_rounded,
+          title: 'Session setup',
+          subtitle:
+              'Only the options available for $_providerName are shown here.',
+          trailing: showCollapseControl
+              ? IconButton(
+                  tooltip: 'Hide advanced',
+                  onPressed: _submitting ? null : _toggleAdvanced,
+                  icon: const Icon(Icons.expand_less_rounded),
+                )
+              : null,
+        ),
+        const SizedBox(height: 14),
+        LaunchOptionsForm(
+          dense: true,
+          capabilities: LaunchOptionsCapabilities(
+            supportsApprovalPolicy: _supportsApprovalPolicy,
+            supportsSandboxMode: _supportsSandboxMode,
+            supportsFastMode: false,
+            supportsWebSearch: _supportsWebSearch,
+            supportsNetworkAccess:
+                _supportsNetworkAccess &&
+                _effectiveSandbox != SandboxMode.dangerFullAccess,
+            supportsSessionMode: _supportsMode,
+            approvalOptions: _approvalOptions,
+          ),
+          sessionModes: _availableModeChoices,
+          value: LaunchOptionsValue(
+            approval: _effectiveApproval,
+            sandbox: _effectiveSandbox,
+            fastMode: _effectiveFastMode,
+            webSearch: _effectiveWebSearch,
+            networkAccess: _networkAccess,
+            sessionMode: _modeToSubmit,
+          ),
+          onApprovalChanged: (policy) => setState(() {
+            _approval = policy;
+            _approvalTouched = true;
+          }),
+          onSandboxChanged: (mode) => setState(() {
+            _sandbox = mode;
+            _sandboxTouched = true;
+          }),
+          onWebSearchChanged: (next) => setState(() {
+            _webSearch = next;
+            _webSearchTouched = true;
+          }),
+          onNetworkAccessChanged: (next) => setState(() {
+            _networkAccess = next;
+          }),
+          onSessionModeChanged: (mode) => setState(() {
+            _mode = mode;
+          }),
+          permissionsTrailing:
+              _supportsApprovalPolicy &&
+                  _approvalOptions.contains(ApprovalPolicy.never) &&
+                  _supportsSandboxMode
+              ? TextButton.icon(
+                  onPressed: _applyAutopilot,
+                  icon: const Icon(Icons.auto_awesome_rounded, size: 16),
+                  label: const Text('Autopilot'),
+                )
+              : null,
+          brainExtras: _buildBrainExtras(
+            context,
+            effectiveReasoning,
+            reasoningDescription,
+          ),
+        ),
+        const SizedBox(height: AppSpacing.sm),
+        Row(
+          children: [
+            Expanded(
+              child: FilledButton.tonalIcon(
+                onPressed: _submitting
+                    ? null
+                    : () async {
+                        await CreateSessionDefaultsStore.instance.setDefaults(
+                          CreateSessionDefaults(
+                            approval: _effectiveApproval,
+                            sandbox: _effectiveSandbox,
+                            fastMode: _effectiveFastMode,
+                            webSearch: _effectiveWebSearch,
+                          ),
+                        );
+                        if (context.mounted) {
+                          showAppSnackBar(
+                            context,
+                            'Saved as default session setup.',
+                          );
+                          HapticFeedback.mediumImpact();
+                        }
+                      },
+                icon: const Icon(Icons.save_outlined, size: 18),
+                label: const Text('Save as defaults'),
+              ),
+            ),
+          ],
+        ),
+      ],
+    );
+    if (!wrapInSurface) return content;
     return MeshSurface(
       tone: MeshSurfaceTone.muted,
       radius: AppRadii.control,
       padding: const EdgeInsets.all(12),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          _PanelHeading(
-            icon: Icons.tune_rounded,
-            title: 'Session setup',
-            subtitle:
-                'Only the options available for $_providerName are shown here.',
-            trailing: showCollapseControl
-                ? IconButton(
-                    tooltip: 'Hide advanced',
-                    onPressed: _submitting ? null : _toggleAdvanced,
-                    icon: const Icon(Icons.expand_less_rounded),
-                  )
-                : null,
-          ),
-          const SizedBox(height: 14),
-          LaunchOptionsForm(
-            dense: true,
-            capabilities: LaunchOptionsCapabilities(
-              supportsApprovalPolicy: _supportsApprovalPolicy,
-              supportsSandboxMode: _supportsSandboxMode,
-              supportsFastMode: false,
-              supportsWebSearch: _supportsWebSearch,
-              supportsNetworkAccess:
-                  _supportsNetworkAccess &&
-                  _effectiveSandbox != SandboxMode.dangerFullAccess,
-              supportsSessionMode: _supportsMode,
-              approvalOptions: _approvalOptions,
-            ),
-            sessionModes: _availableModeChoices,
-            value: LaunchOptionsValue(
-              approval: _effectiveApproval,
-              sandbox: _effectiveSandbox,
-              fastMode: _effectiveFastMode,
-              webSearch: _effectiveWebSearch,
-              networkAccess: _networkAccess,
-              sessionMode: _modeToSubmit,
-            ),
-            onApprovalChanged: (policy) => setState(() {
-              _approval = policy;
-              _approvalTouched = true;
-            }),
-            onSandboxChanged: (mode) => setState(() {
-              _sandbox = mode;
-              _sandboxTouched = true;
-            }),
-            onWebSearchChanged: (next) => setState(() {
-              _webSearch = next;
-              _webSearchTouched = true;
-            }),
-            onNetworkAccessChanged: (next) => setState(() {
-              _networkAccess = next;
-            }),
-            onSessionModeChanged: (mode) => setState(() {
-              _mode = mode;
-            }),
-            permissionsTrailing:
-                _supportsApprovalPolicy &&
-                    _approvalOptions.contains(ApprovalPolicy.never) &&
-                    _supportsSandboxMode
-                ? TextButton.icon(
-                    onPressed: _applyAutopilot,
-                    icon: const Icon(Icons.auto_awesome_rounded, size: 16),
-                    label: const Text('Autopilot'),
-                  )
-                : null,
-            brainExtras: _buildBrainExtras(
-              context,
-              effectiveReasoning,
-              reasoningDescription,
-            ),
-          ),
-          const SizedBox(height: AppSpacing.sm),
-          Row(
-            children: [
-              Expanded(
-                child: FilledButton.tonalIcon(
-                  onPressed: _submitting
-                      ? null
-                      : () async {
-                          await CreateSessionDefaultsStore.instance.setDefaults(
-                            CreateSessionDefaults(
-                              approval: _effectiveApproval,
-                              sandbox: _effectiveSandbox,
-                              fastMode: _effectiveFastMode,
-                              webSearch: _effectiveWebSearch,
-                            ),
-                          );
-                          if (context.mounted) {
-                            showAppSnackBar(
-                              context,
-                              'Saved as default session setup.',
-                            );
-                            HapticFeedback.mediumImpact();
-                          }
-                        },
-                  icon: const Icon(Icons.save_outlined, size: 18),
-                  label: const Text('Save as defaults'),
-                ),
-              ),
-            ],
-          ),
-        ],
-      ),
+      child: content,
     );
   }
 
