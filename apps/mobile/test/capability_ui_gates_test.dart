@@ -1074,6 +1074,7 @@ void main() {
       find.bySemanticsLabel('Send message and create session'),
       findsOneWidget,
     );
+    expect(find.byTooltip('Broad permissions are active'), findsOneWidget);
     expect(find.text('Start session'), findsNothing);
     expect(
       find.byKey(const ValueKey('create-session-send-button')),
