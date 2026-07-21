@@ -51,28 +51,22 @@ class _SidemeshHomeScreenState extends State<SidemeshHomeScreen>
     with WidgetsBindingObserver {
   static const _tabs = [
     _TabDef(
-      title: 'Recent',
-      subtitle: 'Pick up where your agents left off',
-      icon: Icons.schedule_rounded,
-      selectedIcon: Icons.schedule_rounded,
+      title: 'Home',
+      subtitle: 'What needs attention, then what to continue',
+      icon: Icons.circle_outlined,
+      selectedIcon: Icons.circle_rounded,
     ),
     _TabDef(
-      title: 'Inbox',
-      subtitle: 'Approvals and pending replies in one place',
-      icon: Icons.all_inbox_rounded,
-      selectedIcon: Icons.all_inbox_rounded,
+      title: 'Search',
+      subtitle: 'Find sessions, workspaces, and machines',
+      icon: Icons.search_rounded,
+      selectedIcon: Icons.search_rounded,
     ),
     _TabDef(
-      title: 'Usage',
-      subtitle: 'Limits, versions, and host health',
-      icon: Icons.speed_rounded,
-      selectedIcon: Icons.speed_rounded,
-    ),
-    _TabDef(
-      title: 'Hosts',
-      subtitle: 'Machines you can reach from this device',
-      icon: Icons.hub_rounded,
-      selectedIcon: Icons.hub_rounded,
+      title: 'More',
+      subtitle: 'Hosts, usage, settings, and setup',
+      icon: Icons.more_horiz_rounded,
+      selectedIcon: Icons.more_horiz_rounded,
     ),
   ];
 
@@ -93,18 +87,12 @@ class _SidemeshHomeScreenState extends State<SidemeshHomeScreen>
   int _activeCount = 0;
   int _inboxCount = 0;
   String _query = '';
-  RecentSessionFilters _recentFilters = const RecentSessionFilters();
   bool _handlingNotificationIntent = false;
   String? _dismissedRecommendedMobileClientVersion;
   final Map<String, NodeInfo> _hostNodeInfo = {};
 
   List<HostProfile> get _enabledHosts =>
       _hosts.where((host) => host.enabled).toList(growable: false);
-
-  bool _searchVisibleForTab(_TabDef tab, int enabledHostCount) {
-    if (tab.title == 'Usage') return false;
-    return tab.title != 'Hosts' || enabledHostCount >= 4;
-  }
 
   @override
   void initState() {
@@ -236,27 +224,6 @@ class _SidemeshHomeScreenState extends State<SidemeshHomeScreen>
     }
   }
 
-  void _toggleRecentRunningOnly(bool enabled) {
-    if (_recentFilters.runningOnly == enabled) return;
-    setState(() {
-      _recentFilters = _recentFilters.copyWith(runningOnly: enabled);
-    });
-  }
-
-  void _toggleRecentUnreadOnly(bool enabled) {
-    if (_recentFilters.unreadOnly == enabled) return;
-    setState(() {
-      _recentFilters = _recentFilters.copyWith(unreadOnly: enabled);
-    });
-  }
-
-  void _toggleRecentFavoritesOnly(bool enabled) {
-    if (_recentFilters.favoritesOnly == enabled) return;
-    setState(() {
-      _recentFilters = _recentFilters.copyWith(favoritesOnly: enabled);
-    });
-  }
-
   Future<void> _refreshHosts() async {
     final hosts = await _store.loadHosts();
     if (!mounted) {
@@ -385,11 +352,7 @@ class _SidemeshHomeScreenState extends State<SidemeshHomeScreen>
       return;
     }
     final navigator = Navigator.of(context);
-    final route = _buildSessionRoute(
-      host,
-      session,
-      composerSeed: composerSeed,
-    );
+    final route = _buildSessionRoute(host, session, composerSeed: composerSeed);
     if (replaceCurrentRoute) {
       await navigator.pushReplacement<void, void>(route);
     } else {
@@ -470,8 +433,8 @@ class _SidemeshHomeScreenState extends State<SidemeshHomeScreen>
     _handlingNotificationIntent = true;
     try {
       if (!mounted) return;
-      if (_tabIndex != 1) {
-        setState(() => _tabIndex = 1);
+      if (_tabIndex != 0) {
+        setState(() => _tabIndex = 0);
       }
       final host = _hostForIntent(intent);
       if (host == null) {
@@ -546,18 +509,18 @@ class _SidemeshHomeScreenState extends State<SidemeshHomeScreen>
   }
 
   _HomePrimaryAction _primaryActionForTab(_TabDef tab) {
-    if (_hosts.isEmpty || tab.title == 'Hosts') {
+    if (_hosts.isEmpty) {
       return _HomePrimaryAction(
-        label: 'Add host',
+        label: 'Connect a machine',
         icon: Icons.add_link_rounded,
         onTap: () => _showHostEditor(),
       );
     }
     if (_enabledHosts.isEmpty) {
       return _HomePrimaryAction(
-        label: 'Open hosts',
+        label: 'Manage hosts',
         icon: Icons.hub_rounded,
-        onTap: () => setState(() => _tabIndex = 3),
+        onTap: () => setState(() => _tabIndex = 2),
       );
     }
     return _HomePrimaryAction(
@@ -590,17 +553,11 @@ class _SidemeshHomeScreenState extends State<SidemeshHomeScreen>
               tab: tab,
               primaryAction: primaryAction,
               searchController: _searchController,
-              searchVisible: _searchVisibleForTab(tab, enabledHosts.length),
-              recentFilters: _tabIndex == 0 ? _recentFilters : null,
-              onRunningOnlyChanged: _tabIndex == 0
-                  ? _toggleRecentRunningOnly
-                  : null,
-              onUnreadOnlyChanged: _tabIndex == 0
-                  ? _toggleRecentUnreadOnly
-                  : null,
-              onFavoritesOnlyChanged: _tabIndex == 0
-                  ? _toggleRecentFavoritesOnly
-                  : null,
+              searchVisible: _tabIndex == 1,
+              recentFilters: null,
+              onRunningOnlyChanged: null,
+              onUnreadOnlyChanged: null,
+              onFavoritesOnlyChanged: null,
               onRefresh: _refreshHosts,
               onOpenSettings: _openSettings,
             ),
@@ -627,58 +584,62 @@ class _SidemeshHomeScreenState extends State<SidemeshHomeScreen>
                   : IndexedStack(
                       index: _tabIndex,
                       children: [
-                        RecentPane(
+                        HomePane(
                           hosts: enabledHosts,
+                          allHosts: _hosts,
                           api: _api,
-                          query: _query,
+                          activeCount: _activeCount,
+                          inboxCount: _inboxCount,
                           hasSavedHosts: _hosts.isNotEmpty,
-                          screenAwakeSourceKey: 'mobile-recent-sessions',
                           onOpenSession: _openSession,
                           onAddHost: () => _showHostEditor(),
+                          onOpenInbox: () => setState(() => _tabIndex = 1),
                           onActiveCountChanged: (count) {
                             if (!mounted) return;
                             setState(() => _activeCount = count);
                           },
-                          filters: _recentFilters,
                         ),
-                        InboxPane(
+                        GlobalSearchPane(
                           hosts: enabledHosts,
+                          allHosts: _hosts,
+                          hostNodes: _hostNodeInfo,
+                          installedAppVersion: installedAppVersion,
                           api: _api,
                           query: _query,
                           hasSavedHosts: _hosts.isNotEmpty,
-                          onOpenSession: (host, action) =>
-                              _openSession(host, _sessionFromAction(action)),
+                          onOpenSession: _openSession,
+                          onAddHost: () => _showHostEditor(),
+                          onOpenHost: _openHost,
+                          onEditHost: (host) =>
+                              _showHostEditor(initialHost: host),
+                          onRemoveHost: _removeHost,
+                          onToggleHostEnabled: _toggleHostEnabled,
+                          onInboxCountChanged: (count) {
+                            if (!mounted || count == _inboxCount) return;
+                            setState(() => _inboxCount = count);
+                          },
                           onOpenPendingSession: (host, session, composerSeed) =>
                               _openSession(
                                 host,
                                 session,
                                 composerSeed: composerSeed,
                               ),
-                          onEditHost: (host) =>
-                              _showHostEditor(initialHost: host),
-                          onToggleHostEnabled: _toggleHostEnabled,
-                          allHosts: _hosts,
-                          onInboxCountChanged: (count) {
-                            if (!mounted || count == _inboxCount) return;
-                            setState(() => _inboxCount = count);
-                          },
+                          onOpenPendingAction: (host, action) =>
+                              _openSession(host, _sessionFromAction(action)),
                         ),
-                        UsagePane(
-                          hosts: enabledHosts,
-                          api: _api,
-                          active: _tabIndex == 2,
-                        ),
-                        HostsPane(
+                        MorePane(
                           hosts: _hosts,
                           hostNodes: _hostNodeInfo,
                           installedAppVersion: installedAppVersion,
-                          query: _query,
+                          api: _api,
+                          onNewSession: _startSessionFromHome,
+                          onPairHost: () => _showHostEditor(),
+                          onOpenSettings: _openSettings,
                           onOpenHost: _openHost,
                           onEditHost: (host) =>
                               _showHostEditor(initialHost: host),
                           onRemoveHost: _removeHost,
-                          onToggleEnabled: _toggleHostEnabled,
-                          onAddHost: () => _showHostEditor(),
+                          onToggleHostEnabled: _toggleHostEnabled,
                         ),
                       ],
                     ),
@@ -686,29 +647,21 @@ class _SidemeshHomeScreenState extends State<SidemeshHomeScreen>
           ],
         ),
       ),
-      floatingActionButton: _tabIndex == 3 && _hosts.isNotEmpty
-          ? FloatingActionButton.extended(
-              onPressed: () => _showHostEditor(),
-              icon: const Icon(Icons.add_link_rounded),
-              label: const Text('Add host'),
-            )
-          : null,
+      floatingActionButton: null,
       bottomNavigationBar: _MeshNavBar(
         tabs: _tabs,
         currentIndex: _tabIndex,
         onTap: (index) {
           setState(() {
             _tabIndex = index;
-            final tab = _tabs[index];
-            final showSearch = _searchVisibleForTab(tab, _enabledHosts.length);
-            if (!showSearch &&
+            if (index != 1 &&
                 (_query.isNotEmpty || _searchController.text.isNotEmpty)) {
               _query = '';
               _searchController.clear();
             }
           });
         },
-        badges: [_activeCount, _inboxCount, 0, 0],
+        badges: [_inboxCount + _activeCount, 0, 0],
       ),
     );
   }
@@ -813,14 +766,29 @@ class _HomeStickyHeader extends StatelessWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(
-                      'Sidemesh',
-                      style: Theme.of(context).textTheme.labelLarge?.copyWith(
-                        color: colors.textSecondary,
-                        fontWeight: AppWeights.emphasis,
-                      ),
+                    Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Container(
+                          width: 8,
+                          height: 8,
+                          decoration: BoxDecoration(
+                            color: colors.accent,
+                            shape: BoxShape.circle,
+                          ),
+                        ),
+                        const SizedBox(width: 7),
+                        Text(
+                          'SIDEMESH',
+                          style: monoStyle(
+                            color: colors.textSecondary,
+                            fontSize: 11,
+                            fontWeight: AppWeights.title,
+                          ).copyWith(letterSpacing: 1.4),
+                        ),
+                      ],
                     ),
-                    const SizedBox(height: 6),
+                    const SizedBox(height: 8),
                     Text(
                       tab.title,
                       style: Theme.of(context).textTheme.headlineSmall
@@ -841,6 +809,17 @@ class _HomeStickyHeader extends StatelessWidget {
                 ),
               ),
               const SizedBox(width: AppSpacing.sm),
+              FilledButton.icon(
+                onPressed: primaryAction.onTap,
+                icon: Icon(primaryAction.icon, size: 17),
+                label: Text(primaryAction.label),
+                style: FilledButton.styleFrom(
+                  minimumSize: const Size(0, 42),
+                  padding: const EdgeInsets.symmetric(horizontal: 12),
+                  visualDensity: VisualDensity.compact,
+                ),
+              ),
+              const SizedBox(width: AppSpacing.xs),
               PopupMenuButton<_HomeHeaderMenuAction>(
                 tooltip: 'More',
                 onSelected: (action) {
@@ -887,16 +866,7 @@ class _HomeStickyHeader extends StatelessWidget {
               ),
             ],
           ),
-          const SizedBox(height: AppSpacing.md),
-          Align(
-            alignment: Alignment.centerLeft,
-            child: FilledButton.icon(
-              onPressed: primaryAction.onTap,
-              icon: Icon(primaryAction.icon, size: 18),
-              label: Text(primaryAction.label),
-            ),
-          ),
-          const SizedBox(height: AppSpacing.md),
+          const SizedBox(height: AppSpacing.sm),
           AnimatedSwitcher(
             duration: const Duration(milliseconds: 220),
             child: searchVisible
@@ -992,9 +962,9 @@ class _HomeSearchField extends StatelessWidget {
               ),
             ),
             if (filters != null &&
-                    (onRunningOnlyChanged != null ||
-                        onUnreadOnlyChanged != null ||
-                        onFavoritesOnlyChanged != null)) ...[
+                (onRunningOnlyChanged != null ||
+                    onUnreadOnlyChanged != null ||
+                    onFavoritesOnlyChanged != null)) ...[
               const SizedBox(height: AppSpacing.sm),
               Wrap(
                 spacing: AppSpacing.sm,
@@ -1002,22 +972,22 @@ class _HomeSearchField extends StatelessWidget {
                 children: [
                   _HomeSearchFilterToken(
                     icon: Icons.star_rounded,
-                      label: 'Favorites',
-                      selected: filters.favoritesOnly,
-                      onSelected: onFavoritesOnlyChanged,
-                    ),
-                    _HomeSearchFilterToken(
-                      icon: Icons.play_circle_outline_rounded,
-                      label: 'Running',
-                      selected: filters.runningOnly,
-                      onSelected: onRunningOnlyChanged,
-                    ),
-                    _HomeSearchFilterToken(
-                      icon: Icons.mark_chat_unread_rounded,
-                      label: 'Unread',
-                      selected: filters.unreadOnly,
-                      onSelected: onUnreadOnlyChanged,
-                    ),
+                    label: 'Favorites',
+                    selected: filters.favoritesOnly,
+                    onSelected: onFavoritesOnlyChanged,
+                  ),
+                  _HomeSearchFilterToken(
+                    icon: Icons.play_circle_outline_rounded,
+                    label: 'Running',
+                    selected: filters.runningOnly,
+                    onSelected: onRunningOnlyChanged,
+                  ),
+                  _HomeSearchFilterToken(
+                    icon: Icons.mark_chat_unread_rounded,
+                    label: 'Unread',
+                    selected: filters.unreadOnly,
+                    onSelected: onUnreadOnlyChanged,
+                  ),
                 ],
               ),
             ],
@@ -1073,9 +1043,7 @@ class _HomeSearchFilterToken extends StatelessWidget {
                 label,
                 style: Theme.of(context).textTheme.labelMedium?.copyWith(
                   color: selected ? colors.textPrimary : colors.textSecondary,
-                  fontWeight: selected
-                      ? AppWeights.title
-                      : AppWeights.emphasis,
+                  fontWeight: selected ? AppWeights.title : AppWeights.emphasis,
                 ),
               ),
             ],
@@ -1103,68 +1071,55 @@ class _MeshNavBar extends StatelessWidget {
   Widget build(BuildContext context) {
     final colors = context.colors;
     return Container(
-      padding: const EdgeInsets.fromLTRB(14, 8, 14, 14),
       decoration: BoxDecoration(
-        color: colors.canvas,
+        color: colors.canvas.withValues(alpha: 0.98),
         border: Border(top: BorderSide(color: colors.border)),
+        boxShadow: [
+          BoxShadow(
+            color: colors.textPrimary.withValues(alpha: 0.05),
+            blurRadius: 20,
+            offset: const Offset(0, -8),
+          ),
+        ],
       ),
       child: SafeArea(
         top: false,
-        child: Row(
-          children: List.generate(tabs.length, (index) {
-            final tab = tabs[index];
-            final selected = index == currentIndex;
-            final badge = index < badges.length ? badges[index] : 0;
-            return Expanded(
-              child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 3),
-                child: Material(
-                  color: Colors.transparent,
-                  child: InkWell(
-                    borderRadius: AppShapes.input,
-                    onTap: () => onTap(index),
-                    child: AnimatedContainer(
-                      duration: const Duration(milliseconds: 220),
-                      curve: Curves.easeOut,
-                      padding: const EdgeInsets.symmetric(vertical: 10),
-                      decoration: BoxDecoration(
-                        color: selected
-                            ? colors.accentMuted
-                            : Colors.transparent,
-                        borderRadius: AppShapes.input,
-                        border: Border.all(
-                          color: selected
-                              ? colors.accent.withValues(alpha: 0.4)
-                              : Colors.transparent,
-                        ),
-                      ),
-                      child: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          _NavIconWithBadge(
-                            icon: selected ? tab.selectedIcon : tab.icon,
-                            selected: selected,
-                            badge: badge,
-                          ),
-                          const SizedBox(height: 4),
-                          Text(
-                            tab.title,
-                            style: Theme.of(context).textTheme.labelSmall
-                                ?.copyWith(
-                                  color: selected
-                                      ? colors.accent
-                                      : colors.textSecondary,
-                                  fontWeight: AppWeights.emphasis,
-                                ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(12, 6, 12, 8),
+          child: NavigationBar(
+            selectedIndex: currentIndex,
+            onDestinationSelected: onTap,
+            height: 64,
+            backgroundColor: Colors.transparent,
+            elevation: 0,
+            indicatorColor: colors.accentMuted.withValues(alpha: 0.64),
+            labelBehavior: NavigationDestinationLabelBehavior.alwaysShow,
+            destinations: List.generate(tabs.length, (index) {
+              final tab = tabs[index];
+              final badge = index < badges.length ? badges[index] : 0;
+              final icon = _NavIconWithBadge(
+                icon: tab.icon,
+                selected: false,
+                badge: badge,
+              );
+              final selectedIcon = _NavIconWithBadge(
+                icon: tab.selectedIcon,
+                selected: true,
+                badge: badge,
+              );
+              return NavigationDestination(
+                tooltip: tab.title,
+                label: tab.title,
+                icon: Semantics(label: tab.title, button: true, child: icon),
+                selectedIcon: Semantics(
+                  label: '${tab.title}, selected',
+                  button: true,
+                  selected: true,
+                  child: selectedIcon,
                 ),
-              ),
-            );
-          }),
+              );
+            }),
+          ),
         ),
       ),
     );
@@ -1221,6 +1176,653 @@ class _NavIconWithBadge extends StatelessWidget {
             ),
           ),
       ],
+    );
+  }
+}
+
+class HomePane extends StatelessWidget {
+  const HomePane({
+    super.key,
+    required this.hosts,
+    required this.allHosts,
+    required this.api,
+    required this.activeCount,
+    required this.onOpenSession,
+    required this.onActiveCountChanged,
+    required this.onAddHost,
+    required this.onOpenInbox,
+    required this.inboxCount,
+    this.hasSavedHosts = false,
+  });
+
+  final List<HostProfile> hosts;
+  final List<HostProfile> allHosts;
+  final ApiClient api;
+  final int activeCount;
+  final void Function(HostProfile host, SessionSummary session) onOpenSession;
+  final ValueChanged<int> onActiveCountChanged;
+  final VoidCallback onAddHost;
+  final VoidCallback onOpenInbox;
+  final int inboxCount;
+  final bool hasSavedHosts;
+
+  @override
+  Widget build(BuildContext context) {
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(16, 4, 16, 96),
+      children: [
+        _CommandDeckHero(
+          title: inboxCount > 0 ? 'Action required' : 'Command deck',
+          subtitle: inboxCount > 0
+              ? '$inboxCount item${inboxCount == 1 ? '' : 's'} waiting before you continue.'
+              : '${activeCount == 0 ? 'No' : activeCount} active session${activeCount == 1 ? '' : 's'} across ${hosts.length} machine${hosts.length == 1 ? '' : 's'}.',
+          actionLabel: inboxCount > 0
+              ? 'Review'
+              : (hosts.isEmpty ? 'Connect' : 'Ready'),
+          actionIcon: inboxCount > 0
+              ? Icons.priority_high_rounded
+              : Icons.bolt_rounded,
+          onTap: inboxCount > 0
+              ? onOpenInbox
+              : (hosts.isEmpty ? onAddHost : null),
+          stats: [
+            _CommandDeckStat(
+              'Running',
+              '$activeCount',
+              Icons.play_circle_outline_rounded,
+            ),
+            _CommandDeckStat(
+              'Attention',
+              '$inboxCount',
+              Icons.notifications_active_outlined,
+            ),
+            _CommandDeckStat('Machines', '${hosts.length}', Icons.dns_rounded),
+          ],
+        ),
+        const SizedBox(height: 24),
+        MeshSectionHeader(
+          title: 'Continue',
+          subtitle: hosts.isEmpty
+              ? 'Connect a machine to start using Sidemesh.'
+              : 'Your active and recent sessions, grouped by workspace.',
+          trailing: inboxCount > 0
+              ? TextButton(onPressed: onOpenInbox, child: const Text('Review'))
+              : null,
+        ),
+        SizedBox(
+          height: max(420, MediaQuery.sizeOf(context).height * 0.72),
+          child: RecentPane(
+            hosts: hosts,
+            api: api,
+            hasSavedHosts: hasSavedHosts,
+            screenAwakeSourceKey: 'mobile-home-continue',
+            padding: EdgeInsets.zero,
+            onOpenSession: onOpenSession,
+            onAddHost: onAddHost,
+            onActiveCountChanged: onActiveCountChanged,
+            filters: const RecentSessionFilters(),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _CommandDeckStat {
+  const _CommandDeckStat(this.label, this.value, this.icon);
+  final String label;
+  final String value;
+  final IconData icon;
+}
+
+class _CommandDeckHero extends StatelessWidget {
+  const _CommandDeckHero({
+    required this.title,
+    required this.subtitle,
+    required this.actionLabel,
+    required this.actionIcon,
+    required this.stats,
+    this.onTap,
+  });
+
+  final String title;
+  final String subtitle;
+  final String actionLabel;
+  final IconData actionIcon;
+  final List<_CommandDeckStat> stats;
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    final deckBg = Color.alphaBlend(
+      colors.accent.withValues(alpha: 0.22),
+      colors.textPrimary,
+    );
+    final primaryOnDeck = readableTextOn(
+      colors,
+      background: deckBg,
+      preferred: Colors.white,
+    );
+    final secondaryOnDeck = primaryOnDeck.withValues(alpha: 0.72);
+    final panel = Container(
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(34),
+        color: deckBg,
+        boxShadow: [
+          BoxShadow(
+            color: colors.textPrimary.withValues(alpha: 0.22),
+            blurRadius: 38,
+            offset: const Offset(0, 20),
+          ),
+        ],
+      ),
+      child: Stack(
+        children: [
+          Positioned(
+            right: -34,
+            top: -46,
+            child: IgnorePointer(
+              child: Container(
+                width: 148,
+                height: 148,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: colors.accent.withValues(alpha: 0.34),
+                ),
+              ),
+            ),
+          ),
+          Positioned(
+            left: -44,
+            bottom: -58,
+            child: IgnorePointer(
+              child: Container(
+                width: 158,
+                height: 158,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: colors.canvas.withValues(alpha: 0.10),
+                ),
+              ),
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(18, 18, 18, 16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Container(
+                      width: 46,
+                      height: 46,
+                      decoration: BoxDecoration(
+                        color: Colors.white.withValues(alpha: 0.12),
+                        borderRadius: BorderRadius.circular(17),
+                        border: Border.all(
+                          color: Colors.white.withValues(alpha: 0.16),
+                        ),
+                      ),
+                      child: Icon(actionIcon, color: primaryOnDeck, size: 21),
+                    ),
+                    const Spacer(),
+                    FilledButton.tonalIcon(
+                      onPressed: onTap,
+                      icon: Icon(actionIcon, size: 16),
+                      label: Text(actionLabel),
+                      style: FilledButton.styleFrom(
+                        foregroundColor: primaryOnDeck,
+                        backgroundColor: Colors.white.withValues(alpha: 0.12),
+                        disabledForegroundColor: secondaryOnDeck,
+                        disabledBackgroundColor: Colors.white.withValues(
+                          alpha: 0.08,
+                        ),
+                        side: BorderSide(
+                          color: Colors.white.withValues(alpha: 0.14),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 24),
+                Text(
+                  title,
+                  style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                    color: primaryOnDeck,
+                    fontWeight: AppWeights.title,
+                    letterSpacing: -0.8,
+                  ),
+                ),
+                const SizedBox(height: 5),
+                Text(
+                  subtitle,
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: secondaryOnDeck,
+                    height: 1.35,
+                    fontWeight: AppWeights.emphasis,
+                  ),
+                ),
+                const SizedBox(height: 18),
+                Row(
+                  children: [
+                    for (var i = 0; i < stats.length; i++) ...[
+                      Expanded(child: _CommandDeckStatTile(stat: stats[i])),
+                      if (i != stats.length - 1) const SizedBox(width: 9),
+                    ],
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+    if (onTap == null) return panel;
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(34),
+        onTap: onTap,
+        child: panel,
+      ),
+    );
+  }
+}
+
+class _CommandDeckStatTile extends StatelessWidget {
+  const _CommandDeckStatTile({required this.stat});
+  final _CommandDeckStat stat;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.fromLTRB(10, 10, 10, 9),
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: 0.10),
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.13)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(
+                stat.icon,
+                size: 13,
+                color: Colors.white.withValues(alpha: 0.70),
+              ),
+              const Spacer(),
+              Flexible(
+                child: Text(
+                  stat.value,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  textAlign: TextAlign.right,
+                  style: monoStyle(
+                    color: Colors.white,
+                    fontSize: 15,
+                    fontWeight: AppWeights.title,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 9),
+          Text(
+            stat.label.toUpperCase(),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: monoStyle(
+              color: Colors.white.withValues(alpha: 0.58),
+              fontSize: 8.5,
+              fontWeight: AppWeights.title,
+            ).copyWith(letterSpacing: 0.9),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class GlobalSearchPane extends StatelessWidget {
+  const GlobalSearchPane({
+    super.key,
+    required this.hosts,
+    required this.allHosts,
+    required this.hostNodes,
+    required this.installedAppVersion,
+    required this.api,
+    required this.query,
+    required this.onOpenSession,
+    required this.onAddHost,
+    required this.onOpenHost,
+    required this.onEditHost,
+    required this.onRemoveHost,
+    required this.onToggleHostEnabled,
+    required this.onInboxCountChanged,
+    required this.onOpenPendingSession,
+    required this.onOpenPendingAction,
+    this.hasSavedHosts = false,
+  });
+
+  final List<HostProfile> hosts;
+  final List<HostProfile> allHosts;
+  final Map<String, NodeInfo> hostNodes;
+  final String installedAppVersion;
+  final ApiClient api;
+  final String query;
+  final void Function(HostProfile host, SessionSummary session) onOpenSession;
+  final VoidCallback onAddHost;
+  final ValueChanged<HostProfile> onOpenHost;
+  final HostProfileActionCallback onEditHost;
+  final ValueChanged<HostProfile> onRemoveHost;
+  final HostProfileActionCallback onToggleHostEnabled;
+  final ValueChanged<int> onInboxCountChanged;
+  final OpenPendingSessionCallback onOpenPendingSession;
+  final void Function(HostProfile host, PendingAction action)
+  onOpenPendingAction;
+  final bool hasSavedHosts;
+
+  @override
+  Widget build(BuildContext context) {
+    final q = query.trim();
+    if (q.isEmpty) {
+      return ListView(
+        keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+        padding: const EdgeInsets.fromLTRB(16, 8, 16, 96),
+        children: const [
+          MeshEmptyState(
+            icon: Icons.travel_explore_rounded,
+            title: 'Search everything',
+            body:
+                'Type a title, workspace, host, or transcript phrase. Results stay grouped and compact so you can jump back into work quickly.',
+          ),
+        ],
+      );
+    }
+    return ListView(
+      keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+      padding: const EdgeInsets.fromLTRB(16, 4, 16, 120),
+      children: [
+        MeshSurface(
+          tone: MeshSurfaceTone.muted,
+          radius: AppRadii.surface,
+          padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+          child: Row(
+            children: [
+              const _PremiumIconWell(icon: Icons.search_rounded),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Results for “$q”',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                        fontWeight: AppWeights.title,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      'Sessions first. Transcript matches are shortened for scanning.',
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color: context.colors.textSecondary,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 16),
+        const MeshSectionHeader(
+          title: 'Sessions',
+          subtitle: 'Best matches across recent and remote history.',
+        ),
+        SizedBox(
+          height: 430,
+          child: RecentPane(
+            hosts: hosts,
+            api: api,
+            query: q,
+            hasSavedHosts: hasSavedHosts,
+            padding: EdgeInsets.zero,
+            onOpenSession: onOpenSession,
+            onAddHost: onAddHost,
+            onActiveCountChanged: (_) {},
+          ),
+        ),
+        const SizedBox(height: 20),
+        const MeshSectionHeader(
+          title: 'Attention',
+          subtitle: 'Approvals and queued work matching this search.',
+        ),
+        SizedBox(
+          height: 220,
+          child: InboxPane(
+            hosts: hosts,
+            allHosts: allHosts,
+            api: api,
+            query: q,
+            dense: true,
+            hasSavedHosts: hasSavedHosts,
+            onOpenSession: onOpenPendingAction,
+            onOpenPendingSession: onOpenPendingSession,
+            onEditHost: onEditHost,
+            onToggleHostEnabled: onToggleHostEnabled,
+            onInboxCountChanged: onInboxCountChanged,
+          ),
+        ),
+        const SizedBox(height: 20),
+        const MeshSectionHeader(
+          title: 'Machines',
+          subtitle: 'Connected hosts by label or URL.',
+        ),
+        SizedBox(
+          height: 220,
+          child: HostsPane(
+            hosts: allHosts,
+            hostNodes: hostNodes,
+            installedAppVersion: installedAppVersion,
+            query: q,
+            dense: true,
+            onOpenHost: onOpenHost,
+            onEditHost: onEditHost,
+            onRemoveHost: onRemoveHost,
+            onToggleEnabled: onToggleHostEnabled,
+            onAddHost: onAddHost,
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class MorePane extends StatelessWidget {
+  const MorePane({
+    super.key,
+    required this.hosts,
+    required this.hostNodes,
+    required this.installedAppVersion,
+    required this.api,
+    required this.onNewSession,
+    required this.onPairHost,
+    required this.onOpenSettings,
+    required this.onOpenHost,
+    required this.onEditHost,
+    required this.onRemoveHost,
+    required this.onToggleHostEnabled,
+  });
+
+  final List<HostProfile> hosts;
+  final Map<String, NodeInfo> hostNodes;
+  final String installedAppVersion;
+  final ApiClient api;
+  final VoidCallback onNewSession;
+  final VoidCallback onPairHost;
+  final VoidCallback onOpenSettings;
+  final ValueChanged<HostProfile> onOpenHost;
+  final ValueChanged<HostProfile> onEditHost;
+  final ValueChanged<HostProfile> onRemoveHost;
+  final ValueChanged<HostProfile> onToggleHostEnabled;
+
+  @override
+  Widget build(BuildContext context) {
+    final enabledCount = hosts.where((h) => h.enabled).length;
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(16, 4, 16, 96),
+      children: [
+        _CommandDeckHero(
+          title: 'Control deck',
+          subtitle:
+              '$enabledCount of ${hosts.length} machines enabled · app ${installedAppVersion.isEmpty ? 'current' : installedAppVersion}',
+          actionLabel: 'Add host',
+          actionIcon: Icons.add_rounded,
+          onTap: onPairHost,
+          stats: [
+            _CommandDeckStat(
+              'Enabled',
+              '$enabledCount',
+              Icons.power_settings_new_rounded,
+            ),
+            _CommandDeckStat('Saved', '${hosts.length}', Icons.dns_rounded),
+            _CommandDeckStat(
+              'Version',
+              installedAppVersion.isEmpty
+                  ? '—'
+                  : installedAppVersion.split('+').first,
+              Icons.phone_iphone_rounded,
+            ),
+          ],
+        ),
+        const SizedBox(height: 20),
+        const MeshSectionHeader(
+          title: 'Create',
+          subtitle: 'Start work or connect another machine.',
+        ),
+        MeshGroup(
+          children: [
+            MeshListRow(
+              framed: false,
+              leading: const _PremiumIconWell(icon: Icons.add_rounded),
+              title: const Text('New session'),
+              subtitle: const Text(
+                'Start with your defaults, then adjust as needed.',
+              ),
+              trailing: const Icon(Icons.chevron_right_rounded),
+              onTap: onNewSession,
+            ),
+            MeshListRow(
+              framed: false,
+              leading: const _PremiumIconWell(icon: Icons.add_link_rounded),
+              title: const Text('Pair host'),
+              subtitle: const Text('Add a laptop, desktop, or server.'),
+              trailing: const Icon(Icons.chevron_right_rounded),
+              onTap: onPairHost,
+            ),
+          ],
+        ),
+        const SizedBox(height: 24),
+        const MeshSectionHeader(
+          title: 'Manage',
+          subtitle: 'App-level settings and health.',
+        ),
+        MeshGroup(
+          children: [
+            MeshListRow(
+              framed: false,
+              leading: const _PremiumIconWell(icon: Icons.speed_rounded),
+              title: const Text('Usage'),
+              subtitle: const Text('Limits, versions, and host health.'),
+              trailing: const Icon(Icons.chevron_right_rounded),
+              onTap: () => _showUsageSheet(context),
+            ),
+            MeshListRow(
+              framed: false,
+              leading: const _PremiumIconWell(icon: Icons.tune_rounded),
+              title: const Text('Settings'),
+              subtitle: const Text(
+                'Appearance, notifications, updates, and defaults.',
+              ),
+              trailing: const Icon(Icons.chevron_right_rounded),
+              onTap: onOpenSettings,
+            ),
+          ],
+        ),
+        const SizedBox(height: 24),
+        MeshSectionHeader(
+          title: 'Hosts',
+          subtitle: hosts.isEmpty
+              ? 'No machines connected yet.'
+              : '${hosts.length} saved ${hosts.length == 1 ? 'machine' : 'machines'}.',
+          trailing: TextButton.icon(
+            onPressed: onPairHost,
+            icon: const Icon(Icons.add_rounded, size: 17),
+            label: const Text('Add'),
+          ),
+        ),
+        SizedBox(
+          height: hosts.isEmpty ? 220 : min(420, 92.0 * hosts.length + 32),
+          child: HostsPane(
+            hosts: hosts,
+            hostNodes: hostNodes,
+            installedAppVersion: installedAppVersion,
+            dense: true,
+            onOpenHost: onOpenHost,
+            onEditHost: onEditHost,
+            onRemoveHost: onRemoveHost,
+            onToggleEnabled: onToggleHostEnabled,
+            onAddHost: onPairHost,
+          ),
+        ),
+      ],
+    );
+  }
+
+  void _showUsageSheet(BuildContext context) {
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (context) => MeshBottomSheetScaffold(
+        icon: Icons.speed_rounded,
+        title: 'Usage',
+        description:
+            'Limits, versions, and host health across connected machines.',
+        maxHeightFactor: 0.9,
+        child: UsagePane(
+          hosts: hosts.where((h) => h.enabled).toList(),
+          api: api,
+          active: true,
+        ),
+      ),
+    );
+  }
+}
+
+class _PremiumIconWell extends StatelessWidget {
+  const _PremiumIconWell({required this.icon});
+
+  final IconData icon;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    final toneColors = meshPillColors(colors, MeshPillTone.accent);
+    return Container(
+      width: 38,
+      height: 38,
+      decoration: BoxDecoration(
+        color: toneColors.background,
+        borderRadius: BorderRadius.circular(AppRadii.control),
+        border: Border.all(color: toneColors.border.withValues(alpha: 0.72)),
+      ),
+      child: Icon(icon, color: toneColors.foreground, size: 19),
     );
   }
 }
@@ -1487,9 +2089,15 @@ String _hostListSignature(HostProfile host) {
 
 @immutable
 class _SessionGroup {
-  const _SessionGroup({required this.key, required this.title, required this.host, required this.entries});
+  const _SessionGroup({
+    required this.key,
+    required this.title,
+    required this.host,
+    required this.entries,
+  });
   final String key;
   final String title;
+
   /// Host all sessions in this group belong to.
   /// Groups are keyed by host-scoped gitCommonDir when available.
   final HostProfile host;
@@ -1579,10 +2187,7 @@ class _RecentPaneState extends State<RecentPane> {
     return _cwdBasename(stripped);
   }
 
-  int _compareRecentEntries(
-    RemoteSessionEntry left,
-    RemoteSessionEntry right,
-  ) {
+  int _compareRecentEntries(RemoteSessionEntry left, RemoteSessionEntry right) {
     final updatedCompare = right.session.updatedAt.compareTo(
       left.session.updatedAt,
     );
@@ -1629,12 +2234,14 @@ class _RecentPaneState extends State<RecentPane> {
         return a.compareTo(b);
       });
     return sortedKeys
-        .map((k) => _SessionGroup(
-          key: k,
-          title: _projectLabel(groups[k]!.first),
-          host: groups[k]!.first.host,
-          entries: groups[k]!,
-        ))
+        .map(
+          (k) => _SessionGroup(
+            key: k,
+            title: _projectLabel(groups[k]!.first),
+            host: groups[k]!.first.host,
+            entries: groups[k]!,
+          ),
+        )
         .toList();
   }
 
@@ -1658,7 +2265,10 @@ class _RecentPaneState extends State<RecentPane> {
         !_sameHostList(widget.hosts, oldWidget.hosts)) {
       _onQueryChanged(widget.query);
     }
-    _store.configure(hosts: widget.hosts, api: widget.api);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      _store.configure(hosts: widget.hosts, api: widget.api);
+    });
   }
 
   void _handleStoreChanged() {
@@ -2131,7 +2741,8 @@ class _RecentPaneState extends State<RecentPane> {
           final collapsed = _collapsedGroups.contains(group.key);
           final headerIndex = current;
           final entriesStart = headerIndex + 1;
-          final entriesEnd = entriesStart + (collapsed ? 0 : group.entries.length);
+          final entriesEnd =
+              entriesStart + (collapsed ? 0 : group.entries.length);
           if (index == headerIndex) {
             return Padding(
               padding: EdgeInsets.only(
@@ -4598,7 +5209,9 @@ class _HostEditorSheetState extends State<HostEditorSheet> {
                             height: 32,
                           ),
                           suffixIcon: IconButton(
-                            tooltip: _tokenVisible ? 'Hide token' : 'Show token',
+                            tooltip: _tokenVisible
+                                ? 'Hide token'
+                                : 'Show token',
                             padding: EdgeInsets.zero,
                             icon: Icon(
                               _tokenVisible
@@ -4606,9 +5219,8 @@ class _HostEditorSheetState extends State<HostEditorSheet> {
                                   : Icons.visibility_rounded,
                               size: 18,
                             ),
-                            onPressed: () => setState(
-                              () => _tokenVisible = !_tokenVisible,
-                            ),
+                            onPressed: () =>
+                                setState(() => _tokenVisible = !_tokenVisible),
                           ),
                         ),
                       ),
@@ -4944,9 +5556,7 @@ class _HostEditorToggle extends StatelessWidget {
           decoration: BoxDecoration(
             color: value ? activeKnob : colors.surface,
             shape: BoxShape.circle,
-            border: Border.all(
-              color: value ? activeKnob : colors.border,
-            ),
+            border: Border.all(color: value ? activeKnob : colors.border),
           ),
         ),
       ),

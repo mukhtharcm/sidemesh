@@ -5,6 +5,101 @@ import '../theme/color_contrast.dart';
 import '../theme/app_theme.dart';
 import '../theme/app_tokens.dart';
 
+/// Premium section heading for calm, scan-friendly mobile surfaces.
+class MeshSectionHeader extends StatelessWidget {
+  const MeshSectionHeader({
+    super.key,
+    required this.title,
+    this.subtitle,
+    this.trailing,
+    this.padding = const EdgeInsets.fromLTRB(2, 4, 2, 10),
+  });
+
+  final String title;
+  final String? subtitle;
+  final Widget? trailing;
+  final EdgeInsetsGeometry padding;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    return Padding(
+      padding: padding,
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.end,
+        children: [
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  title,
+                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                    color: colors.textPrimary,
+                    fontWeight: AppWeights.title,
+                    letterSpacing: AppLetterSpacing.headline,
+                  ),
+                ),
+                if ((subtitle ?? '').trim().isNotEmpty) ...[
+                  const SizedBox(height: 3),
+                  Text(
+                    subtitle!.trim(),
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      color: colors.textSecondary,
+                      height: 1.35,
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
+          if (trailing != null) ...[
+            const SizedBox(width: AppSpacing.md),
+            trailing!,
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+/// Quiet grouped panel used by the premium mobile IA.
+class MeshGroup extends StatelessWidget {
+  const MeshGroup({
+    super.key,
+    required this.children,
+    this.padding = EdgeInsets.zero,
+    this.spacing = 0,
+    this.tone = MeshSurfaceTone.elevated,
+  });
+
+  final List<Widget> children;
+  final EdgeInsetsGeometry padding;
+  final double spacing;
+  final MeshSurfaceTone tone;
+
+  @override
+  Widget build(BuildContext context) {
+    return MeshSurface(
+      tone: tone,
+      radius: AppRadii.surface,
+      padding: padding,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          for (var i = 0; i < children.length; i++) ...[
+            children[i],
+            if (i != children.length - 1) SizedBox(height: spacing),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
 /// Small pill chip used for status / metadata.
 class MeshPill extends StatelessWidget {
   const MeshPill({
@@ -210,14 +305,18 @@ class MeshSurface extends StatelessWidget {
     if (!effectiveEnabled) {
       return content;
     }
-    return Material(
-      color: Colors.transparent,
-      child: InkWell(
-        borderRadius: borderRadius,
-        onTap: onTap,
-        hoverColor: colors.surfaceElevated.withValues(alpha: 0.5),
-        splashColor: colors.accent.withValues(alpha: 0.08),
-        child: content,
+    return Semantics(
+      button: true,
+      enabled: effectiveEnabled,
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          borderRadius: borderRadius,
+          onTap: onTap,
+          hoverColor: colors.surfaceElevated.withValues(alpha: 0.5),
+          splashColor: colors.accent.withValues(alpha: 0.08),
+          child: content,
+        ),
       ),
     );
   }
@@ -540,14 +639,18 @@ class MeshListRow extends StatelessWidget {
       return content;
     }
 
-    return Material(
-      color: Colors.transparent,
-      child: InkWell(
-        borderRadius: borderRadius,
-        onTap: onTap,
-        hoverColor: colors.surfaceMuted.withValues(alpha: 0.62),
-        splashColor: colors.accent.withValues(alpha: 0.08),
-        child: content,
+    return Semantics(
+      button: true,
+      enabled: enabled,
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          borderRadius: borderRadius,
+          onTap: onTap,
+          hoverColor: colors.surfaceMuted.withValues(alpha: 0.62),
+          splashColor: colors.accent.withValues(alpha: 0.08),
+          child: content,
+        ),
       ),
     );
   }

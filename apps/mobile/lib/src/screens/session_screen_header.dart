@@ -116,9 +116,13 @@ class _SessionActionSheet extends StatelessWidget {
     final shape = desktop ? AppShapes.dialog : AppShapes.sheet;
     final panel = DecoratedBox(
       decoration: BoxDecoration(
-        color: colors.surfaceElevated,
+        gradient: LinearGradient(
+          begin: Alignment.topCenter,
+          end: Alignment.bottomCenter,
+          colors: [colors.surfaceElevated, colors.canvas],
+        ),
         borderRadius: shape,
-        border: Border.all(color: colors.border),
+        border: Border.all(color: colors.borderStrong.withValues(alpha: 0.54)),
         boxShadow: desktop
             ? AppShadows.dialog(colors.textPrimary)
             : AppShadows.sheet(colors.textPrimary),
@@ -205,7 +209,7 @@ class _SessionActionSheet extends StatelessWidget {
               for (var index = 0; index < visibleGroups.length; index++)
                 Padding(
                   padding: EdgeInsets.only(
-                    bottom: index == visibleGroups.length - 1 ? 0 : 12,
+                    bottom: index == visibleGroups.length - 1 ? 0 : 16,
                   ),
                   child: _SessionActionGroupCard(
                     group: visibleGroups[index],
@@ -248,38 +252,29 @@ class _SessionActionGroupCard extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Padding(
-          padding: const EdgeInsets.only(left: 4, bottom: 7),
+          padding: const EdgeInsets.only(left: 3, bottom: 9),
           child: Text(
-            group.label,
-            style: Theme.of(context).textTheme.labelSmall?.copyWith(
+            group.label.toUpperCase(),
+            style: monoStyle(
               color: colors.textSecondary,
-              fontWeight: FontWeight.w700,
-              letterSpacing: 0.2,
-            ),
+              fontSize: 10.5,
+              fontWeight: AppWeights.title,
+            ).copyWith(letterSpacing: 1.1),
           ),
         ),
-        DecoratedBox(
-          decoration: BoxDecoration(
-            color: colors.surface,
-            borderRadius: BorderRadius.circular(AppRadii.control),
-            border: Border.all(color: colors.border),
+        GridView.builder(
+          shrinkWrap: true,
+          primary: false,
+          padding: EdgeInsets.zero,
+          itemCount: group.actions.length,
+          gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+            crossAxisCount: compact ? 1 : 2,
+            mainAxisSpacing: 9,
+            crossAxisSpacing: 9,
+            childAspectRatio: compact ? 4.8 : 2.55,
           ),
-          child: Column(
-            children: [
-              for (var index = 0; index < group.actions.length; index++) ...[
-                if (index > 0)
-                  Divider(
-                    height: 1,
-                    indent: compact ? 52 : 58,
-                    color: colors.border.withValues(alpha: 0.72),
-                  ),
-                _SessionActionRow(
-                  action: group.actions[index],
-                  compact: compact,
-                ),
-              ],
-            ],
-          ),
+          itemBuilder: (context, index) =>
+              _SessionActionRow(action: group.actions[index], compact: compact),
         ),
       ],
     );
@@ -305,46 +300,90 @@ class _SessionActionRow extends StatelessWidget {
   Widget build(BuildContext context) {
     final colors = context.colors;
     final tone = _toneColor(colors);
-    return MeshListRow(
-      framed: false,
-      dense: true,
-      radius: AppRadii.control,
-      onTap: () => Navigator.of(context).pop(action.value),
-      leading: Container(
-        width: compact ? 30 : 34,
-        height: compact ? 30 : 34,
-        decoration: BoxDecoration(
-          color: tone.withValues(alpha: action.active ? 0.14 : 0.08),
-          borderRadius: AppShapes.iconWell,
-          border: Border.all(color: tone.withValues(alpha: 0.18)),
-        ),
-        child: Icon(action.icon, size: compact ? 17 : 18, color: tone),
-      ),
-      title: Text(
-        action.label,
-        style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-          color: action.tone == _SessionActionTone.danger
-              ? colors.danger
-              : colors.textPrimary,
-          fontWeight: FontWeight.w800,
-          letterSpacing: -0.1,
-        ),
-      ),
-      subtitle: (action.detail ?? '').isEmpty
-          ? null
-          : Text(
-              action.detail!,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                color: colors.textSecondary,
-                fontWeight: FontWeight.w500,
+    final bg = action.active
+        ? tone.withValues(alpha: 0.13)
+        : colors.surfaceElevated.withValues(alpha: 0.88);
+    return Semantics(
+      button: true,
+      label: action.detail == null
+          ? action.label
+          : '${action.label}. ${action.detail}',
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          borderRadius: BorderRadius.circular(20),
+          onTap: () => Navigator.of(context).pop(action.value),
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 140),
+            padding: const EdgeInsets.fromLTRB(12, 11, 10, 11),
+            decoration: BoxDecoration(
+              color: bg,
+              borderRadius: BorderRadius.circular(20),
+              border: Border.all(
+                color: action.active
+                    ? tone.withValues(alpha: 0.38)
+                    : colors.border.withValues(alpha: 0.72),
               ),
             ),
+            child: Row(
+              children: [
+                Container(
+                  width: compact ? 30 : 34,
+                  height: compact ? 30 : 34,
+                  decoration: BoxDecoration(
+                    color: tone.withValues(alpha: action.active ? 0.18 : 0.08),
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: tone.withValues(alpha: 0.18)),
+                  ),
+                  child: Icon(
+                    action.icon,
+                    size: compact ? 17 : 18,
+                    color: tone,
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        action.label,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                          color: action.tone == _SessionActionTone.danger
+                              ? colors.danger
+                              : colors.textPrimary,
+                          fontWeight: FontWeight.w800,
+                          letterSpacing: -0.1,
+                        ),
+                      ),
+                      if ((action.detail ?? '').isNotEmpty) ...[
+                        const SizedBox(height: 2),
+                        Text(
+                          action.detail!,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: Theme.of(context).textTheme.bodySmall
+                              ?.copyWith(
+                                color: colors.textSecondary,
+                                fontSize: 11,
+                                fontWeight: FontWeight.w500,
+                              ),
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
     );
   }
 }
-
 
 String? _gitHeaderLabel(SessionSummary session, SessionGitStatus? status) {
   final branch = status?.branch ?? session.gitInfo?.branch;
@@ -364,6 +403,7 @@ String? _gitHeaderLabel(SessionSummary session, SessionGitStatus? status) {
   }
   return label;
 }
+
 class _JumpToLatestPill extends StatelessWidget {
   const _JumpToLatestPill({required this.onTap});
 
@@ -386,11 +426,7 @@ class _JumpToLatestPill extends StatelessWidget {
           child: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Icon(
-                Icons.arrow_downward_rounded,
-                size: 16,
-                color: foreground,
-              ),
+              Icon(Icons.arrow_downward_rounded, size: 16, color: foreground),
               const SizedBox(width: 6),
               Text(
                 'Jump to latest',
@@ -1145,11 +1181,7 @@ class _PinnedMessageSheet extends StatelessWidget {
     final pinnedLinkStyle = linkTextStyleForBackground(
       background: colors.surfaceMuted,
       preferred: colors.accent,
-      fallbacks: [
-        colors.info,
-        colors.textPrimary,
-        colors.textSecondary,
-      ],
+      fallbacks: [colors.info, colors.textPrimary, colors.textSecondary],
       baseStyle: textStyle,
     );
     return MeshBottomSheetScaffold(

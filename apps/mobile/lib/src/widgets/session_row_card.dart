@@ -48,6 +48,7 @@ class SessionRowCard extends StatelessWidget {
     this.dense = false,
     this.query = '',
     this.showHost = true,
+
     /// When set, replaces the default "host · workspace" secondary line in
     /// the dense sidebar variant. Used by grouped views to show the git
     /// branch name instead of the folder (which is already the group header).
@@ -140,10 +141,10 @@ class SessionRowCard extends StatelessWidget {
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
                               style: theme.textTheme.bodyMedium?.copyWith(
-                                    fontWeight: AppWeights.body,
-                                    height: 1.25,
-                                    color: colors.textPrimary,
-                                  ),
+                                fontWeight: AppWeights.body,
+                                height: 1.25,
+                                color: colors.textPrimary,
+                              ),
                             ),
                           ),
                         ],
@@ -157,9 +158,9 @@ class SessionRowCard extends StatelessWidget {
                               // "host · workspace" line when we're inside a
                               // grouped view (e.g. show branch name instead).
                               secondaryLabel ??
-                              (showHost
-                                  ? '${host.label} · $workspaceLabel'
-                                  : workspaceLabel),
+                                  (showHost
+                                      ? '${host.label} · $workspaceLabel'
+                                      : workspaceLabel),
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
                               style: theme.textTheme.bodySmall?.copyWith(
@@ -243,8 +244,7 @@ class SessionRowCard extends StatelessWidget {
                           ? Icons.star_rounded
                           : Icons.star_outline_rounded,
                       size: 15,
-                      color:
-                          favorite ? colors.warning : colors.textTertiary,
+                      color: favorite ? colors.warning : colors.textTertiary,
                     ),
                   ),
                 ),
@@ -257,41 +257,145 @@ class SessionRowCard extends StatelessWidget {
 
     // ── Mobile / full-width variant ──────────────────────────────────────────
     final statusBadge = _sessionStatusBadge(session);
-    return MeshSurface(
-      onTap: onTap,
-      selected: selected,
-      padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
-      borderColor: selected ? colors.accent : null,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Expanded(
-                child: Text(
-                  session.title,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                    fontWeight: unread ? AppWeights.title : AppWeights.emphasis,
+    final accent = running
+        ? colors.success
+        : (unread ? colors.accent : colors.textTertiary);
+    return Semantics(
+      button: true,
+      label: 'Open session ${session.title}',
+      child: Container(
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(24),
+          boxShadow: running
+              ? [
+                  BoxShadow(
+                    color: colors.success.withValues(alpha: 0.10),
+                    blurRadius: 24,
+                    offset: const Offset(0, 10),
                   ),
+                ]
+              : null,
+        ),
+        child: MeshSurface(
+          onTap: onTap,
+          selected: selected,
+          radius: 24,
+          tone: MeshSurfaceTone.elevated,
+          padding: const EdgeInsets.fromLTRB(13, 13, 8, 13),
+          borderColor: selected
+              ? colors.accent
+              : colors.border.withValues(alpha: 0.72),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Container(
+                width: 4,
+                height: 52,
+                decoration: BoxDecoration(
+                  color: accent.withValues(alpha: running ? 1 : 0.72),
+                  borderRadius: BorderRadius.circular(999),
                 ),
               ),
-              if (statusBadge != null) ...[
-                const SizedBox(width: AppSpacing.sm),
-                statusBadge,
-              ],
-              if (unread) ...[
-                const SizedBox(width: 6),
-                _UnreadDot(color: colors.accent),
-                const SizedBox(width: 4),
-              ],
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            session.title,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: Theme.of(context).textTheme.titleSmall
+                                ?.copyWith(
+                                  fontWeight: unread
+                                      ? AppWeights.title
+                                      : AppWeights.emphasis,
+                                  letterSpacing: -0.1,
+                                ),
+                          ),
+                        ),
+                        if (unread) ...[
+                          const SizedBox(width: 6),
+                          _UnreadDot(color: colors.accent),
+                        ],
+                      ],
+                    ),
+                    const SizedBox(height: 5),
+                    Row(
+                      children: [
+                        if (statusBadge != null) ...[
+                          statusBadge,
+                          const SizedBox(width: 7),
+                        ],
+                        if (session.provider != null) ...[
+                          AgentProviderBadge(
+                            providerKind: session.provider,
+                            compact: true,
+                          ),
+                          const SizedBox(width: 7),
+                        ],
+                        Expanded(
+                          child: Text(
+                            showHost
+                                ? '${host.label} · $workspaceLabel'
+                                : workspaceLabel,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: theme.textTheme.bodySmall?.copyWith(
+                              color: colors.textSecondary,
+                              height: 1.25,
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        ListenableBuilder(
+                          listenable: RelativeTimeTicker.minutes,
+                          builder: (_, _) => Text(
+                            sessionTimeLabel(session.updatedAt),
+                            style: theme.textTheme.bodySmall?.copyWith(
+                              color: colors.textTertiary,
+                              fontSize: 11,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                    if (supportingText.isNotEmpty) ...[
+                      const SizedBox(height: 7),
+                      if (session.matchSnippet?.isNotEmpty == true)
+                        _HighlightedSnippet(
+                          text: _shortenSnippet(supportingText),
+                          query: query,
+                          style: theme.textTheme.bodySmall!.copyWith(
+                            color: colors.textSecondary,
+                            height: 1.3,
+                            fontSize: 12,
+                          ),
+                        )
+                      else
+                        Text(
+                          supportingText,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: theme.textTheme.bodySmall?.copyWith(
+                            color: colors.textSecondary,
+                            height: 1.3,
+                            fontSize: 12,
+                          ),
+                        ),
+                    ],
+                  ],
+                ),
+              ),
               IconButton(
                 onPressed: onToggleFavorite,
                 tooltip: favorite ? 'Remove favorite' : 'Add favorite',
                 visualDensity: VisualDensity.compact,
-                iconSize: 20,
-                constraints: const BoxConstraints(minWidth: 44, minHeight: 44),
+                iconSize: 18,
+                constraints: const BoxConstraints(minWidth: 38, minHeight: 38),
                 icon: Icon(
                   favorite ? Icons.star_rounded : Icons.star_outline_rounded,
                   color: favorite ? colors.warning : colors.textTertiary,
@@ -299,88 +403,16 @@ class SessionRowCard extends StatelessWidget {
               ),
             ],
           ),
-          const SizedBox(height: 6),
-          Row(
-            children: [
-              if (showHost) ...[
-                Icon(Icons.dns_rounded, size: 14, color: colors.textTertiary),
-                const SizedBox(width: 4),
-                Flexible(
-                  child: Text(
-                    host.label,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: theme.textTheme.bodySmall?.copyWith(
-                      color: colors.textSecondary,
-                      fontWeight: AppWeights.emphasis,
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 10),
-              ],
-              Icon(Icons.folder_outlined, size: 14, color: colors.textTertiary),
-              const SizedBox(width: 4),
-              Expanded(
-                child: Text(
-                  workspaceLabel,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: theme.textTheme.bodySmall?.copyWith(
-                    color: colors.textSecondary,
-                  ),
-                ),
-              ),
-              const SizedBox(width: 8),
-              ListenableBuilder(
-                listenable: RelativeTimeTicker.minutes,
-                builder: (_, _) => Text(
-                  sessionTimeLabel(session.updatedAt),
-                  style: theme.textTheme.bodySmall?.copyWith(
-                    color: colors.textTertiary,
-                    fontSize: 11,
-                  ),
-                ),
-              ),
-            ],
-          ),
-          if (session.provider != null || session.isSubAgent) ...[
-            const SizedBox(height: 4),
-            Wrap(
-              spacing: 8,
-              runSpacing: 4,
-              children: [
-                if (session.provider != null)
-                  AgentProviderBadge(providerKind: session.provider),
-                if (session.isSubAgent) const _SubAgentBadge(),
-              ],
-            ),
-          ],
-          if (supportingText.isNotEmpty) ...[
-            const SizedBox(height: AppSpacing.sm),
-            if (session.matchSnippet?.isNotEmpty == true)
-              _HighlightedSnippet(
-                text: supportingText,
-                query: query,
-                style: theme.textTheme.bodySmall!.copyWith(
-                  color: colors.textSecondary,
-                  height: 1.35,
-                ),
-              )
-            else
-              Text(
-                supportingText,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: theme.textTheme.bodySmall?.copyWith(
-                  color: colors.textSecondary,
-                  height: 1.35,
-                ),
-              ),
-          ],
-        ],
+        ),
       ),
     );
   }
+}
+
+String _shortenSnippet(String text) {
+  final collapsed = text.replaceAll(RegExp(r'\s+'), ' ').trim();
+  if (collapsed.length <= 180) return collapsed;
+  return '${collapsed.substring(0, 177)}…';
 }
 
 // ── Private helpers ──────────────────────────────────────────────────────────
@@ -389,55 +421,56 @@ MeshStatusBadge? _sessionStatusBadge(SessionSummary session) {
   final status = session.status;
   return switch (status) {
     'waiting_for_approval' || 'pendingApproval' => const MeshStatusBadge(
-        label: 'approval',
-        tone: MeshStatusTone.approval,
-        icon: Icons.verified_user_outlined,
-        compact: true,
-      ),
+      label: 'approval',
+      tone: MeshStatusTone.approval,
+      icon: Icons.verified_user_outlined,
+      compact: true,
+    ),
     'waiting_for_input' => const MeshStatusBadge(
-        label: 'waiting',
-        tone: MeshStatusTone.waiting,
-        icon: Icons.question_answer_outlined,
-        compact: true,
-      ),
+      label: 'waiting',
+      tone: MeshStatusTone.waiting,
+      icon: Icons.question_answer_outlined,
+      compact: true,
+    ),
     'queued' => const MeshStatusBadge(
-        label: 'queued',
-        tone: MeshStatusTone.queued,
-        icon: Icons.schedule_rounded,
-        compact: true,
-      ),
+      label: 'queued',
+      tone: MeshStatusTone.queued,
+      icon: Icons.schedule_rounded,
+      compact: true,
+    ),
     'blocked' => const MeshStatusBadge(
-        label: 'blocked',
-        tone: MeshStatusTone.waiting,
-        icon: Icons.pause_circle_outline_rounded,
-        compact: true,
-      ),
+      label: 'blocked',
+      tone: MeshStatusTone.waiting,
+      icon: Icons.pause_circle_outline_rounded,
+      compact: true,
+    ),
     'failed' || 'errored' => const MeshStatusBadge(
-        label: 'failed',
-        tone: MeshStatusTone.danger,
-        icon: Icons.error_outline_rounded,
-        compact: true,
-      ),
+      label: 'failed',
+      tone: MeshStatusTone.danger,
+      icon: Icons.error_outline_rounded,
+      compact: true,
+    ),
     'stale' => const MeshStatusBadge(
-        label: 'stale',
-        tone: MeshStatusTone.stale,
-        icon: Icons.history_toggle_off_rounded,
-        compact: true,
-      ),
+      label: 'stale',
+      tone: MeshStatusTone.stale,
+      icon: Icons.history_toggle_off_rounded,
+      compact: true,
+    ),
     'active' || 'running' => const MeshStatusBadge(
-        label: 'running',
-        tone: MeshStatusTone.running,
-        live: true,
-        compact: true,
-      ),
-    _ => session.isActive
-        ? const MeshStatusBadge(
-            label: 'running',
-            tone: MeshStatusTone.running,
-            live: true,
-            compact: true,
-          )
-        : null,
+      label: 'running',
+      tone: MeshStatusTone.running,
+      live: true,
+      compact: true,
+    ),
+    _ =>
+      session.isActive
+          ? const MeshStatusBadge(
+              label: 'running',
+              tone: MeshStatusTone.running,
+              live: true,
+              compact: true,
+            )
+          : null,
   };
 }
 
