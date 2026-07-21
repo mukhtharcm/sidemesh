@@ -5748,11 +5748,19 @@ class _SessionScreenState extends State<SessionScreen>
 
   Future<void> _startSessionFromCurrent() async {
     final session = _session ?? widget.session;
+    await _policyStore.ensureLoaded();
+    await _turnConfigStore.ensureLoaded();
+    if (!mounted) return;
     final created = await showCreateSessionLauncher(
       context,
       host: widget.host,
       api: widget.api,
       initialCwd: session.cwd,
+      seed: CreateSessionDraftSeed.fromSession(
+        session: session,
+        turnConfig: _turnConfigStore.configFor(widget.host, session.id),
+        policy: _policyStore.policyFor(widget.host, session.id),
+      ),
     );
     if (!mounted || created == null) return;
 

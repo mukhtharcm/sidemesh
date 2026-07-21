@@ -966,6 +966,201 @@ void main() {
     expect(find.widgetWithText(TextButton, 'Autopilot'), findsNothing);
   });
 
+  test('new-session seed prefers local overrides over live runtime', () {
+    final now = DateTime(2026, 7, 21, 12);
+    final seed = CreateSessionDraftSeed.fromSession(
+      session: SessionSummary(
+        id: 'source-session',
+        title: 'Source',
+        preview: '',
+        cwd: '/repo',
+        createdAt: now,
+        updatedAt: now,
+        source: 'fake',
+        provider: 'fake',
+        status: 'idle',
+        runtime: SessionRuntimeSummary(
+          model: 'runtime-model',
+          mode: 'runtime-mode',
+          serviceTier: 'fast',
+          reasoningEffort: 'low',
+          approvalPolicy: 'on-request',
+          sandboxMode: 'workspace-write',
+          networkAccess: false,
+        ),
+        gitInfo: null,
+      ),
+      turnConfig: const SessionTurnConfig(
+        model: 'override-model',
+        mode: 'override-mode',
+        reasoningEffort: 'high',
+        fastMode: false,
+      ),
+      policy: const SessionPolicy(
+        approval: ApprovalPolicy.never,
+        sandbox: SandboxMode.dangerFullAccess,
+        networkAccess: true,
+      ),
+    );
+
+    expect(seed.provider, 'fake');
+    expect(seed.model, 'override-model');
+    expect(seed.mode, 'override-mode');
+    expect(seed.reasoningEffort, 'high');
+    expect(seed.fastMode, isFalse);
+    expect(seed.approval, ApprovalPolicy.never);
+    expect(seed.sandbox, SandboxMode.dangerFullAccess);
+    expect(seed.networkAccess, isTrue);
+    expect(seed.basedOnCurrentSession, isTrue);
+
+    final unknownRuntimeSeed = CreateSessionDraftSeed.fromSession(
+      session: _seedSessionWithoutRuntime(now),
+      turnConfig: const SessionTurnConfig(),
+      policy: const SessionPolicy(),
+    );
+    expect(unknownRuntimeSeed.fastMode, isNull);
+  });
+
+  testWidgets('new session opens as a draft chat and submits inherited setup', (
+    tester,
+  ) async {
+    await CreateSessionDefaultsStore.instance.ensureLoaded();
+    final api = _CapabilityFakeApi(
+      _nodeForCapabilities(_fullCapabilities),
+      models: const [_fakeModel],
+    );
+    addTearDown(api.dispose);
+    Future<SessionSummary?>? launch;
+
+    await _pumpApp(
+      tester,
+      Builder(
+        builder: (context) => FilledButton(
+          onPressed: () {
+            launch = showCreateSessionLauncher(
+              context,
+              host: _host('draft-launcher'),
+              api: api,
+              initialCwd: '/repo',
+              seed: const CreateSessionDraftSeed(
+                provider: 'fake',
+                model: 'retired-model',
+                mode: 'review',
+                reasoningEffort: 'medium',
+                fastMode: true,
+                approval: ApprovalPolicy.never,
+                sandbox: SandboxMode.workspaceWrite,
+                networkAccess: true,
+                basedOnCurrentSession: true,
+              ),
+            );
+          },
+          child: const Text('New session'),
+        ),
+      ),
+      size: const Size(900, 1000),
+    );
+
+    await tester.tap(find.text('New session'));
+    await _pumpFrames(tester);
+
+    expect(find.byType(Dialog), findsNothing);
+    expect(find.text('What should the agent work on?'), findsOneWidget);
+    expect(
+      find.text(
+        'Based on the current session. Conversation history is not copied.',
+      ),
+      findsOneWidget,
+    );
+    expect(find.text('Start session'), findsNothing);
+    expect(
+      find.byKey(const ValueKey('create-session-send-button')),
+      findsOneWidget,
+    );
+
+    await tester.tap(
+      find.byKey(const ValueKey('new-session-settings-button')),
+    );
+    await _pumpFrames(tester);
+    expect(find.text('Network access'), findsOneWidget);
+
+    await tester.enterText(
+      find.byKey(const ValueKey('create-session-prompt-field')),
+      'Start from the inherited setup.',
+    );
+    await tester.pump();
+    final sendButton = find.byKey(
+      const ValueKey('create-session-send-button'),
+    );
+    expect(tester.widget<FilledButton>(sendButton).onPressed, isNotNull);
+    await tester.ensureVisible(sendButton);
+    await tester.tap(sendButton);
+    await tester.pumpAndSettle();
+
+    expect(api.lastCreateRequest, isNotNull);
+    expect(api.lastCreateRequest!.cwd, '/repo');
+    expect(api.lastCreateRequest!.provider, 'fake');
+    expect(api.lastCreateRequest!.model, 'retired-model');
+    expect(api.lastCreateRequest!.mode, 'review');
+    expect(api.lastCreateRequest!.reasoningEffort, 'medium');
+    expect(api.lastCreateRequest!.fastMode, isTrue);
+    expect(api.lastCreateRequest!.approvalPolicy, 'never');
+    expect(api.lastCreateRequest!.sandboxMode, 'workspace-write');
+    expect(api.lastCreateRequest!.networkAccess, isTrue);
+    expect(await launch, isNotNull);
+  });
+
+  testWidgets('new session confirms before discarding an unsent message', (
+    tester,
+  ) async {
+    final api = _CapabilityFakeApi(
+      _nodeForCapabilities(_minimalCapabilities),
+    );
+    addTearDown(api.dispose);
+    Future<SessionSummary?>? launch;
+
+    await _pumpApp(
+      tester,
+      Builder(
+        builder: (context) => FilledButton(
+          onPressed: () {
+            launch = showCreateSessionLauncher(
+              context,
+              host: _host('draft-discard'),
+              api: api,
+              initialCwd: '/repo',
+            );
+          },
+          child: const Text('New session'),
+        ),
+      ),
+      size: const Size(430, 900),
+    );
+
+    await tester.tap(find.text('New session'));
+    await _pumpFrames(tester);
+    await tester.enterText(
+      find.byKey(const ValueKey('create-session-prompt-field')),
+      'Keep this draft.',
+    );
+    await tester.pump();
+
+    await tester.pageBack();
+    await _pumpFrames(tester);
+    expect(find.text('Discard new session?'), findsOneWidget);
+    await tester.tap(find.widgetWithText(TextButton, 'Cancel'));
+    await _pumpFrames(tester);
+    expect(find.text('What should the agent work on?'), findsOneWidget);
+
+    await tester.pageBack();
+    await _pumpFrames(tester);
+    await tester.tap(find.widgetWithText(FilledButton, 'Discard'));
+    await tester.pumpAndSettle();
+
+    expect(await launch, isNull);
+    expect(find.text('What should the agent work on?'), findsNothing);
+  });
+
   testWidgets('host detail exposes provider contract metadata', (tester) async {
     final api = _CapabilityFakeApi(
       _nodeForCapabilities(
@@ -1152,6 +1347,20 @@ SessionSummary _session(String id, {String? provider}) {
     gitInfo: null,
   );
 }
+
+SessionSummary _seedSessionWithoutRuntime(DateTime now) => SessionSummary(
+  id: 'source-without-runtime',
+  title: 'Source without runtime',
+  preview: '',
+  cwd: '/repo',
+  createdAt: now,
+  updatedAt: now,
+  source: 'fake',
+  provider: 'fake',
+  status: 'idle',
+  runtime: null,
+  gitInfo: null,
+);
 
 NodeInfo _nodeForCapabilities(
   Map<String, Object?> capabilities, {
@@ -1349,6 +1558,7 @@ class _CapturedCreateSessionRequest {
     required this.fastMode,
     required this.approvalPolicy,
     required this.sandboxMode,
+    required this.networkAccess,
     required this.webSearch,
     required this.profile,
   });
@@ -1362,6 +1572,7 @@ class _CapturedCreateSessionRequest {
   final bool? fastMode;
   final String? approvalPolicy;
   final String? sandboxMode;
+  final bool? networkAccess;
   final String? webSearch;
   final String? profile;
 }
@@ -1429,6 +1640,7 @@ class _CapabilityFakeApi extends ApiClient {
     bool? fastMode,
     String? approvalPolicy,
     String? sandboxMode,
+    bool? networkAccess,
     String? webSearch,
     String? profile,
   }) async {
@@ -1442,6 +1654,7 @@ class _CapabilityFakeApi extends ApiClient {
       fastMode: fastMode,
       approvalPolicy: approvalPolicy,
       sandboxMode: sandboxMode,
+      networkAccess: networkAccess,
       webSearch: webSearch,
       profile: profile,
     );
