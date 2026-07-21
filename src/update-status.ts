@@ -49,6 +49,7 @@ export interface UpdateStatus {
   targetCommitSha: string | null;
   installedVersion: string | null;
   installedCommitSha: string | null;
+  cutoverStarted: boolean;
   restored: boolean;
   error: string | null;
   logPath: string | null;
@@ -91,6 +92,7 @@ export function createQueuedUpdateStatus(
     targetCommitSha: info.latestCommitSha,
     installedVersion: null,
     installedCommitSha: null,
+    cutoverStarted: false,
     restored: false,
     error: null,
     logPath: null,
@@ -306,6 +308,7 @@ function parseUpdateStatus(value: unknown): UpdateStatus {
     throw new Error("Invalid update status: expected an object");
   }
   const status = value as Partial<UpdateStatus>;
+  const cutoverStarted = status.cutoverStarted ?? false;
   if (
     status.version !== UPDATE_STATUS_VERSION ||
     typeof status.id !== "string" ||
@@ -321,13 +324,14 @@ function parseUpdateStatus(value: unknown): UpdateStatus {
     !isNullableString(status.targetCommitSha) ||
     !isNullableString(status.installedVersion) ||
     !isNullableString(status.installedCommitSha) ||
+    typeof cutoverStarted !== "boolean" ||
     typeof status.restored !== "boolean" ||
     !isNullableString(status.error) ||
     !isNullableString(status.logPath)
   ) {
     throw new Error("Invalid update status: missing required fields");
   }
-  return status as UpdateStatus;
+  return { ...status, cutoverStarted } as UpdateStatus;
 }
 
 function isNullableString(value: unknown): value is string | null {

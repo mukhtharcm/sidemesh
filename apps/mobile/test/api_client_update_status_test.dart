@@ -98,6 +98,7 @@ Map<String, dynamic> _operationJson({
   'installedCommitSha': restored
       ? 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
       : null,
+  'cutoverStarted': restored,
   'restored': restored,
   'error': error,
   'logPath': '/tmp/update.log',

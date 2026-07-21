@@ -196,6 +196,7 @@ void main() {
       'targetCommitSha': 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
       'installedVersion': '0.2.2',
       'installedCommitSha': 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+      'cutoverStarted': true,
       'restored': true,
       'error': 'candidate health check failed',
       'logPath': '/tmp/update.log',
@@ -205,6 +206,7 @@ void main() {
     expect(operation.isFailed, isTrue);
     expect(operation.isInProgress, isFalse);
     expect(operation.restored, isTrue);
+    expect(operation.cutoverStarted, isTrue);
     expect(operation.shortTargetCommitSha, 'bbbbbbb');
     expect(operation.shortInstalledCommitSha, 'aaaaaaa');
     expect(operation.startedDateTime.millisecondsSinceEpoch, 1000);
