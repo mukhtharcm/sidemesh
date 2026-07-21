@@ -5,7 +5,7 @@ mode="${1:-}"
 
 if command -v gitleaks >/dev/null 2>&1; then
   if [[ "$mode" == "--history" ]]; then
-    exec gitleaks git --redact --verbose --source .
+    exec gitleaks git --redact --verbose .
   fi
   exec gitleaks dir --redact --verbose .
 fi
