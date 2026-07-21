@@ -208,9 +208,9 @@ class AppUpdateSettingsStore extends ChangeNotifier {
     : _service = service ?? MethodChannelAppUpdateSettingsService();
 
   @visibleForTesting
-  factory AppUpdateSettingsStore.forTesting({
+  AppUpdateSettingsStore.forTesting({
     required AppUpdateSettingsService service,
-  }) => AppUpdateSettingsStore._withService(service);
+  }) : this._withService(service);
 
   AppUpdateSettingsStore._withService(this._service);
 
