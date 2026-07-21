@@ -36,6 +36,7 @@
     "docs",
     "scripts/*.sh",
     "scripts/check-node-version.mjs",
+    "scripts/patch-pi-transitives.mjs",
     "scripts/prepare-package.mjs"
   ],
   "engines": {
@@ -45,6 +46,7 @@
     "clean": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\"",
     "build": "npm run clean && tsc && node -e \"require('node:fs').chmodSync('dist/cli.js', 0o755)\"",
     "preinstall": "node scripts/check-node-version.mjs",
+    "postinstall": "node scripts/patch-pi-transitives.mjs",
     "prepare": "node scripts/prepare-package.mjs",
     "daemon": "tsx src/cli.ts daemon",
     "daemon:compiled": "node dist/cli.js daemon",
@@ -85,14 +87,16 @@
   },
   "dependencies": {
     "@clack/prompts": "^1.6.0",
-    "@earendil-works/pi-coding-agent": "^0.80.3",
+    "@earendil-works/pi-coding-agent": "0.80.3",
     "@github/copilot-sdk": "^1.0.4",
     "@hono/node-server": "^2.0.6",
     "@hono/zod-validator": "^0.8.0",
     "acpx": "^0.11.2",
+    "brace-expansion": "5.0.7",
     "commander": "^15.0.0",
     "hono": "^4.12.27",
     "ignore": "^7.0.5",
+    "protobufjs": "7.6.5",
     "qrcode": "^1.5.4",
     "ws": "^8.21.0",
     "zod": "^4.4.3"
