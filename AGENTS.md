@@ -344,6 +344,7 @@ a separate SSH session after confirming the build succeeded.
 ## Quick References
 
 - Provider contract: `docs/provider-adapter-contract.md`
+- Dependency/runtime compatibility: `docs/dependency-runtime-compatibility.md`
 - Contributing guide: `CONTRIBUTING.md`
 - Release playbook: `docs/release-playbook.md`
 - CI definition: `.github/workflows/ci.yml`

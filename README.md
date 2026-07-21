@@ -167,5 +167,6 @@ disabled unless you intentionally need them.
 
 - `docs/getting-started.md`
 - `docs/provider-adapter-contract.md`
+- `docs/dependency-runtime-compatibility.md`
 - `CONTRIBUTING.md`
 - `docs/release-playbook.md`
