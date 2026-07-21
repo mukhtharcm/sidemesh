@@ -610,6 +610,7 @@ async function runAtomicManagedGitUpdate(
   dependencies: SelfUpdateDependencies,
 ): Promise<AtomicManagedGitUpdateResult> {
   let releaseRoot = nodePath.resolve(options.config.stateDir, "releases");
+  let activePackageDir = nodePath.resolve(options.packageDir);
   let candidateDir: string | null = null;
   let targetCommitSha: string | null = null;
   let cutoverStarted = false;
@@ -619,6 +620,7 @@ async function runAtomicManagedGitUpdate(
       realpath(options.packageDir),
     ]);
     releaseRoot = nodePath.join(realStateDir, "releases");
+    activePackageDir = realPackageDir;
     assertReleaseRootOutsideCheckout(realPackageDir, releaseRoot);
     await mkdir(releaseRoot, { recursive: true, mode: 0o700 });
     await patchUpdateStatus(options.config.stateDir, options.updateId, {
@@ -714,7 +716,7 @@ async function runAtomicManagedGitUpdate(
       options.packageDir,
       releaseRoot,
       new Set([
-        nodePath.resolve(options.packageDir),
+        activePackageDir,
         nodePath.resolve(candidateDir),
       ]),
       options.logPath,

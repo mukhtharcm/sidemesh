@@ -1,5 +1,12 @@
 import assert from "node:assert/strict";
-import { access, mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
+import {
+  access,
+  mkdir,
+  mkdtemp,
+  readFile,
+  symlink,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import nodePath from "node:path";
 import { describe, it } from "node:test";
@@ -292,6 +299,11 @@ describe("runSelfUpdate", () => {
     const config = createConfig(dir);
     const currentCommitSha = "a".repeat(40);
     const targetCommitSha = "b".repeat(40);
+    const activeReleaseDir = nodePath.join(
+      config.stateDir,
+      "releases",
+      currentCommitSha,
+    );
     const candidateDir = nodePath.join(config.stateDir, "releases", targetCommitSha);
     const initialInfo = createAtomicGitInstallInfo(
       packageDir,
@@ -301,7 +313,8 @@ describe("runSelfUpdate", () => {
     const commandCalls: Array<{ file: string; args: string[]; cwd?: string }> = [];
     const wrapperPackageDirs: string[] = [];
 
-    await mkdir(packageDir, { recursive: true });
+    await mkdir(activeReleaseDir, { recursive: true });
+    await symlink(activeReleaseDir, packageDir, "dir");
     const result = await runSelfUpdate(
       { config, packageDir, managedService: "sidemesh" },
       {
@@ -382,6 +395,7 @@ describe("runSelfUpdate", () => {
     assert.equal(status?.phase, "completed");
     assert.equal(status?.targetCommitSha, targetCommitSha);
     assert.equal(status?.installedCommitSha, targetCommitSha);
+    assert.equal(await pathExistsForTest(activeReleaseDir), true);
   });
 
   it("restores the previous managed release when candidate health fails", {
