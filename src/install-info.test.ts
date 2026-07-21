@@ -29,7 +29,9 @@ describe("detectInstallInfo", () => {
     assert.equal(info.installType, "git");
     assert.equal(info.packageVersion, "1.0.0");
     assert.equal(info.updateSupported, true);
-    assert.ok(info.updateCommand?.includes("git pull"));
+    assert.match(info.updateCommand ?? "", /git pull --ff-only/);
+    assert.match(info.updateCommand ?? "", /npm ci/);
+    assert.doesNotMatch(info.updateCommand ?? "", /npm install/);
     assert.equal(info.updateAvailable, false);
   });
 
@@ -83,7 +85,10 @@ describe("detectInstallInfo", () => {
     assert.match(info.currentCommitSha ?? "", /^[0-9a-f]{40}$/);
     assert.equal(info.latestCommitSha, info.currentCommitSha);
     assert.equal(info.updateAvailable, false);
-    assert.match(info.updateCommand ?? "", /git pull origin main/);
+    assert.match(info.updateCommand ?? "", /git fetch origin main/);
+    assert.match(info.updateCommand ?? "", /git merge --ff-only FETCH_HEAD/);
+    assert.match(info.updateCommand ?? "", /npm ci/);
+    assert.doesNotMatch(info.updateCommand ?? "", /npm install/);
   });
 
   it("falls back to unknown when package.json is missing", async () => {

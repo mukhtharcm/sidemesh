@@ -178,6 +178,15 @@ describe("runSelfUpdate", () => {
           startDaemon: async () => undefined,
           waitForDaemonHealth: async () => true,
           resolveUpdatedPackageDir: async () => packageDir,
+          runCommand: async (file, args) => {
+            assert.equal(file, "git");
+            assert.deepEqual(args, [
+              "status",
+              "--porcelain=v1",
+              "--untracked-files=no",
+            ]);
+            return { stdout: "", stderr: "" };
+          },
         },
       );
 
@@ -193,6 +202,61 @@ describe("runSelfUpdate", () => {
         process.env.PATH = originalPath;
       }
     }
+  });
+
+  it("rejects tracked git changes before stopping the daemon", async () => {
+    const dir = await mkdtemp(nodePath.join(tmpdir(), "sidemesh-self-update-test-"));
+    const packageDir = nodePath.join(dir, "package");
+    const config = createConfig(dir);
+    let stopCalls = 0;
+    let startCalls = 0;
+
+    const result = await runSelfUpdate(
+      {
+        config,
+        packageDir,
+      },
+      {
+        detectInstallInfo: async () => ({
+          ...createInstallInfo(packageDir),
+          installType: "git",
+          currentCommitSha: "a".repeat(40),
+          latestCommitSha: "b".repeat(40),
+          updateCommand: "should not run",
+          restoreCommand: `git checkout ${"a".repeat(40)}`,
+        }),
+        runCommand: async (file, args) => {
+          assert.equal(file, "git");
+          assert.deepEqual(args, [
+            "status",
+            "--porcelain=v1",
+            "--untracked-files=no",
+          ]);
+          return {
+            stdout: " M package-lock.json\nM  src/local-change.ts\n",
+            stderr: "",
+          };
+        },
+        stopDaemon: async () => {
+          stopCalls += 1;
+          return true;
+        },
+        startDaemon: async () => {
+          startCalls += 1;
+        },
+      },
+    );
+
+    assert.equal(result.success, false);
+    assert.equal(result.restored, false);
+    assert.equal(stopCalls, 0);
+    assert.equal(startCalls, 0);
+    assert.match(result.error ?? "", /package-lock\.json/);
+    assert.match(result.error ?? "", /src\/local-change\.ts/);
+    assert.match(result.error ?? "", /did not stop the daemon/);
+
+    const log = await readFile(result.logPath, "utf8");
+    assert.match(log, /Git update blocked by tracked local changes/);
   });
 
   it("reinstalls a stale managed service wrapper after update", {
