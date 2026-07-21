@@ -707,11 +707,28 @@ public async health(): Promise<boolean> {
       method !== "item/tool/requestUserInput" &&
       method !== "mcpServer/elicitation/request"
     ) {
+      const sessionId = extractSessionId(method, params);
+      if (sessionId) {
+        this.emit("liveEvent", {
+          type: "provider_warning",
+          sessionId,
+          level: "warning",
+          code: "unsupported_request",
+          message: `Unsupported Codex server request: ${method}`,
+          source: "codex",
+        });
+      }
+      this.emit(
+        "stderr",
+        `[codex-provider] Unsupported server request: ${method}\n`,
+      );
+      this.bridge.error(id, -32601, "Method not found");
       return;
     }
 
     const sessionId = extractSessionId(method, params);
     if (!sessionId) {
+      this.bridge.error(id, -32600, "Invalid request params");
       return;
     }
 
@@ -1950,15 +1967,13 @@ function buildCodexSandboxPolicyV2(
   }
 }
 
-type CodexApprovalPolicyValue = "untrusted" | "on-failure" | "on-request" | "never";
+type CodexApprovalPolicyValue = "untrusted" | "on-request" | "never";
 type CodexSandboxModeValue = "read-only" | "workspace-write" | "danger-full-access";
 type CodexWebSearchModeValue = "disabled" | "cached" | "live";
-type CodexReasoningEffortValue = "none" | "minimal" | "low" | "medium" | "high" | "xhigh";
 
 function parseCodexApprovalPolicy(value: string | null): CodexApprovalPolicyValue | null {
   switch (value) {
     case "untrusted":
-    case "on-failure":
     case "on-request":
     case "never":
       return value;
@@ -1989,18 +2004,9 @@ function parseCodexWebSearchMode(value: string | null): CodexWebSearchModeValue 
   }
 }
 
-function parseCodexReasoningEffort(value: string | null): CodexReasoningEffortValue | null {
-  switch (value) {
-    case "none":
-    case "minimal":
-    case "low":
-    case "medium":
-    case "high":
-    case "xhigh":
-      return value;
-    default:
-      return null;
-  }
+function parseCodexReasoningEffort(value: string | null): string | null {
+  const normalized = value?.trim() ?? "";
+  return normalized || null;
 }
 
 function toActivityDraft(activity: SessionActivity): AgentSessionActivityDraft {
