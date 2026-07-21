@@ -127,9 +127,14 @@ class _FakeAppUpdateSettingsService implements AppUpdateSettingsService {
   _FakeAppUpdateSettingsService({
     required AppUpdateSettings initial,
     AppUpdateSettings? afterCheck,
-    this.failFirstFetch = false,
-  }) : _current = initial,
-       _afterCheck = afterCheck;
+    bool failFirstFetch = false,
+  }) : this._(initial, afterCheck, failFirstFetch);
+
+  _FakeAppUpdateSettingsService._(
+    this._current,
+    this._afterCheck,
+    this.failFirstFetch,
+  );
 
   AppUpdateSettings _current;
   final AppUpdateSettings? _afterCheck;

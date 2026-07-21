@@ -251,11 +251,18 @@ class WindowScreenAwakeCoordinator {
     ScreenAwakeController? controller,
     SidemeshWindowRelayChannel? relayChannel,
     bool? supportsRelayOverride,
-  }) : _controller = controller ?? ScreenAwakeController.instance,
-       _relayChannel =
-           relayChannel ??
-           DesktopMultiWindowRelayChannel(_screenAwakeRelayChannelName),
-       _supportsRelayOverride = supportsRelayOverride;
+  }) : this._(
+    controller ?? ScreenAwakeController.instance,
+    relayChannel ??
+        DesktopMultiWindowRelayChannel(_screenAwakeRelayChannelName),
+    supportsRelayOverride,
+  );
+
+  WindowScreenAwakeCoordinator._(
+    this._controller,
+    this._relayChannel,
+    this._supportsRelayOverride,
+  );
 
   static const String _screenAwakeRelayChannelName =
       'sidemesh/window_screen_awake';
@@ -382,8 +389,12 @@ class SidemeshSessionWindowManager {
   SidemeshSessionWindowManager({
     SidemeshWindowPlatform? platform,
     bool? isSupportedOverride,
-  }) : _platform = platform ?? const DesktopMultiWindowPlatform(),
-       _isSupportedOverride = isSupportedOverride;
+  }) : this._(
+    platform ?? const DesktopMultiWindowPlatform(),
+    isSupportedOverride,
+  );
+
+  SidemeshSessionWindowManager._(this._platform, this._isSupportedOverride);
 
   static final SidemeshSessionWindowManager instance =
       SidemeshSessionWindowManager();
@@ -423,8 +434,15 @@ class SidemeshBrowserPreviewWindowManager {
   SidemeshBrowserPreviewWindowManager({
     SidemeshWindowPlatform? platform,
     bool? isSupportedOverride,
-  }) : _platform = platform ?? const DesktopMultiWindowPlatform(),
-       _isSupportedOverride = isSupportedOverride;
+  }) : this._(
+    platform ?? const DesktopMultiWindowPlatform(),
+    isSupportedOverride,
+  );
+
+  SidemeshBrowserPreviewWindowManager._(
+    this._platform,
+    this._isSupportedOverride,
+  );
 
   static final SidemeshBrowserPreviewWindowManager instance =
       SidemeshBrowserPreviewWindowManager();
