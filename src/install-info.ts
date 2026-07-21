@@ -142,7 +142,7 @@ export function resolvePackageRoot(): string {
   );
 }
 
-async function readPackageVersion(packageRoot: string): Promise<string> {
+export async function readPackageVersion(packageRoot: string): Promise<string> {
   try {
     const content = await readFile(
       nodePath.join(packageRoot, "package.json"),

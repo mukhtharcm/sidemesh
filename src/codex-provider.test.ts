@@ -367,6 +367,37 @@ describe("codex provider resume runtime restore", () => {
     });
   });
 
+  it("forwards advertised reasoning efforts and drops removed approval policies", async () => {
+    const provider = new CodexAgentProvider("codex") as any;
+    const bridgeCalls: Array<{ method: string; params: unknown }> = [];
+
+    provider.isSessionThreadLoaded = async () => true;
+    provider.bridge = {
+      request: async (method: string, params: unknown) => {
+        bridgeCalls.push({ method, params });
+        return { turn: { id: "turn-1" } };
+      },
+    };
+
+    await provider.submitInput(
+      createSubmitRequest({
+        reasoningEffort: "max",
+        approvalPolicy: "on-failure",
+      }),
+    );
+
+    assert.deepEqual(bridgeCalls, [
+      {
+        method: "turn/start",
+        params: {
+          threadId: "thread-1",
+          input: [{ type: "text", text: "ping", text_elements: [] }],
+          effort: "max",
+        },
+      },
+    ]);
+  });
+
   it("restores persisted runtime before compacting an unloaded session", async () => {
     const provider = new CodexAgentProvider("codex") as any;
     const thread = createThread();
@@ -657,6 +688,51 @@ describe("codex provider restart", () => {
 });
 
 describe("codex interaction bridge", () => {
+  it("rejects unsupported server requests instead of leaving them pending", () => {
+    const provider = new CodexAgentProvider("codex") as any;
+    const errors: unknown[] = [];
+    const stderrLines: string[] = [];
+    const events: unknown[] = [];
+    provider.bridge = {
+      error: (id: number | string, code: number, message: string) => {
+        errors.push({ id, code, message });
+      },
+    };
+    provider.on("stderr", (line: string) => stderrLines.push(line));
+    provider.on("liveEvent", (event: unknown) => events.push(event));
+
+    provider.emitCodexServerRequest(42, "item/tool/call", {
+      threadId: "thread-1",
+    });
+
+    assert.deepEqual(errors, [
+      { id: 42, code: -32601, message: "Method not found" },
+    ]);
+    assert.equal(stderrLines.length, 1);
+    assert.match(stderrLines[0]!, /item\/tool\/call/);
+    assert.equal(events.length, 1);
+    assert.equal((events[0] as any).type, "provider_warning");
+    assert.equal((events[0] as any).code, "unsupported_request");
+  });
+
+  it("rejects supported server requests without a thread id", () => {
+    const provider = new CodexAgentProvider("codex") as any;
+    const errors: unknown[] = [];
+    provider.bridge = {
+      error: (id: number | string, code: number, message: string) => {
+        errors.push({ id, code, message });
+      },
+    };
+
+    provider.emitCodexServerRequest(7, "item/tool/requestUserInput", {
+      questions: [],
+    });
+
+    assert.deepEqual(errors, [
+      { id: 7, code: -32600, message: "Invalid request params" },
+    ]);
+  });
+
   it("emits user_input pending action for tool requestUserInput", () => {
     const provider = new CodexAgentProvider("codex") as any;
     const events: unknown[] = [];
