@@ -1066,7 +1066,14 @@ void main() {
 
     expect(find.byType(Dialog), findsNothing);
     expect(find.text('Start a new session'), findsOneWidget);
-    expect(find.textContaining('Settings copied · New chat'), findsOneWidget);
+    expect(
+      find.textContaining('Settings copied · No history'),
+      findsOneWidget,
+    );
+    expect(
+      find.bySemanticsLabel('Send message and create session'),
+      findsOneWidget,
+    );
     expect(find.text('Start session'), findsNothing);
     expect(
       find.byKey(const ValueKey('create-session-send-button')),
