@@ -67,7 +67,6 @@ describe("provider registry", () => {
         ],
         supportedApprovalPolicies: [
           "untrusted",
-          "on-failure",
           "on-request",
           "never",
         ],

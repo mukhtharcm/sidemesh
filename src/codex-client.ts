@@ -8,6 +8,10 @@ import {
   resolvePreferredShell,
   shellCaptureArgs,
 } from "./host-environment.js";
+import {
+  readPackageVersion,
+  resolvePackageRoot,
+} from "./install-info.js";
 import type { JsonRpcMessage } from "./types.js";
 
 interface PendingRequest {
@@ -25,6 +29,19 @@ const SHELL_ENV_START_MARKER = "__SIDEMESH_SHELL_ENV_START__";
 const SHELL_ENV_END_MARKER = "__SIDEMESH_SHELL_ENV_END__";
 const CODEX_APP_SERVER_CLOSE_TIMEOUT_MS = 4_000;
 const CODEX_RPC_REQUEST_TIMEOUT_MS = 120_000;
+
+export function buildCodexInitializeParams(clientVersion: string) {
+  return {
+    clientInfo: {
+      name: "sidemesh_node",
+      title: "Sidemesh Node",
+      version: clientVersion,
+    },
+    capabilities: {
+      mcpServerOpenaiFormElicitation: true,
+    },
+  };
+}
 
 function buildSeededCodexSpawnEnv(): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = { ...process.env };
@@ -216,16 +233,11 @@ export class CodexBridge extends EventEmitter<{
       this.handleLine(line);
     });
 
-    const init = (await this.request("initialize", {
-      clientInfo: {
-        name: "sidemesh_node",
-        title: "Sidemesh Node",
-        version: "0.1.0",
-      },
-      capabilities: {
-        experimentalApi: true,
-      },
-    })) as InitializeResult;
+    const clientVersion = await readPackageVersion(resolvePackageRoot());
+    const init = (await this.request(
+      "initialize",
+      buildCodexInitializeParams(clientVersion),
+    )) as InitializeResult;
     this.codexHomePath = typeof init.codexHome === "string" ? init.codexHome : null;
     this.notify("initialized", {});
   }
