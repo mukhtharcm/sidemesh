@@ -330,6 +330,17 @@ class SessionRowCard extends StatelessWidget {
                   ),
                 ),
               ),
+              if (session.provider != null) ...[
+                const SizedBox(width: 8),
+                AgentProviderBadge(
+                  providerKind: session.provider,
+                  compact: true,
+                ),
+              ],
+              if (session.isSubAgent) ...[
+                const SizedBox(width: 6),
+                const _SubAgentBadge(),
+              ],
               const SizedBox(width: 8),
               ListenableBuilder(
                 listenable: RelativeTimeTicker.minutes,
@@ -343,20 +354,8 @@ class SessionRowCard extends StatelessWidget {
               ),
             ],
           ),
-          if (session.provider != null || session.isSubAgent) ...[
-            const SizedBox(height: 4),
-            Wrap(
-              spacing: 8,
-              runSpacing: 4,
-              children: [
-                if (session.provider != null)
-                  AgentProviderBadge(providerKind: session.provider),
-                if (session.isSubAgent) const _SubAgentBadge(),
-              ],
-            ),
-          ],
           if (supportingText.isNotEmpty) ...[
-            const SizedBox(height: AppSpacing.sm),
+            const SizedBox(height: 6),
             if (session.matchSnippet?.isNotEmpty == true)
               _HighlightedSnippet(
                 text: supportingText,

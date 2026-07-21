@@ -121,42 +121,35 @@ class _BannerBody extends StatelessWidget {
   Widget build(BuildContext context) {
     final colors = context.colors;
     return Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
+      crossAxisAlignment: CrossAxisAlignment.center,
       children: [
-        _BellBadge(colors: colors),
-        const SizedBox(width: 12),
+        _BellBadge(colors: colors, size: 30),
+        const SizedBox(width: 10),
         Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                'Turn on alerts',
-                style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                  color: colors.textPrimary,
-                  fontWeight: FontWeight.w800,
-                ),
-              ),
-              const SizedBox(height: 3),
-              Text(
-                'Get a notification when an agent is waiting for approval.',
-                style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                  color: colors.textSecondary,
-                  height: 1.25,
-                ),
-              ),
-              const SizedBox(height: 10),
-              Align(
-                alignment: Alignment.centerLeft,
-                child: _EnableButton(
-                  requesting: requesting,
-                  onPressed: onEnable,
-                ),
-              ),
-            ],
+          child: Text(
+            'Approval alerts',
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: Theme.of(context).textTheme.titleSmall?.copyWith(
+              color: colors.textPrimary,
+              fontWeight: FontWeight.w800,
+            ),
           ),
+        ),
+        const SizedBox(width: 6),
+        TextButton(
+          onPressed: requesting ? null : onEnable,
+          child: requesting
+              ? const SizedBox(
+                  width: 16,
+                  height: 16,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                )
+              : const Text('Enable'),
         ),
         IconButton(
           tooltip: 'Dismiss',
+          constraints: const BoxConstraints.tightFor(width: 44, height: 44),
           visualDensity: VisualDensity.compact,
           onPressed: onDismiss,
           icon: Icon(Icons.close_rounded, color: colors.textSecondary),
