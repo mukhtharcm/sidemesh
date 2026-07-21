@@ -5,6 +5,7 @@ import nodePath from "node:path";
 import { isTermuxEnvironment } from "./host-environment.js";
 import { detectInstallInfo } from "./install-info.js";
 import type { NodeConfig, UpdateChannel } from "./types.js";
+import { assertGitCheckoutClean } from "./update-preflight.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -14,6 +15,7 @@ interface UpdaterSpawnDependencies {
     file: string,
     args: string[],
     options: {
+      cwd?: string;
       encoding: "utf8";
       timeout: number;
     },
@@ -53,6 +55,9 @@ export async function spawnSelfUpdater(
   } satisfies UpdaterSpawnDependencies;
   const info = await dependencies.detectInstallInfo({ config });
   const packageDir = info.packageRoot;
+  if (info.installType === "git") {
+    await assertGitCheckoutClean(packageDir, dependencies.execFile);
+  }
   const cliPath = nodePath.join(packageDir, "dist", "cli.js");
   const env = {
     ...process.env,
