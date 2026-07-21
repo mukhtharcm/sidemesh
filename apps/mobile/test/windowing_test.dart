@@ -401,8 +401,8 @@ void main() {
 }
 
 class _FakeWindowPlatform implements SidemeshWindowPlatform {
-  factory _FakeWindowPlatform({required List<_FakeWindowHandle> windows}) =>
-      _FakeWindowPlatform._(windows);
+  _FakeWindowPlatform({required List<_FakeWindowHandle> windows})
+    : this._(windows);
 
   _FakeWindowPlatform._(this._windows);
 

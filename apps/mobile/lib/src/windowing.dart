@@ -247,11 +247,11 @@ class DesktopMultiWindowRelayChannel implements SidemeshWindowRelayChannel {
 }
 
 class WindowScreenAwakeCoordinator {
-  factory WindowScreenAwakeCoordinator({
+  WindowScreenAwakeCoordinator({
     ScreenAwakeController? controller,
     SidemeshWindowRelayChannel? relayChannel,
     bool? supportsRelayOverride,
-  }) => WindowScreenAwakeCoordinator._(
+  }) : this._(
     controller ?? ScreenAwakeController.instance,
     relayChannel ??
         DesktopMultiWindowRelayChannel(_screenAwakeRelayChannelName),
@@ -386,10 +386,10 @@ class WindowScreenAwakeCoordinator {
 }
 
 class SidemeshSessionWindowManager {
-  factory SidemeshSessionWindowManager({
+  SidemeshSessionWindowManager({
     SidemeshWindowPlatform? platform,
     bool? isSupportedOverride,
-  }) => SidemeshSessionWindowManager._(
+  }) : this._(
     platform ?? const DesktopMultiWindowPlatform(),
     isSupportedOverride,
   );
@@ -431,10 +431,10 @@ class SidemeshSessionWindowManager {
 }
 
 class SidemeshBrowserPreviewWindowManager {
-  factory SidemeshBrowserPreviewWindowManager({
+  SidemeshBrowserPreviewWindowManager({
     SidemeshWindowPlatform? platform,
     bool? isSupportedOverride,
-  }) => SidemeshBrowserPreviewWindowManager._(
+  }) : this._(
     platform ?? const DesktopMultiWindowPlatform(),
     isSupportedOverride,
   );

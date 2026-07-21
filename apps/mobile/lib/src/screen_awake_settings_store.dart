@@ -5,9 +5,9 @@ class ScreenAwakeSettingsStore extends ChangeNotifier {
   ScreenAwakeSettingsStore._() : _prefsKey = _defaultPrefsKey;
 
   @visibleForTesting
-  factory ScreenAwakeSettingsStore.forTesting({
+  ScreenAwakeSettingsStore.forTesting({
     String prefsKey = _defaultPrefsKey,
-  }) => ScreenAwakeSettingsStore._withPrefsKey(prefsKey);
+  }) : this._withPrefsKey(prefsKey);
 
   ScreenAwakeSettingsStore._withPrefsKey(this._prefsKey);
 
