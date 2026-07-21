@@ -126,7 +126,10 @@ The updater fetches and pins the verified target commit, creates a detached
 worktree under
 `<stateDir>/releases/<commit-sha>`, runs `npm ci` and the production build while
 the old daemon remains online, then switches the service wrapper. It considers
-the update successful only after the new daemon passes its health check.
+the update successful only after the new daemon passes its health check. It
+refuses non-descendant targets before cutover, so the channel cannot downgrade
+or jump to an unrelated release; selecting an already-active target is a safe
+no-op.
 
 If cutover or verification fails, the updater rewrites the wrapper to the
 previous package directory, starts it, and verifies that the previous daemon is
@@ -136,7 +139,9 @@ the active Git checkout; nested worktrees are rejected.
 
 The authenticated `GET /api/admin/update-status` endpoint exposes the latest
 operation and its phase (`staging`, `stopping`, `switching`, `starting`,
-`verifying`, or `rolling_back`). The update status and lock files live in the
+`verifying`, or `rolling_back`). Its `cutoverStarted` and `restored` fields let
+clients distinguish a safe pre-cutover failure from a verified rollback or a
+rollback that needs attention. The update status and lock files live in the
 state directory with private permissions. Stable-channel and unmanaged updates
 continue to use the in-place path and require a clean tracked Git checkout.
 

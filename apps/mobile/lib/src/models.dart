@@ -328,6 +328,7 @@ class UpdateOperation {
     this.targetCommitSha,
     this.installedVersion,
     this.installedCommitSha,
+    required this.cutoverStarted,
     required this.restored,
     this.error,
     this.logPath,
@@ -346,6 +347,7 @@ class UpdateOperation {
   final String? targetCommitSha;
   final String? installedVersion;
   final String? installedCommitSha;
+  final bool cutoverStarted;
   final bool restored;
   final String? error;
   final String? logPath;
@@ -384,6 +386,7 @@ class UpdateOperation {
         targetCommitSha: _stringOrNull(json['targetCommitSha']),
         installedVersion: _stringOrNull(json['installedVersion']),
         installedCommitSha: _stringOrNull(json['installedCommitSha']),
+        cutoverStarted: json['cutoverStarted'] == true,
         restored: json['restored'] == true,
         error: _stringOrNull(json['error']),
         logPath: _stringOrNull(json['logPath']),

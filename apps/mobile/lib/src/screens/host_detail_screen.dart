@@ -3014,9 +3014,12 @@ class _UpdateProgressBanner extends StatelessWidget {
     AppColors colors,
     UpdateOperation operation,
   ) {
+    final needsAttention = operation.cutoverStarted && !operation.restored;
     final restoredDetail = operation.restored
         ? 'Previous release restored and healthy.'
-        : 'Automatic restore could not be verified.';
+        : operation.cutoverStarted
+        ? 'Automatic restore could not be verified.'
+        : 'The current release was left running.';
     final error = operation.error;
     final subtitle = error == null || error.isEmpty
         ? '$restoredDetail Tap to try again.'
@@ -3028,11 +3031,15 @@ class _UpdateProgressBanner extends StatelessWidget {
         colors: colors,
         icon: operation.restored
             ? Icons.restore_rounded
-            : Icons.error_outline_rounded,
-        iconColor: operation.restored ? colors.warning : colors.danger,
+            : needsAttention
+            ? Icons.error_outline_rounded
+            : Icons.info_outline_rounded,
+        iconColor: needsAttention ? colors.danger : colors.warning,
         title: operation.restored
             ? 'Update failed — previous release restored'
-            : 'Update and rollback need attention',
+            : needsAttention
+            ? 'Update and rollback need attention'
+            : 'Update stopped before cutover',
         subtitle: subtitle,
         showDismiss: true,
       ),
