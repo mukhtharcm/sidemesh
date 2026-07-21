@@ -18,6 +18,7 @@ class LaunchOptionsValue {
     this.sandbox = SandboxMode.workspaceWrite,
     this.fastMode = false,
     this.webSearch = false,
+    this.networkAccess = false,
     this.sessionMode,
   });
 
@@ -25,6 +26,7 @@ class LaunchOptionsValue {
   final SandboxMode sandbox;
   final bool fastMode;
   final bool webSearch;
+  final bool networkAccess;
 
   /// One of the values in [kSessionModes] (`interactive`, `plan`,
   /// `autopilot`), or null for "provider default".
@@ -35,6 +37,7 @@ class LaunchOptionsValue {
     SandboxMode? sandbox,
     bool? fastMode,
     bool? webSearch,
+    bool? networkAccess,
     Object? sessionMode = _unset,
   }) {
     return LaunchOptionsValue(
@@ -42,6 +45,7 @@ class LaunchOptionsValue {
       sandbox: sandbox ?? this.sandbox,
       fastMode: fastMode ?? this.fastMode,
       webSearch: webSearch ?? this.webSearch,
+      networkAccess: networkAccess ?? this.networkAccess,
       sessionMode: identical(sessionMode, _unset)
           ? this.sessionMode
           : sessionMode as String?,
@@ -60,6 +64,7 @@ class LaunchOptionsCapabilities {
     this.supportsSandboxMode = true,
     this.supportsFastMode = false,
     this.supportsWebSearch = false,
+    this.supportsNetworkAccess = false,
     this.supportsSessionMode = false,
     this.approvalOptions = const <ApprovalPolicy>[
       ApprovalPolicy.untrusted,
@@ -73,6 +78,7 @@ class LaunchOptionsCapabilities {
   final bool supportsSandboxMode;
   final bool supportsFastMode;
   final bool supportsWebSearch;
+  final bool supportsNetworkAccess;
   final bool supportsSessionMode;
 
   /// Subset of [ApprovalPolicy] values the provider exposes. Defaults to
@@ -100,6 +106,7 @@ class LaunchOptionsForm extends StatelessWidget {
     this.onSandboxChanged,
     this.onFastModeChanged,
     this.onWebSearchChanged,
+    this.onNetworkAccessChanged,
     this.onSessionModeChanged,
     this.capabilities = const LaunchOptionsCapabilities(),
     this.sessionModes = kDefaultProviderModes,
@@ -123,6 +130,7 @@ class LaunchOptionsForm extends StatelessWidget {
   final ValueChanged<SandboxMode>? onSandboxChanged;
   final ValueChanged<bool>? onFastModeChanged;
   final ValueChanged<bool>? onWebSearchChanged;
+  final ValueChanged<bool>? onNetworkAccessChanged;
   final ValueChanged<String?>? onSessionModeChanged;
 
   final LaunchOptionsCapabilities capabilities;
@@ -149,7 +157,8 @@ class LaunchOptionsForm extends StatelessWidget {
   bool get _hasPermissions =>
       capabilities.supportsApprovalPolicy || capabilities.supportsSandboxMode;
 
-  bool get _hasNetwork => capabilities.supportsWebSearch;
+  bool get _hasNetwork =>
+      capabilities.supportsWebSearch || capabilities.supportsNetworkAccess;
 
   double get _gap => dense ? AppSpacing.sm : AppSpacing.md;
 
@@ -271,16 +280,32 @@ class LaunchOptionsForm extends StatelessWidget {
       icon: Icons.public_rounded,
       title: 'Network',
       children: [
-        LaunchSwitchRow(
-          icon: Icons.public_rounded,
-          title: 'Live web search',
-          subtitle: 'Starts the thread with web search enabled.',
-          value: value.webSearch,
-          onChanged: (next) {
-            onWebSearchChanged?.call(next);
-            onChanged?.call(value.copyWith(webSearch: next));
-          },
-        ),
+        if (capabilities.supportsNetworkAccess)
+          LaunchSwitchRow(
+            icon: Icons.wifi_rounded,
+            title: 'Network access',
+            subtitle:
+                'Allow commands in the workspace sandbox to use the network.',
+            value: value.networkAccess,
+            onChanged: (next) {
+              onNetworkAccessChanged?.call(next);
+              onChanged?.call(value.copyWith(networkAccess: next));
+            },
+          ),
+        if (capabilities.supportsNetworkAccess &&
+            capabilities.supportsWebSearch)
+          const SizedBox(height: AppSpacing.sm),
+        if (capabilities.supportsWebSearch)
+          LaunchSwitchRow(
+            icon: Icons.public_rounded,
+            title: 'Live web search',
+            subtitle: 'Starts the thread with web search enabled.',
+            value: value.webSearch,
+            onChanged: (next) {
+              onWebSearchChanged?.call(next);
+              onChanged?.call(value.copyWith(webSearch: next));
+            },
+          ),
       ],
     );
   }

@@ -519,6 +519,7 @@ class ApiClient {
     bool? fastMode,
     String? approvalPolicy,
     String? sandboxMode,
+    bool? networkAccess,
     String? webSearch,
     String? profile,
   }) async {
@@ -546,6 +547,9 @@ class ApiClient {
     }
     if ((sandboxMode ?? '').isNotEmpty) {
       body['sandboxMode'] = sandboxMode;
+    }
+    if (networkAccess != null) {
+      body['networkAccess'] = networkAccess;
     }
     if ((webSearch ?? '').isNotEmpty) {
       body['webSearch'] = webSearch;
