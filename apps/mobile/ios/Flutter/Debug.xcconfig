@@ -3,3 +3,5 @@
 #include? "Signing.local.xcconfig"
 
 DEVELOPMENT_TEAM = $(SIDEMESH_DEVELOPMENT_TEAM)
+CODE_SIGN_ENTITLEMENTS = Runner/Runner.entitlements
+APS_ENVIRONMENT = development

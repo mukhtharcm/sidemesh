@@ -18,6 +18,7 @@ import 'src/screens/session_window_screen.dart';
 import 'src/background_sync_service.dart';
 import 'src/create_session_defaults_store.dart';
 import 'src/local_notification_service.dart';
+import 'src/ios_push_notification_service.dart';
 import 'src/screen_awake_settings_store.dart';
 import 'src/session_send_outbox_worker.dart';
 import 'src/theme/app_theme.dart';
@@ -95,6 +96,11 @@ Future<void> _startPostLaunchServices(
     await LocalNotificationService.instance.initialize();
   } catch (_) {
     // Notifications are optional; the app must still be usable without them.
+  }
+  try {
+    await IosPushNotificationService.instance.initialize();
+  } catch (_) {
+    // APNs is optional and must never block app startup.
   }
   try {
     await BackgroundSyncService.instance.initialize();

@@ -9,6 +9,7 @@ class SceneDelegate: FlutterSceneDelegate {
   ) {
     super.scene(scene, willConnectTo: session, options: connectionOptions)
     registerLiveActivityBridge()
+    registerPushBridge()
   }
 
   private func registerLiveActivityBridge() {
@@ -19,6 +20,17 @@ class SceneDelegate: FlutterSceneDelegate {
         return
       }
       SidemeshLiveActivityBridge.shared.attach(to: controller.binaryMessenger)
+    }
+  }
+
+  private func registerPushBridge() {
+    DispatchQueue.main.async { [weak self] in
+      guard
+        let controller = self?.window?.rootViewController as? FlutterViewController
+      else {
+        return
+      }
+      SidemeshPushBridge.shared.attach(to: controller.binaryMessenger)
     }
   }
 }
