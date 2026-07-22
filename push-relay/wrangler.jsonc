@@ -1,0 +1,49 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "sidemesh-push-relay",
+  "main": "src/index.ts",
+  "workers_dev": true,
+  "routes": [
+    { "pattern": "push.sidemesh.com", "custom_domain": true }
+  ],
+  "compatibility_date": "2026-07-22",
+  "observability": { "enabled": true },
+  "vars": {
+    "ALLOWED_BUNDLE_IDS": "dev.sidemesh.mobile,dev.sidemesh.mobile.dev"
+  },
+  "ratelimits": [
+    {
+      "name": "REGISTRATION_RATE_LIMITER",
+      "namespace_id": "73001",
+      "simple": { "limit": 300, "period": 60 }
+    },
+    {
+      "name": "PUBLISH_RATE_LIMITER",
+      "namespace_id": "73002",
+      "simple": { "limit": 120, "period": 60 }
+    }
+  ],
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "sidemesh-push-relay",
+      "database_id": "3e1e5239-0ab5-4f08-9f9e-228599d5b045",
+      "migrations_dir": "migrations"
+    }
+  ],
+  "queues": {
+    "producers": [
+      { "binding": "PUSH_QUEUE", "queue": "sidemesh-apns-push" }
+    ],
+    "consumers": [
+      {
+        "queue": "sidemesh-apns-push",
+        "max_batch_size": 10,
+        "max_batch_timeout": 2,
+        "max_retries": 8,
+        "dead_letter_queue": "sidemesh-apns-push-dlq",
+        "retry_delay": 30
+      }
+    ]
+  }
+}

@@ -198,6 +198,28 @@ class ApiClient {
     return _decodeList(response).map(PendingAction.fromJson).toList();
   }
 
+  Future<void> registerPushSubscription(
+    HostProfile host, {
+    required String installationId,
+    required String hostId,
+    required String relayUrl,
+    required String publishToken,
+  }) async {
+    final response = await _post(
+      host,
+      '/api/push/subscriptions',
+      body: {
+        'installationId': installationId,
+        'hostId': hostId,
+        'relayUrl': relayUrl,
+        'publishToken': publishToken,
+      },
+      timeout: _quickReadTimeout,
+      operation: 'enable push notifications',
+    );
+    _decodeObject(response);
+  }
+
   Future<List<HostTerminalInfo>> fetchTerminals(HostProfile host) async {
     final response = await _get(
       host,

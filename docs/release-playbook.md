@@ -219,6 +219,22 @@ need a mobile build. Keep product releases separate:
 macOS app release versions. The value must be stable `X.Y.Z+N`, where `X.Y.Z`
 is the marketing version and `N` is the positive build number.
 
+### iOS push notification release checks
+
+Production iOS builds use direct APNs through the Sidemesh push relay; they do
+not use Firebase Cloud Messaging. Before archiving a TestFlight build:
+
+1. Confirm `dev.sidemesh.mobile` has the Push Notifications capability.
+2. Use an App Store provisioning profile whose entitlements contain
+   `aps-environment = production`. A profile created before enabling Push
+   Notifications must be replaced.
+3. Confirm the relay health check succeeds and the app's
+   `SIDEMESH_PUSH_RELAY_URL` points to that deployment.
+4. Keep the APNs `.p8` key only in the relay's secret store. Never commit it or
+   put it in a mobile build.
+
+See `docs/push-notifications.md` for the architecture and deployment commands.
+
 Before running TestFlight or macOS release workflows, bump and commit the mobile
 version in a PR:
 

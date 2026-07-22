@@ -203,7 +203,7 @@ class _CompactBannerBody extends StatelessWidget {
         ),
         const SizedBox(height: 8),
         Text(
-          'Get a notification when an agent is waiting for approval.',
+          'Get a notification when an agent finishes or needs your attention.',
           style: Theme.of(context).textTheme.bodySmall?.copyWith(
             color: colors.textSecondary,
             height: 1.25,
