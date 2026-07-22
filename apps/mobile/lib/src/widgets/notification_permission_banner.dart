@@ -3,14 +3,14 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../local_notification_service.dart';
 import '../theme/app_colors.dart';
+import '../theme/app_tokens.dart';
 import '../theme/color_contrast.dart';
 import 'app_snackbar.dart';
-import 'mesh_widgets.dart';
 
 class NotificationPermissionBanner extends StatefulWidget {
   const NotificationPermissionBanner({
     super.key,
-    this.margin = const EdgeInsets.fromLTRB(16, 6, 16, 8),
+    this.margin = const EdgeInsets.fromLTRB(16, 2, 16, 4),
     this.compact = false,
   });
 
@@ -81,14 +81,16 @@ class _NotificationPermissionBannerState
 
     return Padding(
       padding: widget.margin,
-      child: MeshSurface(
-        tone: MeshSurfaceTone.accent,
-        radius: widget.compact ? 14 : 18,
+      child: Container(
+        decoration: BoxDecoration(
+          color: context.colors.surfaceMuted,
+          borderRadius: AppShapes.input,
+        ),
         padding: EdgeInsets.fromLTRB(
-          widget.compact ? 12 : 14,
           widget.compact ? 10 : 12,
-          widget.compact ? 8 : 10,
-          widget.compact ? 10 : 12,
+          widget.compact ? 8 : 6,
+          widget.compact ? 6 : 4,
+          widget.compact ? 8 : 6,
         ),
         child: widget.compact
             ? _CompactBannerBody(
@@ -123,22 +125,26 @@ class _BannerBody extends StatelessWidget {
     return Row(
       crossAxisAlignment: CrossAxisAlignment.center,
       children: [
-        _BellBadge(colors: colors, size: 30),
+        _BellBadge(colors: colors, size: 24),
         const SizedBox(width: 10),
         Expanded(
           child: Text(
             'Approval alerts',
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
-            style: Theme.of(context).textTheme.titleSmall?.copyWith(
+            style: Theme.of(context).textTheme.labelLarge?.copyWith(
               color: colors.textPrimary,
-              fontWeight: FontWeight.w800,
+              fontWeight: AppWeights.emphasis,
             ),
           ),
         ),
         const SizedBox(width: 6),
         TextButton(
           onPressed: requesting ? null : onEnable,
+          style: TextButton.styleFrom(
+            minimumSize: const Size(44, 44),
+            padding: const EdgeInsets.symmetric(horizontal: 8),
+          ),
           child: requesting
               ? const SizedBox(
                   width: 16,

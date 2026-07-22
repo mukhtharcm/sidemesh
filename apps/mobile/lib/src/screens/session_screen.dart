@@ -101,13 +101,16 @@ class SessionScreen extends StatefulWidget {
   final ApiClient api;
   final ValueChanged<SessionSummary>? onOpenSession;
   final VoidCallback? onArchived;
+
   /// Called when the user dismisses this session from the desktop detail pane.
   final VoidCallback? onClose;
   final SessionComposerSeed? initialComposerSeed;
+
   /// When provided (mobile only), a drawer that lets the user switch sessions
   /// without navigating back to the home screen. The drawer is opened via a
   /// leading ☰ button in the AppBar.
   final WidgetBuilder? sessionDrawer;
+
   /// Returns the user from the mobile session drawer to the owning session
   /// list screen instead of stepping through previously opened session routes.
   final VoidCallback? onReturnToSessionList;
@@ -226,7 +229,10 @@ class _DesktopSessionTitle extends StatelessWidget {
       children: [
         if (running) ...[const LivePulse(), const SizedBox(width: 9)],
         Expanded(child: titleContent),
-        if (running) ...[const SizedBox(width: 8), _DesktopSessionStatusBadge(running: running)],
+        if (running) ...[
+          const SizedBox(width: 8),
+          _DesktopSessionStatusBadge(running: running),
+        ],
       ],
     );
   }
@@ -272,7 +278,9 @@ class _DesktopSessionCommandBar extends StatelessWidget {
           children: [
             _DesktopGroupButton(
               icon: Icons.more_horiz_rounded,
-              tooltip: running ? 'Session actions (agent running)' : 'Session actions',
+              tooltip: running
+                  ? 'Session actions (agent running)'
+                  : 'Session actions',
               color: colors.textSecondary,
               onTap: onMore,
             ),
@@ -393,7 +401,6 @@ class _DesktopSessionStatusBadge extends StatelessWidget {
     );
   }
 }
-
 
 class _SessionBrowserPreviewDock extends StatelessWidget {
   const _SessionBrowserPreviewDock({
@@ -1268,7 +1275,10 @@ class _SessionScreenState extends State<SessionScreen>
             score: 0,
           );
           draftFileMentions.add(
-            _ComposerFileMention(file: file, tokenText: _fileMentionToken(file)),
+            _ComposerFileMention(
+              file: file,
+              tokenText: _fileMentionToken(file),
+            ),
           );
         default:
           continue;
@@ -1505,10 +1515,7 @@ class _SessionScreenState extends State<SessionScreen>
         },
         onOpenBrowser: () {
           if (!_supportsBrowserPreview) {
-            showAppSnackBar(
-              context,
-              'Browser is not available on this host.',
-            );
+            showAppSnackBar(context, 'Browser is not available on this host.');
             return;
           }
           unawaited(_openBrowserTabs());
@@ -5326,9 +5333,7 @@ class _SessionScreenState extends State<SessionScreen>
   }
 
   bool _composerThinkingCustomized(SessionSummary session) {
-    return _cleanComposerLabel(
-          _composerTurnConfig(session).reasoningEffort,
-        ) !=
+    return _cleanComposerLabel(_composerTurnConfig(session).reasoningEffort) !=
         null;
   }
 
@@ -5478,10 +5483,7 @@ class _SessionScreenState extends State<SessionScreen>
       orElse: () => defaultModel,
     );
     if (selectedModel.isAutoModel) {
-      showAppSnackBar(
-        context,
-        'This model manages thinking automatically.',
-      );
+      showAppSnackBar(context, 'This model manages thinking automatically.');
       return;
     }
     final options = selectedModel.supportedReasoningEfforts;
@@ -5725,10 +5727,7 @@ class _SessionScreenState extends State<SessionScreen>
                     dialogContext.colors.textPrimary,
                   ),
                 ),
-                child: ClipRRect(
-                  borderRadius: AppShapes.dialog,
-                  child: sheet,
-                ),
+                child: ClipRRect(borderRadius: AppShapes.dialog, child: sheet),
               ),
             ),
           ),
@@ -6207,11 +6206,9 @@ class _SessionScreenState extends State<SessionScreen>
   }
 
   void _upsertActivity(SessionActivity activity) {
-    _activities = _mergeIncomingActivities(
-      _activities,
-      [activity],
-      mode: _ActivityMergeMode.incremental,
-    );
+    _activities = _mergeIncomingActivities(_activities, [
+      activity,
+    ], mode: _ActivityMergeMode.incremental);
   }
 
   List<SessionActivity> _sortActivities(List<SessionActivity> activities) {
@@ -6405,8 +6402,7 @@ class _SessionScreenState extends State<SessionScreen>
     final first = activities.first;
     final changes = _aggregateFileChangeChanges(activities);
     return SessionActivity(
-      id:
-          'file-change-group:${first.turnId ?? first.id}:${activities.length}:${activities.last.id}',
+      id: 'file-change-group:${first.turnId ?? first.id}:${activities.length}:${activities.last.id}',
       type: first.type,
       createdAt: first.createdAt,
       seq: first.seq,
@@ -6971,7 +6967,8 @@ class _SessionScreenState extends State<SessionScreen>
       controlsCustomized: controlsCustomized,
     );
     final String? selected;
-    final restoreComposerFocus = _shouldRestoreComposerFocusAfterDesktopOverlay();
+    final restoreComposerFocus =
+        _shouldRestoreComposerFocusAfterDesktopOverlay();
     if (widget.desktopMode) {
       final anchorRect = _desktopPopoverAnchorRect(anchorContext);
       selected = await showDialog<String>(
@@ -7026,10 +7023,8 @@ class _SessionScreenState extends State<SessionScreen>
         showDragHandle: false,
         useSafeArea: true,
         isScrollControlled: true,
-        builder: (context) => _SessionActionSheet(
-          session: session,
-          groups: groups,
-        ),
+        builder: (context) =>
+            _SessionActionSheet(session: session, groups: groups),
       );
     }
     if (!mounted || selected == null) {
@@ -7082,8 +7077,9 @@ class _SessionScreenState extends State<SessionScreen>
         (_history?.isTruncated ?? false) && !_historyBannerDismissed;
     final showStopPill = isCompact && _running && _supportsSessionInterrupt;
     final showWaitingState = !_loading && timelineEntries.isEmpty && _running;
-    final freshnessTopPadding =
-        widget.desktopMode && _pendingAction == null ? 8.0 : 0.0;
+    final freshnessTopPadding = widget.desktopMode && _pendingAction == null
+        ? 8.0
+        : 0.0;
     final bodyContent = Column(
       children: [
         if (_pendingAction != null)
@@ -7317,7 +7313,7 @@ class _SessionScreenState extends State<SessionScreen>
               queueUpdated: _latestQueueUpdate,
               autoRetryUpdated: _latestAutoRetryUpdate,
             ),
-        ),
+          ),
         _ComposerStatusStrip(thinking: _thinkingNotifier),
         ListenableBuilder(
           listenable: _turnConfigStore,
@@ -7394,8 +7390,7 @@ class _SessionScreenState extends State<SessionScreen>
     final resourcesOpenInInspector = _isResourcesInspectorOpen(inspectorScope);
     final terminalOpenInInspector = _isTerminalInspectorOpen(inspectorScope);
     final browserOpenInInspector = _isBrowserInspectorOpen(inspectorScope);
-    final browserOpen =
-        browserOpenInInspector || _dockedBrowserPreview != null;
+    final browserOpen = browserOpenInInspector || _dockedBrowserPreview != null;
     // All layouts get the same compact info strip: status dot, host·folder,
     // provider badge, git chip, context %, pinned count, ℹ️ tap for details.
     // Desktop uses it as a subtitle since the title row has no room for meta.
@@ -7448,9 +7443,7 @@ class _SessionScreenState extends State<SessionScreen>
                     ),
                     const Divider(height: 1),
                     // Session list
-                    Expanded(
-                      child: Builder(builder: widget.sessionDrawer!),
-                    ),
+                    Expanded(child: Builder(builder: widget.sessionDrawer!)),
                   ],
                 ),
               ),
@@ -7614,6 +7607,7 @@ class _SessionScreenState extends State<SessionScreen>
                       MeshIconButton(
                         icon: Icons.tune_rounded,
                         tooltip: 'Session controls',
+                        framed: false,
                         color: sessionControlsCustomized
                             ? colors.accent
                             : colors.textSecondary,
@@ -7625,6 +7619,7 @@ class _SessionScreenState extends State<SessionScreen>
                             ? Icons.star_rounded
                             : Icons.star_outline_rounded,
                         tooltip: favorite ? 'Unpin session' : 'Pin session',
+                        framed: false,
                         color: favorite ? colors.warning : colors.textSecondary,
                         onTap: _toggleFavorite,
                       ),
@@ -7634,6 +7629,7 @@ class _SessionScreenState extends State<SessionScreen>
                         tooltip: _running
                             ? 'Session actions (agent running)'
                             : 'Session actions',
+                        framed: false,
                         color: _running ? colors.warning : colors.textPrimary,
                         onTap: () => unawaited(
                           _showSessionActionsSheet(
