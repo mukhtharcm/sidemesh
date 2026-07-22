@@ -746,9 +746,17 @@ export function parseActivity(parsed: any, seq: number): SessionActivity | null 
     case "patch_apply_end":
       return buildFileChangeActivityFromRolloutEvent(payload, createdAt, seq);
     case "web_search_begin":
-      return buildWebSearchActivityFromRolloutEvent(payload, createdAt, seq);
+      return buildWebSearchActivityFromRolloutEvent(
+        { ...payload, status: "in_progress" },
+        createdAt,
+        seq,
+      );
     case "web_search_end":
-      return buildWebSearchActivityFromRolloutEvent(payload, createdAt, seq);
+      return buildWebSearchActivityFromRolloutEvent(
+        { ...payload, status: terminalRolloutStatus(payload.status) },
+        createdAt,
+        seq,
+      );
     case "image_generation_begin":
       return buildImageGenerationActivityFromRolloutEvent(
         { ...payload, status: "in_progress" },
@@ -757,15 +765,36 @@ export function parseActivity(parsed: any, seq: number): SessionActivity | null 
       );
     case "image_generation_end":
       return buildImageGenerationActivityFromRolloutEvent(
-        payload,
+        { ...payload, status: terminalRolloutStatus(payload.status) },
         createdAt,
         seq,
       );
+    case "context_compacted":
+      return {
+        id: `context-compaction:${seq}`,
+        type: "context_compaction",
+        turnId: null,
+        createdAt,
+        seq,
+        status: "completed",
+      };
     case "guardian_assessment":
       return buildCommandActivityFromGuardianAssessment(payload, createdAt, seq);
     default:
       return null;
   }
+}
+
+function terminalRolloutStatus(
+  status: unknown,
+): "completed" | "failed" | "declined" {
+  if (status === "failed") {
+    return "failed";
+  }
+  if (status === "declined") {
+    return "declined";
+  }
+  return "completed";
 }
 
 type PendingCommandFunctionCall = {
