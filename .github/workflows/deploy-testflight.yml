@@ -168,7 +168,7 @@ jobs:
           lines = project_path.read_text().splitlines(keepends=True)
 
           profiles = {
-              "dev.sidemesh.mobile": "Sidemesh AppStore Distribution 20260430-075335",
+              "dev.sidemesh.mobile": "Sidemesh AppStore Push Distribution 20260722",
               "dev.sidemesh.mobile.LiveActivityExtension": "Sidemesh Live Activity Extension AppStore Distribution 20260430-075335",
           }
 
