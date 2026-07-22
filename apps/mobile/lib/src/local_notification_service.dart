@@ -311,6 +311,13 @@ class LocalNotificationService with WidgetsBindingObserver {
     }
   }
 
+  void routeRemoteNotification(Map<String, dynamic> payload) {
+    final intent = NotificationRouteIntent.fromJson(payload);
+    if (intent != null) {
+      routeIntent.value = intent;
+    }
+  }
+
   int _notificationId(String hostId, String actionId) {
     var hash = 0;
     for (final unit in '$hostId:$actionId'.codeUnits) {
@@ -385,6 +392,12 @@ class NotificationRouteIntent {
     required this.actionId,
   }) : type = 'approval';
 
+  const NotificationRouteIntent.session({
+    required this.type,
+    required this.hostId,
+    required this.sessionId,
+  }) : actionId = '';
+
   final String type;
   final String hostId;
   final String sessionId;
@@ -395,23 +408,41 @@ class NotificationRouteIntent {
     try {
       final json = jsonDecode(payload);
       if (json is! Map<String, dynamic>) return null;
-      if (json['type'] != 'approval') return null;
+      return fromJson(json);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  static NotificationRouteIntent? fromJson(Map<String, dynamic> json) {
+    try {
+      final type = json['type'] as String?;
       final hostId = json['hostId'] as String?;
       final sessionId = json['sessionId'] as String?;
-      final actionId = json['actionId'] as String?;
+      final actionId = json['actionId'] as String? ?? '';
       if (hostId == null ||
           hostId.isEmpty ||
           sessionId == null ||
           sessionId.isEmpty ||
-          actionId == null ||
-          actionId.isEmpty) {
+          type == null) {
         return null;
       }
-      return NotificationRouteIntent.approval(
-        hostId: hostId,
-        sessionId: sessionId,
-        actionId: actionId,
-      );
+      if (type == 'approval' || type == 'approval_required' || type == 'input_required') {
+        if (actionId.isEmpty) return null;
+        return NotificationRouteIntent.approval(
+          hostId: hostId,
+          sessionId: sessionId,
+          actionId: actionId,
+        );
+      }
+      if (type == 'turn_completed' || type == 'turn_failed') {
+        return NotificationRouteIntent.session(
+          type: type,
+          hostId: hostId,
+          sessionId: sessionId,
+        );
+      }
+      return null;
     } catch (_) {
       return null;
     }

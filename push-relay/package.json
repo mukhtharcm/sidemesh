@@ -1,0 +1,19 @@
+{
+  "name": "sidemesh-push-relay",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "check": "tsc --noEmit",
+    "test": "vitest run",
+    "deploy": "wrangler deploy",
+    "db:migrate:local": "wrangler d1 migrations apply sidemesh-push-relay --local",
+    "db:migrate:remote": "wrangler d1 migrations apply sidemesh-push-relay --remote"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "5.20260722.1",
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.10",
+    "wrangler": "^4.113.0"
+  }
+}

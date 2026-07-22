@@ -330,6 +330,10 @@ release tags use `macos-vX.Y.Z+N`; npm package release tags use
 `npm-v<package.json version>`. TestFlight and Sparkle appcast publishing both
 perform remote monotonic-version checks before uploading release artifacts.
 
+- **iOS APNs profiles**: enabling Push Notifications invalidates the assumptions
+  of older provisioning profiles. Create and install a fresh App Store profile,
+  then verify it contains `aps-environment = production` before archiving.
+
 ### Resilient Daemon Updates
 
 Because systemd kills the entire cgroup on restart, **do not** restart the
