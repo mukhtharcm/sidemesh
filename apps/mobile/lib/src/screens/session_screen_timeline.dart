@@ -2261,8 +2261,8 @@ class _ActivityCardState extends State<_ActivityCard> {
             : 'Edited ${activity.changes.length} files',
       'turn_diff' => _turnDiffActivityTitle(activity),
       'web_search' => _webSearchTitle(activity),
-      'image_generation' => 'Generated image',
-      'context_compaction' => 'Context compacted',
+      'image_generation' => _imageGenerationTitle(activity),
+      'context_compaction' => _contextCompactionTitle(activity),
       _ => 'Activity',
     };
 
@@ -2276,8 +2276,7 @@ class _ActivityCardState extends State<_ActivityCard> {
         (activity.savedPath ?? '').isNotEmpty
             ? _relativeSessionPath(activity.savedPath!, sessionCwd)
             : 'Image generation output',
-      'context_compaction' =>
-        'Older conversation history was summarized to free context.',
+      'context_compaction' => _contextCompactionSubtitle(activity),
       _ => null,
     };
 
@@ -2497,7 +2496,7 @@ class _ActivityCardState extends State<_ActivityCard> {
     final colors = context.colors;
     final changes = activity.changes;
     final sessionCwd = widget.sessionCwd;
-    final title = _fileChangeActivityTitle(activity, running: _activityRunning);
+    final title = _fileChangeActivityTitle(activity);
     final subtitle = _activityFileSummary(changes, sessionCwd);
     final statusBadge = _activityStatusBadge(activity);
     final contextActions = _buildContextActions();
@@ -2702,10 +2701,16 @@ class _ActivityCardState extends State<_ActivityCard> {
           ),
         );
       }
-    } else if (activity.terminalStatus == 'waiting') {
+    } else if (_activityRunning && activity.terminalStatus == 'waiting') {
       widgets.add(_waitingText(context, 'Interactive command is running.'));
-    } else {
+    } else if (_activityRunning) {
       widgets.add(_waitingText(context, 'Waiting for command output.'));
+    } else if (activity.status == 'failed') {
+      widgets.add(_waitingText(context, 'Command failed without output.'));
+    } else if (activity.status == 'declined') {
+      widgets.add(_waitingText(context, 'Command was declined.'));
+    } else {
+      widgets.add(_waitingText(context, 'Command completed without output.'));
     }
 
     return widgets;
@@ -2742,7 +2747,13 @@ class _ActivityCardState extends State<_ActivityCard> {
     }
 
     if (widgets.isEmpty) {
-      widgets.add(_waitingText(context, 'Waiting for tool details.'));
+      final message = switch (activity.status) {
+        'failed' => 'Tool failed without additional details.',
+        'declined' => 'Tool was declined.',
+        'completed' => 'Tool completed without additional details.',
+        _ => 'Waiting for tool details.',
+      };
+      widgets.add(_waitingText(context, message));
     } else {
       widgets.removeLast();
     }
@@ -2940,7 +2951,14 @@ class _ActivityCardState extends State<_ActivityCard> {
             'Image completed, but no saved file was reported.',
           ),
         ] else ...[
-          _waitingText(context, 'Generating image...'),
+          _waitingText(
+            context,
+            switch (activity.status) {
+              'failed' => 'Image generation failed.',
+              'declined' => 'Image generation was declined.',
+              _ => 'Generating image...',
+            },
+          ),
         ],
       ],
     );
@@ -2952,10 +2970,11 @@ class _ActivityCardState extends State<_ActivityCard> {
   ) {
     final message = switch (activity.status) {
       'completed' =>
-        'Codex summarized older history so the session can keep working with more free context.',
+        'The agent summarized older history so the session can keep working with more free context.',
       'failed' =>
-        'Codex tried to compact the session context, but the compaction failed.',
-      _ => 'Codex is compacting older history to free context.',
+        'The agent tried to compact the session context, but the compaction failed.',
+      'declined' => 'Context compaction was declined.',
+      _ => 'The agent is compacting older history to free context.',
     };
     return [
       _activityInfoBlock(context, 'What happened', message),
@@ -2970,22 +2989,46 @@ class _ActivityCardState extends State<_ActivityCard> {
     final command = _toolCommandText(activity);
 
     if (activity.toolAction == 'mode_change' && mode.isNotEmpty) {
-      return 'Switched to $mode mode';
+      final verb = _activityActionVerb(
+        activity.status,
+        completed: 'Switched',
+        progress: 'Switching',
+        infinitive: 'switch',
+      );
+      return '$verb to $mode mode';
     }
     if (activity.toolCategory == 'filesystem' &&
         activity.toolAction == 'read' &&
         target.isNotEmpty) {
-      return 'Read $target';
+      final verb = _activityActionVerb(
+        activity.status,
+        completed: 'Read',
+        progress: 'Reading',
+        infinitive: 'read',
+      );
+      return '$verb $target';
     }
     if (activity.toolCategory == 'filesystem' &&
         activity.toolAction == 'write' &&
         target.isNotEmpty) {
-      return 'Edited $target';
+      final verb = _activityActionVerb(
+        activity.status,
+        completed: 'Edited',
+        progress: 'Editing',
+        infinitive: 'edit',
+      );
+      return '$verb $target';
     }
     if (activity.toolCategory == 'filesystem' &&
         activity.toolAction == 'list' &&
         target.isNotEmpty) {
-      return 'Listed $target';
+      final verb = _activityActionVerb(
+        activity.status,
+        completed: 'Listed',
+        progress: 'Listing',
+        infinitive: 'list',
+      );
+      return '$verb $target';
     }
     if (activity.toolCategory == 'filesystem' &&
         activity.toolAction == 'search') {
@@ -3254,14 +3297,16 @@ class _ActivityCardState extends State<_ActivityCard> {
   }
 
   String _webSearchStatusCopy(SessionActivity activity) {
-    if (activity.status == 'completed') {
-      return switch (_webSearchKindLabel(activity)) {
+    return switch (activity.status) {
+      'completed' => switch (_webSearchKindLabel(activity)) {
         'find in page' => 'Finished searching within a page.',
         'open page' => 'Opened a web page for more detail.',
         _ => 'Finished web search.',
-      };
-    }
-    return 'Web search is running.';
+      },
+      'failed' => 'Web search failed.',
+      'declined' => 'Web search was declined.',
+      _ => 'Web search is running.',
+    };
   }
 
   Widget _waitingText(BuildContext context, String text) {
@@ -4134,6 +4179,48 @@ String _commandActivityTitle(SessionActivity activity) {
       _commandStatusTitle(activity.status, '');
 }
 
+String _contextCompactionTitle(SessionActivity activity) {
+  return switch (activity.status) {
+    'completed' => 'Context compacted',
+    'failed' => 'Context compaction failed',
+    'declined' => 'Context compaction declined',
+    _ => 'Compacting context',
+  };
+}
+
+String _contextCompactionSubtitle(SessionActivity activity) {
+  return switch (activity.status) {
+    'completed' =>
+      'Older conversation history was summarized to free context.',
+    'failed' => 'Older conversation history could not be summarized.',
+    'declined' => 'Context compaction did not run.',
+    _ => 'Summarizing older conversation history to free context.',
+  };
+}
+
+String _imageGenerationTitle(SessionActivity activity) {
+  return switch (activity.status) {
+    'completed' => 'Generated image',
+    'failed' => 'Image generation failed',
+    'declined' => 'Image generation declined',
+    _ => 'Generating image',
+  };
+}
+
+String _activityActionVerb(
+  String status, {
+  required String completed,
+  required String progress,
+  required String infinitive,
+}) {
+  return switch (status) {
+    'failed' => 'Failed to $infinitive',
+    'declined' => 'Did not $infinitive',
+    'in_progress' => progress,
+    _ => completed,
+  };
+}
+
 _CommandTitleParts? _commandTitleParts(String rawCommand, String status) {
   final command = _displayCommandText(rawCommand);
   if (command.isEmpty) {
@@ -4548,16 +4635,23 @@ int _diffLineCount(String diff) {
   return '\n'.allMatches(diff).length + 1;
 }
 
-String _fileChangeActivityTitle(
-  SessionActivity activity, {
-  required bool running,
-}) {
+String _fileChangeActivityTitle(SessionActivity activity) {
   final count = _fileChangeFileCount(activity.changes);
   if (count == 0) {
-    return running ? 'Editing files' : 'No file changes';
+    return switch (activity.status) {
+      'failed' => 'File editing failed',
+      'declined' => 'File editing declined',
+      'in_progress' => 'Editing files',
+      _ => 'No file changes',
+    };
   }
   final noun = count == 1 ? 'file' : 'files';
-  return '${running ? 'Editing' : 'Edited'} $count $noun';
+  return switch (activity.status) {
+    'failed' => 'Could not edit $count $noun',
+    'declined' => 'Did not edit $count $noun',
+    'in_progress' => 'Editing $count $noun',
+    _ => 'Edited $count $noun',
+  };
 }
 
 int _fileChangeFileCount(List<SessionActivityChange> changes) {

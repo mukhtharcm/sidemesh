@@ -8,7 +8,77 @@ import {
   listRecentRolloutThreads,
   loadRolloutLog,
   loadSessionRuntime,
+  parseActivity,
 } from "./codex-history.js";
+
+describe("parseActivity", () => {
+  it("uses rollout event boundaries as activity lifecycle truth", () => {
+    const webBegin = parseActivity(
+      {
+        timestamp: "2026-07-22T00:00:00.000Z",
+        type: "event_msg",
+        payload: {
+          type: "web_search_begin",
+          call_id: "web-1",
+          action: { type: "search", query: "sidemesh" },
+        },
+      },
+      1,
+    );
+    const webEnd = parseActivity(
+      {
+        timestamp: "2026-07-22T00:00:01.000Z",
+        type: "event_msg",
+        payload: {
+          type: "web_search_end",
+          call_id: "web-1",
+          action: { type: "other" },
+        },
+      },
+      2,
+    );
+    const imageEnd = parseActivity(
+      {
+        timestamp: "2026-07-22T00:00:02.000Z",
+        type: "event_msg",
+        payload: {
+          type: "image_generation_end",
+          call_id: "image-1",
+          status: "generating",
+          saved_path: "/repo/image.png",
+        },
+      },
+      3,
+    );
+    const failedImageEnd = parseActivity(
+      {
+        timestamp: "2026-07-22T00:00:02.500Z",
+        type: "event_msg",
+        payload: {
+          type: "image_generation_end",
+          call_id: "image-2",
+          status: "failed",
+        },
+      },
+      4,
+    );
+    const compaction = parseActivity(
+      {
+        timestamp: "2026-07-22T00:00:03.000Z",
+        type: "event_msg",
+        payload: { type: "context_compacted" },
+      },
+      5,
+    );
+
+    assert.equal(webBegin?.status, "in_progress");
+    assert.equal(webEnd?.status, "completed");
+    assert.equal(imageEnd?.status, "completed");
+    assert.equal(failedImageEnd?.status, "failed");
+    assert.equal(compaction?.type, "context_compaction");
+    assert.equal(compaction?.status, "completed");
+  });
+});
 
 describe("loadSessionRuntime", () => {
   let tempDir = "";
