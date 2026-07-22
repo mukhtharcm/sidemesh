@@ -4,6 +4,7 @@ import type {
   PendingActionDecisionId,
   PendingActionDecisionKind,
   PendingActionDecisionRequest,
+  PendingActionProviderOptionRequest,
   PendingActionElicitationFieldValue,
 } from "./types.js";
 
@@ -32,6 +33,7 @@ export interface PendingActionElicitationResponse {
 
 export type PendingActionResponseInput =
   | PendingActionDecisionInput
+  | PendingActionProviderOptionRequest
   | PendingActionUserInputResponse
   | PendingActionElicitationResponse;
 
@@ -83,6 +85,10 @@ export function parsePendingActionResponseBody(
   }
 
   const typed = value as Record<string, unknown>;
+  const providerOption = parsePendingActionProviderOptionResponse(typed);
+  if (providerOption) {
+    return providerOption;
+  }
   if (typed.approvalDecision !== undefined && typed.approvalDecision !== null) {
     return parsePendingActionDecision(typed.approvalDecision);
   }
@@ -90,6 +96,19 @@ export function parsePendingActionResponseBody(
     return parsePendingActionDecision(typed);
   }
   return parsePendingActionDecision(typed.decision);
+}
+
+export function parsePendingActionProviderOptionResponse(
+  value: unknown,
+): PendingActionProviderOptionRequest | null {
+  if (!value || typeof value !== "object") {
+    return null;
+  }
+  const optionId = (value as Record<string, unknown>).providerOptionId;
+  if (typeof optionId !== "string" || !optionId.trim()) {
+    return null;
+  }
+  return { providerOptionId: optionId.trim() };
 }
 
 export function parsePendingActionUserInputResponse(

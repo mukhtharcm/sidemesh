@@ -18,6 +18,8 @@ enum InspectorSurfaceKind {
   browserTabs,
   gitDetails,
   sessionDetails,
+  sessionControls,
+
   /// Default surface shown when no specific surface has been saved for a
   /// session. Acts as a quick-launch hub for all inspector tools.
   sessionHub,

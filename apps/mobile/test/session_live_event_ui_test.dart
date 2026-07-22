@@ -573,12 +573,7 @@ void main() {
 
     await _pumpApp(
       tester,
-      SessionScreen(
-        host: host,
-        session: session,
-        api: api,
-        desktopMode: true,
-      ),
+      SessionScreen(host: host, session: session, api: api, desktopMode: true),
       size: const Size(1180, 900),
     );
     await _pumpFrames(tester);
@@ -590,71 +585,68 @@ void main() {
     );
   });
 
-  testWidgets('delta replay clears stale pending actions when the server has none', (
-    tester,
-  ) async {
-    final session = _session('pending-action-delta-clear');
-    final api = _RichEventFakeApi(
-      messages: [
-        _assistantMessage(
-          id: 'seed-message',
-          text: 'Existing transcript item.',
-          content: const [TextBlock('Existing transcript item.')],
+  testWidgets(
+    'delta replay clears stale pending actions when the server has none',
+    (tester) async {
+      final session = _session('pending-action-delta-clear');
+      final api = _RichEventFakeApi(
+        messages: [
+          _assistantMessage(
+            id: 'seed-message',
+            text: 'Existing transcript item.',
+            content: const [TextBlock('Existing transcript item.')],
+          ),
+        ],
+        eventsDelta: SessionEventsDelta(
+          sessionId: session.id,
+          since: 1,
+          nextSeq: 3,
+          messages: const [],
+          activities: const [],
+          latestPlanUpdate: null,
+          pendingAction: null,
+          session: _session(session.id, status: 'running'),
         ),
-      ],
-      eventsDelta: SessionEventsDelta(
-        sessionId: session.id,
-        since: 1,
-        nextSeq: 3,
-        messages: const [],
-        activities: const [],
-        latestPlanUpdate: null,
-        pendingAction: null,
-        session: _session(session.id, status: 'running'),
-      ),
-    );
-    addTearDown(api.dispose);
+      );
+      addTearDown(api.dispose);
 
-    await _pumpApp(
-      tester,
-      SessionScreen(
-        host: _host('pending-action-delta-clear'),
-        session: session,
-        api: api,
-        desktopMode: true,
-      ),
-      size: const Size(1180, 900),
-    );
-    await _pumpFrames(tester);
+      await _pumpApp(
+        tester,
+        SessionScreen(
+          host: _host('pending-action-delta-clear'),
+          session: session,
+          api: api,
+          desktopMode: true,
+        ),
+        size: const Size(1180, 900),
+      );
+      await _pumpFrames(tester);
 
-    api.emit({
-      'type': 'action_opened',
-      'sessionId': session.id,
-      'action': {
-        'id': 'action-1',
+      api.emit({
+        'type': 'action_opened',
         'sessionId': session.id,
-        'kind': 'permissions',
-        'title': 'Approve file edit',
-        'detail': 'Need approval before continuing.',
-        'requestedAt': DateTime(2026, 1, 1, 12, 1).millisecondsSinceEpoch,
-        'canApprove': true,
-        'canApproveForSession': true,
-        'canDecline': true,
-      },
-    });
-    await _pumpFrames(tester);
+        'action': {
+          'id': 'action-1',
+          'sessionId': session.id,
+          'kind': 'permissions',
+          'title': 'Approve file edit',
+          'detail': 'Need approval before continuing.',
+          'requestedAt': DateTime(2026, 1, 1, 12, 1).millisecondsSinceEpoch,
+          'canApprove': true,
+          'canApproveForSession': true,
+          'canDecline': true,
+        },
+      });
+      await _pumpFrames(tester);
 
-    expect(find.text('Approve file edit'), findsOneWidget);
+      expect(find.text('Approve file edit'), findsOneWidget);
 
-    api.emit({
-      'type': 'hello',
-      'sessionId': session.id,
-      'nextSeq': 3,
-    });
-    await _pumpFrames(tester);
+      api.emit({'type': 'hello', 'sessionId': session.id, 'nextSeq': 3});
+      await _pumpFrames(tester);
 
-    expect(find.text('Approve file edit'), findsNothing);
-  });
+      expect(find.text('Approve file edit'), findsNothing);
+    },
+  );
 
   testWidgets('manual snapshot reload clears stale pending actions', (
     tester,
@@ -708,133 +700,123 @@ void main() {
     expect(find.text('Approve file edit'), findsNothing);
   });
 
-  testWidgets('snapshot reload preserves action opened while fetch is in flight', (
-    tester,
-  ) async {
-    final session = _session('pending-action-snapshot-buffered-open');
-    final snapshotReady = Completer<void>();
-    final api = _RichEventFakeApi(
-      messages: [
-        _assistantMessage(
-          id: 'seed-message',
-          text: 'Existing transcript item.',
-          content: const [TextBlock('Existing transcript item.')],
+  testWidgets(
+    'snapshot reload preserves action opened while fetch is in flight',
+    (tester) async {
+      final session = _session('pending-action-snapshot-buffered-open');
+      final snapshotReady = Completer<void>();
+      final api = _RichEventFakeApi(
+        messages: [
+          _assistantMessage(
+            id: 'seed-message',
+            text: 'Existing transcript item.',
+            content: const [TextBlock('Existing transcript item.')],
+          ),
+        ],
+      );
+      addTearDown(api.dispose);
+
+      await _pumpApp(
+        tester,
+        SessionScreen(
+          host: _host('pending-action-snapshot-buffered-open'),
+          session: session,
+          api: api,
+          desktopMode: true,
         ),
-      ],
-    );
-    addTearDown(api.dispose);
+        size: const Size(1180, 900),
+      );
+      await _pumpFrames(tester);
 
-    await _pumpApp(
-      tester,
-      SessionScreen(
-        host: _host('pending-action-snapshot-buffered-open'),
-        session: session,
-        api: api,
-        desktopMode: true,
-      ),
-      size: const Size(1180, 900),
-    );
-    await _pumpFrames(tester);
+      api.fetchLogBlocker = snapshotReady.future;
+      await _tapDesktopReload(tester);
 
-    api.fetchLogBlocker = snapshotReady.future;
-    await _tapDesktopReload(tester);
-
-    api.emit({
-      'type': 'action_opened',
-      'sessionId': session.id,
-      'action': {
-        'id': 'action-1',
+      api.emit({
+        'type': 'action_opened',
         'sessionId': session.id,
-        'kind': 'permissions',
-        'title': 'Approve file edit',
-        'detail': 'Need approval before continuing.',
-        'requestedAt': DateTime(2026, 1, 1, 12, 1).millisecondsSinceEpoch,
-        'canApprove': true,
-        'canApproveForSession': true,
-        'canDecline': true,
-      },
-    });
-    await _pumpFrames(tester);
+        'action': {
+          'id': 'action-1',
+          'sessionId': session.id,
+          'kind': 'permissions',
+          'title': 'Approve file edit',
+          'detail': 'Need approval before continuing.',
+          'requestedAt': DateTime(2026, 1, 1, 12, 1).millisecondsSinceEpoch,
+          'canApprove': true,
+          'canApproveForSession': true,
+          'canDecline': true,
+        },
+      });
+      await _pumpFrames(tester);
 
-    expect(find.text('Approve file edit'), findsNothing);
+      expect(find.text('Approve file edit'), findsNothing);
 
-    snapshotReady.complete();
-    await _pumpFrames(tester);
+      snapshotReady.complete();
+      await _pumpFrames(tester);
 
-    expect(find.text('Approve file edit'), findsOneWidget);
-  });
+      expect(find.text('Approve file edit'), findsOneWidget);
+    },
+  );
 
-  testWidgets('cached activity details refresh from delta replay without manual reload', (
-    tester,
-  ) async {
-    final host = _host('cached-activity-delta');
-    final session = _session('cached-activity-delta');
-    final api = _RichEventFakeApi(
-      sessionSummary: session,
-      activities: [
-        _fileChangeActivity(
-          id: 'file-1',
-          seq: 1,
-          path: '/repo/after.txt',
-        ),
-      ],
-      eventsDelta: SessionEventsDelta(
-        sessionId: session.id,
-        since: 1,
-        nextSeq: 2,
-        messages: const [],
+  testWidgets(
+    'cached activity details refresh from delta replay without manual reload',
+    (tester) async {
+      final host = _host('cached-activity-delta');
+      final session = _session('cached-activity-delta');
+      final api = _RichEventFakeApi(
+        sessionSummary: session,
         activities: [
-          _fileChangeActivity(
-            id: 'file-1',
-            seq: 1,
-            path: '/repo/after.txt',
-          ),
+          _fileChangeActivity(id: 'file-1', seq: 1, path: '/repo/after.txt'),
         ],
-        latestPlanUpdate: null,
-        pendingAction: null,
-        session: session,
-      ),
-    );
-    addTearDown(api.dispose);
-
-    await SessionLocalStore.instance.saveSessionLog(
-      host,
-      SessionLog(
-        session: session,
-        messages: const [],
-        activities: [
-          _fileChangeActivity(
-            id: 'file-1',
-            seq: 1,
-            path: '/repo/before.txt',
-          ),
-        ],
-        pendingAction: null,
-        history: SessionLogHistorySummary(
-          isTruncated: false,
-          totalMessages: 0,
-          returnedMessages: 0,
-          totalActivities: 1,
-          returnedActivities: 1,
+        eventsDelta: SessionEventsDelta(
+          sessionId: session.id,
+          since: 1,
+          nextSeq: 2,
+          messages: const [],
+          activities: [
+            _fileChangeActivity(id: 'file-1', seq: 1, path: '/repo/after.txt'),
+          ],
+          latestPlanUpdate: null,
+          pendingAction: null,
+          session: session,
         ),
-      ),
-    );
+      );
+      addTearDown(api.dispose);
 
-    await _pumpApp(
-      tester,
-      SessionScreen(
-        host: host,
-        session: session,
-        api: api,
-        desktopMode: true,
-      ),
-      size: const Size(1180, 900),
-    );
-    await _pumpFrames(tester);
+      await SessionLocalStore.instance.saveSessionLog(
+        host,
+        SessionLog(
+          session: session,
+          messages: const [],
+          activities: [
+            _fileChangeActivity(id: 'file-1', seq: 1, path: '/repo/before.txt'),
+          ],
+          pendingAction: null,
+          history: SessionLogHistorySummary(
+            isTruncated: false,
+            totalMessages: 0,
+            returnedMessages: 0,
+            totalActivities: 1,
+            returnedActivities: 1,
+          ),
+        ),
+      );
 
-    expect(find.text('after.txt'), findsOneWidget);
-    expect(find.text('before.txt'), findsNothing);
-  });
+      await _pumpApp(
+        tester,
+        SessionScreen(
+          host: host,
+          session: session,
+          api: api,
+          desktopMode: true,
+        ),
+        size: const Size(1180, 900),
+      );
+      await _pumpFrames(tester);
+
+      expect(find.text('after.txt'), findsOneWidget);
+      expect(find.text('before.txt'), findsNothing);
+    },
+  );
 
   testWidgets('turn completion snapshot keeps locally seen command rows', (
     tester,
@@ -850,11 +832,7 @@ void main() {
     final api = _RichEventFakeApi(
       sessionSummary: session,
       activities: [
-        _plainToolActivity(
-          id: 'live-command',
-          seq: 1,
-          toolName: 'run_command',
-        ),
+        _plainToolActivity(id: 'live-command', seq: 1, toolName: 'run_command'),
       ],
     );
     addTearDown(api.dispose);
@@ -881,11 +859,7 @@ void main() {
 
     expect(find.text('npm test'), findsOneWidget);
 
-    api.emit({
-      'type': 'turn_completed',
-      'sessionId': session.id,
-      'seq': 2,
-    });
+    api.emit({'type': 'turn_completed', 'sessionId': session.id, 'seq': 2});
     await tester.pump(const Duration(milliseconds: 1300));
     await _pumpFrames(tester);
 
@@ -944,12 +918,7 @@ void main() {
 
     await _pumpApp(
       tester,
-      SessionScreen(
-        host: host,
-        session: session,
-        api: api,
-        desktopMode: true,
-      ),
+      SessionScreen(host: host, session: session, api: api, desktopMode: true),
       size: const Size(1180, 900),
     );
     await _pumpFrames(tester);
@@ -958,89 +927,90 @@ void main() {
     expect(find.text('fresh-from-snapshot.txt'), findsOneWidget);
   });
 
-  testWidgets('delta replay refreshes cached history metadata without manual reload', (
-    tester,
-  ) async {
-    final host = _host('cached-history-delta');
-    final session = _session('cached-history-delta');
-    final cachedMessage = _assistantMessage(
-      id: 'msg-1',
-      text: 'Cached message.',
-      content: const [TextBlock('Cached message.')],
-    );
-    final deltaMessage = SessionMessage(
-      id: 'msg-2',
-      role: 'assistant',
-      text: 'New delta message.',
-      content: const [TextBlock('New delta message.')],
-      attachments: const [],
-      createdAt: DateTime(2026, 1, 1, 12, 2),
-      seq: 2,
-      phase: 'final_answer',
-    );
-    final api = _RichEventFakeApi(
-      sessionSummary: session,
-      messages: [cachedMessage, deltaMessage],
-      sessionLogHistory: const SessionLogHistorySummary(
-        isTruncated: true,
-        totalMessages: 6,
-        returnedMessages: 2,
-        totalActivities: 0,
-        returnedActivities: 0,
-      ),
-      eventsDelta: SessionEventsDelta(
-        sessionId: session.id,
-        since: 1,
-        nextSeq: 2,
-        messages: [deltaMessage],
-        activities: const [],
-        latestPlanUpdate: null,
-        pendingAction: null,
-        session: session,
-      ),
-    );
-    addTearDown(api.dispose);
-
-    await SessionLocalStore.instance.saveSessionLog(
-      host,
-      SessionLog(
-        session: session,
-        messages: [cachedMessage],
-        activities: const [],
-        pendingAction: null,
-        history: const SessionLogHistorySummary(
+  testWidgets(
+    'delta replay refreshes cached history metadata without manual reload',
+    (tester) async {
+      final host = _host('cached-history-delta');
+      final session = _session('cached-history-delta');
+      final cachedMessage = _assistantMessage(
+        id: 'msg-1',
+        text: 'Cached message.',
+        content: const [TextBlock('Cached message.')],
+      );
+      final deltaMessage = SessionMessage(
+        id: 'msg-2',
+        role: 'assistant',
+        text: 'New delta message.',
+        content: const [TextBlock('New delta message.')],
+        attachments: const [],
+        createdAt: DateTime(2026, 1, 1, 12, 2),
+        seq: 2,
+        phase: 'final_answer',
+      );
+      final api = _RichEventFakeApi(
+        sessionSummary: session,
+        messages: [cachedMessage, deltaMessage],
+        sessionLogHistory: const SessionLogHistorySummary(
           isTruncated: true,
-          totalMessages: 5,
-          returnedMessages: 1,
+          totalMessages: 6,
+          returnedMessages: 2,
           totalActivities: 0,
           returnedActivities: 0,
         ),
-      ),
-    );
+        eventsDelta: SessionEventsDelta(
+          sessionId: session.id,
+          since: 1,
+          nextSeq: 2,
+          messages: [deltaMessage],
+          activities: const [],
+          latestPlanUpdate: null,
+          pendingAction: null,
+          session: session,
+        ),
+      );
+      addTearDown(api.dispose);
 
-    await _pumpApp(
-      tester,
-      SessionScreen(
-        host: host,
-        session: session,
-        api: api,
-        desktopMode: true,
-      ),
-      size: const Size(1180, 900),
-    );
-    await _pumpFrames(tester);
+      await SessionLocalStore.instance.saveSessionLog(
+        host,
+        SessionLog(
+          session: session,
+          messages: [cachedMessage],
+          activities: const [],
+          pendingAction: null,
+          history: const SessionLogHistorySummary(
+            isTruncated: true,
+            totalMessages: 5,
+            returnedMessages: 1,
+            totalActivities: 0,
+            returnedActivities: 0,
+          ),
+        ),
+      );
 
-    final cached = await SessionLocalStore.instance.loadSessionLog(
-      host,
-      session.id,
-    );
-    expect(cached, isNotNull);
-    final history = cached!.log.history;
-    expect(history, isNotNull);
-    expect(history!.totalMessages, 6);
-    expect(history.returnedMessages, 2);
-    expect(history.isTruncated, isTrue);
-  });
+      await _pumpApp(
+        tester,
+        SessionScreen(
+          host: host,
+          session: session,
+          api: api,
+          desktopMode: true,
+        ),
+        size: const Size(1180, 900),
+      );
+      await _pumpFrames(tester);
+
+      final cached = await SessionLocalStore.instance.loadSessionLog(
+        host,
+        session.id,
+      );
+      expect(cached, isNotNull);
+      final history = cached!.log.history;
+      expect(history, isNotNull);
+      expect(history!.totalMessages, 6);
+      expect(history.returnedMessages, 2);
+      expect(history.isTruncated, isTrue);
+    },
+  );
 
   testWidgets('stale delta fallback reloads the full snapshot automatically', (
     tester,
@@ -1051,11 +1021,7 @@ void main() {
       sessionSummary: session,
       eventsError: StateError('stale_snapshot'),
       activities: [
-        _fileChangeActivity(
-          id: 'file-1',
-          seq: 1,
-          path: '/repo/fresh.txt',
-        ),
+        _fileChangeActivity(id: 'file-1', seq: 1, path: '/repo/fresh.txt'),
       ],
     );
     addTearDown(api.dispose);
@@ -1066,11 +1032,7 @@ void main() {
         session: session,
         messages: const [],
         activities: [
-          _fileChangeActivity(
-            id: 'file-1',
-            seq: 1,
-            path: '/repo/stale.txt',
-          ),
+          _fileChangeActivity(id: 'file-1', seq: 1, path: '/repo/stale.txt'),
         ],
         pendingAction: null,
         history: SessionLogHistorySummary(
@@ -1085,12 +1047,7 @@ void main() {
 
     await _pumpApp(
       tester,
-      SessionScreen(
-        host: host,
-        session: session,
-        api: api,
-        desktopMode: true,
-      ),
+      SessionScreen(host: host, session: session, api: api, desktopMode: true),
       size: const Size(1180, 900),
     );
     await _pumpFrames(tester);
@@ -1099,156 +1056,158 @@ void main() {
     expect(find.text('stale.txt'), findsNothing);
   });
 
-  testWidgets('cached session verifies snapshot even when delta has no transcript rows', (
-    tester,
-  ) async {
-    final host = _host('cached-delta-empty-snapshot-verify');
-    final session = _session('cached-delta-empty-snapshot-verify');
-    final api = _RichEventFakeApi(
-      sessionSummary: session,
-      eventsDelta: SessionEventsDelta(
-        sessionId: session.id,
-        since: 1,
-        nextSeq: 1,
-        messages: const [],
-        activities: const [],
-        latestPlanUpdate: null,
-        pendingAction: null,
-        session: session,
-      ),
-      activities: [
-        _fileChangeActivity(
-          id: 'file-1',
-          seq: 1,
-          path: '/repo/fresh-from-snapshot.txt',
+  testWidgets(
+    'cached session verifies snapshot even when delta has no transcript rows',
+    (tester) async {
+      final host = _host('cached-delta-empty-snapshot-verify');
+      final session = _session('cached-delta-empty-snapshot-verify');
+      final api = _RichEventFakeApi(
+        sessionSummary: session,
+        eventsDelta: SessionEventsDelta(
+          sessionId: session.id,
+          since: 1,
+          nextSeq: 1,
+          messages: const [],
+          activities: const [],
+          latestPlanUpdate: null,
+          pendingAction: null,
+          session: session,
         ),
-      ],
-    );
-    addTearDown(api.dispose);
-
-    await SessionLocalStore.instance.saveSessionLog(
-      host,
-      SessionLog(
-        session: session,
-        messages: const [],
         activities: [
           _fileChangeActivity(
             id: 'file-1',
             seq: 1,
-            path: '/repo/stale-from-cache.txt',
+            path: '/repo/fresh-from-snapshot.txt',
           ),
         ],
-        pendingAction: null,
-        history: SessionLogHistorySummary(
-          isTruncated: false,
-          totalMessages: 0,
-          returnedMessages: 0,
-          totalActivities: 1,
-          returnedActivities: 1,
+      );
+      addTearDown(api.dispose);
+
+      await SessionLocalStore.instance.saveSessionLog(
+        host,
+        SessionLog(
+          session: session,
+          messages: const [],
+          activities: [
+            _fileChangeActivity(
+              id: 'file-1',
+              seq: 1,
+              path: '/repo/stale-from-cache.txt',
+            ),
+          ],
+          pendingAction: null,
+          history: SessionLogHistorySummary(
+            isTruncated: false,
+            totalMessages: 0,
+            returnedMessages: 0,
+            totalActivities: 1,
+            returnedActivities: 1,
+          ),
         ),
-      ),
-    );
+      );
 
-    await _pumpApp(
-      tester,
-      SessionScreen(
-        host: host,
-        session: session,
-        api: api,
-        desktopMode: true,
-      ),
-      size: const Size(1180, 900),
-    );
-    await _pumpFrames(tester);
-
-    expect(find.text('fresh-from-snapshot.txt'), findsOneWidget);
-    expect(find.text('stale-from-cache.txt'), findsNothing);
-  });
-
-  testWidgets('hello gap keeps cached transcript stale until snapshot verifies', (
-    tester,
-  ) async {
-    final host = _host('cached-hello-gap-snapshot-verify');
-    final session = _session('cached-hello-gap-snapshot-verify');
-    final snapshotReady = Completer<void>();
-    final api = _RichEventFakeApi(
-      sessionSummary: session,
-      fetchLogBlocker: snapshotReady.future,
-      messages: [
-        _assistantMessage(
-          id: 'msg-1',
-          text: 'Fresh snapshot item.',
-          content: const [TextBlock('Fresh snapshot item.')],
+      await _pumpApp(
+        tester,
+        SessionScreen(
+          host: host,
+          session: session,
+          api: api,
+          desktopMode: true,
         ),
-      ],
-      eventsDelta: SessionEventsDelta(
-        sessionId: session.id,
-        since: 1,
-        nextSeq: 1,
-        messages: const [],
-        activities: const [],
-        latestPlanUpdate: null,
-        pendingAction: null,
-        session: session,
-      ),
-    );
-    addTearDown(api.dispose);
+        size: const Size(1180, 900),
+      );
+      await _pumpFrames(tester);
 
-    await SessionLocalStore.instance.saveSessionLog(
-      host,
-      SessionLog(
-        session: session,
+      expect(find.text('fresh-from-snapshot.txt'), findsOneWidget);
+      expect(find.text('stale-from-cache.txt'), findsNothing);
+    },
+  );
+
+  testWidgets(
+    'hello gap keeps cached transcript stale until snapshot verifies',
+    (tester) async {
+      final host = _host('cached-hello-gap-snapshot-verify');
+      final session = _session('cached-hello-gap-snapshot-verify');
+      final snapshotReady = Completer<void>();
+      final api = _RichEventFakeApi(
+        sessionSummary: session,
+        fetchLogBlocker: snapshotReady.future,
         messages: [
           _assistantMessage(
             id: 'msg-1',
-            text: 'Cached transcript item.',
-            content: const [TextBlock('Cached transcript item.')],
+            text: 'Fresh snapshot item.',
+            content: const [TextBlock('Fresh snapshot item.')],
           ),
         ],
-        activities: const [],
-        pendingAction: null,
-        history: const SessionLogHistorySummary(
-          isTruncated: false,
-          totalMessages: 1,
-          returnedMessages: 1,
-          totalActivities: 0,
-          returnedActivities: 0,
+        eventsDelta: SessionEventsDelta(
+          sessionId: session.id,
+          since: 1,
+          nextSeq: 1,
+          messages: const [],
+          activities: const [],
+          latestPlanUpdate: null,
+          pendingAction: null,
+          session: session,
         ),
-      ),
-    );
+      );
+      addTearDown(api.dispose);
 
-    await _pumpApp(
-      tester,
-      SessionScreen(
-        host: host,
-        session: session,
-        api: api,
-        desktopMode: true,
-      ),
-      size: const Size(1180, 900),
-    );
-    await _pumpFrames(tester);
+      await SessionLocalStore.instance.saveSessionLog(
+        host,
+        SessionLog(
+          session: session,
+          messages: [
+            _assistantMessage(
+              id: 'msg-1',
+              text: 'Cached transcript item.',
+              content: const [TextBlock('Cached transcript item.')],
+            ),
+          ],
+          activities: const [],
+          pendingAction: null,
+          history: const SessionLogHistorySummary(
+            isTruncated: false,
+            totalMessages: 1,
+            returnedMessages: 1,
+            totalActivities: 0,
+            returnedActivities: 0,
+          ),
+        ),
+      );
 
-    api.emit({'type': 'hello', 'sessionId': session.id, 'nextSeq': 3});
-    await _pumpFrames(tester);
+      await _pumpApp(
+        tester,
+        SessionScreen(
+          host: host,
+          session: session,
+          api: api,
+          desktopMode: true,
+        ),
+        size: const Size(1180, 900),
+      );
+      await _pumpFrames(tester);
 
-    expect(find.text('Cached transcript item.'), findsOneWidget);
-    expect(find.text('Fresh snapshot item.'), findsNothing);
-    expect(
-      find.text('Cached transcript · syncing latest changes'),
-      findsOneWidget,
-    );
+      api.emit({'type': 'hello', 'sessionId': session.id, 'nextSeq': 3});
+      await _pumpFrames(tester);
 
-    snapshotReady.complete();
-    await _pumpFrames(tester);
+      expect(find.text('Cached transcript item.'), findsOneWidget);
+      expect(find.text('Fresh snapshot item.'), findsNothing);
+      expect(
+        find.text('Cached transcript · syncing latest changes'),
+        findsOneWidget,
+      );
 
-    expect(find.text('Fresh snapshot item.'), findsOneWidget);
-    expect(find.text('Cached transcript item.'), findsNothing);
-    expect(
-      find.text('Cached transcript · waiting for latest host snapshot'),
-      findsNothing,
-    );
-  });
+      snapshotReady.complete();
+      await _pumpFrames(tester);
+
+      expect(find.text('Fresh snapshot item.'), findsOneWidget);
+      expect(find.text('Cached transcript item.'), findsNothing);
+      expect(
+        find.text('Cached transcript · waiting for latest host snapshot'),
+        findsNothing,
+      );
+    },
+  );
 
   testWidgets('completed assistant message keeps collapsed reasoning visible', (
     tester,
@@ -1928,8 +1887,7 @@ SessionActivity _commandActivity({
   required String output,
   DateTime? createdAt,
 }) {
-  final now =
-      createdAt ?? DateTime(2026, 1, 1, 12).add(Duration(minutes: seq));
+  final now = createdAt ?? DateTime(2026, 1, 1, 12).add(Duration(minutes: seq));
   return SessionActivity(
     id: id,
     type: 'command',
@@ -2014,8 +1972,7 @@ SessionActivity _fileChangeActivity({
   String? turnId,
   DateTime? createdAt,
 }) {
-  final now =
-      createdAt ?? DateTime(2026, 1, 1, 12).add(Duration(minutes: seq));
+  final now = createdAt ?? DateTime(2026, 1, 1, 12).add(Duration(minutes: seq));
   return SessionActivity(
     id: id,
     type: 'file_change',
@@ -2087,9 +2044,7 @@ SessionActivity _legacyCommandToolActivity({
     toolSemantic: SessionToolSemantic(
       category: 'command',
       action: 'invoke',
-      targets: [
-        SessionToolSemanticTarget(type: 'command', command: command),
-      ],
+      targets: [SessionToolSemanticTarget(type: 'command', command: command)],
     ),
     changes: const [],
     diff: null,
@@ -2365,6 +2320,7 @@ class _RichEventFakeApi extends ApiClient {
     String? approvalPolicy,
     String? sandboxMode,
     bool? networkAccess,
+    String? accessMode,
   }) async {
     sendInputCalls += 1;
     lastInputText = text;

@@ -330,6 +330,8 @@ class StubProvider
     configuration: {
       models: true,
       profiles: false,
+      accessModes: false,
+      permissionProfiles: false,
       skills: false,
       skillManagement: false,
     },
@@ -342,6 +344,9 @@ class StubProvider
       sandboxMode: true,
       networkAccess: true,
       webSearch: false,
+      accessMode: false,
+      permissionProfile: false,
+      approvalsReviewer: false,
     },
     lifecycle: {
       restart: true,

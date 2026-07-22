@@ -6,6 +6,7 @@ import 'package:sidemesh_mobile/src/app_version_store.dart';
 import 'package:sidemesh_mobile/src/create_session_defaults_store.dart';
 import 'package:sidemesh_mobile/src/screen_awake_settings_store.dart';
 import 'package:sidemesh_mobile/src/screens/settings_screen.dart';
+import 'package:sidemesh_mobile/src/session_policy_store.dart';
 import 'package:sidemesh_mobile/src/theme/app_palettes.dart';
 import 'package:sidemesh_mobile/src/theme/app_theme.dart';
 import 'package:sidemesh_mobile/src/theme/theme_controller.dart';
@@ -50,7 +51,6 @@ void main() {
       expect(find.text('Settings'), findsOneWidget);
       expect(find.text('Appearance & device'), findsOneWidget);
       expect(find.text('Appearance'), findsOneWidget);
-      expect(find.text('Display'), findsOneWidget);
       expect(find.text('Keep screen awake while agent runs'), findsOneWidget);
       expect(find.text('Notifications'), findsOneWidget);
       expect(find.text('New session defaults'), findsOneWidget);
@@ -112,6 +112,18 @@ void main() {
       expect(find.text('Settings'), findsOneWidget);
       expect(find.text('Appearance & device'), findsOneWidget);
       expect(find.text('Replay onboarding'), findsNothing);
+
+      await tester.scrollUntilVisible(
+        find.widgetWithText(TextButton, 'Edit'),
+        300,
+        scrollable: find.byType(Scrollable).first,
+      );
+      await tester.tap(find.widgetWithText(TextButton, 'Edit'));
+      await tester.pumpAndSettle();
+
+      expect(find.byType(DropdownButton<ApprovalPolicy>), findsOneWidget);
+      expect(find.byType(DropdownButton<SandboxMode>), findsOneWidget);
+      expect(find.text('Used when you start a new session.'), findsOneWidget);
     } finally {
       debugDefaultTargetPlatformOverride = null;
       tester.view.resetPhysicalSize();
@@ -172,7 +184,7 @@ void main() {
     },
   );
 
-  testWidgets('opens session defaults sheet with summary and clearer actions', (
+  testWidgets('opens compact session defaults and enables save after changes', (
     tester,
   ) async {
     debugDefaultTargetPlatformOverride = TargetPlatform.android;
@@ -209,16 +221,29 @@ void main() {
       );
       await tester.pumpAndSettle();
 
-      await tester.tap(find.widgetWithText(FilledButton, 'Edit'));
+      await tester.tap(find.widgetWithText(TextButton, 'Edit'));
       await tester.pumpAndSettle();
 
-      expect(
-        find.text('Used every time you open New session.'),
-        findsOneWidget,
+      expect(find.text('Fast mode'), findsOneWidget);
+      expect(find.text('Approval policy'), findsOneWidget);
+      expect(find.text('File access'), findsOneWidget);
+      expect(find.text('Web search'), findsOneWidget);
+      expect(find.text('Used every time you open New session.'), findsNothing);
+      expect(find.text('Starting point'), findsNothing);
+      final save = tester.widget<TextButton>(
+        find.widgetWithText(TextButton, 'Save'),
       );
-      expect(find.text('Starting point'), findsOneWidget);
-      expect(find.text('Apply defaults'), findsOneWidget);
-      expect(find.text('Use recommended'), findsOneWidget);
+      expect(save.onPressed, isNull);
+
+      await tester.tap(find.text('Approval policy'));
+      await tester.pumpAndSettle();
+      expect(find.text('Ask when untrusted'), findsOneWidget);
+      await tester.tap(find.text('Ask when untrusted'));
+      await tester.pumpAndSettle();
+      final changedSave = tester.widget<TextButton>(
+        find.widgetWithText(TextButton, 'Save'),
+      );
+      expect(changedSave.onPressed, isNotNull);
       expect(tester.takeException(), isNull);
     } finally {
       debugDefaultTargetPlatformOverride = null;

@@ -5,8 +5,11 @@ import { access, stat } from "node:fs/promises";
 import nodePath from "node:path";
 
 import {
+  AgentProviderRequestError,
+  type AgentAccessModeListOptions,
   type AgentModelListOptions,
   type AgentProfileListOptions,
+  type AgentPermissionProfileListOptions,
   type AgentSkillConfigWriteRequest,
   type AgentSkillListOptions,
   type AgentSessionListOptions,
@@ -46,7 +49,12 @@ import type {
   LiveThreadStatus,
   ModelSummary,
   PendingActionKind,
+  ProviderAccessModeCatalog,
+  ProviderAccessModeSummary,
   ProviderProfileCatalog,
+  ProviderPermissionProfileCatalog,
+  ProviderPermissionModeSummary,
+  ProviderPermissionProfileSummary,
   ProviderProfileSummary,
   ProviderWarningLevel,
   SessionActivity,
@@ -256,19 +264,39 @@ public async health(): Promise<boolean> {
     );
   }
 
-  public readSessionRuntime(thread: ThreadRecord): Promise<SessionRuntimeSummary | null> {
-    return loadSessionRuntime(thread.id, thread.path, this.runtimeHome);
+  public async readSessionRuntime(
+    thread: ThreadRecord,
+  ): Promise<SessionRuntimeSummary | null> {
+    const runtime = await loadSessionRuntime(
+      thread.id,
+      thread.path,
+      this.runtimeHome,
+    );
+    if (runtime) {
+      runtime.accessMode = codexAccessModeFromRuntime(runtime);
+    }
+    return runtime;
   }
 
   public async createSession(
     request: AgentCreateSessionRequest,
   ): Promise<AgentCreateSessionResult> {
+    const resolvedRequest = {
+      ...request,
+      overrides: await this.resolveAccessModeOverrides(
+        request.overrides,
+        request.cwd,
+      ),
+    };
     const started = (await this.bridge.request(
       "thread/start",
-      buildCodexThreadStartParams(request),
+      buildCodexThreadStartParams(resolvedRequest),
     )) as Record<string, unknown>;
     const thread = started.thread as ThreadRecord;
     const runtime = buildRuntimeFromThreadStart(started);
+    if (runtime && !runtime.accessMode) {
+      runtime.accessMode = cleanOptionalString(request.overrides.accessMode) ?? undefined;
+    }
 
     let activeTurnId: string | null = null;
     if (request.input.length > 0) {
@@ -303,16 +331,24 @@ public async health(): Promise<boolean> {
       };
     }
 
+    const resolvedRequest = {
+      ...request,
+      overrides: await this.resolveAccessModeOverridesForSession(
+        request.sessionId,
+        request.overrides,
+      ),
+    };
+
     if (!(await this.isSessionThreadLoaded(request.sessionId))) {
       await this.resumeSessionThread(
         request.sessionId,
-        await this.buildResumeOptionsForSubmit(request),
+        await this.buildResumeOptionsForSubmit(resolvedRequest),
       );
     }
 
     const turn = (await this.bridge.request(
       "turn/start",
-      buildCodexTurnStartParams(request),
+      buildCodexTurnStartParams(resolvedRequest),
     )) as Record<string, unknown>;
     return {
       mode: "turn",
@@ -364,6 +400,263 @@ public async health(): Promise<boolean> {
     };
   }
 
+  public async listAccessModes(
+    options: AgentAccessModeListOptions,
+  ): Promise<ProviderAccessModeCatalog> {
+    const catalog = await this.listPermissionProfiles(options);
+    return {
+      strategy: "modes",
+      modes: catalog.modes.map(codexAccessModeSummary),
+      defaultMode: catalog.defaultMode,
+    };
+  }
+
+  public async listPermissionProfiles(
+    options: AgentPermissionProfileListOptions,
+  ): Promise<ProviderPermissionProfileCatalog> {
+    const profiles: ProviderPermissionProfileSummary[] = [];
+    let cursor: string | null = null;
+    do {
+      const response = (await this.bridge.request("permissionProfile/list", {
+        cwd: options.cwd,
+        cursor,
+        limit: 100,
+      })) as Record<string, unknown>;
+      const data = Array.isArray(response.data) ? response.data : [];
+      for (const item of data) {
+        if (!item || typeof item !== "object") {
+          continue;
+        }
+        const typed = item as Record<string, unknown>;
+        const id = asString(typed.id);
+        if (!id) {
+          continue;
+        }
+        profiles.push({
+          id,
+          label: codexPermissionProfileLabel(id),
+          description:
+            asString(typed.description) ?? codexPermissionProfileDescription(id),
+          allowed: typed.allowed === true,
+        });
+      }
+      cursor = asString(response.nextCursor);
+    } while (cursor);
+
+    const [requirementsResponse, featuresResponse, configResponse] =
+      await Promise.all([
+        this.bridge
+          .request("configRequirements/read", undefined)
+          .catch(() => ({ requirements: null })),
+        this.bridge
+          .request("experimentalFeature/list", {
+            cursor: null,
+            limit: 100,
+          })
+          .catch(() => ({ data: [] })),
+        this.bridge
+          .request("config/read", { cwd: options.cwd })
+          .catch(() => ({ config: {} })),
+      ]);
+    const requirements = asRecord(
+      asRecord(requirementsResponse)?.requirements,
+    );
+    const allowedReviewers = asStringArray(
+      requirements?.allowedApprovalsReviewers,
+    );
+    const allowedApprovalPolicies = asStringArray(
+      requirements?.allowedApprovalPolicies,
+    );
+    const reviewerAllowed = (id: string) =>
+      allowedReviewers === null || allowedReviewers.includes(id);
+    const approvalPolicyAllowed = (id: string) =>
+      allowedApprovalPolicies === null || allowedApprovalPolicies.includes(id);
+    const features = Array.isArray(asRecord(featuresResponse)?.data)
+      ? (asRecord(featuresResponse)!.data as unknown[])
+      : [];
+    const autoReviewEnabled = features.some((feature) => {
+      const typed = asRecord(feature);
+      return typed?.name === "guardian_approval" && typed.enabled === true;
+    });
+    const reviewerOptions = [
+      ...(reviewerAllowed("user")
+        ? [
+            {
+              id: "user",
+              label: "Ask for approval",
+              description:
+                "Always ask before editing external files or using the internet.",
+            },
+          ]
+        : []),
+      ...(autoReviewEnabled && reviewerAllowed("auto_review")
+        ? [
+            {
+              id: "auto_review",
+              label: "Approve for me",
+              description:
+                "Only ask for actions detected as potentially unsafe.",
+            },
+          ]
+        : []),
+    ];
+    const allowedProfileIds = new Set(
+      profiles.filter((profile) => profile.allowed).map((profile) => profile.id),
+    );
+    const modes: ProviderPermissionModeSummary[] = [];
+    if (
+      allowedProfileIds.has(":workspace") &&
+      reviewerAllowed("user") &&
+      approvalPolicyAllowed("on-request")
+    ) {
+      modes.push({
+        id: "ask-for-approval",
+        label: "Ask for approval",
+        description:
+          "Always ask before editing external files or using the internet.",
+        permissionProfile: ":workspace",
+        approvalPolicy: "on-request",
+        approvalsReviewer: "user",
+        dangerous: false,
+        usesProviderDefaults: false,
+      });
+    }
+    if (
+      allowedProfileIds.has(":workspace") &&
+      autoReviewEnabled &&
+      reviewerAllowed("auto_review") &&
+      approvalPolicyAllowed("on-request")
+    ) {
+      modes.push({
+        id: "approve-for-me",
+        label: "Approve for me",
+        description: "Only ask for actions detected as potentially unsafe.",
+        permissionProfile: ":workspace",
+        approvalPolicy: "on-request",
+        approvalsReviewer: "auto_review",
+        dangerous: false,
+        usesProviderDefaults: false,
+      });
+    }
+    if (
+      allowedProfileIds.has(":read-only") &&
+      reviewerAllowed("user") &&
+      approvalPolicyAllowed("on-request")
+    ) {
+      modes.push({
+        id: "read-only",
+        label: "Read only",
+        description:
+          "Inspect the workspace without changing files or accessing the internet.",
+        permissionProfile: ":read-only",
+        approvalPolicy: "on-request",
+        approvalsReviewer: "user",
+        dangerous: false,
+        usesProviderDefaults: false,
+      });
+    }
+    if (
+      allowedProfileIds.has(":danger-full-access") &&
+      reviewerAllowed("user") &&
+      approvalPolicyAllowed("never")
+    ) {
+      modes.push({
+        id: "full-access",
+        label: "Full access",
+        description:
+          "Unrestricted access to the internet and any file on this computer.",
+        permissionProfile: ":danger-full-access",
+        approvalPolicy: "never",
+        approvalsReviewer: "user",
+        dangerous: true,
+        usesProviderDefaults: false,
+      });
+    }
+    modes.push({
+      id: "custom",
+      label: "Provider configuration",
+      description: "Use the permissions configured for Codex on this host.",
+      permissionProfile: null,
+      approvalPolicy: null,
+      approvalsReviewer: null,
+      dangerous: false,
+      usesProviderDefaults: true,
+    });
+
+    const config = asRecord(asRecord(configResponse)?.config);
+    const configuredProfile = asString(config?.default_permissions);
+    const configuredApproval = asString(config?.approval_policy);
+    const configuredReviewer =
+      parseCodexApprovalsReviewer(asString(config?.approvals_reviewer)) ?? "user";
+    const defaultMode =
+      modes.find(
+        (mode) =>
+          !mode.usesProviderDefaults &&
+          mode.permissionProfile === configuredProfile &&
+          mode.approvalPolicy === configuredApproval &&
+          mode.approvalsReviewer === configuredReviewer,
+      )?.id ?? "custom";
+
+    return {
+      strategy: "profiles",
+      profiles,
+      reviewerOptions,
+      modes,
+      defaultMode,
+    };
+  }
+
+  private async resolveAccessModeOverridesForSession(
+    sessionId: string,
+    overrides: AgentSubmitInputRequest["overrides"],
+  ): Promise<AgentSubmitInputRequest["overrides"]> {
+    if (!cleanOptionalString(overrides.accessMode)) {
+      return overrides;
+    }
+    const thread = await this.readSessionThread(sessionId, false);
+    return this.resolveAccessModeOverrides(overrides, thread.cwd ?? null);
+  }
+
+  private async resolveAccessModeOverrides(
+    overrides: AgentCreateSessionRequest["overrides"],
+    cwd: string | null,
+  ): Promise<AgentCreateSessionRequest["overrides"]> {
+    const accessMode = cleanOptionalString(overrides.accessMode);
+    if (!accessMode) {
+      return overrides;
+    }
+    const catalog = await this.listPermissionProfiles({ cwd });
+    const mode = catalog.modes.find((candidate) => candidate.id === accessMode);
+    if (!mode) {
+      throw new AgentProviderRequestError(
+        `Codex access mode is unavailable: ${accessMode}`,
+      );
+    }
+    if (mode.usesProviderDefaults) {
+      const response = await this.bridge.request("config/read", { cwd });
+      const config = asRecord(asRecord(response)?.config);
+      return {
+        ...overrides,
+        approvalPolicy: asString(config?.approval_policy) ?? "on-request",
+        sandboxMode: null,
+        networkAccess: null,
+        permissionProfile:
+          asString(config?.default_permissions) ?? ":workspace",
+        approvalsReviewer:
+          parseCodexApprovalsReviewer(asString(config?.approvals_reviewer)) ??
+          "user",
+      };
+    }
+    return {
+      ...overrides,
+      approvalPolicy: mode.approvalPolicy,
+      sandboxMode: null,
+      networkAccess: null,
+      permissionProfile: mode.permissionProfile,
+      approvalsReviewer: mode.approvalsReviewer,
+    };
+  }
+
   private async isSessionThreadLoaded(sessionId: string): Promise<boolean> {
     const data = await this.listLoadedSessionIds();
     return data.includes(sessionId);
@@ -409,14 +702,26 @@ public async health(): Promise<boolean> {
     const approvalPolicy = parseCodexApprovalPolicy(
       overrides?.approvalPolicy ?? runtime.approvalPolicy ?? null,
     );
+    const permissionProfile =
+      overrides?.permissionProfile ?? runtime.permissionProfile ?? null;
+    if (permissionProfile) {
+      options.permissions = permissionProfile;
+    }
     if (approvalPolicy) {
       options.approvalPolicy = approvalPolicy;
+    }
+
+    const approvalsReviewer = parseCodexApprovalsReviewer(
+      overrides?.approvalsReviewer ?? runtime.approvalsReviewer ?? null,
+    );
+    if (approvalsReviewer) {
+      options.approvalsReviewer = approvalsReviewer;
     }
 
     const sandboxMode = parseCodexSandboxMode(
       overrides?.sandboxMode ?? runtime.sandboxMode ?? null,
     );
-    if (sandboxMode) {
+    if (!permissionProfile && sandboxMode) {
       options.sandbox = sandboxMode;
     }
 
@@ -1821,13 +2126,25 @@ function buildCodexThreadStartParams(
   if (overrides.fastMode !== null) {
     params.serviceTier = overrides.fastMode ? "fast" : null;
   }
+  const permissionProfile = cleanOptionalString(overrides.permissionProfile);
+  if (permissionProfile) {
+    params.permissions = permissionProfile;
+  }
   const approvalPolicy = parseCodexApprovalPolicy(overrides.approvalPolicy);
   if (approvalPolicy) {
     params.approvalPolicy = approvalPolicy;
   }
-  const sandboxMode = parseCodexSandboxMode(overrides.sandboxMode);
-  if (sandboxMode) {
-    params.sandbox = sandboxMode;
+  if (!permissionProfile) {
+    const sandboxMode = parseCodexSandboxMode(overrides.sandboxMode);
+    if (sandboxMode) {
+      params.sandbox = sandboxMode;
+    }
+  }
+  const approvalsReviewer = parseCodexApprovalsReviewer(
+    overrides.approvalsReviewer,
+  );
+  if (approvalsReviewer) {
+    params.approvalsReviewer = approvalsReviewer;
   }
   const config = buildCodexThreadConfigOverrides(overrides);
   if (config) {
@@ -1844,9 +2161,19 @@ function buildCodexTurnStartParams(
     threadId: request.sessionId,
     input: normalizeCodexInput(request.input),
   };
+  const permissionProfile = cleanOptionalString(overrides.permissionProfile);
+  if (permissionProfile) {
+    params.permissions = permissionProfile;
+  }
   const approvalPolicy = parseCodexApprovalPolicy(overrides.approvalPolicy);
   if (approvalPolicy) {
     params.approvalPolicy = approvalPolicy;
+  }
+  const approvalsReviewer = parseCodexApprovalsReviewer(
+    overrides.approvalsReviewer,
+  );
+  if (approvalsReviewer) {
+    params.approvalsReviewer = approvalsReviewer;
   }
   if (overrides.model) {
     params.model = overrides.model;
@@ -1859,7 +2186,7 @@ function buildCodexTurnStartParams(
     params.serviceTier = overrides.fastMode ? "fast" : null;
   }
   const sandboxMode = parseCodexSandboxMode(overrides.sandboxMode);
-  if (sandboxMode || overrides.networkAccess !== null) {
+  if (!permissionProfile && (sandboxMode || overrides.networkAccess !== null)) {
     const sandboxPolicy = buildCodexSandboxPolicyV2(
       sandboxMode,
       overrides.networkAccess,
@@ -1877,7 +2204,7 @@ function buildRuntimeFromThreadStart(raw: unknown): SessionRuntimeSummary | null
     return null;
   }
 
-  const runtime = {
+  const runtime: SessionRuntimeSummary = {
     model: asString(typed.model) ?? undefined,
     modelProvider:
       asString(typed.modelProvider) ??
@@ -1910,7 +2237,16 @@ function buildRuntimeFromThreadStart(raw: unknown): SessionRuntimeSummary | null
         (typed.sandbox as Record<string, unknown> | undefined)?.network_access,
       ) ??
       undefined,
-  } satisfies SessionRuntimeSummary;
+    permissionProfile:
+      asString(
+        (typed.activePermissionProfile as Record<string, unknown> | undefined)?.id,
+      ) ?? undefined,
+    approvalsReviewer:
+      asString(typed.approvalsReviewer) ??
+      asString(typed.approvals_reviewer) ??
+      undefined,
+  };
+  runtime.accessMode = codexAccessModeFromRuntime(runtime);
 
   if (
     !runtime.model &&
@@ -1919,7 +2255,10 @@ function buildRuntimeFromThreadStart(raw: unknown): SessionRuntimeSummary | null
     !runtime.reasoningEffort &&
     !runtime.approvalPolicy &&
     !runtime.sandboxMode &&
-    runtime.networkAccess === undefined
+    runtime.networkAccess === undefined &&
+    !runtime.accessMode &&
+    !runtime.permissionProfile &&
+    !runtime.approvalsReviewer
   ) {
     return null;
   }
@@ -1971,6 +2310,119 @@ function buildCodexSandboxPolicyV2(
 type CodexApprovalPolicyValue = "untrusted" | "on-request" | "never";
 type CodexSandboxModeValue = "read-only" | "workspace-write" | "danger-full-access";
 type CodexWebSearchModeValue = "disabled" | "cached" | "live";
+type CodexApprovalsReviewerValue = "user" | "auto_review";
+
+function parseCodexApprovalsReviewer(
+  value: string | null | undefined,
+): CodexApprovalsReviewerValue | null {
+  if (value === "user" || value === "auto_review") {
+    return value;
+  }
+  return value === "guardian_subagent" ? "auto_review" : null;
+}
+
+function cleanOptionalString(value: string | null | undefined): string | null {
+  const trimmed = value?.trim() ?? "";
+  return trimmed || null;
+}
+
+function codexAccessModeSummary(
+  mode: ProviderPermissionModeSummary,
+): ProviderAccessModeSummary {
+  const icon = (() => {
+    switch (mode.id) {
+      case "ask-for-approval":
+        return "prompt";
+      case "approve-for-me":
+        return "automatic";
+      case "read-only":
+        return "read-only";
+      case "full-access":
+        return "unrestricted";
+      default:
+        return "settings";
+    }
+  })();
+  return {
+    id: mode.id,
+    label: mode.label,
+    description: mode.description,
+    icon,
+    tone: mode.dangerous ? "danger" : "default",
+    enabled: true,
+    disabledReason: null,
+    confirmation: mode.dangerous
+      ? {
+          title: `Enable ${mode.label.toLowerCase()}?`,
+          description:
+            "This mode can edit any file on this computer and use the internet without approval. It substantially increases the risk of data loss or leaks.",
+          confirmLabel: `Enable ${mode.label.toLowerCase()}`,
+          danger: true,
+        }
+      : null,
+  };
+}
+
+function codexAccessModeFromRuntime(
+  runtime: SessionRuntimeSummary,
+): string | undefined {
+  const permissionProfile = cleanOptionalString(runtime.permissionProfile);
+  const approvalPolicy = cleanOptionalString(runtime.approvalPolicy);
+  const approvalsReviewer =
+    parseCodexApprovalsReviewer(runtime.approvalsReviewer) ?? "user";
+  if (
+    permissionProfile === ":workspace" &&
+    approvalPolicy === "on-request"
+  ) {
+    return approvalsReviewer === "auto_review"
+      ? "approve-for-me"
+      : "ask-for-approval";
+  }
+  if (
+    permissionProfile === ":read-only" &&
+    approvalPolicy === "on-request"
+  ) {
+    return "read-only";
+  }
+  if (
+    permissionProfile === ":danger-full-access" &&
+    approvalPolicy === "never"
+  ) {
+    return "full-access";
+  }
+  return undefined;
+}
+
+function codexPermissionProfileLabel(id: string): string {
+  switch (id) {
+    case ":read-only":
+      return "Read only";
+    case ":workspace":
+      return "Workspace";
+    case ":workspace_roots":
+      return "Selected workspaces";
+    case ":danger-full-access":
+      return "Full access";
+  }
+  return id
+    .replace(/^:/, "")
+    .replace(/[-_]+/g, " ")
+    .replace(/\b\w/g, (letter) => letter.toUpperCase());
+}
+
+function codexPermissionProfileDescription(id: string): string | null {
+  switch (id) {
+    case ":read-only":
+      return "Inspect files and run safe read-only commands without making changes.";
+    case ":workspace":
+    case ":workspace_roots":
+      return "Read and change files inside the selected workspace.";
+    case ":danger-full-access":
+      return "Access files and commands across the machine without sandbox limits.";
+    default:
+      return null;
+  }
+}
 
 function parseCodexApprovalPolicy(value: string | null): CodexApprovalPolicyValue | null {
   switch (value) {
@@ -2392,6 +2844,8 @@ export const CODEX_PROVIDER_CAPABILITIES: AgentProviderCapabilities = {
   configuration: {
     models: true,
     profiles: true,
+    accessModes: true,
+    permissionProfiles: true,
     skills: true,
     skillManagement: true,
   },
@@ -2404,6 +2858,9 @@ export const CODEX_PROVIDER_CAPABILITIES: AgentProviderCapabilities = {
     sandboxMode: true,
     networkAccess: true,
     webSearch: true,
+    accessMode: true,
+    permissionProfile: true,
+    approvalsReviewer: true,
   },
   lifecycle: {
     restart: true,
@@ -2792,6 +3249,19 @@ function codexItemLifecycleStatus(
 
 function asString(value: unknown): string | null {
   return typeof value === "string" && value.length > 0 ? value : null;
+}
+
+function asRecord(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === "object"
+    ? (value as Record<string, unknown>)
+    : null;
+}
+
+function asStringArray(value: unknown): string[] | null {
+  if (!Array.isArray(value)) {
+    return null;
+  }
+  return value.filter((item): item is string => typeof item === "string");
 }
 
 function asNumber(value: unknown): number | null {

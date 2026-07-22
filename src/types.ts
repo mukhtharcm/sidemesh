@@ -628,6 +628,19 @@ export type SessionActivity =
 
 export type PendingActionApprovalScope = "once" | "session" | "location";
 
+export type PendingActionProviderOptionKind =
+  | "allow_once"
+  | "allow_always"
+  | "reject_once"
+  | "reject_always";
+
+export interface PendingActionProviderOption {
+  id: string;
+  label: string;
+  kind: PendingActionProviderOptionKind;
+  description?: string;
+}
+
 export type PendingActionKind =
   | "command"
   | "tool"
@@ -666,6 +679,10 @@ export type PendingActionDecisionKind = "approve" | "decline" | "cancel";
 export interface PendingActionDecisionRequest {
   decision: PendingActionDecisionKind;
   scope?: PendingActionApprovalScope;
+}
+
+export interface PendingActionProviderOptionRequest {
+  providerOptionId: string;
 }
 
 export type PendingActionApprovalCategory =
@@ -746,6 +763,7 @@ export interface PendingActionApproval {
   targets: PendingActionApprovalTarget[];
   supportedScopes: PendingActionApprovalScope[];
   suggestedScope?: PendingActionApprovalScope;
+  providerOptions?: PendingActionProviderOption[];
 }
 
 export interface PendingActionUserInputRequest {
@@ -994,10 +1012,69 @@ export interface SessionRuntimeSummary {
   approvalPolicy?: string;
   sandboxMode?: string;
   networkAccess?: boolean;
+  accessMode?: string;
+  permissionProfile?: string;
+  approvalsReviewer?: string;
   summaryMode?: string;
   personality?: string;
   telemetry?: SessionTelemetrySummary;
   updatedAt?: number;
+}
+
+export interface ProviderAccessModeConfirmation {
+  title: string;
+  description: string;
+  confirmLabel: string;
+  danger: boolean;
+}
+
+export interface ProviderAccessModeSummary {
+  id: string;
+  label: string;
+  description: string;
+  icon: string;
+  tone: "default" | "danger";
+  enabled: boolean;
+  disabledReason: string | null;
+  confirmation: ProviderAccessModeConfirmation | null;
+}
+
+export interface ProviderAccessModeCatalog {
+  strategy: "modes";
+  modes: ProviderAccessModeSummary[];
+  defaultMode: string | null;
+}
+
+export interface ProviderPermissionProfileSummary {
+  id: string;
+  label: string;
+  description: string | null;
+  allowed: boolean;
+}
+
+export interface ProviderApprovalReviewerOption {
+  id: string;
+  label: string;
+  description: string;
+}
+
+export interface ProviderPermissionModeSummary {
+  id: string;
+  label: string;
+  description: string;
+  permissionProfile: string | null;
+  approvalPolicy: string | null;
+  approvalsReviewer: string | null;
+  dangerous: boolean;
+  usesProviderDefaults: boolean;
+}
+
+export interface ProviderPermissionProfileCatalog {
+  strategy: "profiles";
+  profiles: ProviderPermissionProfileSummary[];
+  reviewerOptions: ProviderApprovalReviewerOption[];
+  modes: ProviderPermissionModeSummary[];
+  defaultMode: string | null;
 }
 
 export interface SessionTelemetrySummary {

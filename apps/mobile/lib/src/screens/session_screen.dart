@@ -61,13 +61,16 @@ import '../theme/app_tokens.dart';
 import '../windowing.dart';
 import '../widgets/app_snackbar.dart';
 import '../widgets/app_dialogs.dart';
+import '../widgets/app_primitives.dart';
 import '../widgets/app_sheets.dart';
 import '../widgets/composer_paste_text_action.dart';
 import '../widgets/markdown_content.dart';
 import '../widgets/diff_view.dart';
+import '../widgets/launch_options_form.dart';
 import '../widgets/mesh_widgets.dart';
 import 'package:sidemesh_mobile/src/host_reconnect_scheduler.dart';
 import '../widgets/provider_badge.dart';
+import '../widgets/provider_access_mode_choices.dart';
 import '../relative_time_ticker.dart';
 import '../widgets/syntax_code_block.dart';
 
@@ -1453,6 +1456,11 @@ class _SessionScreenState extends State<SessionScreen>
       case InspectorSurfaceKind.sessionDetails:
         // Not persisted / not owned by the session screen yet.
         break;
+      case InspectorSurfaceKind.sessionControls:
+        // Controls are transient form state. Never restore a stale draft.
+        closeOrphan();
+        _openDefaultInspectorHub(controller, ownerKey);
+        break;
       case InspectorSurfaceKind.sessionHub:
         // Hub is the default; treat a persisted hub as if nothing was saved.
         closeOrphan();
@@ -1536,7 +1544,8 @@ class _SessionScreenState extends State<SessionScreen>
       _lastInspectorSurfaceKind = cur.kind;
       // Don't persist the hub — it's the default, not a deliberate user
       // choice. A real surface opened next will replace it in persistence.
-      if (cur.kind != InspectorSurfaceKind.sessionHub) {
+      if (cur.kind != InspectorSurfaceKind.sessionHub &&
+          cur.kind != InspectorSurfaceKind.sessionControls) {
         unawaited(InspectorPersistence.save(ownerKey, cur.kind));
       }
       return;
@@ -4135,6 +4144,7 @@ class _SessionScreenState extends State<SessionScreen>
     required String? approvalPolicy,
     required String? sandboxMode,
     required bool? networkAccess,
+    required String? accessMode,
     required Object error,
   }) async {
     final now = DateTime.now();
@@ -4157,6 +4167,7 @@ class _SessionScreenState extends State<SessionScreen>
       approvalPolicy: approvalPolicy,
       sandboxMode: sandboxMode,
       networkAccess: networkAccess,
+      accessMode: accessMode,
       lastError: friendlyError(error),
     );
     final saved = await _sendOutbox.upsert(pending);
@@ -4317,6 +4328,7 @@ class _SessionScreenState extends State<SessionScreen>
           approval: ApprovalPolicy.fromWire(pending.approvalPolicy),
           sandbox: SandboxMode.fromWire(pending.sandboxMode),
           networkAccess: pending.networkAccess,
+          accessMode: pending.accessMode,
         ),
         runtime: session.runtime,
         nodeInfo: _nodeInfo,
@@ -4335,6 +4347,7 @@ class _SessionScreenState extends State<SessionScreen>
         approvalPolicy: normalizedOverrides.approvalPolicy,
         sandboxMode: normalizedOverrides.sandboxMode,
         networkAccess: normalizedOverrides.networkAccess,
+        accessMode: normalizedOverrides.accessMode,
       );
       HostStatusStore.instance.markOnline(widget.host.id);
       await _sendOutbox.remove(pending);
@@ -4495,6 +4508,7 @@ class _SessionScreenState extends State<SessionScreen>
       approvalPolicy: normalizedOverrides.approvalPolicy,
       sandboxMode: normalizedOverrides.sandboxMode,
       networkAccess: normalizedOverrides.networkAccess,
+      accessMode: normalizedOverrides.accessMode,
     );
     final clientMessageId = _clientMessageIdForSend(retrySignature);
     final optimisticMessage = SessionMessage(
@@ -4537,6 +4551,7 @@ class _SessionScreenState extends State<SessionScreen>
         approvalPolicy: normalizedOverrides.approvalPolicy,
         sandboxMode: normalizedOverrides.sandboxMode,
         networkAccess: normalizedOverrides.networkAccess,
+        accessMode: normalizedOverrides.accessMode,
       );
       if (!mounted) {
         return;
@@ -4569,6 +4584,7 @@ class _SessionScreenState extends State<SessionScreen>
           approvalPolicy: normalizedOverrides.approvalPolicy,
           sandboxMode: normalizedOverrides.sandboxMode,
           networkAccess: normalizedOverrides.networkAccess,
+          accessMode: normalizedOverrides.accessMode,
           error: error,
         );
         if (!mounted) {
@@ -4645,6 +4661,7 @@ class _SessionScreenState extends State<SessionScreen>
     required String? approvalPolicy,
     required String? sandboxMode,
     required bool? networkAccess,
+    required String? accessMode,
   }) {
     return jsonEncode({
       'input': inputItems.map((item) => item.toJson()).toList(),
@@ -4655,6 +4672,7 @@ class _SessionScreenState extends State<SessionScreen>
       'approvalPolicy': approvalPolicy,
       'sandboxMode': sandboxMode,
       'networkAccess': networkAccess,
+      'accessMode': accessMode,
     });
   }
 
@@ -4988,9 +5006,20 @@ class _SessionScreenState extends State<SessionScreen>
         _pendingAction = null;
       });
       _syncSessionLiveActivity();
+      final providerOptionId = response.payload['providerOptionId'];
+      String? providerOptionLabel;
+      if (providerOptionId is String) {
+        for (final option in action.approval?.providerOptions ?? const []) {
+          if (option.id == providerOptionId) {
+            providerOptionLabel = option.label;
+            break;
+          }
+        }
+      }
       final label = switch (action.kind) {
         'user_input' => 'Answer sent',
         'elicitation' => 'Response sent',
+        _ when providerOptionLabel != null => providerOptionLabel,
         _ => switch (response.payload['decision']) {
           'accept' => 'Approved this step',
           'acceptForSession' => 'Approved for the rest of the session',
@@ -5081,31 +5110,110 @@ class _SessionScreenState extends State<SessionScreen>
   }
 
   Future<void> _showSessionDetailsSheet(SessionSummary session) async {
-    final colors = context.colors;
     final gitLabel = _supportsGitStatus
         ? _gitHeaderLabel(session, _gitStatus)
         : null;
     final subAgentInfo = session.subAgent;
     final subAgentLabel = subAgentInfo?.label;
-    Widget sectionLabel(String title, String subtitle) {
+    Widget detailsContent(BuildContext surfaceContext) {
       return Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Text(
-            title,
-            style: Theme.of(context).textTheme.labelLarge?.copyWith(
-              color: colors.textPrimary,
-              fontWeight: AppWeights.title,
+          AppSectionHeader(
+            icon: Icons.info_outline_rounded,
+            title: session.title,
+            subtitle: 'Running on ${widget.host.label}',
+          ),
+          const SizedBox(height: AppSpacing.md),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: AppSpacing.md),
+            child: Wrap(
+              spacing: AppSpacing.sm,
+              runSpacing: AppSpacing.sm,
+              children: [
+                MeshPill(
+                  label: _running ? 'running' : 'idle',
+                  icon: _running
+                      ? Icons.play_circle_outline_rounded
+                      : Icons.pause_circle_outline_rounded,
+                  tone: _running ? MeshPillTone.success : MeshPillTone.neutral,
+                ),
+                MeshPill(label: session.source, icon: Icons.route_rounded),
+                if (subAgentLabel != null)
+                  MeshPill(
+                    label: subAgentLabel,
+                    icon: Icons.account_tree_outlined,
+                    tone: MeshPillTone.info,
+                  ),
+                if (gitLabel != null)
+                  MeshPill(
+                    label: gitLabel,
+                    icon: Icons.account_tree_rounded,
+                    tone: MeshPillTone.info,
+                  ),
+              ],
             ),
           ),
-          const SizedBox(height: 3),
-          Text(
-            subtitle,
-            style: Theme.of(context).textTheme.bodySmall?.copyWith(
-              color: colors.textSecondary,
-              height: 1.35,
+          const SizedBox(height: AppSpacing.xl),
+          const AppSectionHeader(
+            icon: Icons.route_rounded,
+            title: 'Overview',
+            subtitle: 'Where this session is running and how it started.',
+          ),
+          const SizedBox(height: AppSpacing.sm),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: AppSpacing.md),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                _DetailRow(label: 'Host', value: widget.host.label),
+                _DetailRow(label: 'Folder', value: session.cwd),
+                _DetailRow(
+                  label: 'Status',
+                  value: _running ? 'Running' : 'Idle',
+                ),
+                _DetailRow(label: 'Started from', value: session.source),
+                if (subAgentLabel != null)
+                  _DetailRow(label: 'Sub-agent', value: subAgentLabel),
+                if (subAgentInfo?.parentSessionId?.isNotEmpty == true)
+                  _DetailRow(
+                    label: 'Parent session',
+                    value: subAgentInfo!.parentSessionId!,
+                  ),
+                if (subAgentInfo != null)
+                  _DetailRow(
+                    label: 'Sub-agent source',
+                    value: _formatSubAgentSourceKind(subAgentInfo.sourceKind),
+                  ),
+                if (gitLabel != null) _DetailRow(label: 'Git', value: gitLabel),
+                if (gitLabel != null) ...[
+                  const SizedBox(height: AppSpacing.sm),
+                  OutlinedButton.icon(
+                    onPressed: () {
+                      Navigator.of(surfaceContext).pop();
+                      unawaited(_showGitSheet(session));
+                    },
+                    icon: const Icon(Icons.account_tree_rounded),
+                    label: const Text('View Git details'),
+                  ),
+                ],
+              ],
             ),
           ),
+          if (session.runtime != null) ...[
+            const SizedBox(height: AppSpacing.xl),
+            const AppSectionHeader(
+              icon: Icons.memory_rounded,
+              title: 'Runtime now',
+              subtitle: 'Live settings currently used by the agent.',
+            ),
+            const SizedBox(height: AppSpacing.sm),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: AppSpacing.md),
+              child: _SessionRuntimeDetails(runtime: session.runtime!),
+            ),
+          ],
+          const SizedBox(height: AppSpacing.xl),
         ],
       );
     }
@@ -5116,140 +5224,31 @@ class _SessionScreenState extends State<SessionScreen>
       showDragHandle: false,
       useSafeArea: true,
       isScrollControlled: true,
-      builder: (context) => MeshBottomSheetScaffold(
+      builder: (sheetContext) => MeshBottomSheetScaffold(
         icon: Icons.info_outline_rounded,
         title: 'Session details',
-        description:
-            'See where this session is running and the live settings the agent is using.',
+        description: 'Live session location, status, and runtime.',
         maxWidth: 760,
         maxHeightFactor: 0.86,
-        child: SingleChildScrollView(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              MeshCard(
-                tone: MeshCardTone.muted,
-                padding: const EdgeInsets.all(14),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      session.title,
-                      style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                        fontWeight: AppWeights.title,
-                      ),
-                    ),
-                    const SizedBox(height: 4),
-                    Text(
-                      'Running on ${widget.host.label}',
-                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                        color: colors.textSecondary,
-                      ),
-                    ),
-                    const SizedBox(height: 10),
-                    Wrap(
-                      spacing: 8,
-                      runSpacing: 8,
-                      children: [
-                        MeshPill(
-                          label: _running ? 'running' : 'idle',
-                          icon: _running
-                              ? Icons.play_circle_outline_rounded
-                              : Icons.pause_circle_outline_rounded,
-                          tone: _running
-                              ? MeshPillTone.success
-                              : MeshPillTone.neutral,
-                        ),
-                        MeshPill(
-                          label: session.source,
-                          icon: Icons.route_rounded,
-                          tone: MeshPillTone.neutral,
-                        ),
-                        if (subAgentLabel != null)
-                          MeshPill(
-                            label: subAgentLabel,
-                            icon: Icons.account_tree_outlined,
-                            tone: MeshPillTone.info,
-                          ),
-                        if (gitLabel != null)
-                          MeshPill(
-                            label: gitLabel,
-                            icon: Icons.account_tree_rounded,
-                            tone: MeshPillTone.info,
-                          ),
-                      ],
-                    ),
-                  ],
-                ),
-              ),
-              const SizedBox(height: 14),
-              sectionLabel(
-                'Overview',
-                'Where this session is running and how it started.',
-              ),
-              const SizedBox(height: 8),
-              MeshCard(
-                tone: MeshCardTone.muted,
-                padding: const EdgeInsets.fromLTRB(14, 12, 14, 2),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    _DetailRow(label: 'Host', value: widget.host.label),
-                    _DetailRow(label: 'Folder', value: session.cwd),
-                    _DetailRow(
-                      label: 'Status',
-                      value: _running ? 'Running' : 'Idle',
-                    ),
-                    _DetailRow(label: 'Started from', value: session.source),
-                    if (subAgentLabel != null)
-                      _DetailRow(label: 'Sub-agent', value: subAgentLabel),
-                    if (subAgentInfo?.parentSessionId?.isNotEmpty == true)
-                      _DetailRow(
-                        label: 'Parent session',
-                        value: subAgentInfo!.parentSessionId!,
-                      ),
-                    if (subAgentInfo != null)
-                      _DetailRow(
-                        label: 'Sub-agent source',
-                        value: _formatSubAgentSourceKind(
-                          subAgentInfo.sourceKind,
-                        ),
-                      ),
-                    if (gitLabel != null)
-                      _DetailRow(label: 'Git', value: gitLabel),
-                  ],
-                ),
-              ),
-              if (gitLabel != null) ...[
-                const SizedBox(height: 8),
-                OutlinedButton.icon(
-                  onPressed: () {
-                    Navigator.of(context).pop();
-                    unawaited(_showGitSheet(session));
-                  },
-                  icon: const Icon(Icons.account_tree_rounded, size: 18),
-                  label: const Text('View Git details'),
-                ),
-              ],
-              if (session.runtime != null) ...[
-                const SizedBox(height: 14),
-                sectionLabel(
-                  'Runtime now',
-                  'Live settings the agent is using for this session.',
-                ),
-                const SizedBox(height: 8),
-                _SessionRuntimeDetails(runtime: session.runtime!),
-              ],
-            ],
-          ),
-        ),
+        child: SingleChildScrollView(child: detailsContent(sheetContext)),
       ),
     );
     if (widget.desktopMode) {
       await _showDesktopOverlayWithComposerFocusRestore(showSheet);
       return;
     }
-    await showSheet();
+    await Navigator.of(context).push<void>(
+      MaterialPageRoute<void>(
+        builder: (pageContext) => Scaffold(
+          backgroundColor: pageContext.colors.canvas,
+          appBar: AppBar(title: const Text('Session details')),
+          body: SingleChildScrollView(
+            padding: AppPadding.mobilePage,
+            child: AppContentColumn(child: detailsContent(pageContext)),
+          ),
+        ),
+      ),
+    );
   }
 
   String? _cleanComposerLabel(String? value) {
@@ -5554,6 +5553,48 @@ class _SessionScreenState extends State<SessionScreen>
       providerName: providerName,
     );
     if (widget.desktopMode) {
+      final inspector = InspectorScope.maybeOf(context);
+      if (inspector != null && MediaQuery.sizeOf(context).width >= 900) {
+        final result = Completer<ModelCatalogEntry?>();
+        final ownerKey = _inspectorOwnerKey();
+        late VoidCallback listener;
+        void finish(ModelCatalogEntry? model) {
+          if (!result.isCompleted) result.complete(model);
+        }
+
+        listener = () {
+          final current = inspector.current;
+          if (current == null ||
+              current.kind != InspectorSurfaceKind.sessionControls ||
+              current.ownerKey != ownerKey) {
+            finish(null);
+          }
+        };
+        inspector.addListener(listener);
+        inspector.show(
+          InspectorSurface(
+            kind: InspectorSurfaceKind.sessionControls,
+            ownerKey: ownerKey,
+            title: 'Choose a model',
+            icon: Icons.memory_rounded,
+            bodyBuilder: (inspectorContext) => _ModelPickerSheet(
+              models: models,
+              currentModel: currentModel,
+              providerName: providerName,
+              embedded: true,
+              showEmbeddedHeader: false,
+              onBack: inspector.close,
+              onSelected: (model) {
+                finish(model);
+                inspector.close();
+              },
+            ),
+          ),
+        );
+        return result.future.whenComplete(
+          () => inspector.removeListener(listener),
+        );
+      }
       return showDialog<ModelCatalogEntry>(
         context: context,
         barrierColor: Colors.black.withValues(alpha: 0.35),
@@ -5570,13 +5611,22 @@ class _SessionScreenState extends State<SessionScreen>
         ),
       );
     }
-    return showModalBottomSheet<ModelCatalogEntry>(
-      context: context,
-      backgroundColor: Colors.transparent,
-      showDragHandle: false,
-      useSafeArea: true,
-      isScrollControlled: true,
-      builder: (sheetContext) => picker,
+    return Navigator.of(context).push<ModelCatalogEntry>(
+      MaterialPageRoute<ModelCatalogEntry>(
+        builder: (pageContext) => Scaffold(
+          backgroundColor: pageContext.colors.canvas,
+          body: SafeArea(
+            child: _ModelPickerSheet(
+              models: models,
+              currentModel: currentModel,
+              providerName: providerName,
+              embedded: true,
+              onBack: () => Navigator.of(pageContext).maybePop(),
+              onSelected: (model) => Navigator.of(pageContext).pop(model),
+            ),
+          ),
+        ),
+      ),
     );
   }
 
@@ -5688,60 +5738,62 @@ class _SessionScreenState extends State<SessionScreen>
     await _turnConfigStore.ensureLoaded();
     if (!mounted) return;
     final runtime = session.runtime;
-    final isDesktop = widget.desktopMode;
-    final sheet = SessionControlsSheet(
-      api: widget.api,
-      host: widget.host,
-      session: session,
-      useBottomSheetChrome: !isDesktop,
-      runtimeModel: runtime?.model,
-      runtimeModelProvider: runtime?.modelProvider,
-      runtimeMode: runtime?.mode,
-      runtimeServiceTier: runtime?.serviceTier,
-      runtimeReasoningEffort: runtime?.reasoningEffort,
-      runtimeApproval: ApprovalPolicy.fromWire(runtime?.approvalPolicy),
-      runtimeSandbox: SandboxMode.fromWire(runtime?.sandboxMode),
-      runtimeNetworkAccess: runtime?.networkAccess,
-      policyStore: _policyStore,
-      turnConfigStore: _turnConfigStore,
-    );
-    if (isDesktop) {
-      await _showDesktopOverlayWithComposerFocusRestore(
-        () => showDialog<void>(
-          context: context,
-          barrierColor: Colors.black.withValues(alpha: 0.35),
-          builder: (dialogContext) => Dialog(
-            backgroundColor: Colors.transparent,
-            insetPadding: const EdgeInsets.symmetric(
-              horizontal: 48,
-              vertical: 48,
-            ),
-            child: ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 520, maxHeight: 640),
-              child: DecoratedBox(
-                decoration: BoxDecoration(
-                  color: dialogContext.colors.surfaceElevated,
-                  borderRadius: AppShapes.dialog,
-                  border: Border.all(color: dialogContext.colors.border),
-                  boxShadow: AppShadows.dialog(
-                    dialogContext.colors.textPrimary,
-                  ),
-                ),
-                child: ClipRRect(borderRadius: AppShapes.dialog, child: sheet),
-              ),
-            ),
+    final inspector = InspectorScope.maybeOf(context);
+    final isWideInspector =
+        widget.desktopMode &&
+        MediaQuery.sizeOf(context).width >= 900 &&
+        inspector != null;
+    if (isWideInspector) {
+      inspector.show(
+        InspectorSurface(
+          kind: InspectorSurfaceKind.sessionControls,
+          ownerKey: _inspectorOwnerKey(),
+          title: 'Session controls',
+          icon: Icons.tune_rounded,
+          bodyBuilder: (inspectorContext) => SessionControlsSheet(
+            api: widget.api,
+            host: widget.host,
+            session: session,
+            onClose: inspector.close,
+            runtimeModel: runtime?.model,
+            runtimeModelProvider: runtime?.modelProvider,
+            runtimeMode: runtime?.mode,
+            runtimeServiceTier: runtime?.serviceTier,
+            runtimeReasoningEffort: runtime?.reasoningEffort,
+            runtimeApproval: ApprovalPolicy.fromWire(runtime?.approvalPolicy),
+            runtimeSandbox: SandboxMode.fromWire(runtime?.sandboxMode),
+            runtimeNetworkAccess: runtime?.networkAccess,
+            runtimeAccessMode: runtime?.accessMode,
+            policyStore: _policyStore,
+            turnConfigStore: _turnConfigStore,
           ),
         ),
       );
       return;
     }
-    await showModalBottomSheet<void>(
-      context: context,
-      backgroundColor: Colors.transparent,
-      showDragHandle: false,
-      useSafeArea: true,
-      isScrollControlled: true,
-      builder: (sheetContext) => sheet,
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (pageContext) => Scaffold(
+          backgroundColor: pageContext.colors.canvas,
+          appBar: AppBar(title: const Text('Session controls')),
+          body: SessionControlsSheet(
+            api: widget.api,
+            host: widget.host,
+            session: session,
+            runtimeModel: runtime?.model,
+            runtimeModelProvider: runtime?.modelProvider,
+            runtimeMode: runtime?.mode,
+            runtimeServiceTier: runtime?.serviceTier,
+            runtimeReasoningEffort: runtime?.reasoningEffort,
+            runtimeApproval: ApprovalPolicy.fromWire(runtime?.approvalPolicy),
+            runtimeSandbox: SandboxMode.fromWire(runtime?.sandboxMode),
+            runtimeNetworkAccess: runtime?.networkAccess,
+            runtimeAccessMode: runtime?.accessMode,
+            policyStore: _policyStore,
+            turnConfigStore: _turnConfigStore,
+          ),
+        ),
+      ),
     );
   }
 

@@ -66,9 +66,7 @@ void main() {
     expect(find.text('New tab'), findsOneWidget);
     expect(find.byType(TextField), findsNothing);
 
-    await tester.tap(
-      find.widgetWithIcon(FilledButton, Icons.open_in_browser_rounded),
-    );
+    await tester.tap(find.text('Local app'));
     await _pumpFrames(tester);
     expect(opened?.id, 'tab-existing');
 
@@ -147,10 +145,7 @@ HostBrowserPreviewInfo _tab({
 );
 
 class _CreateCall {
-  const _CreateCall({
-    required this.targetPort,
-    required this.reuseExisting,
-  });
+  const _CreateCall({required this.targetPort, required this.reuseExisting});
 
   final int? targetPort;
   final bool reuseExisting;
@@ -197,10 +192,7 @@ class _BrowserTabsFakeApi extends ApiClient {
   }
 
   @override
-  Future<void> stopBrowserPreview(
-    HostProfile host,
-    String previewId,
-  ) async {
+  Future<void> stopBrowserPreview(HostProfile host, String previewId) async {
     final index = _tabs.indexWhere((tab) => tab.id == previewId);
     if (index == -1) {
       throw StateError('missing tab');

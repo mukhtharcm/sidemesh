@@ -84,7 +84,7 @@ enum MeshPillTone { neutral, accent, success, danger, warning, info }
     MeshPillTone.neutral => (
       colors.surfaceMuted,
       colors.textSecondary,
-      colors.border,
+      Colors.transparent,
     ),
     MeshPillTone.accent => (
       colors.accentMuted,
@@ -135,6 +135,7 @@ class MeshSurface extends StatelessWidget {
     this.borderColor,
     this.selected = false,
     this.enabled = true,
+    this.bordered = true,
     this.radius = AppRadii.surface,
     this.width,
   });
@@ -146,6 +147,7 @@ class MeshSurface extends StatelessWidget {
   final Color? borderColor;
   final bool selected;
   final bool enabled;
+  final bool bordered;
   final double radius;
   final double? width;
 
@@ -190,7 +192,7 @@ class MeshSurface extends StatelessWidget {
       decoration: BoxDecoration(
         color: bg,
         borderRadius: borderRadius,
-        border: Border.all(color: border),
+        border: bordered ? Border.all(color: border) : null,
         boxShadow: tone == MeshSurfaceTone.elevated
             ? [
                 BoxShadow(
@@ -465,8 +467,11 @@ class MeshListRow extends StatelessWidget {
   Widget build(BuildContext context) {
     final colors = context.colors;
     final rowPadding = dense
-        ? const EdgeInsets.fromLTRB(12, 10, 10, 10)
-        : const EdgeInsets.fromLTRB(14, 14, 12, 14);
+        ? const EdgeInsets.symmetric(
+            horizontal: AppSpacing.md,
+            vertical: AppSpacing.sm,
+          )
+        : AppPadding.listRow;
     final gap = dense ? AppSpacing.sm : AppSpacing.md;
     final borderRadius = BorderRadius.circular(radius);
     final row = Row(
@@ -533,7 +538,10 @@ class MeshListRow extends StatelessWidget {
             ? Border.all(color: colors.accent.withValues(alpha: 0.28))
             : null,
       ),
-      child: Padding(padding: rowPadding, child: row),
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(minHeight: AppSizes.rowMinHeight),
+        child: Padding(padding: rowPadding, child: row),
+      ),
     );
 
     if (!enabled || onTap == null) {
@@ -1214,6 +1222,7 @@ class MeshCard extends StatelessWidget {
     this.onTap,
     this.tone = MeshCardTone.surface,
     this.borderColor,
+    this.bordered = true,
   });
 
   final Widget child;
@@ -1221,6 +1230,7 @@ class MeshCard extends StatelessWidget {
   final VoidCallback? onTap;
   final MeshCardTone tone;
   final Color? borderColor;
+  final bool bordered;
 
   @override
   Widget build(BuildContext context) {
@@ -1229,6 +1239,7 @@ class MeshCard extends StatelessWidget {
       onTap: onTap,
       tone: _meshSurfaceToneForCardTone(tone),
       borderColor: borderColor,
+      bordered: bordered,
       child: child,
     );
   }
@@ -1271,11 +1282,11 @@ class MeshEmptyState extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colors = context.colors;
-    final padding = compact ? 20.0 : 32.0;
-    final bubble = compact ? 52.0 : 72.0;
-    final bubbleRadius = compact ? 16.0 : 22.0;
-    final iconSize = compact ? 24.0 : 32.0;
-    final spacingTop = compact ? 12.0 : 18.0;
+    final padding = compact ? AppSpacing.lg : AppSpacing.xl;
+    final bubble = compact ? AppSizes.control : AppSizes.emptyIconWell;
+    final bubbleRadius = compact ? AppRadii.control : AppRadii.surface;
+    final iconSize = compact ? AppSizes.icon : 24.0;
+    final spacingTop = compact ? AppSpacing.md : AppSpacing.lg;
     return Center(
       child: Padding(
         padding: EdgeInsets.all(padding),
@@ -1288,7 +1299,6 @@ class MeshEmptyState extends StatelessWidget {
               decoration: BoxDecoration(
                 color: colors.accentMuted,
                 borderRadius: BorderRadius.circular(bubbleRadius),
-                border: Border.all(color: colors.accent.withValues(alpha: 0.4)),
               ),
               child: Icon(icon, size: iconSize, color: colors.accent),
             ),

@@ -45,6 +45,8 @@ const EMPTY_CAPABILITIES: AgentProviderCapabilities = {
   configuration: {
     models: false,
     profiles: false,
+    accessModes: false,
+    permissionProfiles: false,
     skills: false,
     skillManagement: false,
   },
@@ -57,6 +59,9 @@ const EMPTY_CAPABILITIES: AgentProviderCapabilities = {
     sandboxMode: false,
     networkAccess: false,
     webSearch: false,
+    accessMode: false,
+    permissionProfile: false,
+    approvalsReviewer: false,
   },
   lifecycle: {
     restart: false,

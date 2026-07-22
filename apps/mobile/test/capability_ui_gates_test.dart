@@ -276,10 +276,48 @@ void main() {
     expect(find.text('Choose a model'), findsOneWidget);
     expect(find.text('Model and thinking'), findsNothing);
     expect(find.text('Approvals'), findsNothing);
+    expect(find.byType(BottomSheet), findsNothing);
+    expect(find.byTooltip('Back to session controls'), findsOneWidget);
 
     await tester.pumpWidget(const SizedBox.shrink());
     await tester.pump();
   });
+
+  testWidgets(
+    'mobile session controls use a page and keep model choice inline',
+    (tester) async {
+      final api = _CapabilityFakeApi(
+        _nodeForCapabilities(_fullCapabilities),
+        models: const [_fakeModel],
+      );
+      addTearDown(api.dispose);
+
+      await _pumpApp(
+        tester,
+        SessionScreen(
+          host: _host('mobile-session-controls-page'),
+          session: _session('mobile-session-controls-page', provider: 'fake'),
+          api: api,
+        ),
+        size: const Size(390, 840),
+      );
+      await _pumpFrames(tester);
+
+      await tester.tap(find.byTooltip('Session controls').first);
+      await _pumpFrames(tester);
+
+      expect(find.text('Session controls'), findsWidgets);
+      expect(find.byType(BottomSheet), findsNothing);
+      expect(find.text('Model and thinking'), findsOneWidget);
+
+      await tester.tap(find.text('Fake Balanced'));
+      await _pumpFrames(tester);
+
+      expect(find.text('Choose a model'), findsOneWidget);
+      expect(find.byTooltip('Back to session controls'), findsOneWidget);
+      expect(find.byType(BottomSheet), findsNothing);
+    },
+  );
 
   testWidgets('composer thinking chip opens the thinking picker only', (
     tester,
@@ -598,7 +636,7 @@ void main() {
     expect(find.text('Internet access'), findsNothing);
   });
 
-  testWidgets('session controls show advertised runtime controls', (
+  testWidgets('session controls compact supported legacy policy controls', (
     tester,
   ) async {
     final api = _CapabilityFakeApi(
@@ -629,9 +667,99 @@ void main() {
 
     expect(find.text('Model and thinking'), findsOneWidget);
     expect(find.text('Mode'), findsOneWidget);
-    expect(find.text('Approvals'), findsOneWidget);
-    expect(find.text('File access'), findsOneWidget);
-    expect(find.text('Internet access'), findsOneWidget);
+    expect(find.byType(Slider), findsOneWidget);
+    expect(find.text('Permissions'), findsOneWidget);
+    expect(find.text('Approval'), findsOneWidget);
+    expect(find.text('Sandbox'), findsOneWidget);
+    expect(find.text('Network'), findsOneWidget);
+    expect(find.text('Network access'), findsOneWidget);
+    expect(find.text('Approvals'), findsNothing);
+    expect(find.text('File access'), findsNothing);
+    expect(find.text('Internet access'), findsNothing);
+  });
+
+  testWidgets('session controls show provider-owned access modes', (
+    tester,
+  ) async {
+    final host = _host('controls-native-permissions');
+    final session = _session('controls-native-permissions-session');
+    final api = _CapabilityFakeApi(
+      _nodeForCapabilities(_nativePermissionCapabilities),
+      models: const [_fakeModel],
+      accessModeCatalog: const ProviderAccessModeCatalog(
+        strategy: 'modes',
+        modes: [
+          ProviderAccessModeSummary(
+            id: 'ask-for-approval',
+            label: 'Ask for approval',
+            description: 'Ask before crossing the workspace boundary.',
+            icon: 'prompt',
+            tone: 'default',
+            enabled: true,
+          ),
+          ProviderAccessModeSummary(
+            id: 'approve-for-me',
+            label: 'Approve for me',
+            description: 'Use the provider reviewer.',
+            icon: 'automatic',
+            tone: 'default',
+            enabled: true,
+          ),
+          ProviderAccessModeSummary(
+            id: 'custom',
+            label: 'Provider configuration',
+            description: 'Use the provider configuration.',
+            icon: 'settings',
+            tone: 'default',
+            enabled: true,
+          ),
+        ],
+        defaultMode: 'custom',
+      ),
+    );
+
+    await _pumpApp(
+      tester,
+      SessionControlsSheet(
+        api: api,
+        host: host,
+        session: session,
+        runtimeModel: null,
+        runtimeModelProvider: null,
+        runtimeMode: null,
+        runtimeServiceTier: null,
+        runtimeReasoningEffort: null,
+        runtimeApproval: null,
+        runtimeSandbox: null,
+        runtimeNetworkAccess: null,
+        policyStore: SessionPolicyStore.instance,
+        turnConfigStore: SessionTurnConfigStore.instance,
+      ),
+      size: const Size(840, 1100),
+    );
+    await _pumpFrames(tester);
+
+    expect(find.text('Access'), findsOneWidget);
+    expect(find.text('Workspace'), findsNothing);
+    expect(find.text('Full access'), findsNothing);
+    expect(find.text('Unavailable'), findsNothing);
+    expect(find.text('Ask for approval'), findsOneWidget);
+    expect(find.text('Approve for me'), findsOneWidget);
+    expect(find.text('Provider configuration'), findsOneWidget);
+    expect(find.text('Permissions'), findsNothing);
+    expect(find.text('File access'), findsNothing);
+    expect(find.text('Internet access'), findsNothing);
+    expect(find.byTooltip('Back to session controls'), findsNothing);
+
+    await tester.ensureVisible(find.text('Apply'));
+    await tester.tap(find.text('Apply'));
+    await _pumpFrames(tester);
+
+    expect(
+      SessionPolicyStore.instance.policyFor(host, session.id).isEmpty,
+      isTrue,
+      reason: 'Applying untouched runtime defaults must not pin overrides.',
+    );
   });
 
   testWidgets('session controls use provider-defined mode catalogs', (
@@ -670,6 +798,57 @@ void main() {
     expect(find.text('Review'), findsOneWidget);
     expect(find.text('Interactive'), findsNothing);
     expect(find.text('Plan'), findsNothing);
+  });
+
+  testWidgets('session controls explain unavailable access modes', (
+    tester,
+  ) async {
+    final host = _host('controls-legacy-native-permissions');
+    final session = _session('controls-legacy-native-permissions-session');
+    final api = _CapabilityFakeApi(
+      _nodeForCapabilities(_nativePermissionCapabilities),
+      models: const [_fakeModel],
+      accessModeCatalog: const ProviderAccessModeCatalog(
+        strategy: 'modes',
+        modes: [
+          ProviderAccessModeSummary(
+            id: 'managed',
+            label: 'Managed access',
+            description: 'Use the organization policy.',
+            icon: 'settings',
+            tone: 'default',
+            enabled: false,
+            disabledReason: 'Restricted by the host administrator.',
+          ),
+        ],
+      ),
+    );
+
+    await _pumpApp(
+      tester,
+      SessionControlsSheet(
+        api: api,
+        host: host,
+        session: session,
+        runtimeModel: null,
+        runtimeModelProvider: null,
+        runtimeMode: null,
+        runtimeServiceTier: null,
+        runtimeReasoningEffort: null,
+        runtimeApproval: null,
+        runtimeSandbox: null,
+        runtimeNetworkAccess: null,
+        policyStore: SessionPolicyStore.instance,
+        turnConfigStore: SessionTurnConfigStore.instance,
+      ),
+      size: const Size(840, 1100),
+    );
+    await _pumpFrames(tester);
+
+    expect(find.text('Access'), findsOneWidget);
+    expect(find.text('Managed access'), findsOneWidget);
+    expect(find.text('Unavailable'), findsOneWidget);
+    expect(find.text('Restricted by the host administrator.'), findsOneWidget);
   });
 
   testWidgets('create session sheet hides unsupported launch controls', (
@@ -734,6 +913,136 @@ void main() {
     expect(find.text('Fast mode'), findsOneWidget);
     expect(find.text('Permissions'), findsOneWidget);
     expect(find.text('Live web search'), findsOneWidget);
+  });
+
+  testWidgets('create session submits the opaque provider access mode', (
+    tester,
+  ) async {
+    await CreateSessionDefaultsStore.instance.ensureLoaded();
+    final api = _CapabilityFakeApi(
+      _nodeForCapabilities(_nativePermissionCapabilities),
+      accessModeCatalog: const ProviderAccessModeCatalog(
+        strategy: 'modes',
+        modes: [
+          ProviderAccessModeSummary(
+            id: 'ask-for-approval',
+            label: 'Ask for approval',
+            description: 'Ask before crossing the workspace boundary.',
+            icon: 'prompt',
+            tone: 'default',
+            enabled: true,
+          ),
+          ProviderAccessModeSummary(
+            id: 'approve-for-me',
+            label: 'Approve for me',
+            description: 'Use the provider reviewer.',
+            icon: 'automatic',
+            tone: 'default',
+            enabled: true,
+          ),
+          ProviderAccessModeSummary(
+            id: 'full-access',
+            label: 'Full access',
+            description: 'Use the whole machine.',
+            icon: 'unrestricted',
+            tone: 'danger',
+            enabled: true,
+            confirmation: ProviderAccessModeConfirmation(
+              title: 'Enable full access?',
+              description: 'This mode can use the whole machine.',
+              confirmLabel: 'Enable full access',
+              danger: true,
+            ),
+          ),
+        ],
+        defaultMode: 'ask-for-approval',
+      ),
+    );
+
+    await _pumpApp(
+      tester,
+      CreateSessionSheet(
+        host: _host('create-native-permissions'),
+        api: api,
+        initialCwd: '/repo',
+        presentation: CreateSessionPresentation.dialog,
+      ),
+      size: const Size(1600, 1200),
+    );
+    await _pumpFrames(tester);
+
+    await tester.tap(find.text('Session setup'));
+    await _pumpFrames(tester);
+    expect(find.text('Workspace'), findsNothing);
+    await tester.tap(find.text('Full access'));
+    await _pumpFrames(tester);
+    await tester.tap(find.text('Enable full access'));
+    await _pumpFrames(tester);
+    await tester.enterText(
+      find.byKey(const ValueKey('create-session-prompt-field')),
+      'Use native permissions.',
+    );
+    await tester.tap(find.widgetWithText(FilledButton, 'Start session'));
+    await _pumpFrames(tester);
+
+    expect(api.lastCreateRequest?.accessMode, 'full-access');
+    expect(api.lastCreateRequest?.approvalPolicy, isNull);
+    expect(api.lastCreateRequest?.sandboxMode, isNull);
+    expect(api.lastCreateRequest?.networkAccess, isNull);
+  });
+
+  testWidgets('create session replaces an unavailable inherited access mode', (
+    tester,
+  ) async {
+    await CreateSessionDefaultsStore.instance.ensureLoaded();
+    final api = _CapabilityFakeApi(
+      _nodeForCapabilities(_nativePermissionCapabilities),
+      accessModeCatalog: const ProviderAccessModeCatalog(
+        strategy: 'modes',
+        modes: [
+          ProviderAccessModeSummary(
+            id: 'retired',
+            label: 'Retired mode',
+            description: 'No longer available.',
+            icon: 'settings',
+            tone: 'default',
+            enabled: false,
+            disabledReason: 'Disabled by the provider.',
+          ),
+          ProviderAccessModeSummary(
+            id: 'guarded',
+            label: 'Guarded',
+            description: 'Ask before sensitive actions.',
+            icon: 'prompt',
+            tone: 'default',
+            enabled: true,
+          ),
+        ],
+        defaultMode: 'guarded',
+      ),
+    );
+
+    await _pumpApp(
+      tester,
+      CreateSessionSheet(
+        host: _host('create-inherited-access'),
+        api: api,
+        initialCwd: '/repo',
+        seed: const CreateSessionDraftSeed(accessMode: 'retired'),
+        presentation: CreateSessionPresentation.dialog,
+      ),
+      size: const Size(1600, 1200),
+    );
+    await _pumpFrames(tester);
+
+    await tester.enterText(
+      find.byKey(const ValueKey('create-session-prompt-field')),
+      'Use the valid provider default.',
+    );
+    await tester.tap(find.widgetWithText(FilledButton, 'Start session'));
+    await _pumpFrames(tester);
+
+    expect(api.lastCreateRequest?.accessMode, 'guarded');
   });
 
   testWidgets('create session sheet sends selected provider for mixed hosts', (
@@ -1091,6 +1400,16 @@ void main() {
     expect(find.text('Session settings'), findsOneWidget);
     expect(find.byKey(const ValueKey('new-session-composer')), findsNothing);
 
+    await tester.tap(find.byKey(const ValueKey('new-session-model-selector')));
+    await _pumpFrames(tester);
+    expect(find.text('Choose a model'), findsOneWidget);
+    expect(find.byType(BottomSheet), findsNothing);
+    expect(find.text('Fake Balanced'), findsOneWidget);
+
+    await tester.tap(find.byTooltip('Back to session settings'));
+    await _pumpFrames(tester);
+    expect(find.text('Session settings'), findsOneWidget);
+
     await tester.tap(find.byTooltip('Back to new session'));
     await _pumpFrames(tester);
 
@@ -1165,6 +1484,45 @@ void main() {
 
     expect(await launch, isNull);
     expect(find.text('What should the agent work on?'), findsNothing);
+  });
+
+  testWidgets('new session loads the model page before a folder is chosen', (
+    tester,
+  ) async {
+    final api = _CapabilityFakeApi(
+      _nodeForCapabilities(_fullCapabilities),
+      models: const [_fakeModel],
+    );
+    addTearDown(api.dispose);
+
+    await _pumpApp(
+      tester,
+      Builder(
+        builder: (context) => FilledButton(
+          onPressed: () => showCreateSessionLauncher(
+            context,
+            host: _host('model-before-folder'),
+            api: api,
+          ),
+          child: const Text('New session'),
+        ),
+      ),
+      size: const Size(430, 900),
+    );
+
+    await tester.tap(find.text('New session'));
+    await _pumpFrames(tester);
+    await tester.tap(find.byKey(const ValueKey('new-session-settings-button')));
+    await _pumpFrames(tester);
+    await tester.ensureVisible(
+      find.byKey(const ValueKey('new-session-model-selector')),
+    );
+    await tester.tap(find.byKey(const ValueKey('new-session-model-selector')));
+    await _pumpFrames(tester);
+
+    expect(find.text('Choose a model'), findsOneWidget);
+    expect(find.text('Fake Balanced'), findsOneWidget);
+    expect(find.byType(BottomSheet), findsNothing);
   });
 
   testWidgets('host detail exposes provider contract metadata', (tester) async {
@@ -1435,6 +1793,27 @@ const Map<String, Object?> _fullCapabilities = {
   },
 };
 
+final Map<String, Object?> _nativePermissionCapabilities = {
+  ..._fullCapabilities,
+  'configuration': {
+    'models': true,
+    'profiles': true,
+    'skills': true,
+    'accessModes': true,
+  },
+  'runtimeControls': {
+    'model': true,
+    'mode': true,
+    'reasoningEffort': true,
+    'fastMode': true,
+    'approvalPolicy': true,
+    'sandboxMode': true,
+    'networkAccess': true,
+    'webSearch': true,
+    'accessMode': true,
+  },
+};
+
 const Map<String, Object?> _minimalCapabilities = {
   'sessions': {
     'create': true,
@@ -1568,6 +1947,7 @@ class _CapturedCreateSessionRequest {
     required this.networkAccess,
     required this.webSearch,
     required this.profile,
+    required this.accessMode,
   });
 
   final String cwd;
@@ -1582,6 +1962,7 @@ class _CapturedCreateSessionRequest {
   final bool? networkAccess;
   final String? webSearch;
   final String? profile;
+  final String? accessMode;
 }
 
 class _CapabilityFakeApi extends ApiClient {
@@ -1590,12 +1971,14 @@ class _CapabilityFakeApi extends ApiClient {
     this.models = const <ModelCatalogEntry>[],
     this.modes = const <ProviderModeSummary>[],
     this.profiles = const <ProviderProfileSummary>[],
+    this.accessModeCatalog,
   });
 
   final NodeInfo node;
   final List<ModelCatalogEntry> models;
   final List<ProviderModeSummary> modes;
   final List<ProviderProfileSummary> profiles;
+  final ProviderAccessModeCatalog? accessModeCatalog;
   final _IdleWebSocketChannel _channel = _IdleWebSocketChannel();
   _CapturedCreateSessionRequest? lastCreateRequest;
 
@@ -1635,6 +2018,15 @@ class _CapabilityFakeApi extends ApiClient {
   }) async => ProviderModeCatalog(defaultMode: null, modes: modes);
 
   @override
+  Future<ProviderAccessModeCatalog> fetchAccessModes(
+    HostProfile host, {
+    String? cwd,
+    String? agentProvider,
+  }) async =>
+      accessModeCatalog ??
+      const ProviderAccessModeCatalog(strategy: 'modes', modes: []);
+
+  @override
   Future<SessionSummary> createSession(
     HostProfile host, {
     required String cwd,
@@ -1648,6 +2040,7 @@ class _CapabilityFakeApi extends ApiClient {
     String? approvalPolicy,
     String? sandboxMode,
     bool? networkAccess,
+    String? accessMode,
     String? webSearch,
     String? profile,
   }) async {
@@ -1664,6 +2057,7 @@ class _CapabilityFakeApi extends ApiClient {
       networkAccess: networkAccess,
       webSearch: webSearch,
       profile: profile,
+      accessMode: accessMode,
     );
     return _session('created-session');
   }

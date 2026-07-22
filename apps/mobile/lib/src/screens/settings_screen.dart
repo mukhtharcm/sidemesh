@@ -6,7 +6,6 @@ import 'package:flutter/services.dart';
 
 import '../app_update_settings_store.dart';
 import '../app_version_store.dart';
-import '../background_sync_service.dart';
 import '../create_session_defaults_store.dart';
 import '../image_blob_cache_store.dart';
 import '../live_activity_service.dart';
@@ -19,9 +18,9 @@ import '../theme/app_colors.dart';
 import '../theme/app_tokens.dart';
 import '../theme/theme_controller.dart';
 import '../widgets/app_dialogs.dart';
+import '../widgets/app_primitives.dart';
 import '../widgets/app_snackbar.dart';
 import '../widgets/appearance_sheet.dart';
-import '../widgets/launch_options_form.dart';
 import '../widgets/mesh_widgets.dart';
 import '../onboarding_store.dart';
 import 'desktop_welcome_overlay.dart';
@@ -166,17 +165,16 @@ class _SettingsScreenState extends State<SettingsScreen> {
             vertical: 28,
           ),
           child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 760),
+            constraints: const BoxConstraints(maxWidth: 520),
             child: const _LaunchDefaultsSheet(embedded: true),
           ),
         ),
       );
     } else {
-      updated = await showModalBottomSheet<bool>(
-        context: context,
-        isScrollControlled: true,
-        backgroundColor: Colors.transparent,
-        builder: (_) => const _LaunchDefaultsSheet(),
+      updated = await Navigator.of(context).push<bool>(
+        MaterialPageRoute<bool>(
+          builder: (_) => const _LaunchDefaultsSheet(page: true),
+        ),
       );
     }
     if (!mounted) return;
@@ -349,288 +347,382 @@ class _SettingsScreenState extends State<SettingsScreen> {
 }
 
 class _LaunchDefaultsSheet extends StatefulWidget {
-  const _LaunchDefaultsSheet({this.embedded = false});
+  const _LaunchDefaultsSheet({this.embedded = false, this.page = false});
 
   final bool embedded;
+  final bool page;
 
   @override
   State<_LaunchDefaultsSheet> createState() => _LaunchDefaultsSheetState();
 }
 
 class _LaunchDefaultsSheetState extends State<_LaunchDefaultsSheet> {
+  late final CreateSessionDefaults _initial;
   late CreateSessionDefaults _draft;
   bool _saving = false;
 
   @override
   void initState() {
     super.initState();
-    _draft = CreateSessionDefaultsStore.instance.defaults;
+    _initial = CreateSessionDefaultsStore.instance.defaults;
+    _draft = _initial;
   }
 
+  bool get _hasChanges =>
+      _draft.approval != _initial.approval ||
+      _draft.sandbox != _initial.sandbox ||
+      _draft.fastMode != _initial.fastMode ||
+      _draft.webSearch != _initial.webSearch;
+
   Future<void> _save() async {
-    if (_saving) return;
+    if (_saving || !_hasChanges) return;
     setState(() => _saving = true);
     await CreateSessionDefaultsStore.instance.setDefaults(_draft);
     if (!mounted) return;
     Navigator.of(context).pop(true);
   }
 
-  @override
-  Widget build(BuildContext context) {
-    final colors = context.colors;
-    return Padding(
-      padding: widget.embedded
-          ? EdgeInsets.zero
-          : EdgeInsets.fromLTRB(
-              16,
-              12,
-              16,
-              MediaQuery.viewInsetsOf(context).bottom + 16,
+  Future<void> _pickApproval() async {
+    final selected = await _showChoiceSheet<ApprovalPolicy>(
+      title: 'Approval policy',
+      current: _draft.approval,
+      values: ApprovalPolicy.values,
+      label: (value) => value.label,
+      description: (value) => value.description,
+    );
+    if (selected != null && mounted) {
+      setState(() => _draft = _draft.copyWith(approval: selected));
+    }
+  }
+
+  Future<void> _pickSandbox() async {
+    final selected = await _showChoiceSheet<SandboxMode>(
+      title: 'File access',
+      current: _draft.sandbox,
+      values: SandboxMode.values,
+      label: (value) => value.label,
+      description: (value) => value.description,
+    );
+    if (selected != null && mounted) {
+      setState(() => _draft = _draft.copyWith(sandbox: selected));
+    }
+  }
+
+  Future<T?> _showChoiceSheet<T>({
+    required String title,
+    required T current,
+    required List<T> values,
+    required String Function(T value) label,
+    required String Function(T value) description,
+  }) {
+    return showModalBottomSheet<T>(
+      context: context,
+      useSafeArea: true,
+      showDragHandle: true,
+      constraints: const BoxConstraints(maxWidth: 520),
+      builder: (sheetContext) => Padding(
+        padding: const EdgeInsets.fromLTRB(
+          AppSpacing.md,
+          0,
+          AppSpacing.md,
+          AppSpacing.lg,
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(
+                AppSpacing.md,
+                AppSpacing.xs,
+                AppSpacing.md,
+                AppSpacing.md,
+              ),
+              child: Text(
+                title,
+                style: Theme.of(
+                  sheetContext,
+                ).textTheme.titleLarge?.copyWith(fontWeight: AppWeights.title),
+              ),
             ),
-      child: MeshCard(
-        tone: MeshCardTone.surface,
-        padding: const EdgeInsets.all(20),
-        child: SafeArea(
-          top: false,
-          child: SingleChildScrollView(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Row(
+            Flexible(
+              child: SingleChildScrollView(
+                child: Column(
                   children: [
-                    Icon(Icons.rocket_launch_rounded, color: colors.accent),
-                    const SizedBox(width: 10),
-                    Expanded(
-                      child: Text(
-                        'New session defaults',
-                        style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                          fontWeight: AppWeights.title,
-                        ),
+                    for (var index = 0; index < values.length; index++) ...[
+                      AppChoiceRow(
+                        title: label(values[index]),
+                        subtitle: description(values[index]),
+                        selected: values[index] == current,
+                        onTap: () =>
+                            Navigator.of(sheetContext).pop(values[index]),
                       ),
-                    ),
-                    MeshIconButton(
-                      icon: Icons.close_rounded,
-                      tooltip: 'Close',
-                      onTap: () => Navigator.of(context).maybePop(),
-                    ),
+                      if (index != values.length - 1)
+                        Padding(
+                          padding: const EdgeInsets.only(left: 52),
+                          child: Divider(
+                            height: 1,
+                            color: context.colors.border,
+                          ),
+                        ),
+                    ],
                   ],
                 ),
-                const SizedBox(height: 8),
-                Text(
-                  'These values prefill the create-session flow before any host-specific model or profile overrides are chosen.',
-                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                    color: colors.textSecondary,
-                    height: 1.35,
-                  ),
-                ),
-                const SizedBox(height: 16),
-                _LaunchDefaultsSummaryCard(draft: _draft),
-                const SizedBox(height: 18),
-                const _LaunchDefaultsSectionLabel(
-                  title: 'Starting point',
-                  subtitle:
-                      'These controls decide how every new session begins before you make one-off changes.',
-                ),
-                const SizedBox(height: 10),
-                LaunchOptionsForm(
-                  capabilities: const LaunchOptionsCapabilities(
-                    supportsApprovalPolicy: true,
-                    supportsSandboxMode: true,
-                    supportsFastMode: true,
-                    supportsWebSearch: true,
-                  ),
-                  value: LaunchOptionsValue(
-                    approval: _draft.approval,
-                    sandbox: _draft.sandbox,
-                    fastMode: _draft.fastMode,
-                    webSearch: _draft.webSearch,
-                  ),
-                  onChanged: (next) {
-                    setState(() {
-                      _draft = _draft.copyWith(
-                        approval: next.approval,
-                        sandbox: next.sandbox,
-                        fastMode: next.fastMode,
-                        webSearch: next.webSearch,
-                      );
-                    });
-                  },
-                ),
-                if (_draft.sandbox == SandboxMode.dangerFullAccess ||
-                    _draft.approval == ApprovalPolicy.never) ...[
-                  const SizedBox(height: 16),
-                  Container(
-                    padding: const EdgeInsets.all(12),
-                    decoration: BoxDecoration(
-                      color: colors.warning.withValues(alpha: 0.11),
-                      borderRadius: AppShapes.input,
-                      border: Border.all(
-                        color: colors.warning.withValues(alpha: 0.3),
-                      ),
-                    ),
-                    child: Text(
-                      'These defaults allow more freedom than usual. New sessions may ask less often or start with broader access.',
-                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                        color: colors.textPrimary,
-                        height: 1.35,
-                      ),
-                    ),
-                  ),
-                ],
-                const SizedBox(height: 18),
-                LayoutBuilder(
-                  builder: (context, constraints) {
-                    final compact = constraints.maxWidth < 480;
-                    final resetButton = TextButton(
-                      onPressed: _saving
-                          ? null
-                          : () {
-                              setState(() {
-                                _draft = CreateSessionDefaults.factoryDefaults;
-                              });
-                            },
-                      child: const Text('Use recommended'),
-                    );
-                    final applyButton = FilledButton(
-                      onPressed: _saving ? null : () => unawaited(_save()),
-                      child: Text(_saving ? 'Applying...' : 'Apply defaults'),
-                    );
-                    if (compact) {
-                      return Column(
-                        crossAxisAlignment: CrossAxisAlignment.stretch,
-                        children: [
-                          applyButton,
-                          const SizedBox(height: 8),
-                          OutlinedButton(
-                            onPressed: _saving
-                                ? null
-                                : () => Navigator.of(context).maybePop(),
-                            child: const Text('Cancel'),
-                          ),
-                          const SizedBox(height: 4),
-                          Center(child: resetButton),
-                        ],
-                      );
-                    }
-                    return Row(
-                      children: [
-                        resetButton,
-                        const Spacer(),
-                        OutlinedButton(
-                          onPressed: _saving
-                              ? null
-                              : () => Navigator.of(context).maybePop(),
-                          child: const Text('Cancel'),
-                        ),
-                        const SizedBox(width: 8),
-                        applyButton,
-                      ],
-                    );
-                  },
-                ),
-              ],
+              ),
             ),
-          ),
+          ],
         ),
       ),
     );
   }
-}
 
-class _LaunchDefaultsSectionLabel extends StatelessWidget {
-  const _LaunchDefaultsSectionLabel({
-    required this.title,
-    required this.subtitle,
-  });
-
-  final String title;
-  final String subtitle;
-
-  @override
-  Widget build(BuildContext context) {
-    final colors = context.colors;
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
+  Widget _valueTrailing(BuildContext context, String value) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
       children: [
-        Text(
-          title,
-          style: Theme.of(context).textTheme.labelLarge?.copyWith(
-            color: colors.textPrimary,
-            fontWeight: AppWeights.title,
+        ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 150),
+          child: Text(
+            value,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+              color: context.colors.textSecondary,
+            ),
           ),
         ),
-        const SizedBox(height: 3),
-        Text(
-          subtitle,
-          style: Theme.of(context).textTheme.bodySmall?.copyWith(
-            color: colors.textSecondary,
-            height: 1.35,
-          ),
+        const SizedBox(width: AppSpacing.xs),
+        Icon(
+          Icons.chevron_right_rounded,
+          size: AppSizes.icon,
+          color: context.colors.textSecondary,
         ),
       ],
     );
   }
-}
 
-class _LaunchDefaultsSummaryCard extends StatelessWidget {
-  const _LaunchDefaultsSummaryCard({required this.draft});
+  Widget _desktopDropdown<T>({
+    required T value,
+    required List<T> values,
+    required String Function(T value) label,
+    required ValueChanged<T> onChanged,
+  }) {
+    return DropdownButtonHideUnderline(
+      child: DropdownButton<T>(
+        value: value,
+        isDense: true,
+        borderRadius: AppShapes.input,
+        icon: const Icon(Icons.expand_more_rounded),
+        items: [
+          for (final option in values)
+            DropdownMenuItem<T>(value: option, child: Text(label(option))),
+        ],
+        onChanged: _saving
+            ? null
+            : (next) {
+                if (next != null) onChanged(next);
+              },
+      ),
+    );
+  }
 
-  final CreateSessionDefaults draft;
+  void _reset() {
+    setState(() => _draft = CreateSessionDefaults.factoryDefaults);
+  }
 
   @override
   Widget build(BuildContext context) {
-    return MeshSurface(
-      tone: MeshSurfaceTone.muted,
-      radius: AppRadii.control,
-      padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+    final colors = context.colors;
+    final content = SingleChildScrollView(
       child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        mainAxisSize: MainAxisSize.min,
         children: [
-          Text(
-            'Used every time you open New session.',
-            style: Theme.of(
-              context,
-            ).textTheme.labelLarge?.copyWith(fontWeight: AppWeights.title),
-          ),
-          const SizedBox(height: 4),
-          Text(
-            'You can still adjust these choices for a specific machine or session later.',
-            style: Theme.of(context).textTheme.bodySmall?.copyWith(
-              color: context.colors.textSecondary,
-              height: 1.35,
+          if (!widget.page) ...[
+            Row(
+              children: [
+                Icon(Icons.rocket_launch_rounded, color: colors.accent),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    'New session defaults',
+                    style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                      fontWeight: AppWeights.title,
+                    ),
+                  ),
+                ),
+                MeshIconButton(
+                  icon: Icons.close_rounded,
+                  tooltip: 'Close',
+                  onTap: () => Navigator.of(context).maybePop(),
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            Text(
+              'Used when you start a new session.',
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                color: colors.textSecondary,
+                height: 1.35,
+              ),
+            ),
+            const SizedBox(height: 16),
+          ],
+          AppSettingsRow(
+            icon: Icons.bolt_rounded,
+            title: 'Fast mode',
+            trailing: Semantics(
+              label: 'Fast mode',
+              child: Switch.adaptive(
+                value: _draft.fastMode,
+                onChanged: _saving
+                    ? null
+                    : (value) => setState(
+                        () => _draft = _draft.copyWith(fastMode: value),
+                      ),
+              ),
             ),
           ),
-          const SizedBox(height: 10),
-          Wrap(
-            spacing: AppSpacing.sm,
-            runSpacing: AppSpacing.sm,
-            children: [
-              MeshPill(
-                label: draft.approval.label,
-                icon: Icons.verified_user_rounded,
-              ),
-              MeshPill(
-                label: draft.sandbox.label,
-                icon: Icons.folder_special_rounded,
-              ),
-              MeshPill(
-                label: draft.fastMode ? 'fast mode on' : 'fast mode off',
-                icon: Icons.bolt_rounded,
-                tone: draft.fastMode
-                    ? MeshPillTone.accent
-                    : MeshPillTone.neutral,
-              ),
-              MeshPill(
-                label: draft.webSearch ? 'web search on' : 'web search off',
-                icon: Icons.public_rounded,
-                tone: draft.webSearch
-                    ? MeshPillTone.info
-                    : MeshPillTone.neutral,
-              ),
-            ],
+          Divider(height: 1, indent: 52, color: colors.border),
+          AppSettingsRow(
+            icon: Icons.verified_user_outlined,
+            title: 'Approval policy',
+            trailing: widget.embedded
+                ? _desktopDropdown<ApprovalPolicy>(
+                    value: _draft.approval,
+                    values: ApprovalPolicy.values,
+                    label: (value) => value.label,
+                    onChanged: (value) => setState(
+                      () => _draft = _draft.copyWith(approval: value),
+                    ),
+                  )
+                : _valueTrailing(context, _draft.approval.label),
+            onTap: widget.embedded || _saving
+                ? null
+                : () => unawaited(_pickApproval()),
           ),
+          Divider(height: 1, indent: 52, color: colors.border),
+          AppSettingsRow(
+            icon: Icons.folder_outlined,
+            title: 'File access',
+            trailing: widget.embedded
+                ? _desktopDropdown<SandboxMode>(
+                    value: _draft.sandbox,
+                    values: SandboxMode.values,
+                    label: (value) => value.label,
+                    onChanged: (value) => setState(
+                      () => _draft = _draft.copyWith(sandbox: value),
+                    ),
+                  )
+                : _valueTrailing(context, _draft.sandbox.label),
+            onTap: widget.embedded || _saving
+                ? null
+                : () => unawaited(_pickSandbox()),
+          ),
+          Divider(height: 1, indent: 52, color: colors.border),
+          AppSettingsRow(
+            icon: Icons.public_rounded,
+            title: 'Web search',
+            trailing: Semantics(
+              label: 'Web search',
+              child: Switch.adaptive(
+                value: _draft.webSearch,
+                onChanged: _saving
+                    ? null
+                    : (value) => setState(
+                        () => _draft = _draft.copyWith(webSearch: value),
+                      ),
+              ),
+            ),
+          ),
+          if (_draft.sandbox == SandboxMode.dangerFullAccess ||
+              _draft.approval == ApprovalPolicy.never) ...[
+            const SizedBox(height: 16),
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: colors.warning.withValues(alpha: 0.11),
+                borderRadius: AppShapes.input,
+                border: Border.all(
+                  color: colors.warning.withValues(alpha: 0.3),
+                ),
+              ),
+              child: Text(
+                _draft.sandbox == SandboxMode.dangerFullAccess
+                    ? 'Full access removes the file sandbox for new sessions.'
+                    : 'New sessions will run without asking for approval.',
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                  color: colors.textPrimary,
+                  height: 1.35,
+                ),
+              ),
+            ),
+          ],
+          if (!widget.page) ...[
+            const SizedBox(height: AppSpacing.lg),
+            Row(
+              children: [
+                TextButton(
+                  onPressed: _saving ? null : _reset,
+                  child: const Text('Reset'),
+                ),
+                const Spacer(),
+                FilledButton(
+                  onPressed: _saving || !_hasChanges
+                      ? null
+                      : () => unawaited(_save()),
+                  child: Text(_saving ? 'Saving...' : 'Save'),
+                ),
+              ],
+            ),
+          ],
         ],
+      ),
+    );
+    if (widget.page) {
+      return Scaffold(
+        backgroundColor: colors.canvas,
+        appBar: AppBar(
+          title: const Text('New session defaults'),
+          actions: [
+            TextButton(
+              onPressed: _saving || !_hasChanges
+                  ? null
+                  : () => unawaited(_save()),
+              child: Text(_saving ? 'Saving...' : 'Save'),
+            ),
+            const SizedBox(width: AppSpacing.xs),
+          ],
+        ),
+        body: AppContentColumn(
+          child: SafeArea(
+            top: false,
+            child: Padding(
+              padding: EdgeInsets.fromLTRB(
+                AppSizes.mobileGutter,
+                AppSpacing.sm,
+                AppSizes.mobileGutter,
+                MediaQuery.viewInsetsOf(context).bottom + AppSpacing.xl,
+              ),
+              child: content,
+            ),
+          ),
+        ),
+      );
+    }
+    return Padding(
+      padding: widget.embedded
+          ? EdgeInsets.zero
+          : EdgeInsets.fromLTRB(
+              AppSizes.mobileGutter,
+              AppSpacing.md,
+              AppSizes.mobileGutter,
+              MediaQuery.viewInsetsOf(context).bottom + AppSpacing.lg,
+            ),
+      child: MeshCard(
+        tone: MeshCardTone.surface,
+        padding: const EdgeInsets.all(AppSpacing.lg),
+        child: SafeArea(top: false, child: content),
       ),
     );
   }
@@ -728,7 +820,7 @@ class _SettingsContent extends StatelessWidget {
                 title: 'Appearance',
                 subtitle:
                     '${themeModeLabelFor(themeController.mode)} · ${themeController.variant.label} · ${themeController.typography.interfaceFont.label}',
-                trailing: FilledButton(
+                trailing: TextButton(
                   onPressed: () => showAppearanceSheet(context),
                   child: const Text('Customize'),
                 ),
@@ -739,29 +831,22 @@ class _SettingsContent extends StatelessWidget {
               listenable: screenAwakeStore,
               builder: (context, _) {
                 final enabled = screenAwakeStore.keepScreenAwakeWhileAgentRuns;
-                return _SettingsCard(
-                  icon: Icons.light_mode_rounded,
-                  title: 'Display',
+                return _ToggleTile(
+                  icon: Icons.screen_lock_portrait_rounded,
+                  title: 'Keep screen awake while agent runs',
                   subtitle: enabled
-                      ? 'This screen stays awake while an agent is working.'
-                      : 'This device can sleep normally.',
-                  body:
-                      'Sidemesh only keeps this screen awake while an agent run is active. The wake lock ends when the run stops, the app leaves the foreground, or you turn this off.',
-                  footer: _ToggleTile(
-                    icon: Icons.screen_lock_portrait_rounded,
-                    title: 'Keep screen awake while agent runs',
-                    subtitle: 'Useful for long turns. May use more battery.',
-                    value: enabled,
-                    onChanged: (value) => unawaited(
-                      screenAwakeStore.setKeepScreenAwakeWhileAgentRuns(value),
-                    ),
+                      ? 'Stays awake during active work.'
+                      : 'The device can sleep normally.',
+                  value: enabled,
+                  onChanged: (value) => unawaited(
+                    screenAwakeStore.setKeepScreenAwakeWhileAgentRuns(value),
                   ),
                 );
               },
             ),
           ],
         ),
-        const SizedBox(height: AppSpacing.lg),
+        const SizedBox(height: AppSpacing.xl),
         _SettingsSection(
           icon: Icons.notifications_rounded,
           title: 'Alerts',
@@ -777,67 +862,26 @@ class _SettingsContent extends StatelessWidget {
                         ? 'Agent and approval alerts are enabled.'
                         : 'Agent and approval alerts are available but currently disabled.'
                   : 'This platform does not support agent alerts.',
-              footer: Wrap(
-                spacing: AppSpacing.sm,
-                runSpacing: AppSpacing.sm,
-                children: [
-                  MeshPill(
-                    label: notificationsLoading
-                        ? 'checking alerts'
-                        : notificationsAllowed
-                        ? 'alerts on'
-                        : 'alerts off',
-                    tone: notificationsAllowed
-                        ? MeshPillTone.success
-                        : MeshPillTone.warning,
-                    icon: notificationsAllowed
-                        ? Icons.notifications_active_rounded
-                        : Icons.notifications_off_rounded,
-                  ),
-                  MeshPill(
-                    label:
-                        BackgroundSyncService.instance.supportsBackgroundFetch
-                        ? 'background sync'
-                        : 'foreground only',
-                    tone: BackgroundSyncService.instance.supportsBackgroundFetch
-                        ? MeshPillTone.info
-                        : MeshPillTone.neutral,
-                    icon: Icons.sync_rounded,
-                  ),
-                  if (liveActivitiesSupported)
-                    const MeshPill(
-                      label: 'live activity',
-                      tone: MeshPillTone.info,
-                      icon: Icons.view_agenda_rounded,
-                    ),
-                ],
-              ),
-              trailing: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  OutlinedButton(
-                    onPressed: notificationsLoading
-                        ? null
-                        : () => unawaited(onRefreshNotifications()),
-                    child: const Text('Refresh'),
-                  ),
-                  if (notificationsSupported && !notificationsAllowed) ...[
-                    const SizedBox(width: AppSpacing.sm),
-                    FilledButton(
+              trailing: notificationsSupported && !notificationsAllowed
+                  ? FilledButton(
                       onPressed: notificationsRequesting
                           ? null
                           : () => unawaited(onRequestNotifications()),
                       child: Text(
                         notificationsRequesting ? 'Enabling...' : 'Enable',
                       ),
+                    )
+                  : IconButton(
+                      tooltip: 'Refresh notification status',
+                      onPressed: notificationsLoading
+                          ? null
+                          : () => unawaited(onRefreshNotifications()),
+                      icon: const Icon(Icons.refresh_rounded),
                     ),
-                  ],
-                ],
-              ),
             ),
           ],
         ),
-        const SizedBox(height: AppSpacing.lg),
+        const SizedBox(height: AppSpacing.xl),
         if (showAppUpdateSection) ...[
           _SettingsSection(
             icon: Icons.system_update_rounded,
@@ -853,7 +897,7 @@ class _SettingsContent extends StatelessWidget {
               ),
             ],
           ),
-          const SizedBox(height: AppSpacing.lg),
+          const SizedBox(height: AppSpacing.xl),
         ],
         _SettingsSection(
           icon: Icons.rocket_launch_rounded,
@@ -893,7 +937,7 @@ class _SettingsContent extends StatelessWidget {
                       ),
                     ],
                   ),
-                  trailing: FilledButton(
+                  trailing: TextButton(
                     onPressed: () => unawaited(onEditLaunchDefaults()),
                     child: const Text('Edit'),
                   ),
@@ -902,75 +946,70 @@ class _SettingsContent extends StatelessWidget {
             ),
           ],
         ),
-        const SizedBox(height: AppSpacing.lg),
+        const SizedBox(height: AppSpacing.xl),
         _SettingsSection(
           icon: Icons.warning_amber_rounded,
           title: 'Local data',
           subtitle: 'Clear information saved only on this device.',
           children: [
-            _SettingsCard(
-              icon: Icons.storage_rounded,
-              title: 'On-device state',
-              subtitle: 'These actions only touch local data.',
-              footer: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  _ActionRow(
-                    icon: Icons.history_rounded,
-                    title: 'Clear saved transcript cache',
-                    danger: true,
-                    subtitle: 'Drop saved recent sessions and saved logs.',
-                    busy: busyAction == 'transcript-cache',
-                    onTap: () => unawaited(
-                      onRunStorageAction(
-                        key: 'transcript-cache',
-                        title: 'Clear saved transcript cache?',
-                        body:
-                            'This removes saved recent sessions and saved transcripts from this device. Open panes keep their current contents until refreshed.',
-                        action: SessionLocalStore.instance.clearAll,
-                        successMessage: 'Saved transcript cache cleared.',
-                      ),
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                _ActionRow(
+                  icon: Icons.history_rounded,
+                  title: 'Clear saved transcript cache',
+                  danger: true,
+                  subtitle: 'Drop saved recent sessions and saved logs.',
+                  busy: busyAction == 'transcript-cache',
+                  onTap: () => unawaited(
+                    onRunStorageAction(
+                      key: 'transcript-cache',
+                      title: 'Clear saved transcript cache?',
+                      body:
+                          'This removes saved recent sessions and saved transcripts from this device. Open panes keep their current contents until refreshed.',
+                      action: SessionLocalStore.instance.clearAll,
+                      successMessage: 'Saved transcript cache cleared.',
                     ),
                   ),
-                  Divider(color: colors.border),
-                  _ActionRow(
-                    icon: Icons.image_rounded,
-                    title: 'Clear saved image cache',
-                    danger: true,
-                    subtitle: 'Remove saved image blobs from disk.',
-                    busy: busyAction == 'image-cache',
-                    onTap: () => unawaited(
-                      onRunStorageAction(
-                        key: 'image-cache',
-                        title: 'Clear saved image cache?',
-                        body:
-                            'This removes downloaded image blobs saved on this device. Images already open may remain visible until reopened.',
-                        action: ImageBlobCacheStore.instance.clearAll,
-                        successMessage: 'Saved image cache cleared.',
-                      ),
+                ),
+                Divider(color: colors.border, indent: 52),
+                _ActionRow(
+                  icon: Icons.image_rounded,
+                  title: 'Clear saved image cache',
+                  danger: true,
+                  subtitle: 'Remove saved image blobs from disk.',
+                  busy: busyAction == 'image-cache',
+                  onTap: () => unawaited(
+                    onRunStorageAction(
+                      key: 'image-cache',
+                      title: 'Clear saved image cache?',
+                      body:
+                          'This removes downloaded image blobs saved on this device. Images already open may remain visible until reopened.',
+                      action: ImageBlobCacheStore.instance.clearAll,
+                      successMessage: 'Saved image cache cleared.',
                     ),
                   ),
-                  Divider(color: colors.border),
-                  _ActionRow(
-                    icon: Icons.outbox_rounded,
-                    title: 'Clear queued sends',
-                    danger: true,
-                    subtitle:
-                        'Discard queued retries that have not already started.',
-                    busy: busyAction == 'queued-sends',
-                    onTap: () => unawaited(
-                      onRunStorageAction(
-                        key: 'queued-sends',
-                        title: 'Clear queued sends?',
-                        body:
-                            'This discards locally queued messages waiting for retry. A retry already in progress may still finish. Remote sessions are unchanged.',
-                        action: SessionSendOutboxStore.instance.clearAll,
-                        successMessage: 'Queued sends cleared.',
-                      ),
+                ),
+                Divider(color: colors.border, indent: 52),
+                _ActionRow(
+                  icon: Icons.outbox_rounded,
+                  title: 'Clear queued sends',
+                  danger: true,
+                  subtitle:
+                      'Discard queued retries that have not already started.',
+                  busy: busyAction == 'queued-sends',
+                  onTap: () => unawaited(
+                    onRunStorageAction(
+                      key: 'queued-sends',
+                      title: 'Clear queued sends?',
+                      body:
+                          'This discards locally queued messages waiting for retry. A retry already in progress may still finish. Remote sessions are unchanged.',
+                      action: SessionSendOutboxStore.instance.clearAll,
+                      successMessage: 'Queued sends cleared.',
                     ),
                   ),
-                ],
-              ),
+                ),
+              ],
             ),
           ],
         ),
@@ -986,13 +1025,7 @@ class _SettingsContent extends StatelessWidget {
       ],
     );
 
-    final centered = Align(
-      alignment: Alignment.topCenter,
-      child: ConstrainedBox(
-        constraints: const BoxConstraints(maxWidth: 860),
-        child: list,
-      ),
-    );
+    final centered = AppContentColumn(child: list);
 
     if (!embedded) {
       return centered;
@@ -1053,7 +1086,7 @@ class _SettingsContent extends StatelessWidget {
   }
 }
 
-class _SettingsSection extends StatefulWidget {
+class _SettingsSection extends StatelessWidget {
   const _SettingsSection({
     required this.icon,
     required this.title,
@@ -1067,70 +1100,17 @@ class _SettingsSection extends StatefulWidget {
   final List<Widget> children;
 
   @override
-  State<_SettingsSection> createState() => _SettingsSectionState();
-}
-
-class _SettingsSectionState extends State<_SettingsSection>
-    with SingleTickerProviderStateMixin {
-  bool _expanded = true;
-
-  @override
   Widget build(BuildContext context) {
-    final colors = context.colors;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        MeshListRow(
-          framed: false,
-          radius: AppRadii.control,
-          onTap: () => setState(() => _expanded = !_expanded),
-          leading: Container(
-            width: 32,
-            height: 32,
-            decoration: BoxDecoration(
-              color: colors.accentMuted,
-              borderRadius: BorderRadius.circular(AppRadii.control),
-              border: Border.all(color: colors.accent.withValues(alpha: 0.28)),
-            ),
-            alignment: Alignment.center,
-            child: Icon(widget.icon, size: 17, color: colors.accent),
+        AppSectionHeader(icon: icon, title: title, subtitle: subtitle),
+        Padding(
+          padding: const EdgeInsets.only(top: AppSpacing.sm),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: children,
           ),
-          title: Text(
-            widget.title,
-            style: Theme.of(context).textTheme.titleSmall?.copyWith(
-              fontWeight: AppWeights.title,
-              letterSpacing: AppLetterSpacing.headline,
-            ),
-          ),
-          subtitle: Text(
-            widget.subtitle,
-            style: Theme.of(
-              context,
-            ).textTheme.bodySmall?.copyWith(color: colors.textSecondary),
-          ),
-          trailing: AnimatedRotation(
-            duration: const Duration(milliseconds: 180),
-            turns: _expanded ? 0.5 : 0,
-            child: Icon(
-              Icons.expand_more_rounded,
-              color: colors.textSecondary,
-              size: 22,
-            ),
-          ),
-        ),
-        AnimatedSize(
-          duration: const Duration(milliseconds: 200),
-          curve: Curves.easeOut,
-          alignment: Alignment.topCenter,
-          child: _expanded
-              ? Padding(
-                  padding: const EdgeInsets.only(top: AppSpacing.sm),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: widget.children,
-                  ),
-                )
-              : const SizedBox.shrink(),
         ),
       ],
     );
@@ -1419,69 +1399,29 @@ class _SettingsCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colors = context.colors;
-    return MeshCard(
-      tone: MeshCardTone.surface,
-      padding: AppPadding.card,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
+    final supporting = body == null && footer == null
+        ? null
+        : Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              Container(
-                width: 34,
-                height: 34,
-                decoration: BoxDecoration(
-                  color: colors.surfaceMuted,
-                  borderRadius: AppShapes.input,
-                  border: Border.all(color: colors.border),
+              if (body != null)
+                Text(
+                  body!,
+                  style: Theme.of(
+                    context,
+                  ).textTheme.bodySmall?.copyWith(color: colors.textSecondary),
                 ),
-                alignment: Alignment.center,
-                child: Icon(icon, size: 18, color: colors.accent),
-              ),
-              const SizedBox(width: AppSpacing.md),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      title,
-                      style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                        fontWeight: AppWeights.title,
-                      ),
-                    ),
-                    const SizedBox(height: 3),
-                    Text(
-                      subtitle,
-                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                        color: colors.textSecondary,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              if (trailing != null) ...[
-                const SizedBox(width: AppSpacing.md),
-                trailing!,
-              ],
+              if (body != null && footer != null)
+                const SizedBox(height: AppSpacing.sm),
+              ?footer,
             ],
-          ),
-          if (body != null) ...[
-            const SizedBox(height: AppSpacing.md),
-            Text(
-              body!,
-              style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                color: colors.textSecondary,
-                height: 1.35,
-              ),
-            ),
-          ],
-          if (footer != null) ...[
-            const SizedBox(height: AppSpacing.md),
-            footer!,
-          ],
-        ],
-      ),
+          );
+    return AppSettingsRow(
+      icon: icon,
+      title: title,
+      subtitle: subtitle,
+      trailing: trailing,
+      footer: supporting,
     );
   }
 }
@@ -1505,53 +1445,18 @@ class _ActionRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final colors = context.colors;
-    final iconColor = danger ? colors.danger : colors.accent;
-    final titleColor = danger ? colors.danger : colors.textPrimary;
-    final iconBg = danger ? colors.dangerMuted : colors.surfaceMuted;
-    final iconBorder = danger
-        ? colors.danger.withValues(alpha: 0.25)
-        : colors.border;
-    return MeshListRow(
-      framed: false,
-      dense: true,
-      radius: AppRadii.control,
-      enabled: !busy,
+    return AppSettingsRow(
+      icon: icon,
+      title: title,
+      subtitle: subtitle,
+      danger: danger,
       onTap: busy ? null : onTap,
-      leading: Container(
-        width: 32,
-        height: 32,
-        decoration: BoxDecoration(
-          color: iconBg,
-          borderRadius: AppShapes.action,
-          border: Border.all(color: iconBorder),
-        ),
-        alignment: Alignment.center,
-        child: busy
-            ? SizedBox(
-                width: 16,
-                height: 16,
-                child: CircularProgressIndicator(
-                  strokeWidth: 2,
-                  color: iconColor,
-                ),
-              )
-            : Icon(icon, size: 17, color: iconColor),
-      ),
-      title: Text(
-        title,
-        style: Theme.of(context).textTheme.titleSmall?.copyWith(
-          fontWeight: AppWeights.emphasis,
-          color: titleColor,
-        ),
-      ),
-      subtitle: Text(
-        subtitle,
-        style: Theme.of(context).textTheme.bodySmall?.copyWith(
-          color: colors.textSecondary,
-          height: 1.3,
-        ),
-      ),
+      trailing: busy
+          ? const SizedBox.square(
+              dimension: AppSizes.icon,
+              child: CircularProgressIndicator(strokeWidth: 2),
+            )
+          : const Icon(Icons.chevron_right_rounded),
     );
   }
 }
@@ -1573,58 +1478,11 @@ class _ToggleTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final colors = context.colors;
-    return MeshSurface(
-      tone: MeshSurfaceTone.muted,
-      selected: value,
-      radius: AppRadii.control,
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Padding(
-            padding: const EdgeInsets.only(top: 10),
-            child: Icon(
-              icon,
-              size: 18,
-              color: value
-                  ? colors.accent
-                  : onChanged != null
-                  ? colors.textSecondary
-                  : colors.textSecondary.withValues(alpha: 0.72),
-            ),
-          ),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  title,
-                  style: Theme.of(context).textTheme.labelLarge?.copyWith(
-                    fontWeight: AppWeights.emphasis,
-                    color: onChanged != null
-                        ? colors.textPrimary
-                        : colors.textSecondary,
-                  ),
-                ),
-                const SizedBox(height: 2),
-                Text(
-                  subtitle,
-                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                    color: onChanged != null
-                        ? colors.textSecondary
-                        : colors.textSecondary.withValues(alpha: 0.82),
-                    height: 1.3,
-                  ),
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(width: 8),
-          Switch(value: value, onChanged: onChanged),
-        ],
-      ),
+    return AppSettingsRow(
+      icon: icon,
+      title: title,
+      subtitle: subtitle,
+      trailing: Switch(value: value, onChanged: onChanged),
     );
   }
 }
