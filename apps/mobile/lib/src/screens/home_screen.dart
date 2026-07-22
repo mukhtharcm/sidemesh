@@ -12,6 +12,7 @@ import '../relative_time_ticker.dart';
 import '../host_store.dart';
 import '../live_activity_service.dart';
 import '../local_notification_service.dart';
+import '../ios_push_notification_service.dart';
 import '../mobile_client_version_policy.dart';
 import '../models.dart';
 import '../pending_send_recovery.dart';
@@ -275,6 +276,9 @@ class _SidemeshHomeScreenState extends State<SidemeshHomeScreen>
       }
     }
     ApprovalInboxStore.instance.configure(hosts: _enabledHosts, api: _api);
+    unawaited(
+      IosPushNotificationService.instance.synchronizeHosts(_enabledHosts),
+    );
     _startHeartbeat();
     unawaited(_runHeartbeat());
     unawaited(_handleNotificationRouteIntent());
@@ -458,11 +462,12 @@ class _SidemeshHomeScreenState extends State<SidemeshHomeScreen>
     if (_handlingNotificationIntent || _loading) return;
     final service = LocalNotificationService.instance;
     final intent = service.routeIntent.value;
-    if (intent == null || intent.type != 'approval') return;
+    if (intent == null) return;
     _handlingNotificationIntent = true;
     try {
       if (!mounted) return;
-      if (_tabIndex != 1) {
+      final isApproval = intent.type == 'approval';
+      if (isApproval && _tabIndex != 1) {
         setState(() => _tabIndex = 1);
       }
       final host = _hostForIntent(intent);
@@ -470,9 +475,11 @@ class _SidemeshHomeScreenState extends State<SidemeshHomeScreen>
         service.markRouteIntentHandled(intent);
         return;
       }
-      await ApprovalInboxStore.instance.refresh();
+      if (isApproval) {
+        await ApprovalInboxStore.instance.refresh();
+      }
       if (!mounted) return;
-      final entry = _entryForIntent(intent);
+      final entry = isApproval ? _entryForIntent(intent) : null;
       service.markRouteIntentHandled(intent);
       await _openSession(
         host,
@@ -509,13 +516,21 @@ class _SidemeshHomeScreenState extends State<SidemeshHomeScreen>
     return SessionSummary(
       id: intent.sessionId,
       title: 'Session',
-      preview: 'Opened from approval notification',
+      preview: switch (intent.type) {
+        'turn_completed' => 'Opened from completion notification',
+        'turn_failed' => 'Opened from failure notification',
+        _ => 'Opened from approval notification',
+      },
       cwd: '',
       createdAt: now,
       updatedAt: now,
       source: 'appServer',
       provider: null,
-      status: 'pendingApproval',
+      status: switch (intent.type) {
+        'turn_failed' => 'errored',
+        'turn_completed' => 'idle',
+        _ => 'pendingApproval',
+      },
       runtime: null,
       gitInfo: null,
     );

@@ -122,6 +122,7 @@ import {
   readUpdateStatus,
   UpdateAlreadyInProgressError,
 } from "./update-status.js";
+import { PushNotificationDispatcher } from "./push-notifications.js";
 import {
   jsonRoute,
   type HonoServerEnv,
@@ -296,6 +297,9 @@ export async function startServer(
       ttlMs: SESSION_INPUT_DEDUPE_TTL_MS,
       limit: SESSION_INPUT_DEDUPE_LIMIT,
     },
+  );
+  const pushNotifications = await PushNotificationDispatcher.open(
+    config.stateDir,
   );
   for (const entry of sessionInputDedupeStore.entries()) {
     sessionInputDedupe.set(entry.key, {
@@ -1306,6 +1310,13 @@ export async function startServer(
           turnId: event.turnId,
           status: event.status,
         });
+        void pushNotifications.enqueue({
+          kind: /error|fail/i.test(event.status)
+            ? "turn_failed"
+            : "turn_completed",
+          sessionId: event.sessionId,
+          turnId: event.turnId,
+        });
         clearActionsForSession(
           pendingActions,
           event.sessionId,
@@ -1342,6 +1353,15 @@ export async function startServer(
         broadcastApprovalLive({
           type: "action_opened",
           action: publicAction,
+        });
+        void pushNotifications.enqueue({
+          kind:
+            event.action.kind === "user_input" ||
+            event.action.kind === "elicitation"
+              ? "input_required"
+              : "approval_required",
+          sessionId: event.action.sessionId,
+          actionId: event.action.id,
         });
         scheduleRecentSessionUpsert(event.action.sessionId);
         return;
@@ -1506,6 +1526,49 @@ export async function startServer(
       })),
     });
   }));
+
+  app.get("/api/push/subscriptions", jsonRoute((_request, response) => {
+    response.json({ subscriptions: pushNotifications.listSubscriptions() });
+  }));
+
+  app.post(
+    "/api/push/subscriptions",
+    asyncRoute(async (request, response) => {
+      const installationId = asString(request.body?.installationId);
+      const hostId = asString(request.body?.hostId);
+      const relayUrl = asString(request.body?.relayUrl);
+      const publishToken = asString(request.body?.publishToken);
+      if (!installationId || !hostId || !relayUrl || !publishToken) {
+        response.status(400).json({ error: "invalid push subscription" });
+        return;
+      }
+      try {
+        const subscription = await pushNotifications.upsertSubscription({
+          installationId,
+          hostId,
+          relayUrl,
+          publishToken,
+        });
+        response.json({ ok: true, subscription });
+      } catch (error) {
+        response.status(400).json({
+          error:
+            error instanceof Error
+              ? error.message
+              : "invalid push subscription",
+        });
+      }
+    }),
+  );
+
+  app.delete(
+    "/api/push/subscriptions/:installationId",
+    asyncRoute(async (request, response) => {
+      const installationId = pathParam(request.params.installationId);
+      const removed = await pushNotifications.removeSubscription(installationId);
+      response.status(removed ? 200 : 404).json({ ok: removed });
+    }),
+  );
 
   app.get(
     "/api/usage",
@@ -3501,6 +3564,7 @@ export async function startServer(
       await searchIndex.close();
       await sessionRuntimeSignalsSaveChain.catch(() => undefined);
       await provider.close?.();
+      await pushNotifications.close();
     },
   };
   return runningServerRef;

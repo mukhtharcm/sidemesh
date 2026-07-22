@@ -774,9 +774,9 @@ class _SettingsContent extends StatelessWidget {
                   ? 'Checking device notification status...'
                   : notificationsSupported
                   ? notificationsAllowed
-                        ? 'Approval alerts are enabled.'
-                        : 'Approval alerts are available but currently disabled.'
-                  : 'This platform does not support local approval alerts.',
+                        ? 'Agent and approval alerts are enabled.'
+                        : 'Agent and approval alerts are available but currently disabled.'
+                  : 'This platform does not support agent alerts.',
               footer: Wrap(
                 spacing: AppSpacing.sm,
                 runSpacing: AppSpacing.sm,
