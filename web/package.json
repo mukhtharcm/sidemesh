@@ -20,6 +20,10 @@
     "typescript": "^6.0.2",
     "wrangler": "^4.112.0"
   },
+  "overrides": {
+    "fast-uri": "3.1.4",
+    "sharp": "$sharp"
+  },
   "engines": {
     "node": ">=22.0.0"
   }
