@@ -143,9 +143,13 @@ describe("Codex activity compatibility", () => {
       {
         id: "compact-1",
         type: "contextCompaction",
-        status: "completed",
       },
-      { turnId: "turn-1", createdAt: 1004, seq: 5 },
+      {
+        turnId: "turn-1",
+        createdAt: 1004,
+        seq: 5,
+        lifecycleStatus: "completed",
+      },
     );
 
     assert.equal(command?.type, "command");
@@ -158,6 +162,95 @@ describe("Codex activity compatibility", () => {
     assert.equal(image?.savedPath, "/repo/image.png");
     assert.equal(compaction?.type, "context_compaction");
     assert.equal(compaction?.status, "completed");
+  });
+
+  it("uses notification lifecycle for status-less Codex activity items", () => {
+    const item = {
+      id: "compact-1",
+      type: "contextCompaction",
+    };
+    const started = buildActivityFromThreadItem(item, {
+      turnId: "turn-1",
+      createdAt: 1000,
+      seq: 1,
+      lifecycleStatus: "in_progress",
+    });
+    const completed = buildActivityFromThreadItem(item, {
+      turnId: "turn-1",
+      createdAt: 1001,
+      seq: 2,
+      lifecycleStatus: "completed",
+    });
+
+    assert.equal(started?.status, "in_progress");
+    assert.equal(completed?.status, "completed");
+  });
+
+  it("keeps started web searches running despite their required query", () => {
+    const activity = buildActivityFromThreadItem(
+      { id: "web-1", type: "webSearch", query: "sidemesh", action: null },
+      {
+        turnId: "turn-1",
+        createdAt: 1000,
+        seq: 1,
+        lifecycleStatus: "in_progress",
+      },
+    );
+
+    assert.equal(activity?.type, "web_search");
+    assert.equal(activity?.status, "in_progress");
+  });
+
+  it("maps current Codex tool-call item variants", () => {
+    const context = {
+      turnId: "turn-1",
+      createdAt: 1000,
+      seq: 1,
+      lifecycleStatus: "completed" as const,
+    };
+    const mcp = buildActivityFromThreadItem(
+      {
+        id: "mcp-1",
+        type: "mcpToolCall",
+        server: "github",
+        tool: "search",
+        arguments: { query: "sidemesh" },
+        result: { content: [] },
+        error: null,
+      },
+      context,
+    );
+    const dynamic = buildActivityFromThreadItem(
+      {
+        id: "dynamic-1",
+        type: "dynamicToolCall",
+        namespace: "functions",
+        tool: "exec",
+        arguments: { cmd: "pwd" },
+        contentItems: [{ type: "inputText", text: "/repo" }],
+        success: true,
+      },
+      context,
+    );
+    const collab = buildActivityFromThreadItem(
+      {
+        id: "collab-1",
+        type: "collabAgentToolCall",
+        tool: "spawnAgent",
+        status: "completed",
+        prompt: "Inspect activity rendering",
+        receiverThreadIds: ["thread-child"],
+        agentsStates: { "thread-child": { status: "completed" } },
+      },
+      context,
+    );
+
+    assert.equal(mcp?.type, "tool");
+    assert.equal(mcp?.toolName, "github.search");
+    assert.equal(dynamic?.type, "tool");
+    assert.equal(dynamic?.toolName, "functions.exec");
+    assert.equal(collab?.type, "tool");
+    assert.equal(collab?.toolName, "collab.spawnAgent");
   });
 
   it("preserves generalized tool semantics when merging tool activities", () => {

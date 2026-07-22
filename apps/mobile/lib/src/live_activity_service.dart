@@ -468,6 +468,14 @@ class LiveActivityService {
         badge: 'IMG',
       );
     }
+    if (activity.isContextCompaction) {
+      return const _LiveActivitySummary(
+        headline: 'Compacting context',
+        detail: 'Summarizing older conversation history.',
+        status: 'compacting',
+        badge: 'CTX',
+      );
+    }
     if (activity.isFileChange || activity.changes.isNotEmpty) {
       final files = activity.changes
           .map((change) => _relativePath(change.path, sessionCwd))
@@ -552,7 +560,7 @@ class LiveActivityService {
   String _toolActivityDetail(SessionActivity activity, String sessionCwd) {
     final mode = _nonEmpty(activity.toolMode);
     if (mode.isNotEmpty) {
-      return 'Switched to $mode mode';
+      return 'Switching to $mode mode';
     }
     final query = _nonEmpty(activity.toolQuery);
     if (query.isNotEmpty) {

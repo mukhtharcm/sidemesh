@@ -654,6 +654,46 @@ describe("codex rich live event mappings", () => {
       source: "codex/config",
     });
   });
+
+  it("derives activity status from Codex item lifecycle notifications", () => {
+    const provider = new CodexAgentProvider("codex") as any;
+    const events: any[] = [];
+    provider.on("liveEvent", (event: unknown) => events.push(event));
+    const item = { id: "compact-1", type: "contextCompaction" };
+
+    provider.emitCodexNotification("item/started", {
+      threadId: "thread-1",
+      turnId: "turn-1",
+      startedAtMs: 1000,
+      item,
+    });
+    provider.emitCodexNotification("item/completed", {
+      threadId: "thread-1",
+      turnId: "turn-1",
+      completedAtMs: 2000,
+      item,
+    });
+    provider.emitCodexNotification("item/completed", {
+      threadId: "thread-1",
+      turnId: "turn-1",
+      completedAtMs: 3000,
+      item: {
+        id: "command-1",
+        type: "commandExecution",
+        status: "failed",
+        command: "false",
+        cwd: "/tmp/project",
+      },
+    });
+
+    assert.equal(events.length, 3);
+    assert.equal(events[0]?.type, "activity_updated");
+    assert.equal(events[0]?.activity.status, "in_progress");
+    assert.equal(events[1]?.type, "activity_updated");
+    assert.equal(events[1]?.activity.status, "completed");
+    assert.equal(events[2]?.type, "activity_updated");
+    assert.equal(events[2]?.activity.status, "failed");
+  });
 });
 
 describe("codex provider restart", () => {

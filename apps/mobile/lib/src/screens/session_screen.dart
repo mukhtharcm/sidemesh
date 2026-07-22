@@ -6452,7 +6452,7 @@ class _SessionScreenState extends State<SessionScreen>
   String _aggregateFileChangeStatus(List<SessionActivity> activities) {
     const terminal = {'completed', 'failed', 'declined'};
     if (activities.any((activity) => !terminal.contains(activity.status))) {
-      return 'running';
+      return 'in_progress';
     }
     if (activities.any((activity) => activity.status == 'failed')) {
       return 'failed';
@@ -6573,14 +6573,28 @@ class _SessionScreenState extends State<SessionScreen>
         if (fileCount == 1 && activity.changes.isNotEmpty) {
           return activity.changes.first.path;
         }
-        return 'Edited $fileCount files';
+        return activity.status == 'in_progress'
+            ? 'Editing $fileCount files'
+            : 'Edited $fileCount files';
       case 'turn_diff':
         return 'Turn diff';
       case 'web_search':
         final q = (activity.query ?? '').trim();
         return q.isEmpty ? 'Web search' : 'Web: $q';
       case 'image_generation':
-        return 'Generated image';
+        return switch (activity.status) {
+          'completed' => 'Generated image',
+          'failed' => 'Image generation failed',
+          'declined' => 'Image generation declined',
+          _ => 'Generating image',
+        };
+      case 'context_compaction':
+        return switch (activity.status) {
+          'completed' => 'Context compacted',
+          'failed' => 'Context compaction failed',
+          'declined' => 'Context compaction declined',
+          _ => 'Compacting context',
+        };
       default:
         return activity.type;
     }

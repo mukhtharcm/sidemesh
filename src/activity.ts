@@ -101,11 +101,16 @@ export function extractSessionActivities(
 
 export function buildActivityFromThreadItem(
   item: ThreadItemRecord,
-  context: { turnId: string | null; createdAt: number; seq: number },
+  context: {
+    turnId: string | null;
+    createdAt: number;
+    seq: number;
+    lifecycleStatus?: SessionActivity["status"];
+  },
 ): SessionActivity | null {
   if (item.type === "commandExecution") {
     const source = normalizeCommandSource(item.source);
-    const status = normalizeStatus(item.status);
+    const status = context.lifecycleStatus ?? normalizeStatus(item.status);
     return {
       id: item.id,
       type: "command",
@@ -134,25 +139,31 @@ export function buildActivityFromThreadItem(
       turnId: context.turnId,
       createdAt: context.createdAt,
       seq: context.seq,
-      status: normalizeStatus(item.status),
+      status: context.lifecycleStatus ?? normalizeStatus(item.status),
       changes: buildFileChangeChanges(item.changes),
     };
   }
 
-  if (item.type === "toolExecution") {
+  if (
+    item.type === "toolExecution" ||
+    item.type === "mcpToolCall" ||
+    item.type === "dynamicToolCall" ||
+    item.type === "collabAgentToolCall"
+  ) {
+    const tool = buildToolActivityFields(item);
     return {
       id: item.id,
       type: "tool",
       turnId: context.turnId,
       createdAt: context.createdAt,
       seq: context.seq,
-      status: normalizeStatus(item.status),
-      toolName: asString(item.toolName) || asString(item.name) || "tool",
-      title: asString(item.title),
-      args: item.args ?? item.arguments ?? null,
-      output: truncateNullableText(asString(item.output), MAX_COMMAND_OUTPUT_CHARS),
-      result: item.result ?? null,
-      isError: typeof item.isError === "boolean" ? item.isError : null,
+      status: context.lifecycleStatus ?? normalizeStatus(item.status),
+      toolName: tool.toolName,
+      title: tool.title,
+      args: tool.args,
+      output: tool.output,
+      result: tool.result,
+      isError: tool.isError,
       semantic: normalizeToolSemantic(item),
     };
   }
@@ -168,7 +179,7 @@ export function buildActivityFromThreadItem(
       turnId: context.turnId,
       createdAt: context.createdAt,
       seq: context.seq,
-      status: normalizeStatus(item.status),
+      status: context.lifecycleStatus ?? normalizeStatus(item.status),
       revisedPrompt: asString(item.revisedPrompt),
       savedPath: asString(item.savedPath),
     };
@@ -179,6 +190,69 @@ export function buildActivityFromThreadItem(
   }
 
   return null;
+}
+
+function buildToolActivityFields(item: ThreadItemRecord): {
+  toolName: string;
+  title: string | null;
+  args: unknown;
+  output: string | null;
+  result: unknown;
+  isError: boolean | null;
+} {
+  if (item.type === "mcpToolCall") {
+    const server = asString(item.server);
+    const tool = asString(item.tool) || "tool";
+    const status = normalizeStatus(item.status);
+    return {
+      toolName: server ? `${server}.${tool}` : tool,
+      title: server ? `${tool} via ${server}` : tool,
+      args: item.arguments ?? null,
+      output: null,
+      result: item.result ?? item.error ?? null,
+      isError: item.error != null ? true : status === "completed" ? false : null,
+    };
+  }
+
+  if (item.type === "dynamicToolCall") {
+    const namespace = asString(item.namespace);
+    const tool = asString(item.tool) || "tool";
+    return {
+      toolName: namespace ? `${namespace}.${tool}` : tool,
+      title: tool,
+      args: item.arguments ?? null,
+      output: null,
+      result: item.contentItems ?? null,
+      isError: typeof item.success === "boolean" ? !item.success : null,
+    };
+  }
+
+  if (item.type === "collabAgentToolCall") {
+    const tool = asString(item.tool) || "agent collaboration";
+    const status = normalizeStatus(item.status);
+    return {
+      toolName: `collab.${tool}`,
+      title: tool,
+      args: {
+        prompt: item.prompt ?? null,
+        receiverThreadIds: item.receiverThreadIds ?? [],
+        model: item.model ?? null,
+        reasoningEffort: item.reasoningEffort ?? null,
+      },
+      output: null,
+      result: item.agentsStates ?? null,
+      isError: status === "failed" ? true : status === "completed" ? false : null,
+    };
+  }
+
+  return {
+    toolName: asString(item.toolName) || asString(item.name) || "tool",
+    title: asString(item.title),
+    args: item.args ?? item.arguments ?? null,
+    output: truncateNullableText(asString(item.output), MAX_COMMAND_OUTPUT_CHARS),
+    result: item.result ?? null,
+    isError: typeof item.isError === "boolean" ? item.isError : null,
+  };
 }
 
 export function mergeActivity(
@@ -518,7 +592,12 @@ export function buildWebSearchActivityFromRolloutEvent(
     turnId: asString(typed.turn_id) || asString(typed.turnId),
     createdAt,
     seq,
-    status: hasCompletedAction ? "completed" : "in_progress",
+    status:
+      typed.status == null
+        ? hasCompletedAction
+          ? "completed"
+          : "in_progress"
+        : normalizeStatus(typed.status),
     query: asString(typed.query) || action.query,
     queries: action.queries,
     targetUrl: action.targetUrl,
@@ -647,6 +726,9 @@ function isActivityThreadItem(item: ThreadItemRecord): boolean {
   return (
     item.type === "commandExecution" ||
     item.type === "toolExecution" ||
+    item.type === "mcpToolCall" ||
+    item.type === "dynamicToolCall" ||
+    item.type === "collabAgentToolCall" ||
     item.type === "fileChange" ||
     item.type === "webSearch" ||
     item.type === "imageGeneration" ||
@@ -656,7 +738,12 @@ function isActivityThreadItem(item: ThreadItemRecord): boolean {
 
 function buildContextCompactionActivity(
   item: ThreadItemRecord,
-  context: { turnId: string | null; createdAt: number; seq: number },
+  context: {
+    turnId: string | null;
+    createdAt: number;
+    seq: number;
+    lifecycleStatus?: SessionActivity["status"];
+  },
 ): ContextCompactionActivity | null {
   const id = asString(item.id);
   if (!id) {
@@ -668,13 +755,18 @@ function buildContextCompactionActivity(
     turnId: context.turnId,
     createdAt: context.createdAt,
     seq: context.seq,
-    status: normalizeStatus(item.status),
+    status: context.lifecycleStatus ?? normalizeStatus(item.status),
   };
 }
 
 function buildWebSearchActivity(
   item: ThreadItemRecord,
-  context: { turnId: string | null; createdAt: number; seq: number },
+  context: {
+    turnId: string | null;
+    createdAt: number;
+    seq: number;
+    lifecycleStatus?: SessionActivity["status"];
+  },
 ): WebSearchActivity | null {
   const id = asString(item.id);
   if (!id) {
@@ -695,7 +787,9 @@ function buildWebSearchActivity(
     turnId: context.turnId,
     createdAt: context.createdAt,
     seq: context.seq,
-    status: hasCompletedAction ? "completed" : "in_progress",
+    status:
+      context.lifecycleStatus ??
+      (hasCompletedAction ? "completed" : "in_progress"),
     query,
     queries: action.queries,
     targetUrl: action.targetUrl,

@@ -597,6 +597,7 @@ public async health(): Promise<boolean> {
         turnId,
         createdAt: 0,
         seq: 0,
+        lifecycleStatus: codexItemLifecycleStatus(method, item.status),
       });
       const draft = activity ? toActivityDraft(activity) : null;
       if (draft) {
@@ -2771,6 +2772,22 @@ function appendPermissionPaths(lines: string[], label: string, paths: unknown): 
     return;
   }
   lines.push(`${label}: ${normalized.join(", ")}`);
+}
+
+function codexItemLifecycleStatus(
+  method: "item/started" | "item/completed",
+  itemStatus: unknown,
+): "in_progress" | "completed" | "failed" | "declined" {
+  if (method === "item/started") {
+    return "in_progress";
+  }
+  if (itemStatus === "failed") {
+    return "failed";
+  }
+  if (itemStatus === "declined") {
+    return "declined";
+  }
+  return "completed";
 }
 
 function asString(value: unknown): string | null {
