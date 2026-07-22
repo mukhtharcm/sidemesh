@@ -7,6 +7,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:sidemesh_mobile/src/api_client.dart';
 import 'package:sidemesh_mobile/src/db.dart';
 import 'package:sidemesh_mobile/src/models.dart';
+import 'package:sidemesh_mobile/src/recent_session_view_store.dart';
 import 'package:sidemesh_mobile/src/screens/home_screen.dart';
 import 'package:sidemesh_mobile/src/session_local_store.dart';
 import 'package:sidemesh_mobile/src/session_read_store.dart';
@@ -44,6 +45,7 @@ void main() {
     final db = await SidemeshDb.instance;
     await db.delete('sessions');
     SharedPreferences.setMockInitialValues(<String, Object>{});
+    RecentSessionViewStore.instance.resetForTest();
     await SessionReadStore.instance.ensureLoaded();
   });
 
@@ -318,7 +320,9 @@ void main() {
     (tester) async {
       final now = DateTime(2026, 1, 1, 12);
       const repoGitInfo = GitInfoSummary(gitCommonDir: '/workspace/repo/.git');
-      const otherGitInfo = GitInfoSummary(gitCommonDir: '/workspace/other/.git');
+      const otherGitInfo = GitInfoSummary(
+        gitCommonDir: '/workspace/other/.git',
+      );
       final api = _FakeSearchApiClient(
         sessions: <SessionSummary>[
           _session(
@@ -366,6 +370,58 @@ void main() {
     },
   );
 
+  testWidgets('single-list mode orders sessions globally by recency', (
+    tester,
+  ) async {
+    final now = DateTime(2026, 1, 1, 12);
+    const repoGitInfo = GitInfoSummary(gitCommonDir: '/workspace/repo/.git');
+    const otherGitInfo = GitInfoSummary(gitCommonDir: '/workspace/other/.git');
+    final api = _FakeSearchApiClient(
+      sessions: <SessionSummary>[
+        _session(
+          id: 'repo-newest',
+          title: 'Repo Newest',
+          updatedAt: now,
+          cwd: '/workspace/repo',
+          gitInfo: repoGitInfo,
+        ),
+        _session(
+          id: 'other-middle',
+          title: 'Other Middle',
+          updatedAt: now.subtract(const Duration(seconds: 30)),
+          cwd: '/workspace/other',
+          gitInfo: otherGitInfo,
+        ),
+        _session(
+          id: 'repo-oldest',
+          title: 'Repo Oldest',
+          updatedAt: now.subtract(const Duration(minutes: 1)),
+          cwd: '/workspace/repo-feature',
+          gitInfo: repoGitInfo,
+        ),
+      ],
+      searchResults: const <String, List<SessionSummary>>{},
+    );
+    await RecentSessionViewStore.instance.ensureLoaded();
+    await RecentSessionViewStore.instance.setGrouping(
+      RecentSessionGrouping.singleList,
+    );
+
+    await _pumpRecentPane(
+      tester,
+      api: api,
+      hosts: const <HostProfile>[host],
+      query: '',
+    );
+    await tester.pump();
+    await tester.pump();
+
+    final newest = tester.getTopLeft(find.text('Repo Newest')).dy;
+    final middle = tester.getTopLeft(find.text('Other Middle')).dy;
+    final oldest = tester.getTopLeft(find.text('Repo Oldest')).dy;
+    expect(newest, lessThan(middle));
+    expect(middle, lessThan(oldest));
+  });
 }
 
 Future<void> _pumpRecentPane(

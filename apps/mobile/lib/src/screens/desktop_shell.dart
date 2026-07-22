@@ -1534,6 +1534,7 @@ class _Sidebar extends StatelessWidget {
               Padding(
                 padding: const EdgeInsets.fromLTRB(16, 0, 16, 10),
                 child: _RecentControlsBar(
+                  showGrouping: query.trim().isEmpty,
                   filters: recentFilters,
                   onRunningOnlyChanged: onRecentRunningOnlyChanged,
                   onUnreadOnlyChanged: onRecentUnreadOnlyChanged,
@@ -1730,12 +1731,14 @@ class _ListPaneActionButton extends StatelessWidget {
 
 class _RecentControlsBar extends StatelessWidget {
   const _RecentControlsBar({
+    required this.showGrouping,
     required this.filters,
     required this.onRunningOnlyChanged,
     required this.onUnreadOnlyChanged,
     required this.onFavoritesOnlyChanged,
   });
 
+  final bool showGrouping;
   final RecentSessionFilters filters;
   final ValueChanged<bool>? onRunningOnlyChanged;
   final ValueChanged<bool>? onUnreadOnlyChanged;
@@ -1748,6 +1751,7 @@ class _RecentControlsBar extends StatelessWidget {
       runSpacing: 6,
       crossAxisAlignment: WrapCrossAlignment.center,
       children: [
+        if (showGrouping) const RecentSessionGroupingControl(compact: true),
         _RecentFilterToken(
           icon: Icons.star_rounded,
           label: 'Favorites',

@@ -16,6 +16,7 @@ import '../ios_push_notification_service.dart';
 import '../mobile_client_version_policy.dart';
 import '../models.dart';
 import '../pending_send_recovery.dart';
+import '../recent_session_view_store.dart';
 import '../recent_sessions_live_store.dart';
 import '../recent_session_filter.dart';
 import '../screen_awake_controller.dart';
@@ -364,6 +365,7 @@ class _SidemeshHomeScreenState extends State<SidemeshHomeScreen>
           },
           onActiveCountChanged: (_) {},
           dense: false,
+          showGroupingControl: true,
           hasSavedHosts: _hosts.isNotEmpty,
         ),
       ),
@@ -749,6 +751,99 @@ class RecentSessionFilters {
   }
 }
 
+class RecentSessionGroupingControl extends StatelessWidget {
+  const RecentSessionGroupingControl({
+    super.key,
+    this.store,
+    this.compact = false,
+  });
+
+  final RecentSessionViewStore? store;
+  final bool compact;
+
+  String _label(RecentSessionGrouping grouping) {
+    return switch (grouping) {
+      RecentSessionGrouping.project => 'By project',
+      RecentSessionGrouping.singleList => 'Single list',
+    };
+  }
+
+  IconData _icon(RecentSessionGrouping grouping) {
+    return switch (grouping) {
+      RecentSessionGrouping.project => Icons.folder_rounded,
+      RecentSessionGrouping.singleList => Icons.view_list_rounded,
+    };
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final viewStore = store ?? RecentSessionViewStore.instance;
+    return ListenableBuilder(
+      listenable: viewStore,
+      builder: (context, _) {
+        final colors = context.colors;
+        final grouping = viewStore.grouping;
+        return PopupMenuButton<RecentSessionGrouping>(
+          tooltip: 'Group sessions',
+          onSelected: (value) => viewStore.setGrouping(value),
+          itemBuilder: (context) => [
+            for (final option in RecentSessionGrouping.values)
+              CheckedPopupMenuItem(
+                value: option,
+                checked: option == grouping,
+                child: Row(
+                  children: [
+                    Icon(_icon(option), size: 18),
+                    const SizedBox(width: 10),
+                    Expanded(child: Text(_label(option))),
+                  ],
+                ),
+              ),
+          ],
+          child: ConstrainedBox(
+            constraints: BoxConstraints(minHeight: compact ? 32 : 44),
+            child: Container(
+              padding: EdgeInsets.symmetric(
+                horizontal: compact ? 9 : 10,
+                vertical: compact ? 7 : 6,
+              ),
+              decoration: BoxDecoration(
+                color: colors.accentMuted.withValues(alpha: 0.72),
+                borderRadius: AppShapes.badge,
+                border: Border.all(color: colors.accent.withValues(alpha: 0.3)),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(
+                    _icon(grouping),
+                    size: compact ? 14 : 15,
+                    color: colors.accent,
+                  ),
+                  const SizedBox(width: 6),
+                  Text(
+                    _label(grouping),
+                    style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                      color: colors.textPrimary,
+                      fontWeight: AppWeights.emphasis,
+                    ),
+                  ),
+                  const SizedBox(width: 4),
+                  Icon(
+                    Icons.expand_more_rounded,
+                    size: 15,
+                    color: colors.textSecondary,
+                  ),
+                ],
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+}
+
 class _TabDef {
   const _TabDef({
     required this.title,
@@ -992,6 +1087,10 @@ class _HomeSearchField extends StatelessWidget {
                 scrollDirection: Axis.horizontal,
                 child: Row(
                   children: [
+                    if (controller.text.isEmpty) ...[
+                      const RecentSessionGroupingControl(),
+                      const SizedBox(width: AppSpacing.xs),
+                    ],
                     _HomeSearchFilterToken(
                       icon: Icons.star_rounded,
                       label: 'Favorites',
@@ -1428,6 +1527,7 @@ class RecentPane extends StatefulWidget {
     this.selectedSessionId,
     this.padding,
     this.dense = false,
+    this.showGroupingControl = false,
     this.hasSavedHosts = false,
     this.screenAwakeSourceKey,
     this.screenAwakeController,
@@ -1443,6 +1543,7 @@ class RecentPane extends StatefulWidget {
   final String? selectedSessionId;
   final EdgeInsets? padding;
   final bool dense;
+  final bool showGroupingControl;
   final bool hasSavedHosts;
   final String? screenAwakeSourceKey;
   final ScreenAwakeController? screenAwakeController;
@@ -1521,6 +1622,7 @@ class _RecentPaneState extends State<RecentPane> {
     super.initState();
     _localStore.ensureLoaded();
     SessionReadStore.instance.ensureLoaded();
+    RecentSessionViewStore.instance.ensureLoaded();
     _store.addListener(_handleStoreChanged);
     _store.configure(hosts: widget.hosts, api: widget.api);
     unawaited(_loadCollapsedGroups());
@@ -1937,6 +2039,7 @@ class _RecentPaneState extends State<RecentPane> {
         HostStatusStore.instance,
         SessionOverridesStore.instance,
         SessionReadStore.instance,
+        RecentSessionViewStore.instance,
       ]),
       builder: (context, _) {
         final stillLoadingInitial =
@@ -1952,10 +2055,13 @@ class _RecentPaneState extends State<RecentPane> {
         }
         final sortedEntries = _sortEntries(_store.entries);
         final isSearchMode = widget.query.trim().isNotEmpty;
-        final groups = isSearchMode
+        final groupByProject =
+            RecentSessionViewStore.instance.grouping ==
+            RecentSessionGrouping.project;
+        final groups = isSearchMode || !groupByProject
             ? const <_SessionGroup>[]
             : _groupEntries(sortedEntries);
-        final isGrouped = groups.isNotEmpty;
+        final isGrouped = groupByProject && groups.isNotEmpty;
         final hasCachedEntries =
             _store.entries.isNotEmpty &&
             _store.confirmedHostIds.length < widget.hosts.length;
@@ -2014,6 +2120,14 @@ class _RecentPaneState extends State<RecentPane> {
         return Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
+            if (widget.showGroupingControl)
+              const Padding(
+                padding: EdgeInsets.fromLTRB(16, 0, 16, 4),
+                child: Align(
+                  alignment: Alignment.centerLeft,
+                  child: RecentSessionGroupingControl(),
+                ),
+              ),
             if (_searchLoading)
               const Padding(
                 padding: EdgeInsets.fromLTRB(16, 4, 16, 6),
