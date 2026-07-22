@@ -23,6 +23,12 @@ official [app-server documentation](https://learn.chatgpt.com/docs/app-server).
   app-server from waiting indefinitely for a response.
 - `initialize.clientInfo.version` is read from the installed Sidemesh
   `package.json` rather than a duplicated constant.
+- Activity lifecycle comes from the enclosing `item/started` and
+  `item/completed` notification. Do not infer completion from item fields such
+  as a web-search query; some item variants, including `contextCompaction`, do
+  not carry their own status.
+- Keep generalized activity mappings aligned with the stable `ThreadItem`
+  union, including MCP, dynamic, and collaboration tool-call variants.
 
 ## Upgrade audit
 

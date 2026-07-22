@@ -1423,6 +1423,73 @@ void main() {
     },
   );
 
+  testWidgets('activity copy follows running and terminal status', (
+    tester,
+  ) async {
+    final session = _session('activity-status-copy');
+    final api = _RichEventFakeApi(
+      sessionSummary: session,
+      activities: [
+        _statusActivity(
+          id: 'compaction-running',
+          seq: 1,
+          type: 'context_compaction',
+          status: 'in_progress',
+        ),
+        _statusActivity(
+          id: 'web-failed',
+          seq: 2,
+          type: 'web_search',
+          status: 'failed',
+          query: 'latest Codex types',
+        ),
+        _statusActivity(
+          id: 'image-failed',
+          seq: 3,
+          type: 'image_generation',
+          status: 'failed',
+        ),
+        _statusActivity(
+          id: 'command-complete-empty',
+          seq: 4,
+          type: 'command',
+          status: 'completed',
+          command: 'true',
+          cwd: '/repo',
+        ),
+      ],
+    );
+    addTearDown(api.dispose);
+
+    await _pumpApp(
+      tester,
+      SessionScreen(
+        host: _host('activity-status-copy'),
+        session: session,
+        api: api,
+        desktopMode: true,
+      ),
+      size: const Size(1180, 900),
+    );
+    await _pumpFrames(tester);
+
+    expect(find.text('Compacting context'), findsOneWidget);
+    expect(find.text('Context compacted'), findsNothing);
+    expect(find.text('Image generation failed'), findsOneWidget);
+    expect(find.text('Image generation failed.'), findsOneWidget);
+
+    await tester.ensureVisible(find.text('latest Codex types'));
+    await tester.tap(find.text('latest Codex types'));
+    await _pumpFrames(tester);
+    expect(find.text('Web search failed.'), findsOneWidget);
+
+    await tester.ensureVisible(find.text('true'));
+    await tester.tap(find.text('true'));
+    await _pumpFrames(tester);
+    expect(find.text('Command completed without output.'), findsOneWidget);
+    expect(find.text('Waiting for command output.'), findsNothing);
+  });
+
   testWidgets('session screen renders legacy command tool activities', (
     tester,
   ) async {
@@ -1889,6 +1956,49 @@ SessionActivity _commandActivity({
     changes: const [],
     diff: null,
     query: null,
+    queries: const [],
+    targetUrl: null,
+    pattern: null,
+    revisedPrompt: null,
+    savedPath: null,
+  );
+}
+
+SessionActivity _statusActivity({
+  required String id,
+  required int seq,
+  required String type,
+  required String status,
+  String? command,
+  String? cwd,
+  String? query,
+}) {
+  return SessionActivity(
+    id: id,
+    type: type,
+    createdAt: DateTime(2026, 1, 1, 12).add(Duration(minutes: seq)),
+    seq: seq,
+    status: status,
+    turnId: 'turn-$seq',
+    command: command,
+    cwd: cwd,
+    output: null,
+    exitCode: null,
+    durationMs: null,
+    source: null,
+    processId: null,
+    commandActions: const [],
+    terminalStatus: null,
+    terminalInput: null,
+    toolName: null,
+    toolTitle: null,
+    toolArgs: null,
+    toolResult: null,
+    toolError: null,
+    toolSemantic: null,
+    changes: const [],
+    diff: null,
+    query: query,
     queries: const [],
     targetUrl: null,
     pattern: null,
