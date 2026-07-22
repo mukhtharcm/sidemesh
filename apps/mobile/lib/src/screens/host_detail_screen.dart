@@ -19,6 +19,7 @@ import '../widgets/app_dialogs.dart';
 import '../widgets/app_sheets.dart';
 import '../widgets/app_snackbar.dart';
 import '../widgets/mesh_widgets.dart';
+import '../widgets/app_primitives.dart';
 import '../widgets/session_row_card.dart';
 import 'create_session_sheet.dart';
 import 'terminal_screen.dart';
@@ -310,6 +311,19 @@ class _HostDetailScreenState extends State<HostDetailScreen>
     return workspaces;
   }
 
+  bool _shouldShowMobileCompatibility(NodeInfo node) {
+    if (!widget.showMobileClientCompatibility ||
+        !node.advertisesMobileClientVersionHints) {
+      return false;
+    }
+    return evaluateMobileClientCompatibility(
+          installedVersion: _appVersionStore.info.comparableVersion,
+          recommendedVersion: node.recommendedMobileClientVersion,
+          minimumVersion: node.minimumMobileClientVersion,
+        ).level !=
+        MobileClientCompatibilityLevel.none;
+  }
+
   Future<void> _startSession({String? prefilledCwd}) async {
     final created = await showCreateSessionLauncher(
       context,
@@ -387,20 +401,24 @@ class _HostDetailScreenState extends State<HostDetailScreen>
           ]),
           builder: (context, _) {
             final sortedSessions = _sortSessions(data.sessions);
-            return RefreshIndicator(
-              color: colors.accent,
-              onRefresh: _refresh,
-              child: ListView(
+            return AppContentColumn(
+              child: RefreshIndicator(
+                color: colors.accent,
+                onRefresh: _refresh,
+                child: ListView(
                 padding: EdgeInsets.fromLTRB(
-                  16,
-                  8,
-                  16,
+                  widget.embedded
+                      ? AppSizes.desktopGutter
+                      : AppSizes.mobileGutter,
+                  AppSpacing.sm,
+                  widget.embedded
+                      ? AppSizes.desktopGutter
+                      : AppSizes.mobileGutter,
                   widget.embedded ? 32 : 120,
                 ),
                 children: [
                   _NodeCard(host: widget.host, node: data.node),
-                  if (widget.showMobileClientCompatibility &&
-                      data.node.advertisesMobileClientVersionHints) ...[
+                  if (_shouldShowMobileCompatibility(data.node)) ...[
                     const SizedBox(height: AppSpacing.sm),
                     _MobileClientCompatibilityCard(
                       node: data.node,
@@ -408,10 +426,7 @@ class _HostDetailScreenState extends State<HostDetailScreen>
                     ),
                   ],
                   const SizedBox(height: AppSpacing.sm),
-                  if (widget.embedded)
-                    _ProviderContractCard(node: data.node)
-                  else
-                    _ProviderContractSummaryCard(node: data.node),
+                  _ProviderContractSummaryCard(node: data.node),
                   if (data.workspaces.length > 1) ...[
                     const SizedBox(height: AppSpacing.lg),
                     _SectionHeader(
@@ -428,20 +443,6 @@ class _HostDetailScreenState extends State<HostDetailScreen>
                     ),
                   ],
                   const SizedBox(height: AppSpacing.xl),
-                  _SectionHeader(
-                    icon: Icons.medical_services_rounded,
-                    title: 'Manage this machine',
-                    subtitle: 'Open tools, updates, and restart controls',
-                  ),
-                  const SizedBox(height: AppSpacing.sm),
-                  _HostManagementCard(
-                    host: widget.host,
-                    api: widget.api,
-                    node: data.node,
-                    checkingUpdateInfo: _checkingUpdateInfo,
-                    onRefresh: _refresh,
-                  ),
-                  const SizedBox(height: AppSpacing.lg),
                   _SectionHeader(
                     icon: Icons.history_rounded,
                     title: 'Recent sessions',
@@ -474,7 +475,22 @@ class _HostDetailScreenState extends State<HostDetailScreen>
                         ),
                       ),
                     ),
+                  const SizedBox(height: AppSpacing.lg),
+                  _SectionHeader(
+                    icon: Icons.build_circle_outlined,
+                    title: 'Machine tools',
+                    subtitle: 'Terminal, updates, and restart controls',
+                  ),
+                  const SizedBox(height: AppSpacing.sm),
+                  _HostManagementCard(
+                    host: widget.host,
+                    api: widget.api,
+                    node: data.node,
+                    checkingUpdateInfo: _checkingUpdateInfo,
+                    onRefresh: _refresh,
+                  ),
                 ],
+                ),
               ),
             );
           },
@@ -716,6 +732,7 @@ class _NodeCard extends StatelessWidget {
     final colors = context.colors;
     return MeshCard(
       tone: MeshCardTone.surface,
+      bordered: false,
       padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -1538,6 +1555,7 @@ class _ProviderContractSummaryCard extends StatelessWidget {
     final providerCountLabel = _agentAvailabilityLabel(supportedProviders);
     return MeshCard(
       tone: MeshCardTone.muted,
+      bordered: false,
       padding: EdgeInsets.zero,
       child: Material(
         color: Colors.transparent,
@@ -1606,417 +1624,6 @@ class _ProviderContractSummaryCard extends StatelessWidget {
   }
 }
 
-class _ProviderContractCard extends StatefulWidget {
-  const _ProviderContractCard({required this.node});
-
-  final NodeInfo node;
-
-  @override
-  State<_ProviderContractCard> createState() => _ProviderContractCardState();
-}
-
-class _ProviderContractCardState extends State<_ProviderContractCard> {
-  late String _selectedProviderKind = _initialProviderKind(widget.node);
-
-  @override
-  void didUpdateWidget(covariant _ProviderContractCard oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    if (oldWidget.node == widget.node) {
-      return;
-    }
-    final supportedKinds = widget.node.supportedProviders
-        .map((provider) => provider.kind)
-        .toSet();
-    if (_selectedProviderKind.isEmpty ||
-        !supportedKinds.contains(_selectedProviderKind)) {
-      _selectedProviderKind = _initialProviderKind(widget.node);
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final node = widget.node;
-    final colors = context.colors;
-    final selectedSummary = _selectedProviderSummary(
-      node,
-      _selectedProviderKind,
-    );
-    final providerGroups = _capabilityGroups(
-      node.capabilitiesForProvider(_selectedProviderKind),
-    );
-    final hostGroups = _capabilityGroups(node.hostCapabilities);
-    final supportedProviders = node.supportedProviders;
-    final selectedDisplayName = _providerDisplayName(node, selectedSummary);
-    final selectedVersion = _providerDisplayVersion(node, selectedSummary);
-    final selectedCommand = _providerCommand(node, selectedSummary);
-    final isViewingActiveProvider = _selectedProviderKind == node.provider;
-
-    return MeshCard(
-      tone: MeshCardTone.muted,
-      padding: EdgeInsets.zero,
-      child: Theme(
-        data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
-        child: ExpansionTile(
-          tilePadding: const EdgeInsets.fromLTRB(14, 8, 12, 8),
-          childrenPadding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-          leading: Container(
-            width: 30,
-            height: 30,
-            decoration: BoxDecoration(
-              color: colors.infoMuted,
-              borderRadius: BorderRadius.circular(9),
-              border: Border.all(color: colors.info.withValues(alpha: 0.35)),
-            ),
-            alignment: Alignment.center,
-            child: Icon(Icons.hub_rounded, color: colors.info, size: 16),
-          ),
-          title: Text(
-            'Agents on this machine',
-            style: Theme.of(
-              context,
-            ).textTheme.titleSmall?.copyWith(fontWeight: AppWeights.title),
-          ),
-          subtitle: Text(
-            '$selectedDisplayName · $selectedVersion',
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: Theme.of(context).textTheme.bodySmall?.copyWith(
-              color: colors.textSecondary,
-              height: 1.3,
-            ),
-          ),
-          children: [
-            Align(
-              alignment: Alignment.centerLeft,
-              child: Wrap(
-                spacing: 8,
-                runSpacing: 8,
-                children: [
-                  MeshPill(
-                    label: _agentInUseLabel(node.providerDisplayName),
-                    icon: Icons.radio_button_checked_rounded,
-                    tone: isViewingActiveProvider
-                        ? MeshPillTone.success
-                        : MeshPillTone.neutral,
-                  ),
-                  if (!isViewingActiveProvider)
-                    MeshPill(
-                      label: _agentViewingLabel(selectedDisplayName),
-                      icon: Icons.visibility_rounded,
-                      tone: MeshPillTone.accent,
-                    ),
-                  if (selectedCommand != null)
-                    MeshPill(
-                      label: _agentCommandLabel(selectedCommand),
-                      icon: Icons.terminal_rounded,
-                      tone: MeshPillTone.neutral,
-                    ),
-                  MeshPill(
-                    label: _agentAvailabilityLabel(supportedProviders.length),
-                    icon: Icons.extension_rounded,
-                    tone: supportedProviders.isEmpty
-                        ? MeshPillTone.warning
-                        : MeshPillTone.info,
-                  ),
-                ],
-              ),
-            ),
-            if (supportedProviders.isNotEmpty) ...[
-              const SizedBox(height: 14),
-              _ProviderDefinitionList(
-                currentProvider: node.provider,
-                selectedProvider: _selectedProviderKind,
-                providers: supportedProviders,
-                onSelect: (provider) {
-                  setState(() {
-                    _selectedProviderKind = provider.kind;
-                  });
-                },
-              ),
-            ],
-            const SizedBox(height: 14),
-            _CapabilityMatrix(
-              title: 'Agent features',
-              emptyText: 'This agent did not report any extra features.',
-              groups: providerGroups,
-            ),
-            const SizedBox(height: 12),
-            _CapabilityMatrix(
-              title: 'Machine features',
-              emptyText: 'This machine did not report any extra features.',
-              groups: hostGroups,
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  static String _initialProviderKind(NodeInfo node) {
-    if (node.supportedProviders.any(
-      (provider) => provider.kind == node.provider,
-    )) {
-      return node.provider;
-    }
-    if (node.supportedProviders.isNotEmpty) {
-      return node.supportedProviders.first.kind;
-    }
-    return node.provider;
-  }
-
-  static ProviderDefinitionSummary _selectedProviderSummary(
-    NodeInfo node,
-    String selectedProviderKind,
-  ) {
-    return node.providerSummary(selectedProviderKind);
-  }
-
-  static String _providerDisplayName(
-    NodeInfo node,
-    ProviderDefinitionSummary summary,
-  ) {
-    if (summary.displayName.isNotEmpty) {
-      return summary.displayName;
-    }
-    if (summary.kind == node.provider || summary.kind.isEmpty) {
-      return node.providerDisplayName;
-    }
-    return summary.kind;
-  }
-
-  static String _providerDisplayVersion(
-    NodeInfo node,
-    ProviderDefinitionSummary summary,
-  ) {
-    if (summary.version.isNotEmpty) {
-      return summary.version;
-    }
-    if (summary.kind == node.provider || summary.kind.isEmpty) {
-      return node.providerDisplayVersion;
-    }
-    return 'version unknown';
-  }
-
-  static String? _providerCommand(
-    NodeInfo node,
-    ProviderDefinitionSummary summary,
-  ) {
-    if (summary.config.command != null) {
-      return summary.config.command;
-    }
-    if (summary.defaultCommand.isNotEmpty) {
-      return summary.defaultCommand;
-    }
-    if (summary.kind == node.provider || summary.kind.isEmpty) {
-      return node.providerConfig.command;
-    }
-    return null;
-  }
-}
-
-class _ProviderDefinitionList extends StatelessWidget {
-  const _ProviderDefinitionList({
-    required this.currentProvider,
-    required this.selectedProvider,
-    required this.providers,
-    required this.onSelect,
-  });
-
-  final String currentProvider;
-  final String selectedProvider;
-  final List<ProviderDefinitionSummary> providers;
-  final ValueChanged<ProviderDefinitionSummary> onSelect;
-
-  @override
-  Widget build(BuildContext context) {
-    final colors = context.colors;
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          'Available agents',
-          style: Theme.of(context).textTheme.labelLarge?.copyWith(
-            color: colors.textSecondary,
-            fontWeight: AppWeights.title,
-          ),
-        ),
-        const SizedBox(height: 4),
-        Text(
-          'Choose one to see what it can do.',
-          style: Theme.of(
-            context,
-          ).textTheme.bodySmall?.copyWith(color: colors.textTertiary),
-        ),
-        const SizedBox(height: 8),
-        Wrap(
-          spacing: 8,
-          runSpacing: 8,
-          children: providers
-              .map((provider) {
-                final active = provider.kind == currentProvider;
-                final selected = provider.kind == selectedProvider;
-                return _ProviderSelectPill(
-                  label: active
-                      ? '${provider.displayName} in use'
-                      : provider.displayName,
-                  icon: active
-                      ? Icons.check_circle_rounded
-                      : Icons.circle_outlined,
-                  tone: selected
-                      ? (active ? MeshPillTone.success : MeshPillTone.accent)
-                      : MeshPillTone.neutral,
-                  selected: selected,
-                  onTap: () => onSelect(provider),
-                );
-              })
-              .toList(growable: false),
-        ),
-      ],
-    );
-  }
-}
-
-class _ProviderSelectPill extends StatelessWidget {
-  const _ProviderSelectPill({
-    required this.label,
-    required this.icon,
-    required this.tone,
-    required this.selected,
-    required this.onTap,
-  });
-
-  final String label;
-  final IconData icon;
-  final MeshPillTone tone;
-  final bool selected;
-  final VoidCallback? onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    return Material(
-      color: Colors.transparent,
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: AppShapes.pill,
-        child: AnimatedScale(
-          duration: const Duration(milliseconds: 140),
-          scale: selected ? 1.0 : 0.985,
-          child: MeshPill(label: label, icon: icon, tone: tone),
-        ),
-      ),
-    );
-  }
-}
-
-class _CapabilityMatrix extends StatelessWidget {
-  const _CapabilityMatrix({
-    required this.title,
-    required this.emptyText,
-    required this.groups,
-  });
-
-  final String title;
-  final String emptyText;
-  final List<_CapabilityGroup> groups;
-
-  @override
-  Widget build(BuildContext context) {
-    final colors = context.colors;
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          title,
-          style: Theme.of(context).textTheme.labelLarge?.copyWith(
-            color: colors.textSecondary,
-            fontWeight: AppWeights.title,
-          ),
-        ),
-        const SizedBox(height: 8),
-        if (groups.isEmpty)
-          Text(
-            emptyText,
-            style: Theme.of(
-              context,
-            ).textTheme.bodySmall?.copyWith(color: colors.textTertiary),
-          )
-        else
-          Column(
-            children: groups
-                .map(
-                  (group) => Padding(
-                    padding: const EdgeInsets.only(bottom: 8),
-                    child: _CapabilityGroupRow(group: group),
-                  ),
-                )
-                .toList(growable: false),
-          ),
-      ],
-    );
-  }
-}
-
-class _CapabilityGroupRow extends StatelessWidget {
-  const _CapabilityGroupRow({required this.group});
-
-  final _CapabilityGroup group;
-
-  @override
-  Widget build(BuildContext context) {
-    final colors = context.colors;
-    final allEnabled = group.enabledCount == group.totalCount;
-    return Container(
-      padding: const EdgeInsets.fromLTRB(10, 8, 10, 8),
-      decoration: BoxDecoration(
-        borderRadius: AppShapes.input,
-        border: Border.all(color: colors.border),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Icon(group.icon, size: 16, color: colors.accent),
-              const SizedBox(width: 8),
-              Expanded(
-                child: Text(
-                  group.title,
-                  style: Theme.of(context).textTheme.labelLarge?.copyWith(
-                    fontWeight: AppWeights.title,
-                  ),
-                ),
-              ),
-              MeshPill(
-                label: '${group.enabledCount}/${group.totalCount}',
-                tone: allEnabled ? MeshPillTone.success : MeshPillTone.warning,
-              ),
-            ],
-          ),
-          const SizedBox(height: 8),
-          Wrap(
-            spacing: 6,
-            runSpacing: 6,
-            children: group.features
-                .map((feature) {
-                  return MeshPill(
-                    label: feature.label,
-                    icon: feature.enabled
-                        ? Icons.check_rounded
-                        : Icons.remove_rounded,
-                    tone: feature.enabled
-                        ? MeshPillTone.success
-                        : MeshPillTone.neutral,
-                    bold: false,
-                  );
-                })
-                .toList(growable: false),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
 class _SectionHeader extends StatelessWidget {
   const _SectionHeader({
     required this.icon,
@@ -2030,39 +1637,10 @@ class _SectionHeader extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final colors = context.colors;
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(2, 0, 2, 0),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Icon(icon, size: 18, color: colors.textTertiary),
-          const SizedBox(width: 8),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  title,
-                  overflow: TextOverflow.ellipsis,
-                  style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                    fontWeight: AppWeights.title,
-                  ),
-                ),
-                const SizedBox(height: 2),
-                Text(
-                  subtitle,
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                  style: Theme.of(
-                    context,
-                  ).textTheme.bodySmall?.copyWith(color: colors.textSecondary),
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
+    return AppSectionHeader(
+      icon: icon,
+      title: title,
+      subtitle: subtitle,
     );
   }
 }
@@ -2781,6 +2359,7 @@ class _HostManagementCardState extends State<_HostManagementCard> {
 
         return MeshCard(
           tone: MeshCardTone.muted,
+          bordered: false,
           padding: EdgeInsets.zero,
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,

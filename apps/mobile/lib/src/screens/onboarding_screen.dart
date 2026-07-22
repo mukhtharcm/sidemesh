@@ -3,7 +3,6 @@ import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
-import '../api_client.dart';
 import '../host_store.dart';
 import '../models.dart';
 import '../onboarding_store.dart';
@@ -17,9 +16,7 @@ import 'pair_scanner_sheet.dart';
 
 Future<void> showOnboardingScreen(BuildContext context) {
   return Navigator.of(context).pushReplacement(
-    MaterialPageRoute<void>(
-      builder: (_) => const OnboardingScreen(),
-    ),
+    MaterialPageRoute<void>(builder: (_) => const OnboardingScreen()),
   );
 }
 
@@ -71,9 +68,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
     await OnboardingStore.instance.markCompleted();
     if (!mounted) return;
     await Navigator.of(context).pushReplacement(
-      MaterialPageRoute<void>(
-        builder: (_) => SidemeshHomeScreen(),
-      ),
+      MaterialPageRoute<void>(builder: (_) => SidemeshHomeScreen()),
     );
   }
 
@@ -121,16 +116,16 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                 mainAxisAlignment: MainAxisAlignment.end,
                 children: [
                   if (_pageIndex < _pageCount - 1)
-                TextButton(
-                    onPressed: _skipIntro,
-                    child: Text(
-                      'Go to setup',
-                      style: Theme.of(context).textTheme.labelLarge?.copyWith(
-                        color: colors.textSecondary,
-                        fontWeight: FontWeight.w600,
+                    TextButton(
+                      onPressed: _skipIntro,
+                      child: Text(
+                        'Go to setup',
+                        style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                          color: colors.textSecondary,
+                          fontWeight: FontWeight.w600,
+                        ),
                       ),
                     ),
-                  ),
                 ],
               ),
             ),
@@ -150,26 +145,27 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                           payload: _pairingSuccess!,
                         )
                       : _ConnectPage(
-                    colors: colors,
-                    onScanQr: () async {
-                      final payload = await showPairScannerSheet(context);
-                      if (payload != null) {
-                        await _onPairingResult(payload);
-                      }
-                    },
-                    onManualEntry: () async {
-                      final host = await showModalBottomSheet<HostProfile>(
-                        context: context,
-                        isScrollControlled: true,
-                        backgroundColor: Colors.transparent,
-                        builder: (_) => const _ManualHostSheet(),
-                      );
-                      if (host != null) {
-                        await _onManualHost(host);
-                      }
-                    },
-                    onSkip: _skip,
-                  ),
+                          colors: colors,
+                          onScanQr: () async {
+                            final payload = await showPairScannerSheet(context);
+                            if (payload != null) {
+                              await _onPairingResult(payload);
+                            }
+                          },
+                          onManualEntry: () async {
+                            final host = await Navigator.of(context)
+                                .push<HostProfile>(
+                                  MaterialPageRoute<HostProfile>(
+                                    builder: (_) =>
+                                        const HostEditorSheet(fullPage: true),
+                                  ),
+                                );
+                            if (host != null) {
+                              await _onManualHost(host);
+                            }
+                          },
+                          onSkip: _skip,
+                        ),
                 ],
               ),
             ),
@@ -192,9 +188,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                         width: active ? 24 : 8,
                         height: 8,
                         decoration: BoxDecoration(
-                          color: active
-                              ? colors.accent
-                              : colors.borderStrong,
+                          color: active ? colors.accent : colors.borderStrong,
                           borderRadius: BorderRadius.circular(4),
                         ),
                       );
@@ -269,15 +263,9 @@ class _WelcomePage extends StatelessWidget {
             decoration: BoxDecoration(
               color: colors.accentMuted,
               borderRadius: BorderRadius.circular(32),
-              border: Border.all(
-                color: colors.accent.withValues(alpha: 0.4),
-              ),
+              border: Border.all(color: colors.accent.withValues(alpha: 0.4)),
             ),
-            child: Icon(
-              Icons.hub_rounded,
-              size: 56,
-              color: colors.accent,
-            ),
+            child: Icon(Icons.hub_rounded, size: 56, color: colors.accent),
           ),
           const SizedBox(height: 40),
           Text(
@@ -367,8 +355,7 @@ class _HowItWorksPage extends StatelessWidget {
           _StepItem(
             number: '1',
             title: 'Install Sidemesh',
-            body:
-                'Run the setup commands on the machine you want to manage.',
+            body: 'Run the setup commands on the machine you want to manage.',
             colors: colors,
           ),
           const SizedBox(height: 16),
@@ -391,9 +378,9 @@ class _HowItWorksPage extends StatelessWidget {
           Text(
             'About a minute if you already have terminal access.',
             textAlign: TextAlign.center,
-            style: Theme.of(context).textTheme.bodySmall?.copyWith(
-              color: colors.textTertiary,
-            ),
+            style: Theme.of(
+              context,
+            ).textTheme.bodySmall?.copyWith(color: colors.textTertiary),
           ),
         ],
       ),
@@ -425,9 +412,7 @@ class _StepItem extends StatelessWidget {
           decoration: BoxDecoration(
             color: colors.accentMuted,
             borderRadius: BorderRadius.circular(8),
-            border: Border.all(
-              color: colors.accent.withValues(alpha: 0.4),
-            ),
+            border: Border.all(color: colors.accent.withValues(alpha: 0.4)),
           ),
           alignment: Alignment.center,
           child: Text(
@@ -542,9 +527,9 @@ class _ActionsPage extends StatelessWidget {
           Text(
             'Best first step: connect a machine and open one test session.',
             textAlign: TextAlign.center,
-            style: Theme.of(context).textTheme.bodySmall?.copyWith(
-              color: colors.textTertiary,
-            ),
+            style: Theme.of(
+              context,
+            ).textTheme.bodySmall?.copyWith(color: colors.textTertiary),
           ),
         ],
       ),
@@ -676,9 +661,7 @@ class _ConnectPage extends StatelessWidget {
             decoration: BoxDecoration(
               color: colors.accentMuted,
               borderRadius: BorderRadius.circular(22),
-              border: Border.all(
-                color: colors.accent.withValues(alpha: 0.4),
-              ),
+              border: Border.all(color: colors.accent.withValues(alpha: 0.4)),
             ),
             child: Icon(
               Icons.qr_code_scanner_rounded,
@@ -720,20 +703,11 @@ class _ConnectPage extends StatelessWidget {
                   ),
                 ),
                 const SizedBox(height: 10),
-                _CommandLine(
-                  text: 'npm install -g sidemesh',
-                  colors: colors,
-                ),
+                _CommandLine(text: 'npm install -g sidemesh', colors: colors),
                 const SizedBox(height: 6),
-                _CommandLine(
-                  text: 'sidemesh setup',
-                  colors: colors,
-                ),
+                _CommandLine(text: 'sidemesh setup', colors: colors),
                 const SizedBox(height: 6),
-                _CommandLine(
-                  text: 'sidemesh pair',
-                  colors: colors,
-                ),
+                _CommandLine(text: 'sidemesh pair', colors: colors),
                 const SizedBox(height: 12),
                 Text(
                   'If the machine is already set up, you can scan the pairing code right away or add it manually.',
@@ -764,10 +738,7 @@ class _ConnectPage extends StatelessWidget {
                 onPressed: onManualEntry,
                 child: const Text('Add manually'),
               ),
-              Text(
-                ' · ',
-                style: TextStyle(color: colors.textTertiary),
-              ),
+              Text(' · ', style: TextStyle(color: colors.textTertiary)),
               TextButton(
                 onPressed: onSkip,
                 child: const Text('I\'ll do this later'),
@@ -797,175 +768,15 @@ class _CommandLine extends StatelessWidget {
       ),
       child: Row(
         children: [
-          Text(
-            '\$',
-            style: monoStyle(
-              color: colors.accent,
-              fontSize: 12,
-            ),
-          ),
+          Text('\$', style: monoStyle(color: colors.accent, fontSize: 12)),
           const SizedBox(width: 8),
           Expanded(
             child: Text(
               text,
-              style: monoStyle(
-                color: colors.codeForeground,
-                fontSize: 12,
-              ),
+              style: monoStyle(color: colors.codeForeground, fontSize: 12),
             ),
           ),
         ],
-      ),
-    );
-  }
-}
-
-// ---------------------------------------------------------------------------
-// Manual host entry sheet
-// ---------------------------------------------------------------------------
-
-class _ManualHostSheet extends StatefulWidget {
-  const _ManualHostSheet();
-
-  @override
-  State<_ManualHostSheet> createState() => _ManualHostSheetState();
-}
-
-class _ManualHostSheetState extends State<_ManualHostSheet> {
-  final _labelController = TextEditingController();
-  final _baseUrlController = TextEditingController();
-  final _tokenController = TextEditingController();
-  String? _error;
-
-  @override
-  void dispose() {
-    _labelController.dispose();
-    _baseUrlController.dispose();
-    _tokenController.dispose();
-    super.dispose();
-  }
-
-  void _submit() {
-    final label = _labelController.text.trim();
-    final baseUrl = _baseUrlController.text.trim();
-    final token = _tokenController.text.trim();
-
-    if (label.isEmpty || baseUrl.isEmpty || token.isEmpty) {
-      setState(() => _error = 'All fields are required.');
-      return;
-    }
-
-    // Simple URL validation
-    final uri = Uri.tryParse(baseUrl);
-    if (uri == null ||
-        (uri.scheme != 'http' && uri.scheme != 'https') ||
-        uri.host.isEmpty) {
-      setState(() => _error = 'Enter a valid http:// or https:// URL.');
-      return;
-    }
-    final browserIssue = browserHostUrlIssue(baseUrl);
-    if (browserIssue != null) {
-      setState(() => _error = browserIssue);
-      return;
-    }
-
-    Navigator.of(context).pop(
-      HostProfile(
-        id: _randomId(),
-        label: label,
-        baseUrl: baseUrl.endsWith('/')
-            ? baseUrl.substring(0, baseUrl.length - 1)
-            : baseUrl,
-        token: token,
-        enabled: true,
-      ),
-    );
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final colors = context.colors;
-    final bottom = MediaQuery.of(context).viewInsets.bottom;
-
-    return Align(
-      alignment: Alignment.bottomCenter,
-      child: Padding(
-        padding: EdgeInsets.fromLTRB(16, 8, 16, bottom + 16),
-        child: MeshCard(
-          tone: MeshCardTone.elevated,
-          child: SafeArea(
-            top: false,
-            child: SingleChildScrollView(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  Row(
-                    children: [
-                      Text(
-                        'Add a machine manually',
-                        style: Theme.of(context)
-                            .textTheme
-                            .titleLarge
-                            ?.copyWith(fontWeight: FontWeight.w800),
-                      ),
-                      const Spacer(),
-                      MeshIconButton(
-                        icon: Icons.close_rounded,
-                        onTap: () => Navigator.of(context).pop(),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 16),
-                  TextField(
-                    controller: _labelController,
-                    decoration: const InputDecoration(
-                      labelText: 'Machine name',
-                      hintText: 'Work MacBook',
-                    ),
-                    textInputAction: TextInputAction.next,
-                  ),
-                  const SizedBox(height: 10),
-                  TextField(
-                    controller: _baseUrlController,
-                    decoration: const InputDecoration(
-                      labelText: 'Machine address',
-                      hintText: 'https://myhost.tailnet:3000',
-                    ),
-                    keyboardType: TextInputType.url,
-                    textInputAction: TextInputAction.next,
-                  ),
-                  const SizedBox(height: 10),
-                  TextField(
-                    controller: _tokenController,
-                    decoration: const InputDecoration(
-                      labelText: 'Access token',
-                      hintText: 'Paste from sidemesh setup',
-                    ),
-                    obscureText: true,
-                    textInputAction: TextInputAction.done,
-                    onSubmitted: (_) => _submit(),
-                  ),
-                  if (_error != null) ...[
-                    const SizedBox(height: 10),
-                    Text(
-                      _error!,
-                      style: TextStyle(
-                        color: colors.danger,
-                        fontSize: 13,
-                      ),
-                    ),
-                  ],
-                  const SizedBox(height: 16),
-                  FilledButton(
-                    onPressed: _submit,
-                    child: const Text('Add machine'),
-                  ),
-                ],
-              ),
-            ),
-          ),
-        ),
       ),
     );
   }
@@ -1008,11 +819,7 @@ class _PairingSuccessPage extends StatelessWidget {
               color: colors.successMuted,
               shape: BoxShape.circle,
             ),
-            child: Icon(
-              Icons.check_rounded,
-              size: 40,
-              color: colors.success,
-            ),
+            child: Icon(Icons.check_rounded, size: 40, color: colors.success),
           ),
           const SizedBox(height: 28),
           Text(
@@ -1028,9 +835,9 @@ class _PairingSuccessPage extends StatelessWidget {
           Text(
             payload.label,
             textAlign: TextAlign.center,
-            style: Theme.of(context).textTheme.titleMedium?.copyWith(
-              fontWeight: AppWeights.title,
-            ),
+            style: Theme.of(
+              context,
+            ).textTheme.titleMedium?.copyWith(fontWeight: AppWeights.title),
           ),
           const SizedBox(height: 4),
           Text(
@@ -1042,9 +849,9 @@ class _PairingSuccessPage extends StatelessWidget {
           Text(
             'Ready to open sessions on this machine.',
             textAlign: TextAlign.center,
-            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-              color: colors.textSecondary,
-            ),
+            style: Theme.of(
+              context,
+            ).textTheme.bodyMedium?.copyWith(color: colors.textSecondary),
           ),
         ],
       ),

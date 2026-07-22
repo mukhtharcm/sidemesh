@@ -11,6 +11,7 @@ import '../../models.dart';
 import '../../theme/app_colors.dart';
 import '../../theme/app_theme.dart';
 import '../../theme/app_tokens.dart';
+import '../../widgets/app_primitives.dart';
 import '../../widgets/app_snackbar.dart';
 import '../../widgets/mesh_widgets.dart';
 import '../image_viewer_screen.dart';
@@ -346,7 +347,16 @@ class _SessionResourcesPanelState extends State<SessionResourcesPanel> {
         child: ListView.separated(
           padding: const EdgeInsets.fromLTRB(14, 4, 14, 18),
           itemCount: resources.length,
-          separatorBuilder: (_, _) => const SizedBox(height: 10),
+          separatorBuilder: (context, index) {
+            if (resources[index].isImage || resources[index + 1].isImage) {
+              return const SizedBox(height: AppSpacing.md);
+            }
+            return Divider(
+              height: 1,
+              indent: AppSizes.iconWell + AppSpacing.sm,
+              color: context.colors.border,
+            );
+          },
           itemBuilder: (context, index) {
             final resource = resources[index];
             if (resource.isImage) {
@@ -378,7 +388,11 @@ class _SessionResourcesPanelState extends State<SessionResourcesPanel> {
       child: ListView.separated(
         padding: const EdgeInsets.fromLTRB(14, 4, 14, 18),
         itemCount: resources.length,
-        separatorBuilder: (_, _) => const SizedBox(height: 10),
+        separatorBuilder: (context, _) => Divider(
+          height: 1,
+          indent: AppSizes.iconWell + AppSpacing.sm,
+          color: context.colors.border,
+        ),
         itemBuilder: (context, index) => _ResourceListCard(
           resource: resources[index],
           sessionCwd: widget.session.cwd,
@@ -455,104 +469,46 @@ class _ResourceListCard extends StatelessWidget {
       onTap = () => onOpenFile(path!);
     }
 
-    return MeshCard(
-      tone: MeshCardTone.surface,
-      padding: EdgeInsets.zero,
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: AppShapes.input,
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Container(
-                width: 38,
-                height: 38,
-                decoration: BoxDecoration(
-                  color: colors.surfaceMuted,
-                  borderRadius: AppShapes.input,
-                  border: Border.all(color: colors.border),
-                ),
-                alignment: Alignment.center,
-                child: Icon(
-                  _resourceIcon(resource, preferFileOpen: preferFileOpen),
-                  size: 18,
-                  color: colors.accent,
-                ),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      resource.title,
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                      style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                        fontWeight: AppWeights.emphasis,
-                        height: 1.3,
-                      ),
-                    ),
-                    if ((resource.subtitle ?? '').trim().isNotEmpty) ...[
-                      const SizedBox(height: 4),
-                      Text(
-                        resource.subtitle!,
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
-                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                          color: colors.textSecondary,
-                          height: 1.35,
-                        ),
-                      ),
-                    ],
-                    const SizedBox(height: 8),
-                    Wrap(
-                      spacing: 8,
-                      runSpacing: 6,
-                      children: [
-                        MeshPill(
-                          label: _sourceLabel(resource),
-                          tone: MeshPillTone.info,
-                          mono: true,
-                        ),
-                        MeshPill(
-                          label: _formatTimestamp(resource.createdAt),
-                          mono: true,
-                        ),
-                      ],
-                    ),
-                    if ((path ?? '').isNotEmpty) ...[
-                      const SizedBox(height: 8),
-                      Text(
-                        _relativeSessionPath(path!, sessionCwd),
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
-                        style: monoStyle(
-                          color: colors.textTertiary,
-                          fontSize: 10.5,
-                        ),
-                      ),
-                    ] else if ((href ?? '').isNotEmpty) ...[
-                      const SizedBox(height: 8),
-                      Text(
-                        href!,
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
-                        style: monoStyle(
-                          color: colors.textTertiary,
-                          fontSize: 10.5,
-                        ),
-                      ),
-                    ],
-                  ],
-                ),
-              ),
-            ],
-          ),
-        ),
+    final location = (path ?? '').isNotEmpty
+        ? _relativeSessionPath(path!, sessionCwd)
+        : href;
+    return MeshListRow(
+      onTap: onTap,
+      framed: false,
+      leading: AppIconWell(
+        icon: _resourceIcon(resource, preferFileOpen: preferFileOpen),
       ),
+      title: Text(resource.title, maxLines: 2, overflow: TextOverflow.ellipsis),
+      subtitle: (resource.subtitle ?? '').trim().isEmpty
+          ? null
+          : Text(
+              resource.subtitle!.trim(),
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+            ),
+      badges: [
+        MeshPill(
+          label: _sourceLabel(resource),
+          tone: MeshPillTone.info,
+          mono: true,
+        ),
+        MeshPill(label: _formatTimestamp(resource.createdAt), mono: true),
+      ],
+      meta: location == null || location.isEmpty
+          ? null
+          : Text(
+              location,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: monoStyle(color: colors.textTertiary, fontSize: 10.5),
+            ),
+      trailing: onTap == null
+          ? null
+          : Icon(
+              Icons.chevron_right_rounded,
+              size: AppSizes.icon,
+              color: colors.textTertiary,
+            ),
     );
   }
 }
@@ -835,11 +791,12 @@ class _LocalResourceImageState extends State<_LocalResourceImage> {
       _error = null;
     });
     try {
-      final imageProvider = await ImageBlobCacheStore.instance.loadImageProvider(
-        host: widget.host,
-        path: widget.path,
-        api: widget.api,
-      );
+      final imageProvider = await ImageBlobCacheStore.instance
+          .loadImageProvider(
+            host: widget.host,
+            path: widget.path,
+            api: widget.api,
+          );
       if (!mounted || gen != _loadGeneration) return;
       setState(() => _imageProvider = imageProvider);
     } catch (error) {

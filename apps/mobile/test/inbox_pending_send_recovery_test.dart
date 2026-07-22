@@ -48,6 +48,15 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(find.text('Use current host'), findsOneWidget);
+      expect(find.text('Discard'), findsNothing);
+      expect(find.byTooltip('More actions'), findsOneWidget);
+
+      await tester.tap(find.byTooltip('More actions'));
+      await tester.pumpAndSettle();
+      expect(find.text('Discard'), findsOneWidget);
+      await tester.tapAt(const Offset(4, 4));
+      await tester.pumpAndSettle();
+
       await tester.tap(find.text('Use current host'));
       await tester.pumpAndSettle();
 

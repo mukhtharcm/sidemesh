@@ -85,7 +85,12 @@ enum SandboxMode {
 /// turn.
 @immutable
 class SessionPolicy {
-  const SessionPolicy({this.approval, this.sandbox, this.networkAccess});
+  const SessionPolicy({
+    this.approval,
+    this.sandbox,
+    this.networkAccess,
+    this.accessMode,
+  });
 
   final ApprovalPolicy? approval;
   final SandboxMode? sandbox;
@@ -93,14 +98,19 @@ class SessionPolicy {
   /// Optional outbound network toggle. Meaningful for `read-only` and
   /// `workspace-write`; `danger-full-access` always allows network regardless.
   final bool? networkAccess;
+  final String? accessMode;
 
   bool get isEmpty =>
-      approval == null && sandbox == null && networkAccess == null;
+      approval == null &&
+      sandbox == null &&
+      networkAccess == null &&
+      accessMode == null;
 
   SessionPolicy copyWith({
     Object? approval = _sentinel,
     Object? sandbox = _sentinel,
     Object? networkAccess = _sentinel,
+    Object? accessMode = _sentinel,
   }) {
     return SessionPolicy(
       approval: identical(approval, _sentinel)
@@ -112,6 +122,9 @@ class SessionPolicy {
       networkAccess: identical(networkAccess, _sentinel)
           ? this.networkAccess
           : networkAccess as bool?,
+      accessMode: identical(accessMode, _sentinel)
+          ? this.accessMode
+          : accessMode as String?,
     );
   }
 
@@ -121,12 +134,14 @@ class SessionPolicy {
     ...?networkAccess == null
         ? null
         : <String, Object>{'networkAccess': networkAccess!},
+    'accessMode': ?accessMode,
   };
 
   factory SessionPolicy.fromJson(Map<String, dynamic> json) => SessionPolicy(
     approval: ApprovalPolicy.fromWire(json['approval'] as String?),
     sandbox: SandboxMode.fromWire(json['sandbox'] as String?),
     networkAccess: json['networkAccess'] as bool?,
+    accessMode: json['accessMode'] as String?,
   );
 
   static SessionPolicy get factoryDefaults => const SessionPolicy(

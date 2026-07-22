@@ -26,6 +26,7 @@ void main() {
       final loaded = await store.loadForSession(host, 'session-1');
       expect(loaded, hasLength(1));
       expect(loaded.single.clientMessageId, 'local-1');
+      expect(loaded.single.accessMode, 'guarded');
 
       await store.remove(loaded.single);
       expect(await store.loadForSession(host, 'session-1'), isEmpty);
@@ -157,5 +158,6 @@ PendingSessionSend _pendingSend(
     updatedAt: now,
     nextAttemptAt: now,
     retryCount: 0,
+    accessMode: 'guarded',
   );
 }

@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 
 import { CodexAgentProvider } from "./codex-provider.js";
+import { AgentProviderRequestError } from "./agent-provider.js";
 import type {
   AgentSessionResumeOptions,
   AgentSubmitInputRequest,
@@ -49,6 +50,234 @@ function createThread(): ThreadRecord {
 }
 
 describe("codex provider usage observations", () => {
+  it("lists native permission profiles and reviewer choices", async () => {
+    const provider = new CodexAgentProvider("codex") as any;
+    const requests: Array<{ method: string; params: unknown }> = [];
+    provider.bridge = {
+      request: async (method: string, params: unknown) => {
+        requests.push({ method, params });
+        if (method === "configRequirements/read") {
+          return { requirements: null };
+        }
+        if (method === "experimentalFeature/list") {
+          return {
+            data: [{ name: "guardian_approval", enabled: true }],
+            nextCursor: null,
+          };
+        }
+        if (method === "config/read") {
+          return {
+            config: {
+              default_permissions: ":workspace",
+              approval_policy: "on-request",
+              approvals_reviewer: "auto_review",
+            },
+          };
+        }
+        return {
+          data: [
+            {
+              id: ":workspace",
+              description: "Read and write the current workspace.",
+              allowed: true,
+            },
+            {
+              id: ":danger-full-access",
+              description: "Unrestricted access.",
+              allowed: false,
+            },
+          ],
+          nextCursor: null,
+        };
+      },
+    };
+
+    const catalog = await provider.listPermissionProfiles({ cwd: "/tmp/project" });
+
+    assert.deepEqual(requests, [
+      {
+        method: "permissionProfile/list",
+        params: { cwd: "/tmp/project", cursor: null, limit: 100 },
+      },
+      { method: "configRequirements/read", params: undefined },
+      {
+        method: "experimentalFeature/list",
+        params: { cursor: null, limit: 100 },
+      },
+      { method: "config/read", params: { cwd: "/tmp/project" } },
+    ]);
+    assert.deepEqual(catalog.profiles, [
+      {
+        id: ":workspace",
+        label: "Workspace",
+        description: "Read and write the current workspace.",
+        allowed: true,
+      },
+      {
+        id: ":danger-full-access",
+        label: "Full access",
+        description: "Unrestricted access.",
+        allowed: false,
+      },
+    ]);
+    assert.deepEqual(
+      catalog.reviewerOptions.map((option: { id: string }) => option.id),
+      ["user", "auto_review"],
+    );
+    assert.deepEqual(
+      catalog.modes.map((mode: { id: string }) => mode.id),
+      ["ask-for-approval", "approve-for-me", "custom"],
+    );
+    assert.equal(catalog.defaultMode, "approve-for-me");
+  });
+
+  it("respects managed reviewer constraints in permission modes", async () => {
+    const provider = new CodexAgentProvider("codex") as any;
+    provider.bridge = {
+      request: async (method: string) => {
+        if (method === "permissionProfile/list") {
+          return {
+            data: [
+              { id: ":workspace", allowed: true },
+              { id: ":danger-full-access", allowed: true },
+            ],
+            nextCursor: null,
+          };
+        }
+        if (method === "configRequirements/read") {
+          return { requirements: { allowedApprovalsReviewers: ["user"] } };
+        }
+        if (method === "experimentalFeature/list") {
+          return {
+            data: [{ name: "guardian_approval", enabled: true }],
+            nextCursor: null,
+          };
+        }
+        return { config: {} };
+      },
+    };
+
+    const catalog = await provider.listPermissionProfiles({ cwd: null });
+
+    assert.deepEqual(
+      catalog.modes.map((mode: { id: string }) => mode.id),
+      ["ask-for-approval", "full-access", "custom"],
+    );
+    assert.deepEqual(
+      catalog.reviewerOptions.map((option: { id: string }) => option.id),
+      ["user"],
+    );
+  });
+
+  it("publishes opaque access modes without leaking native permission tuples", async () => {
+    const provider = new CodexAgentProvider("codex") as any;
+    provider.bridge = {
+      request: async (method: string) => {
+        if (method === "permissionProfile/list") {
+          return {
+            data: [
+              { id: ":workspace", allowed: true },
+              { id: ":danger-full-access", allowed: true },
+            ],
+            nextCursor: null,
+          };
+        }
+        if (method === "configRequirements/read") {
+          return { requirements: null };
+        }
+        if (method === "experimentalFeature/list") {
+          return {
+            data: [{ name: "guardian_approval", enabled: true }],
+            nextCursor: null,
+          };
+        }
+        return {
+          config: {
+            default_permissions: ":workspace",
+            approval_policy: "on-request",
+            approvals_reviewer: "user",
+          },
+        };
+      },
+    };
+
+    const catalog = await provider.listAccessModes({ cwd: "/tmp/project" });
+
+    assert.equal(catalog.strategy, "modes");
+    assert.equal(catalog.defaultMode, "ask-for-approval");
+    assert.deepEqual(
+      catalog.modes.map(
+        (mode: {
+          id: string;
+          enabled: boolean;
+          tone: string;
+          confirmation: unknown;
+        }) => ({
+          id: mode.id,
+          enabled: mode.enabled,
+          tone: mode.tone,
+          hasConfirmation: mode.confirmation !== null,
+        }),
+      ),
+      [
+        {
+          id: "ask-for-approval",
+          enabled: true,
+          tone: "default",
+          hasConfirmation: false,
+        },
+        {
+          id: "approve-for-me",
+          enabled: true,
+          tone: "default",
+          hasConfirmation: false,
+        },
+        {
+          id: "full-access",
+          enabled: true,
+          tone: "danger",
+          hasConfirmation: true,
+        },
+        {
+          id: "custom",
+          enabled: true,
+          tone: "default",
+          hasConfirmation: false,
+        },
+      ],
+    );
+    for (const mode of catalog.modes) {
+      assert.equal("permissionProfile" in mode, false);
+      assert.equal("approvalPolicy" in mode, false);
+      assert.equal("approvalsReviewer" in mode, false);
+    }
+  });
+
+  it("describes built-in permission profiles when Codex omits descriptions", async () => {
+    const provider = new CodexAgentProvider("codex") as any;
+    provider.bridge = {
+      request: async () => ({
+        data: [
+          { id: ":read-only", description: null, allowed: true },
+          { id: ":danger-full-access", description: null, allowed: true },
+        ],
+        nextCursor: null,
+      }),
+    };
+
+    const catalog = await provider.listPermissionProfiles({ cwd: null });
+
+    assert.deepEqual(
+      catalog.profiles.map(
+        (profile: { description: string | null }) => profile.description,
+      ),
+      [
+        "Inspect files and run safe read-only commands without making changes.",
+        "Access files and commands across the machine without sandbox limits.",
+      ],
+    );
+  });
+
   it("normalizes account rate-limit RPC data", async () => {
     const provider = new CodexAgentProvider("codex") as any;
     const requests: Array<{ method: string; params: unknown }> = [];
@@ -365,6 +594,157 @@ describe("codex provider resume runtime restore", () => {
         model_reasoning_effort: "high",
       },
     });
+  });
+
+  it("uses native permission profiles instead of legacy sandbox controls", async () => {
+    const provider = new CodexAgentProvider("codex") as any;
+    const thread = createThread();
+    let resumeOptions: AgentSessionResumeOptions | undefined;
+    const bridgeCalls: Array<{ method: string; params: unknown }> = [];
+
+    provider.isSessionThreadLoaded = async () => false;
+    provider.readSessionThread = async () => thread;
+    provider.readSessionRuntime = async () => ({
+      permissionProfile: ":workspace",
+      approvalsReviewer: "user",
+      approvalPolicy: "on-request",
+      sandboxMode: "workspace-write",
+    });
+    provider.resumeSessionThread = async (
+      _threadId: string,
+      options?: AgentSessionResumeOptions,
+    ) => {
+      resumeOptions = options;
+      return {};
+    };
+    provider.bridge = {
+      request: async (method: string, params: unknown) => {
+        bridgeCalls.push({ method, params });
+        return { turn: { id: "turn-1" } };
+      },
+    };
+
+    await provider.submitInput(
+      createSubmitRequest({
+        permissionProfile: ":full-access",
+        approvalsReviewer: "auto_review",
+        approvalPolicy: "never",
+        sandboxMode: "danger-full-access",
+      }),
+    );
+
+    assert.deepEqual(resumeOptions, {
+      persistExtendedHistory: true,
+      permissions: ":full-access",
+      approvalPolicy: "never",
+      approvalsReviewer: "auto_review",
+    });
+    assert.deepEqual(bridgeCalls, [
+      {
+        method: "turn/start",
+        params: {
+          threadId: "thread-1",
+          input: [{ type: "text", text: "ping", text_elements: [] }],
+          permissions: ":full-access",
+          approvalPolicy: "never",
+          approvalsReviewer: "auto_review",
+        },
+      },
+    ]);
+  });
+
+  it("resolves an opaque access mode inside the provider adapter", async () => {
+    const provider = new CodexAgentProvider("codex") as any;
+    const bridgeCalls: Array<{ method: string; params: unknown }> = [];
+
+    provider.readSessionThread = async () => createThread();
+    provider.isSessionThreadLoaded = async () => true;
+    provider.bridge = {
+      request: async (method: string, params: unknown) => {
+        bridgeCalls.push({ method, params });
+        if (method === "permissionProfile/list") {
+          return {
+            data: [
+              { id: ":workspace", allowed: true },
+              { id: ":danger-full-access", allowed: true },
+            ],
+            nextCursor: null,
+          };
+        }
+        if (method === "configRequirements/read") {
+          return { requirements: null };
+        }
+        if (method === "experimentalFeature/list") {
+          return { data: [], nextCursor: null };
+        }
+        if (method === "config/read") {
+          return { config: {} };
+        }
+        return { turn: { id: "turn-1" } };
+      },
+    };
+
+    await provider.submitInput(
+      createSubmitRequest({ accessMode: "full-access" }),
+    );
+
+    assert.deepEqual(bridgeCalls.at(-1), {
+      method: "turn/start",
+      params: {
+        threadId: "thread-1",
+        input: [{ type: "text", text: "ping", text_elements: [] }],
+        permissions: ":danger-full-access",
+        approvalPolicy: "never",
+        approvalsReviewer: "user",
+      },
+    });
+  });
+
+  it("rejects access modes that are unavailable for the current workspace", async () => {
+    const provider = new CodexAgentProvider("codex") as any;
+    let turnStarted = false;
+
+    provider.readSessionThread = async () => createThread();
+    provider.isSessionThreadLoaded = async () => true;
+    provider.bridge = {
+      request: async (method: string) => {
+        if (method === "permissionProfile/list") {
+          return {
+            data: [
+              { id: ":workspace", allowed: true },
+              { id: ":danger-full-access", allowed: false },
+            ],
+            nextCursor: null,
+          };
+        }
+        if (method === "configRequirements/read") {
+          return { requirements: null };
+        }
+        if (method === "experimentalFeature/list") {
+          return { data: [], nextCursor: null };
+        }
+        if (method === "config/read") {
+          return { config: {} };
+        }
+        if (method === "turn/start") {
+          turnStarted = true;
+        }
+        return { turn: { id: "turn-1" } };
+      },
+    };
+
+    await assert.rejects(
+      provider.submitInput(
+        createSubmitRequest({ accessMode: "full-access" }),
+      ),
+      (error) => {
+        assert.ok(error instanceof AgentProviderRequestError);
+        assert.equal(error.status, 400);
+        assert.match(error.message, /access mode is unavailable/);
+        return true;
+      },
+    );
+    assert.equal(turnStarted, false);
   });
 
   it("forwards advertised reasoning efforts and drops removed approval policies", async () => {

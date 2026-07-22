@@ -22,6 +22,22 @@ abstract final class AppSpacing {
   static const double xxl = 32;
 }
 
+/// Canonical component geometry. Screen code should not invent control,
+/// leading-icon, or content-width values when one of these roles applies.
+abstract final class AppSizes {
+  static const double mobileGutter = AppSpacing.lg;
+  static const double desktopGutter = AppSpacing.xl;
+  static const double control = 48;
+  static const double compactControl = 36;
+  static const double rowMinHeight = 56;
+  static const double icon = 20;
+  static const double compactIcon = 16;
+  static const double iconWell = 32;
+  static const double emptyIconWell = 56;
+  static const double contentMaxWidth = 840;
+  static const double readingMaxWidth = 680;
+}
+
 abstract final class AppRadii {
   /// Badges, compact chips, and tiny action targets.
   static const double badge = 8;
@@ -56,13 +72,16 @@ abstract final class AppRadii {
 
 abstract final class AppWeights {
   /// Default body text.
-  static const FontWeight body = FontWeight.w500;
+  static const FontWeight body = FontWeight.w400;
 
   /// Emphasized body / metadata / pill labels.
-  static const FontWeight emphasis = FontWeight.w600;
+  static const FontWeight emphasis = FontWeight.w500;
 
   /// Titles and primary buttons.
-  static const FontWeight title = FontWeight.w700;
+  static const FontWeight title = FontWeight.w600;
+
+  /// Reserved for page titles and rare high-emphasis values.
+  static const FontWeight strong = FontWeight.w700;
 }
 
 abstract final class AppLetterSpacing {
@@ -128,5 +147,21 @@ abstract final class AppPadding {
   static const EdgeInsets pill = EdgeInsets.symmetric(
     horizontal: AppSpacing.md,
     vertical: AppSpacing.xs,
+  );
+  static const EdgeInsets mobilePage = EdgeInsets.fromLTRB(
+    AppSizes.mobileGutter,
+    AppSpacing.sm,
+    AppSizes.mobileGutter,
+    AppSpacing.xxl,
+  );
+  static const EdgeInsets desktopPage = EdgeInsets.fromLTRB(
+    AppSizes.desktopGutter,
+    AppSpacing.lg,
+    AppSizes.desktopGutter,
+    AppSpacing.xxl,
+  );
+  static const EdgeInsets listRow = EdgeInsets.symmetric(
+    horizontal: AppSpacing.md,
+    vertical: AppSpacing.md,
   );
 }

@@ -173,6 +173,39 @@ void main() {
     expect(overrides.model, 'gpt-5.1');
     expect(overrides.reasoningEffort, 'high');
   });
+
+  test('provider access modes replace legacy access overrides', () {
+    final overrides = normalizeSessionSendOverrides(
+      turnConfig: const SessionTurnConfig(),
+      policy: const SessionPolicy(
+        approval: ApprovalPolicy.never,
+        sandbox: SandboxMode.dangerFullAccess,
+        networkAccess: true,
+        accessMode: 'unrestricted',
+      ),
+      runtime: const SessionRuntimeSummary(accessMode: 'guarded'),
+      nodeInfo: _nodeForProvider(
+        kind: 'codex',
+        supportedApprovalPolicies: const <String>[
+          'untrusted',
+          'on-request',
+          'never',
+        ],
+        runtimeControls: const <String, bool>{
+          'approvalPolicy': true,
+          'sandboxMode': true,
+          'networkAccess': true,
+          'accessMode': true,
+        },
+      ),
+      providerKind: 'codex',
+    );
+
+    expect(overrides.accessMode, 'unrestricted');
+    expect(overrides.approvalPolicy, isNull);
+    expect(overrides.sandboxMode, isNull);
+    expect(overrides.networkAccess, isNull);
+  });
 }
 
 NodeInfo _nodeForProvider({

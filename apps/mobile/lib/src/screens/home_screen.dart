@@ -31,6 +31,7 @@ import '../theme/color_contrast.dart';
 import '../theme/app_theme.dart';
 import '../theme/app_tokens.dart';
 import '../widgets/app_sheets.dart';
+import '../widgets/app_primitives.dart';
 import '../widgets/app_snackbar.dart';
 import '../widgets/mesh_widgets.dart';
 import '../widgets/session_row_card.dart';
@@ -88,6 +89,7 @@ class _SidemeshHomeScreenState extends State<SidemeshHomeScreen>
   List<HostProfile> _hosts = const [];
   bool _loading = true;
   int _tabIndex = 0;
+  bool _searchExpanded = false;
   int _activeCount = 0;
   int _inboxCount = 0;
   String _query = '';
@@ -286,11 +288,13 @@ class _SidemeshHomeScreenState extends State<SidemeshHomeScreen>
   }
 
   Future<void> _showHostEditor({HostProfile? initialHost}) async {
-    final result = await showModalBottomSheet<HostProfile>(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      builder: (context) => HostEditorSheet(initialHost: initialHost),
+    final result = await Navigator.of(context).push<HostProfile>(
+      MaterialPageRoute<HostProfile>(
+        builder: (context) => HostEditorSheet(
+          initialHost: initialHost,
+          fullPage: true,
+        ),
+      ),
     );
     if (result == null) {
       return;
@@ -554,7 +558,7 @@ class _SidemeshHomeScreenState extends State<SidemeshHomeScreen>
     );
   }
 
-  _HomePrimaryAction _primaryActionForTab(_TabDef tab) {
+  _HomePrimaryAction? _primaryActionForTab(_TabDef tab) {
     if (_hosts.isEmpty || tab.title == 'Hosts') {
       return _HomePrimaryAction(
         label: 'Add host',
@@ -568,6 +572,9 @@ class _SidemeshHomeScreenState extends State<SidemeshHomeScreen>
         icon: Icons.hub_rounded,
         onTap: () => setState(() => _tabIndex = 3),
       );
+    }
+    if (tab.title == 'Inbox' || tab.title == 'Usage') {
+      return null;
     }
     return _HomePrimaryAction(
       label: 'New session',
@@ -600,6 +607,14 @@ class _SidemeshHomeScreenState extends State<SidemeshHomeScreen>
               primaryAction: primaryAction,
               searchController: _searchController,
               searchVisible: _searchVisibleForTab(tab, enabledHosts.length),
+              searchExpanded:
+                  _searchExpanded || _query.isNotEmpty,
+              onToggleSearch: () => setState(() {
+                _searchExpanded = !_searchExpanded;
+                if (!_searchExpanded && _query.isEmpty) {
+                  FocusManager.instance.primaryFocus?.unfocus();
+                }
+              }),
               recentFilters: _tabIndex == 0 ? _recentFilters : null,
               onRunningOnlyChanged: _tabIndex == 0
                   ? _toggleRecentRunningOnly
@@ -695,19 +710,13 @@ class _SidemeshHomeScreenState extends State<SidemeshHomeScreen>
           ],
         ),
       ),
-      floatingActionButton: _tabIndex == 3 && _hosts.isNotEmpty
-          ? FloatingActionButton.extended(
-              onPressed: () => _showHostEditor(),
-              icon: const Icon(Icons.add_link_rounded),
-              label: const Text('Add host'),
-            )
-          : null,
       bottomNavigationBar: _MeshNavBar(
         tabs: _tabs,
         currentIndex: _tabIndex,
         onTap: (index) {
           setState(() {
             _tabIndex = index;
+            _searchExpanded = false;
             final tab = _tabs[index];
             final showSearch = _searchVisibleForTab(tab, _enabledHosts.length);
             if (!showSearch &&
@@ -874,6 +883,8 @@ class _HomeStickyHeader extends StatelessWidget {
     required this.primaryAction,
     required this.searchController,
     required this.searchVisible,
+    required this.searchExpanded,
+    required this.onToggleSearch,
     required this.recentFilters,
     required this.onRunningOnlyChanged,
     required this.onUnreadOnlyChanged,
@@ -883,9 +894,11 @@ class _HomeStickyHeader extends StatelessWidget {
   });
 
   final _TabDef tab;
-  final _HomePrimaryAction primaryAction;
+  final _HomePrimaryAction? primaryAction;
   final TextEditingController searchController;
   final bool searchVisible;
+  final bool searchExpanded;
+  final VoidCallback onToggleSearch;
   final RecentSessionFilters? recentFilters;
   final ValueChanged<bool>? onRunningOnlyChanged;
   final ValueChanged<bool>? onUnreadOnlyChanged;
@@ -898,10 +911,10 @@ class _HomeStickyHeader extends StatelessWidget {
     final colors = context.colors;
     return Padding(
       padding: const EdgeInsets.fromLTRB(
-        AppSpacing.lg,
-        AppSpacing.xs,
-        AppSpacing.md,
-        AppSpacing.xs,
+        AppSizes.mobileGutter,
+        AppSpacing.sm,
+        AppSizes.mobileGutter,
+        AppSpacing.sm,
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -917,23 +930,40 @@ class _HomeStickyHeader extends StatelessWidget {
                       tab.title,
                       style: Theme.of(context).textTheme.titleLarge?.copyWith(
                         color: colors.textPrimary,
-                        fontWeight: AppWeights.title,
+                        fontWeight: AppWeights.strong,
                       ),
                     ),
                   ],
                 ),
               ),
-              const SizedBox(width: AppSpacing.sm),
-              FilledButton.icon(
-                onPressed: primaryAction.onTap,
-                style: FilledButton.styleFrom(
-                  minimumSize: const Size(0, 44),
-                  padding: const EdgeInsets.symmetric(horizontal: 14),
-                  visualDensity: VisualDensity.compact,
+              if (searchVisible)
+                IconButton(
+                  tooltip: searchExpanded ? 'Hide search' : 'Search',
+                  onPressed: onToggleSearch,
+                  icon: Icon(
+                    searchExpanded
+                        ? Icons.search_off_rounded
+                        : Icons.search_rounded,
+                    color: recentFilters?.isAnyActive == true
+                        ? colors.accent
+                        : null,
+                  ),
                 ),
-                icon: Icon(primaryAction.icon, size: 18),
-                label: Text(primaryAction.label),
-              ),
+              if (primaryAction != null) ...[
+                const SizedBox(width: AppSpacing.xs),
+                FilledButton.icon(
+                  onPressed: primaryAction!.onTap,
+                  style: FilledButton.styleFrom(
+                    minimumSize: const Size(0, AppSizes.control),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: AppSpacing.md,
+                    ),
+                    visualDensity: VisualDensity.compact,
+                  ),
+                  icon: Icon(primaryAction!.icon, size: 18),
+                  label: Text(primaryAction!.label),
+                ),
+              ],
               const SizedBox(width: AppSpacing.xs),
               PopupMenuButton<_HomeHeaderMenuAction>(
                 tooltip: 'More',
@@ -963,28 +993,19 @@ class _HomeStickyHeader extends StatelessWidget {
                     ),
                   ),
                 ],
-                child: Container(
-                  width: 44,
-                  height: 44,
-                  decoration: BoxDecoration(
-                    color: colors.surface,
-                    borderRadius: AppShapes.input,
-                    border: Border.all(color: colors.border),
-                  ),
-                  alignment: Alignment.center,
-                  child: Icon(
-                    Icons.more_horiz_rounded,
-                    color: colors.textSecondary,
-                    size: 20,
-                  ),
+                icon: Icon(
+                  Icons.more_horiz_rounded,
+                  color: colors.textSecondary,
+                  size: 20,
                 ),
               ),
             ],
           ),
-          const SizedBox(height: AppSpacing.sm),
+          if (searchVisible && searchExpanded)
+            const SizedBox(height: AppSpacing.sm),
           AnimatedSwitcher(
             duration: const Duration(milliseconds: 220),
-            child: searchVisible
+            child: searchVisible && searchExpanded
                 ? _HomeSearchField(
                     controller: searchController,
                     hintText: 'Search ${tab.title.toLowerCase()}',
@@ -1753,15 +1774,20 @@ class _RecentPaneState extends State<RecentPane> {
   @override
   void didUpdateWidget(covariant RecentPane oldWidget) {
     super.didUpdateWidget(oldWidget);
+    final hostsChanged = !_sameHostList(widget.hosts, oldWidget.hosts);
     if (oldWidget.screenAwakeSourceKey != widget.screenAwakeSourceKey) {
       _clearScreenAwakeSource(oldWidget.screenAwakeSourceKey);
       _syncScreenAwakeSource(_screenAwakeActiveEntryCount() > 0);
     }
-    if (widget.query != oldWidget.query ||
-        !_sameHostList(widget.hosts, oldWidget.hosts)) {
+    if (widget.query != oldWidget.query || hostsChanged) {
       _onQueryChanged(widget.query);
     }
-    _store.configure(hosts: widget.hosts, api: widget.api);
+    if (hostsChanged || oldWidget.api != widget.api) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        _store.configure(hosts: widget.hosts, api: widget.api);
+      });
+    }
   }
 
   void _handleStoreChanged() {
@@ -2001,26 +2027,14 @@ class _RecentPaneState extends State<RecentPane> {
   Widget build(BuildContext context) {
     if (widget.hosts.isEmpty) {
       if (!widget.hasSavedHosts) {
-        // No hosts at all — show a clear call-to-action to add one
-        return Center(
+        return const Center(
           child: Padding(
-            padding: const EdgeInsets.all(AppSpacing.xl),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                const MeshEmptyState(
-                  icon: Icons.hub_rounded,
-                  title: 'Connect a machine',
-                  body:
-                      'Add a host to check sessions, approvals, files, and terminals from this device.',
-                ),
-                const SizedBox(height: AppSpacing.lg),
-                FilledButton.icon(
-                  onPressed: widget.onAddHost,
-                  icon: const Icon(Icons.add_link_rounded),
-                  label: const Text('Add your first host'),
-                ),
-              ],
+            padding: AppPadding.mobilePage,
+            child: MeshEmptyState(
+              icon: Icons.hub_rounded,
+              title: 'Connect a machine',
+              body:
+                  'Use Add host above to connect sessions, approvals, files, and terminals.',
             ),
           ),
         );
@@ -2211,7 +2225,8 @@ class _RecentPaneState extends State<RecentPane> {
           (isRefreshing ? 1 : 0) +
           (hasFailures ? 1 : 0) +
           groups.fold<int>(0, (sum, g) {
-            final collapsed = _collapsedGroups.contains(g.key);
+            final collapsed =
+                widget.dense && _collapsedGroups.contains(g.key);
             return sum + 1 + (collapsed ? 0 : g.entries.length);
           }),
       itemBuilder: (context, index) {
@@ -2243,7 +2258,8 @@ class _RecentPaneState extends State<RecentPane> {
         }
         var current = offset;
         for (final group in groups) {
-          final collapsed = _collapsedGroups.contains(group.key);
+          final collapsed =
+              widget.dense && _collapsedGroups.contains(group.key);
           final headerIndex = current;
           final entriesStart = headerIndex + 1;
           final entriesEnd =
@@ -2286,7 +2302,7 @@ class _RecentPaneState extends State<RecentPane> {
     return Material(
       color: Colors.transparent,
       child: InkWell(
-        onTap: () => _toggleGroupCollapse(group.key),
+        onTap: widget.dense ? () => _toggleGroupCollapse(group.key) : null,
         borderRadius: BorderRadius.circular(AppRadii.control),
         child: Padding(
           padding: EdgeInsets.symmetric(
@@ -2295,17 +2311,19 @@ class _RecentPaneState extends State<RecentPane> {
           ),
           child: Row(
             children: [
-              AnimatedRotation(
-                turns: collapsed ? -0.25 : 0,
-                duration: const Duration(milliseconds: 180),
-                curve: Curves.easeOutCubic,
-                child: Icon(
-                  Icons.expand_more_rounded,
-                  size: 15,
-                  color: colors.textSecondary,
+              if (widget.dense) ...[
+                AnimatedRotation(
+                  turns: collapsed ? -0.25 : 0,
+                  duration: const Duration(milliseconds: 180),
+                  curve: Curves.easeOutCubic,
+                  child: Icon(
+                    Icons.expand_more_rounded,
+                    size: 15,
+                    color: colors.textSecondary,
+                  ),
                 ),
-              ),
-              const SizedBox(width: 5),
+                const SizedBox(width: 5),
+              ],
               Icon(icon, size: 13, color: colors.textSecondary),
               const SizedBox(width: 6),
               Expanded(
@@ -3074,57 +3092,16 @@ class _PendingSendCard extends StatelessWidget {
               ),
             ),
             const SizedBox(height: 8),
-            Wrap(
-              spacing: 6,
-              runSpacing: 6,
-              children: [
-                if (onEnableHost != null)
-                  _PendingSendActionChip(
-                    icon: Icons.play_circle_outline_rounded,
-                    label: 'Enable',
-                    onTap: onEnableHost,
-                  ),
-                if (onFixHost != null)
-                  _PendingSendActionChip(
-                    icon: Icons.tune_rounded,
-                    label: 'Fix host',
-                    onTap: onFixHost,
-                  ),
-                if (onUseCurrentHost != null)
-                  _PendingSendActionChip(
-                    icon: Icons.link_rounded,
-                    label: 'Use current',
-                    onTap: onUseCurrentHost,
-                  ),
-                if (onOpenSession != null)
-                  _PendingSendActionChip(
-                    icon: Icons.chat_bubble_outline_rounded,
-                    label: 'Open',
-                    onTap: onOpenSession,
-                  ),
-                if (onEditCopy != null)
-                  _PendingSendActionChip(
-                    icon: Icons.edit_rounded,
-                    label: 'Edit',
-                    onTap: onEditCopy,
-                  ),
-                if (onRetryNow != null)
-                  _PendingSendActionChip(
-                    icon: Icons.refresh_rounded,
-                    label: analysis.state == PendingSendDisplayState.retrying
-                        ? 'Retrying'
-                        : 'Retry',
-                    onTap: analysis.state == PendingSendDisplayState.retrying
-                        ? null
-                        : onRetryNow,
-                  ),
-                _PendingSendActionChip(
-                  icon: Icons.delete_outline_rounded,
-                  label: 'Discard',
-                  destructive: true,
-                  onTap: onDiscard,
-                ),
-              ],
+            _PendingSendActions(
+              analysis: analysis,
+              dense: true,
+              onEnableHost: onEnableHost,
+              onFixHost: onFixHost,
+              onUseCurrentHost: onUseCurrentHost,
+              onOpenSession: onOpenSession,
+              onEditCopy: onEditCopy,
+              onRetryNow: onRetryNow,
+              onDiscard: onDiscard,
             ),
           ],
         ),
@@ -3186,57 +3163,15 @@ class _PendingSendCard extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 12),
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            children: [
-              if (onEnableHost != null)
-                _PendingSendActionChip(
-                  icon: Icons.play_circle_outline_rounded,
-                  label: 'Enable host',
-                  onTap: onEnableHost,
-                ),
-              if (onFixHost != null)
-                _PendingSendActionChip(
-                  icon: Icons.tune_rounded,
-                  label: 'Fix host',
-                  onTap: onFixHost,
-                ),
-              if (onUseCurrentHost != null)
-                _PendingSendActionChip(
-                  icon: Icons.link_rounded,
-                  label: 'Use current host',
-                  onTap: onUseCurrentHost,
-                ),
-              if (onOpenSession != null)
-                _PendingSendActionChip(
-                  icon: Icons.chat_bubble_outline_rounded,
-                  label: 'Open',
-                  onTap: onOpenSession,
-                ),
-              if (onEditCopy != null)
-                _PendingSendActionChip(
-                  icon: Icons.edit_rounded,
-                  label: 'Edit',
-                  onTap: onEditCopy,
-                ),
-              if (onRetryNow != null)
-                _PendingSendActionChip(
-                  icon: Icons.refresh_rounded,
-                  label: analysis.state == PendingSendDisplayState.retrying
-                      ? 'Retrying...'
-                      : 'Retry now',
-                  onTap: analysis.state == PendingSendDisplayState.retrying
-                      ? null
-                      : onRetryNow,
-                ),
-              _PendingSendActionChip(
-                icon: Icons.delete_outline_rounded,
-                label: 'Discard',
-                destructive: true,
-                onTap: onDiscard,
-              ),
-            ],
+          _PendingSendActions(
+            analysis: analysis,
+            onEnableHost: onEnableHost,
+            onFixHost: onFixHost,
+            onUseCurrentHost: onUseCurrentHost,
+            onOpenSession: onOpenSession,
+            onEditCopy: onEditCopy,
+            onRetryNow: onRetryNow,
+            onDiscard: onDiscard,
           ),
         ],
       ),
@@ -3244,8 +3179,132 @@ class _PendingSendCard extends StatelessWidget {
   }
 }
 
-class _PendingSendActionChip extends StatelessWidget {
-  const _PendingSendActionChip({
+class _PendingSendActions extends StatelessWidget {
+  const _PendingSendActions({
+    required this.analysis,
+    required this.onDiscard,
+    this.onOpenSession,
+    this.onEditCopy,
+    this.onRetryNow,
+    this.onFixHost,
+    this.onUseCurrentHost,
+    this.onEnableHost,
+    this.dense = false,
+  });
+
+  final PendingSendAnalysis analysis;
+  final VoidCallback onDiscard;
+  final VoidCallback? onOpenSession;
+  final VoidCallback? onEditCopy;
+  final VoidCallback? onRetryNow;
+  final VoidCallback? onFixHost;
+  final VoidCallback? onUseCurrentHost;
+  final VoidCallback? onEnableHost;
+  final bool dense;
+
+  List<_PendingSendAction> get _actions => [
+    if (onEnableHost != null)
+      _PendingSendAction(
+        icon: Icons.play_circle_outline_rounded,
+        label: 'Enable host',
+        onTap: onEnableHost!,
+      ),
+    if (onFixHost != null)
+      _PendingSendAction(
+        icon: Icons.tune_rounded,
+        label: 'Fix host',
+        onTap: onFixHost!,
+      ),
+    if (onUseCurrentHost != null)
+      _PendingSendAction(
+        icon: Icons.link_rounded,
+        label: 'Use current host',
+        onTap: onUseCurrentHost!,
+      ),
+    if (onRetryNow != null &&
+        analysis.state != PendingSendDisplayState.retrying)
+      _PendingSendAction(
+        icon: Icons.refresh_rounded,
+        label: 'Retry now',
+        onTap: onRetryNow!,
+      ),
+    if (onOpenSession != null)
+      _PendingSendAction(
+        icon: Icons.chat_bubble_outline_rounded,
+        label: 'Open session',
+        onTap: onOpenSession!,
+      ),
+    if (onEditCopy != null)
+      _PendingSendAction(
+        icon: Icons.edit_rounded,
+        label: 'Edit copy',
+        onTap: onEditCopy!,
+      ),
+    _PendingSendAction(
+      icon: Icons.delete_outline_rounded,
+      label: 'Discard',
+      onTap: onDiscard,
+      destructive: true,
+    ),
+  ];
+
+  @override
+  Widget build(BuildContext context) {
+    final actions = _actions;
+    final primary = actions.first;
+    final overflow = actions.skip(1).toList(growable: false);
+    return Row(
+      children: [
+        if (dense)
+          TextButton.icon(
+            onPressed: primary.onTap,
+            icon: Icon(primary.icon, size: 16),
+            label: Text(primary.label),
+          )
+        else
+          FilledButton.icon(
+            onPressed: primary.onTap,
+            icon: Icon(primary.icon, size: 17),
+            label: Text(primary.label),
+          ),
+        const Spacer(),
+        if (overflow.isNotEmpty)
+          PopupMenuButton<int>(
+            tooltip: 'More actions',
+            onSelected: (index) => overflow[index].onTap(),
+            itemBuilder: (context) => [
+              for (var index = 0; index < overflow.length; index++)
+                PopupMenuItem<int>(
+                  value: index,
+                  child: Row(
+                    children: [
+                      Icon(
+                        overflow[index].icon,
+                        size: 18,
+                        color: overflow[index].destructive
+                            ? context.colors.danger
+                            : null,
+                      ),
+                      const SizedBox(width: 10),
+                      Text(
+                        overflow[index].label,
+                        style: overflow[index].destructive
+                            ? TextStyle(color: context.colors.danger)
+                            : null,
+                      ),
+                    ],
+                  ),
+                ),
+            ],
+            icon: const Icon(Icons.more_horiz_rounded),
+          ),
+      ],
+    );
+  }
+}
+
+class _PendingSendAction {
+  const _PendingSendAction({
     required this.icon,
     required this.label,
     required this.onTap,
@@ -3254,39 +3313,8 @@ class _PendingSendActionChip extends StatelessWidget {
 
   final IconData icon;
   final String label;
-  final VoidCallback? onTap;
+  final VoidCallback onTap;
   final bool destructive;
-
-  @override
-  Widget build(BuildContext context) {
-    final colors = context.colors;
-    final disabled = onTap == null;
-    if (destructive) {
-      return MeshDangerAction(label: label, icon: icon, onPressed: onTap);
-    }
-    final fg = disabled ? colors.textTertiary : colors.textPrimary;
-    return MeshSurface(
-      tone: MeshSurfaceTone.muted,
-      radius: 999,
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-      enabled: !disabled,
-      onTap: onTap,
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(icon, size: 16, color: fg),
-          const SizedBox(width: 6),
-          Text(
-            label,
-            style: Theme.of(context).textTheme.labelMedium?.copyWith(
-              color: fg,
-              fontWeight: AppWeights.emphasis,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
 }
 
 String _pendingSendTitle(PendingSessionSend send) {
@@ -3613,41 +3641,71 @@ class _InboxCard extends StatelessWidget {
           Row(
             mainAxisAlignment: MainAxisAlignment.end,
             children: [
-              if (action.canApproveForSession)
-                _MobileInboxAction(
-                  icon: Icons.history_toggle_off_rounded,
-                  tooltip: 'Approve for session',
-                  foreground: colors.textSecondary,
-                  background: colors.surfaceMuted,
-                  onTap: () => onRespond(
-                    PendingActionResponseDraft.approval('acceptForSession'),
+              if (action.approval?.providerOptions.isNotEmpty ?? false)
+                for (final option in action.approval!.providerOptions) ...[
+                  if (option != action.approval!.providerOptions.first)
+                    const SizedBox(width: 8),
+                  _MobileInboxAction(
+                    icon: option.rejects
+                        ? Icons.close_rounded
+                        : option.kind == 'allow_always'
+                        ? Icons.history_toggle_off_rounded
+                        : Icons.check_rounded,
+                    tooltip: option.label,
+                    foreground: option.rejects
+                        ? colors.danger
+                        : visibleUiColorOn(
+                            colors,
+                            background: colors.success,
+                            preferred: colors.accentOn,
+                          ),
+                    background: option.rejects
+                        ? colors.danger.withValues(alpha: 0.12)
+                        : colors.success,
+                    onTap: () => onRespond(
+                      PendingActionResponseDraft.providerOption(option.id),
+                    ),
                   ),
-                ),
-              if (action.canDecline) ...[
-                if (action.canApproveForSession) const SizedBox(width: 8),
-                _MobileInboxAction(
-                  icon: Icons.close_rounded,
-                  tooltip: 'Decline',
-                  foreground: colors.danger,
-                  background: colors.danger.withValues(alpha: 0.12),
-                  onTap: () =>
-                      onRespond(PendingActionResponseDraft.approval('decline')),
-                ),
-              ],
-              if (action.canApprove) ...[
-                const SizedBox(width: 8),
-                _MobileInboxAction(
-                  icon: Icons.check_rounded,
-                  tooltip: 'Approve',
-                  foreground: visibleUiColorOn(
-                    colors,
+                ]
+              else ...[
+                if (action.canApproveForSession)
+                  _MobileInboxAction(
+                    icon: Icons.history_toggle_off_rounded,
+                    tooltip: 'Approve for session',
+                    foreground: colors.textSecondary,
+                    background: colors.surfaceMuted,
+                    onTap: () => onRespond(
+                      PendingActionResponseDraft.approval('acceptForSession'),
+                    ),
+                  ),
+                if (action.canDecline) ...[
+                  if (action.canApproveForSession) const SizedBox(width: 8),
+                  _MobileInboxAction(
+                    icon: Icons.close_rounded,
+                    tooltip: 'Decline',
+                    foreground: colors.danger,
+                    background: colors.danger.withValues(alpha: 0.12),
+                    onTap: () => onRespond(
+                      PendingActionResponseDraft.approval('decline'),
+                    ),
+                  ),
+                ],
+                if (action.canApprove) ...[
+                  const SizedBox(width: 8),
+                  _MobileInboxAction(
+                    icon: Icons.check_rounded,
+                    tooltip: 'Approve',
+                    foreground: visibleUiColorOn(
+                      colors,
+                      background: colors.success,
+                      preferred: colors.accentOn,
+                    ),
                     background: colors.success,
-                    preferred: colors.accentOn,
+                    onTap: () => onRespond(
+                      PendingActionResponseDraft.approval('accept'),
+                    ),
                   ),
-                  background: colors.success,
-                  onTap: () =>
-                      onRespond(PendingActionResponseDraft.approval('accept')),
-                ),
+                ],
               ],
             ],
           ),
@@ -3699,6 +3757,51 @@ class _InboxDenseActions extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colors = context.colors;
+    final providerOptions = action.approval?.providerOptions ?? const [];
+    PendingActionProviderOption? primaryAllow;
+    PendingActionProviderOption? reject;
+    for (final option in providerOptions) {
+      if (option.allows &&
+          (primaryAllow == null || option.kind == 'allow_once')) {
+        primaryAllow = option;
+      }
+      if (reject == null && option.rejects) {
+        reject = option;
+      }
+    }
+    if (providerOptions.isNotEmpty) {
+      return Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (primaryAllow != null)
+            _SquareIconAction(
+              icon: Icons.check_rounded,
+              tooltip: primaryAllow.label,
+              foreground: colors.success,
+              background: colors.success.withValues(alpha: 0.12),
+              onTap: () => onRespond(
+                PendingActionResponseDraft.providerOption(primaryAllow!.id),
+              ),
+              onSecondaryTap: providerOptions.length > 1
+                  ? (position) =>
+                        _showProviderMenu(context, position, providerOptions)
+                  : null,
+            ),
+          if (reject != null) ...[
+            if (primaryAllow != null) const SizedBox(width: 4),
+            _SquareIconAction(
+              icon: Icons.close_rounded,
+              tooltip: reject.label,
+              foreground: colors.danger,
+              background: colors.danger.withValues(alpha: 0.12),
+              onTap: () => onRespond(
+                PendingActionResponseDraft.providerOption(reject!.id),
+              ),
+            ),
+          ],
+        ],
+      );
+    }
     final canExtended = action.canApproveForSession;
     return Row(
       mainAxisSize: MainAxisSize.min,
@@ -3728,6 +3831,29 @@ class _InboxDenseActions extends StatelessWidget {
         ],
       ],
     );
+  }
+
+  Future<void> _showProviderMenu(
+    BuildContext context,
+    Offset globalPos,
+    List<PendingActionProviderOption> options,
+  ) async {
+    final result = await showMenu<String>(
+      context: context,
+      position: RelativeRect.fromLTRB(
+        globalPos.dx,
+        globalPos.dy,
+        globalPos.dx,
+        globalPos.dy,
+      ),
+      items: [
+        for (final option in options)
+          PopupMenuItem(value: option.id, child: Text(option.label)),
+      ],
+    );
+    if (result != null) {
+      onRespond(PendingActionResponseDraft.providerOption(result));
+    }
   }
 
   Future<void> _showExtendedMenu(BuildContext context, Offset globalPos) async {
@@ -3865,25 +3991,12 @@ class HostsPane extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     if (hosts.isEmpty) {
-      return Padding(
-        padding: const EdgeInsets.all(20),
-        child: Center(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const MeshEmptyState(
-                icon: Icons.route_rounded,
-                title: 'No machines yet',
-                body: 'Add a laptop, desktop, or server to reach it from here.',
-              ),
-              const SizedBox(height: 12),
-              FilledButton.icon(
-                onPressed: onAddHost,
-                icon: const Icon(Icons.add_link_rounded),
-                label: const Text('Add a machine'),
-              ),
-            ],
-          ),
+      return const Padding(
+        padding: AppPadding.mobilePage,
+        child: MeshEmptyState(
+          icon: Icons.route_rounded,
+          title: 'No machines yet',
+          body: 'Use Add host above to connect a laptop, desktop, or server.',
         ),
       );
     }
@@ -3904,9 +4017,16 @@ class HostsPane extends StatelessWidget {
     return ListView.separated(
       padding: dense
           ? const EdgeInsets.fromLTRB(6, 4, 6, 24)
-          : const EdgeInsets.fromLTRB(16, 8, 16, 120),
+          : const EdgeInsets.fromLTRB(
+              AppSizes.mobileGutter,
+              AppSpacing.sm,
+              AppSizes.mobileGutter,
+              120,
+            ),
       itemCount: visibleHosts.length,
-      separatorBuilder: (_, _) => SizedBox(height: dense ? 2 : 10),
+      separatorBuilder: (_, _) => SizedBox(
+        height: dense ? 2 : AppSpacing.xs,
+      ),
       itemBuilder: (context, index) {
         final host = visibleHosts[index];
         return _HostRowCard(
@@ -3964,13 +4084,12 @@ class _HostRowCard extends StatelessWidget {
                 recommendedVersion: node!.recommendedMobileClientVersion,
                 minimumVersion: node!.minimumMobileClientVersion,
               );
-        final hostStatusBadge = _hostStatusBadge(status, host.enabled);
         final endpointLabel = _hostEndpointLabel(host.baseUrl);
         if (dense) {
           return Material(
             color: Colors.transparent,
             child: InkWell(
-              onTap: host.enabled ? onTap : null,
+              onTap: onTap,
               borderRadius: BorderRadius.circular(AppRadii.control),
               child: AnimatedContainer(
                 duration: const Duration(milliseconds: 120),
@@ -4084,10 +4203,10 @@ class _HostRowCard extends StatelessWidget {
             ),
         ];
         return MeshSurface(
-          onTap: host.enabled ? onTap : null,
+          onTap: onTap,
           selected: selected,
-          enabled: host.enabled,
-          padding: const EdgeInsets.fromLTRB(14, 14, 10, 14),
+          bordered: selected,
+          padding: AppPadding.listRow,
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
@@ -4098,20 +4217,17 @@ class _HostRowCard extends StatelessWidget {
                     clipBehavior: Clip.none,
                     children: [
                       Container(
-                        width: 44,
-                        height: 44,
+                        width: AppSizes.compactControl,
+                        height: AppSizes.compactControl,
                         decoration: BoxDecoration(
                           color: colors.accentMuted,
                           borderRadius: BorderRadius.circular(AppRadii.control),
-                          border: Border.all(
-                            color: colors.accent.withValues(alpha: 0.3),
-                          ),
                         ),
                         alignment: Alignment.center,
                         child: Icon(
                           Icons.dns_rounded,
                           color: colors.accent,
-                          size: 20,
+                          size: AppSizes.icon,
                         ),
                       ),
                       Positioned(
@@ -4124,31 +4240,23 @@ class _HostRowCard extends StatelessWidget {
                       ),
                     ],
                   ),
-                  const SizedBox(width: 12),
+                  const SizedBox(width: AppSpacing.md),
                   Expanded(
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        Row(
-                          children: [
-                            Expanded(
-                              child: Text(
-                                host.label,
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: Theme.of(context).textTheme.titleMedium
-                                    ?.copyWith(
-                                      fontWeight: AppWeights.emphasis,
-                                      color: host.enabled
-                                          ? null
-                                          : colors.textTertiary,
-                                    ),
+                        Text(
+                          host.label,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: Theme.of(context).textTheme.titleSmall
+                              ?.copyWith(
+                                fontWeight: AppWeights.emphasis,
+                                color: host.enabled
+                                    ? null
+                                    : colors.textTertiary,
                               ),
-                            ),
-                            const SizedBox(width: 8),
-                            hostStatusBadge,
-                          ],
                         ),
                         const SizedBox(height: 5),
                         Text(
@@ -4178,7 +4286,9 @@ class _HostRowCard extends StatelessWidget {
               if (showStatusLine || supplementalBadges.isNotEmpty) ...[
                 const SizedBox(height: 10),
                 Padding(
-                  padding: const EdgeInsets.only(left: 56),
+                  padding: const EdgeInsets.only(
+                    left: AppSizes.compactControl + AppSpacing.md,
+                  ),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
@@ -4343,16 +4453,14 @@ class _HostRowActionsMenu extends StatelessWidget {
           ),
         ),
       ],
-      child: MeshSurface(
-        padding: EdgeInsets.zero,
-        radius: AppRadii.control,
-        tone: MeshSurfaceTone.muted,
+      child: Material(
+        color: Colors.transparent,
         child: SizedBox(
-          width: compact ? 34 : 40,
-          height: compact ? 34 : 40,
+          width: AppSizes.control,
+          height: AppSizes.control,
           child: Icon(
             Icons.more_horiz_rounded,
-            size: compact ? 18 : 22,
+            size: compact ? AppSizes.compactIcon : AppSizes.icon,
             color: colors.textSecondary,
           ),
         ),
@@ -4382,43 +4490,6 @@ class _HostActionMenuItem extends StatelessWidget {
       ],
     );
   }
-}
-
-MeshStatusBadge _hostStatusBadge(HostStatus status, bool enabled) {
-  if (!enabled) {
-    return const MeshStatusBadge(
-      label: 'disabled',
-      tone: MeshStatusTone.offline,
-      icon: Icons.pause_circle_outline_rounded,
-      compact: true,
-    );
-  }
-  return switch (status.reachability) {
-    HostReachability.online => const MeshStatusBadge(
-      label: 'online',
-      tone: MeshStatusTone.success,
-      icon: Icons.check_circle_outline_rounded,
-      compact: true,
-    ),
-    HostReachability.probing => const MeshStatusBadge(
-      label: 'checking',
-      tone: MeshStatusTone.queued,
-      icon: Icons.sync_rounded,
-      compact: true,
-    ),
-    HostReachability.offline => const MeshStatusBadge(
-      label: 'offline',
-      tone: MeshStatusTone.danger,
-      icon: Icons.wifi_off_rounded,
-      compact: true,
-    ),
-    HostReachability.unknown => const MeshStatusBadge(
-      label: 'unknown',
-      tone: MeshStatusTone.stale,
-      icon: Icons.help_outline_rounded,
-      compact: true,
-    ),
-  };
 }
 
 class _HostStatusDot extends StatelessWidget {
@@ -4462,9 +4533,10 @@ class _HostStatusDot extends StatelessWidget {
 }
 
 class HostEditorSheet extends StatefulWidget {
-  const HostEditorSheet({super.key, this.initialHost});
+  const HostEditorSheet({super.key, this.initialHost, this.fullPage = false});
 
   final HostProfile? initialHost;
+  final bool fullPage;
 
   @override
   State<HostEditorSheet> createState() => _HostEditorSheetState();
@@ -4600,6 +4672,141 @@ class _HostEditorSheetState extends State<HostEditorSheet> {
   Widget build(BuildContext context) {
     final bottom = MediaQuery.viewInsetsOf(context).bottom;
     final isEditing = widget.initialHost != null;
+    final content = Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Expanded(
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.only(bottom: 4),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                if (canScanPairingQr) ...[
+                  _HostEditorActionCard(
+                    icon: Icons.qr_code_scanner_rounded,
+                    title: isEditing
+                        ? 'Replace from pairing code'
+                        : 'Pair with a code',
+                    subtitle:
+                        'Scan the code from sidemesh pair to fill these fields.',
+                    actionLabel: 'Scan',
+                    onTap: _scanPairingQr,
+                  ),
+                  const SizedBox(height: 20),
+                ],
+                _HostEditorTextField(
+                  icon: Icons.label_rounded,
+                  label: 'Name',
+                  controller: _labelController,
+                  textInputAction: TextInputAction.next,
+                  textCapitalization: TextCapitalization.words,
+                  hintText: 'MacBook, office iMac, or VPS-1',
+                ),
+                const SizedBox(height: AppSpacing.md),
+                _HostEditorTextField(
+                  icon: Icons.link_rounded,
+                  label: 'Address',
+                  controller: _baseUrlController,
+                  keyboardType: TextInputType.url,
+                  textInputAction: TextInputAction.next,
+                  textCapitalization: TextCapitalization.none,
+                  autocorrect: false,
+                  enableSuggestions: false,
+                  hintText: 'http://macbook.tailnet.ts.net:8787',
+                ),
+                const SizedBox(height: AppSpacing.md),
+                _HostEditorTextField(
+                  icon: Icons.key_rounded,
+                  label: 'Token',
+                  controller: _tokenController,
+                  textInputAction: TextInputAction.done,
+                  obscureText: !_tokenVisible,
+                  textCapitalization: TextCapitalization.none,
+                  autocorrect: false,
+                  enableSuggestions: false,
+                  onSubmitted: (_) => _submit(),
+                  hintText: 'Paste the pairing token',
+                  suffixIcon: IconButton(
+                    tooltip: _tokenVisible ? 'Hide token' : 'Show token',
+                    icon: Icon(
+                      _tokenVisible
+                          ? Icons.visibility_off_rounded
+                          : Icons.visibility_rounded,
+                    ),
+                    onPressed: () =>
+                        setState(() => _tokenVisible = !_tokenVisible),
+                  ),
+                ),
+                const SizedBox(height: 12),
+                Row(
+                  children: [
+                    Expanded(
+                      child: OutlinedButton.icon(
+                        onPressed: _testing ? null : _testConnection,
+                        icon: _testing
+                            ? const SizedBox(
+                                width: 14,
+                                height: 14,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 1.5,
+                                ),
+                              )
+                            : const Icon(Icons.wifi_tethering_rounded, size: 18),
+                        label: Text(
+                          _testing ? 'Checking...' : 'Check connection',
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                if (_testResult != null) ...[
+                  const SizedBox(height: 8),
+                  _HostEditorStatusCard(
+                    success: _testSuccess,
+                    message: _testResult!,
+                  ),
+                ],
+                const SizedBox(height: AppSpacing.lg),
+                _HostEnabledCard(
+                  enabled: _enabled,
+                  onChanged: (value) => setState(() => _enabled = value),
+                ),
+                if (_error != null) ...[
+                  const SizedBox(height: 12),
+                  _HostEditorError(message: _error!),
+                ],
+              ],
+            ),
+          ),
+        ),
+        const SizedBox(height: 12),
+        _HostEditorFooter(
+          isEditing: isEditing,
+          onCancel: () => Navigator.of(context).pop(),
+          onSubmit: _submit,
+        ),
+      ],
+    );
+    if (widget.fullPage) {
+      return Scaffold(
+        backgroundColor: context.colors.canvas,
+        appBar: AppBar(title: Text(isEditing ? 'Edit host' : 'Add host')),
+        body: SafeArea(
+          child: AppContentColumn(
+            maxWidth: 560,
+            child: Padding(
+              padding: EdgeInsets.fromLTRB(
+                AppSizes.mobileGutter,
+                AppSpacing.sm,
+                AppSizes.mobileGutter,
+                bottom + AppSpacing.lg,
+              ),
+              child: content,
+            ),
+          ),
+        ),
+      );
+    }
     return Padding(
       padding: EdgeInsets.only(bottom: bottom),
       child: MeshBottomSheetScaffold(
@@ -4610,180 +4817,7 @@ class _HostEditorSheetState extends State<HostEditorSheet> {
             : 'Connect a laptop, desktop, or server.',
         maxWidth: 560,
         maxHeightFactor: 0.9,
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Expanded(
-              child: SingleChildScrollView(
-                padding: const EdgeInsets.only(bottom: 4),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    if (canScanPairingQr) ...[
-                      const _HostEditorSectionLabel(
-                        title: 'Pairing',
-                        subtitle: 'Start with a code if the machine is nearby.',
-                      ),
-                      const SizedBox(height: 8),
-                      _HostEditorActionCard(
-                        icon: Icons.qr_code_scanner_rounded,
-                        title: isEditing
-                            ? 'Replace from pairing code'
-                            : 'Pair with a code',
-                        subtitle:
-                            'Run sidemesh pair on the machine, then scan the code here to fill this form.',
-                        actionLabel: 'Scan code',
-                        onTap: _scanPairingQr,
-                      ),
-                      const SizedBox(height: 16),
-                    ],
-                    const _HostEditorSectionLabel(
-                      title: 'About this machine',
-                      subtitle: 'Choose the name you want to see in Sidemesh.',
-                    ),
-                    const SizedBox(height: 8),
-                    _HostEditorFieldFrame(
-                      icon: Icons.label_rounded,
-                      label: 'Name',
-                      child: TextField(
-                        controller: _labelController,
-                        textInputAction: TextInputAction.next,
-                        textCapitalization: TextCapitalization.words,
-                        decoration: const InputDecoration(
-                          border: InputBorder.none,
-                          enabledBorder: InputBorder.none,
-                          focusedBorder: InputBorder.none,
-                          filled: false,
-                          isDense: true,
-                          hintText: 'MacBook, office iMac, or VPS-1',
-                          contentPadding: EdgeInsets.zero,
-                        ),
-                      ),
-                    ),
-                    const SizedBox(height: 16),
-                    const _HostEditorSectionLabel(
-                      title: 'Connection',
-                      subtitle: 'How this app reaches the machine.',
-                    ),
-                    const SizedBox(height: 8),
-                    _HostEditorFieldFrame(
-                      icon: Icons.link_rounded,
-                      label: 'Address',
-                      child: TextField(
-                        controller: _baseUrlController,
-                        keyboardType: TextInputType.url,
-                        textInputAction: TextInputAction.next,
-                        textCapitalization: TextCapitalization.none,
-                        autocorrect: false,
-                        enableSuggestions: false,
-                        decoration: const InputDecoration(
-                          border: InputBorder.none,
-                          enabledBorder: InputBorder.none,
-                          focusedBorder: InputBorder.none,
-                          filled: false,
-                          isDense: true,
-                          hintText: 'http://macbook.tailnet.ts.net:8787',
-                          contentPadding: EdgeInsets.zero,
-                        ),
-                      ),
-                    ),
-                    const SizedBox(height: 10),
-                    _HostEditorFieldFrame(
-                      icon: Icons.key_rounded,
-                      label: 'Token',
-                      child: TextField(
-                        controller: _tokenController,
-                        textInputAction: TextInputAction.done,
-                        obscureText: !_tokenVisible,
-                        textCapitalization: TextCapitalization.none,
-                        autocorrect: false,
-                        enableSuggestions: false,
-                        onSubmitted: (_) => _submit(),
-                        decoration: InputDecoration(
-                          border: InputBorder.none,
-                          enabledBorder: InputBorder.none,
-                          focusedBorder: InputBorder.none,
-                          filled: false,
-                          isDense: true,
-                          hintText: 'Paste the pairing token',
-                          contentPadding: EdgeInsets.zero,
-                          suffixIconConstraints: const BoxConstraints.tightFor(
-                            width: 36,
-                            height: 32,
-                          ),
-                          suffixIcon: IconButton(
-                            tooltip: _tokenVisible
-                                ? 'Hide token'
-                                : 'Show token',
-                            padding: EdgeInsets.zero,
-                            icon: Icon(
-                              _tokenVisible
-                                  ? Icons.visibility_off_rounded
-                                  : Icons.visibility_rounded,
-                              size: 18,
-                            ),
-                            onPressed: () =>
-                                setState(() => _tokenVisible = !_tokenVisible),
-                          ),
-                        ),
-                      ),
-                    ),
-                    const SizedBox(height: 12),
-                    Align(
-                      alignment: Alignment.centerLeft,
-                      child: FilledButton.tonalIcon(
-                        onPressed: _testing ? null : _testConnection,
-                        icon: _testing
-                            ? const SizedBox(
-                                width: 14,
-                                height: 14,
-                                child: CircularProgressIndicator(
-                                  strokeWidth: 1.5,
-                                ),
-                              )
-                            : const Icon(
-                                Icons.wifi_tethering_rounded,
-                                size: 18,
-                              ),
-                        label: Text(
-                          _testing ? 'Checking...' : 'Check connection',
-                        ),
-                      ),
-                    ),
-                    if (_testResult != null) ...[
-                      const SizedBox(height: 8),
-                      _HostEditorStatusCard(
-                        success: _testSuccess,
-                        message: _testResult!,
-                      ),
-                    ],
-                    const SizedBox(height: 16),
-                    const _HostEditorSectionLabel(
-                      title: 'Availability',
-                      subtitle:
-                          'Decide whether this machine is active in the app right now.',
-                    ),
-                    const SizedBox(height: 8),
-                    _HostEnabledCard(
-                      enabled: _enabled,
-                      onChanged: (value) => setState(() => _enabled = value),
-                    ),
-                    if (_error != null) ...[
-                      const SizedBox(height: 12),
-                      _HostEditorError(message: _error!),
-                    ],
-                  ],
-                ),
-              ),
-            ),
-            const SizedBox(height: 12),
-            _HostEditorFooter(
-              isEditing: isEditing,
-              onCancel: () => Navigator.of(context).pop(),
-              onSubmit: _submit,
-            ),
-          ],
-        ),
+        child: content,
       ),
     );
   }
@@ -4811,17 +4845,12 @@ class _HostEditorActionCard extends StatelessWidget {
       tone: MeshSurfaceTone.muted,
       radius: AppRadii.control,
       dense: true,
+      framed: false,
       onTap: onTap,
-      leading: Container(
-        width: 32,
-        height: 32,
-        decoration: BoxDecoration(
-          color: colors.infoMuted,
-          borderRadius: BorderRadius.circular(11),
-          border: Border.all(color: colors.info.withValues(alpha: 0.24)),
-        ),
-        alignment: Alignment.center,
-        child: Icon(icon, color: colors.info, size: 17),
+      leading: AppIconWell(
+        icon: icon,
+        color: colors.info,
+        background: colors.infoMuted,
       ),
       title: Text(
         title,
@@ -4849,92 +4878,51 @@ class _HostEditorActionCard extends StatelessWidget {
   }
 }
 
-class _HostEditorSectionLabel extends StatelessWidget {
-  const _HostEditorSectionLabel({required this.title, required this.subtitle});
-
-  final String title;
-  final String subtitle;
-
-  @override
-  Widget build(BuildContext context) {
-    final colors = context.colors;
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          title,
-          style: Theme.of(context).textTheme.labelLarge?.copyWith(
-            color: colors.textPrimary,
-            fontWeight: AppWeights.title,
-          ),
-        ),
-        const SizedBox(height: 3),
-        Text(
-          subtitle,
-          style: Theme.of(context).textTheme.bodySmall?.copyWith(
-            color: colors.textSecondary,
-            height: 1.35,
-          ),
-        ),
-      ],
-    );
-  }
-}
-
-class _HostEditorFieldFrame extends StatelessWidget {
-  const _HostEditorFieldFrame({
+class _HostEditorTextField extends StatelessWidget {
+  const _HostEditorTextField({
     required this.icon,
     required this.label,
-    required this.child,
+    required this.controller,
+    required this.hintText,
+    this.keyboardType,
+    this.textInputAction,
+    this.textCapitalization = TextCapitalization.none,
+    this.autocorrect = true,
+    this.enableSuggestions = true,
+    this.obscureText = false,
+    this.onSubmitted,
+    this.suffixIcon,
   });
 
   final IconData icon;
   final String label;
-  final Widget child;
+  final TextEditingController controller;
+  final String hintText;
+  final TextInputType? keyboardType;
+  final TextInputAction? textInputAction;
+  final TextCapitalization textCapitalization;
+  final bool autocorrect;
+  final bool enableSuggestions;
+  final bool obscureText;
+  final ValueChanged<String>? onSubmitted;
+  final Widget? suffixIcon;
 
   @override
   Widget build(BuildContext context) {
-    final colors = context.colors;
-    return MeshSurface(
-      tone: MeshSurfaceTone.muted,
-      radius: AppRadii.control,
-      padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
-      child: Semantics(
-        label: label,
-        textField: true,
-        child: Row(
-          children: [
-            Container(
-              width: 32,
-              height: 32,
-              decoration: BoxDecoration(
-                color: colors.surface,
-                borderRadius: BorderRadius.circular(11),
-                border: Border.all(color: colors.border),
-              ),
-              alignment: Alignment.center,
-              child: Icon(icon, color: colors.accent, size: 17),
-            ),
-            const SizedBox(width: 11),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    label,
-                    style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                      color: colors.textSecondary,
-                      fontWeight: AppWeights.title,
-                      letterSpacing: 0.4,
-                    ),
-                  ),
-                  const SizedBox(height: 6),
-                  child,
-                ],
-              ),
-            ),
-          ],
-        ),
+    return TextField(
+      controller: controller,
+      keyboardType: keyboardType,
+      textInputAction: textInputAction,
+      textCapitalization: textCapitalization,
+      autocorrect: autocorrect,
+      enableSuggestions: enableSuggestions,
+      obscureText: obscureText,
+      onSubmitted: onSubmitted,
+      decoration: InputDecoration(
+        labelText: label,
+        hintText: hintText,
+        prefixIcon: Icon(icon, size: AppSizes.icon),
+        suffixIcon: suffixIcon,
       ),
     );
   }
@@ -4997,6 +4985,7 @@ class _HostEnabledCard extends StatelessWidget {
       selected: enabled,
       radius: AppRadii.control,
       dense: true,
+      framed: false,
       onTap: () => onChanged(!enabled),
       leading: Icon(
         enabled ? Icons.sensors_rounded : Icons.pause_rounded,
@@ -5020,49 +5009,7 @@ class _HostEnabledCard extends StatelessWidget {
           context,
         ).textTheme.bodySmall?.copyWith(color: colors.textSecondary),
       ),
-      trailing: _HostEditorToggle(value: enabled),
-    );
-  }
-}
-
-class _HostEditorToggle extends StatelessWidget {
-  const _HostEditorToggle({required this.value});
-
-  final bool value;
-
-  @override
-  Widget build(BuildContext context) {
-    final colors = context.colors;
-    final activeKnob = visibleUiColorOn(
-      colors,
-      background: colors.accent,
-      preferred: colors.accentOn,
-    );
-    return AnimatedContainer(
-      duration: const Duration(milliseconds: 180),
-      curve: Curves.easeOutCubic,
-      width: 52,
-      height: 30,
-      padding: const EdgeInsets.all(3),
-      decoration: BoxDecoration(
-        color: value ? colors.accent : colors.surfaceMuted,
-        borderRadius: AppShapes.pill,
-        border: Border.all(color: value ? colors.accent : colors.borderStrong),
-      ),
-      child: AnimatedAlign(
-        duration: const Duration(milliseconds: 180),
-        curve: Curves.easeOutCubic,
-        alignment: value ? Alignment.centerRight : Alignment.centerLeft,
-        child: Container(
-          width: 24,
-          height: 24,
-          decoration: BoxDecoration(
-            color: value ? activeKnob : colors.surface,
-            shape: BoxShape.circle,
-            border: Border.all(color: value ? activeKnob : colors.border),
-          ),
-        ),
-      ),
+      trailing: Switch(value: enabled, onChanged: onChanged),
     );
   }
 }

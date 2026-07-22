@@ -183,6 +183,7 @@ class SessionSendOutboxWorker with WidgetsBindingObserver {
         approvalPolicy: send.approvalPolicy,
         sandboxMode: send.sandboxMode,
         networkAccess: send.networkAccess,
+        accessMode: send.accessMode,
       );
       await _outbox.remove(send);
     } catch (error) {

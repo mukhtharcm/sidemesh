@@ -212,6 +212,8 @@ export const PI_PROVIDER_CAPABILITIES: AgentProviderCapabilities = {
   configuration: {
     models: true,
     profiles: false,
+    accessModes: false,
+    permissionProfiles: false,
     skills: true,
     skillManagement: false,
   },
@@ -224,6 +226,9 @@ export const PI_PROVIDER_CAPABILITIES: AgentProviderCapabilities = {
     sandboxMode: false,
     networkAccess: false,
     webSearch: false,
+    accessMode: false,
+    permissionProfile: false,
+    approvalsReviewer: false,
   },
   lifecycle: {
     restart: false,

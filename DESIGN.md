@@ -1,65 +1,63 @@
-# Sidemesh Design System
+# Sidemesh interface direction
 
-## Product scene
+Sidemesh is a control surface for coding agents used on both phones and
+desktops. The interface should feel calm, direct, and native enough to
+disappear while someone is monitoring or steering real work.
 
-A developer checks agent work from a phone between other tasks, often with one
-hand and limited attention. The interface should make state and the next action
-obvious without turning technical metadata into visual noise.
+## Hierarchy
 
-## Direction
+- The canvas establishes the page. Do not place a card around the page itself.
+- Use plain headings and rows for structure. A filled surface groups related
+  information; a border identifies a control, selection, warning, or explicit
+  boundary.
+- Never place a bordered card inside another bordered card.
+- Keep one obvious primary action per region. Put uncommon recovery and
+  destructive actions in an overflow menu.
+- Status should have one primary visual signal. Do not repeat the same state as
+  a dot, badge, colored sentence, and border.
 
-Sidemesh is a calm workbench for agent sessions: compact, direct, status-aware,
-and trustworthy. It should feel native to the device, not like a desktop admin
-panel squeezed into a phone.
+## Navigation and adaptive behavior
 
-## Visual grammar
+- On phones, substantial setup and selection flows are full pages. Bottom
+  sheets are for short choices and confirmations.
+- On desktop, use the rail, list pane, detail pane, and inspector as the main
+  hierarchy. Dialogs are appropriate for compact global preferences.
+- Responsive behavior changes structure, not merely padding. Dense desktop
+  rows should stay flat; wide data surfaces may use columns.
+- Search and filters should be available on demand rather than permanently
+  consuming mobile vertical space.
 
-- Canvas is the default grouping surface. Do not put every row in a card.
-- Use a surface when content needs an edge, such as an input, sheet, dialog, or
-  independently actionable warning.
-- Group related list rows with spacing and dividers. Avoid nested surfaces.
-- Accent color is reserved for primary actions, selection, focus, and unread
-  state. Success, warning, and danger colors only communicate real state.
-- Metadata is quiet text with icons. Badges are reserved for states that change
-  what the user should do.
+## Components
 
-## Type
+- Mobile pages use a 16 px horizontal gutter. Desktop management pages use a
+  24 px gutter and an 840 px maximum content width.
+- Interactive controls are 48 px high. Management rows have a 56 px minimum
+  content height. Leading UI icons are 20 px and share the row label grid.
+- The spacing scale is 4, 8, 12, 16, 24, and 32 px. Screen code should use the
+  named tokens rather than near-duplicate values.
+- `AppSectionHeader`, `AppSettingsRow`, `AppChoiceRow`, `AppListSection`,
+  `AppContentColumn`, and `AppIconWell` are the canonical management and
+  selection primitives. Their alignment and sizing should not be recreated in
+  individual screens.
+- Mobile bottom sheets sit edge-to-edge against the viewport and are reserved
+  for short choices or transient actions. Do not place another floating card
+  around the sheet. Long setup and browsing flows remain full pages.
+- `MeshSurface` and `MeshCard` may be borderless when fill and spacing already
+  establish grouping. Reserve `bordered: true` for inputs, selection, errors,
+  warnings, and independently actionable objects.
+- Pills are metadata or status, not general-purpose buttons.
+- Use platform controls such as `Switch`, text fields, and standard buttons
+  unless the product requires behavior they cannot express.
+- Empty and loading states should resemble the surface they replace and teach
+  the next useful action.
 
-- Use the platform interface font for all product UI.
-- Use 700 for titles and primary actions, 600 for emphasis, and 500 for body.
-- Keep letter spacing at zero. Hierarchy comes from size, weight, and color.
-- Use monospace only for code, paths, commands, identifiers, and aligned data.
+## Color, type, and motion
 
-## Shape and spacing
-
-- 8 px: badges and compact selections.
-- 10 px: controls and icon buttons.
-- 14 px: independent surfaces.
-- 18 px: sheets and dialogs.
-- Use the 4, 8, 12, 16, 24, 32 spacing scale. Favor 12 to 16 px screen edges
-  and 10 to 12 px vertical padding for operational rows.
-
-## Motion
-
-- Use 160 ms for local state changes and 220 ms for reveals or navigation.
-- Use ease-out cubic for enter and state-change motion.
-- Do not animate decoration. Motion should explain selection, progress, or
-  spatial continuity.
-
-## Core patterns
-
-- Home: compact toolbar, search and filters, grouped session rows, stable bottom
-  navigation.
-- New session: conversation canvas first, inherited context in one quiet row,
-  settings on a separate screen, composer fixed above the keyboard.
-- Session: transcript owns the page. Status and runtime metadata live in the
-  header or context shelf, never as a wall of chips around the composer.
-- Approvals: explain the requested action and consequence, then present the
-  safest common response as the primary action.
-
-## Accessibility
-
-- Interactive targets are at least 44 by 44 logical pixels.
-- Do not encode state with color alone.
-- Preserve platform text scaling and keyboard-safe layouts.
-- Keep secondary text readable against every supported palette.
+- Use the restrained palette from `AppColors`: tinted neutrals and one accent,
+  with semantic colors reserved for actual state.
+- Use the app typography scale and keep explanatory copy short. A heading does
+  not need a paragraph that restates it.
+- Body copy uses regular weight, ordinary emphasis uses medium, component
+  titles use semibold, and bold is reserved for page titles or rare values.
+- Use 150–250 ms motion only to communicate selection, reveal, navigation, or
+  state changes. Avoid decorative animation.
