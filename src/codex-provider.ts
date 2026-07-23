@@ -183,16 +183,31 @@ public async health(): Promise<boolean> {
   public async listSessionThreads(
     options: AgentSessionListOptions,
   ): Promise<ThreadRecord[]> {
-    const result = (await this.bridge.request("thread/list", {
-      limit: options.limit,
-      sortKey: "updated_at",
-      sortDirection: "desc",
-      sourceKinds: CODEX_THREAD_SOURCES,
-      archived: options.archived,
-    })) as { data?: unknown[] };
-    return Array.isArray(result.data)
-      ? (result.data as ThreadRecord[]).map(normalizeCodexThreadRecord)
-      : [];
+    const threads: ThreadRecord[] = [];
+    let cursor: string | null = null;
+    do {
+      const result = (await this.bridge.request("thread/list", {
+        limit: options.limit,
+        ...(cursor ? { cursor } : {}),
+        sortKey: "updated_at",
+        sortDirection: "desc",
+        sourceKinds: CODEX_THREAD_SOURCES,
+        archived: options.archived,
+      })) as { data?: unknown[]; nextCursor?: unknown };
+      const page = Array.isArray(result.data)
+        ? (result.data as ThreadRecord[]).map(normalizeCodexThreadRecord)
+        : [];
+      threads.push(
+        ...page.filter((thread) => {
+          if (options.subAgentParentId) {
+            return thread.subAgent?.parentSessionId === options.subAgentParentId;
+          }
+          return options.includeSubAgents || thread.subAgent == null;
+        }),
+      );
+      cursor = asString(result.nextCursor);
+    } while (threads.length < options.limit && cursor);
+    return threads.slice(0, options.limit);
   }
 
   public async readSessionThread(

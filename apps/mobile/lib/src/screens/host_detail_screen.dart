@@ -216,8 +216,11 @@ class _HostDetailScreenState extends State<HostDetailScreen>
     List<SessionSummary> recents,
     List<SessionSummary> favorites,
   ) {
-    final byId = <String, SessionSummary>{for (final s in recents) s.id: s};
-    for (final fav in favorites) {
+    final byId = <String, SessionSummary>{
+      for (final s in recents.where((session) => !session.isSubAgent))
+        s.id: s,
+    };
+    for (final fav in favorites.where((session) => !session.isSubAgent)) {
       byId.putIfAbsent(fav.id, () => fav);
     }
     return byId.values.toList()

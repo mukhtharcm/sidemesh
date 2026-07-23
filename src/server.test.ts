@@ -4365,7 +4365,7 @@ describe("GET /api/sessions/:sessionId/status", () => {
     });
   });
 
-  it("returns structured sub-agent lineage for child sessions in recent rows", async () => {
+  it("keeps child sessions out of recents and exposes them under their parent", async () => {
     const stateDir = await mkdtemp(nodePath.join(tmpdir(), "sidemesh-server-status-test-"));
     const provider = new SearchFixtureProvider([
       {
@@ -4413,16 +4413,32 @@ describe("GET /api/sessions/:sessionId/status", () => {
       const listed = (sessionsRes.body as any[]).find(
         (item) => item.id === "thread-child",
       );
-      assert.ok(listed);
-      assert.equal(listed.source, "sub-agent");
-      assert.equal(listed.isSubAgent, true);
-      assert.deepEqual(listed.subAgent, {
+      assert.equal(listed, undefined);
+
+      const runsRes = await request({
+        hostname: "127.0.0.1",
+        port: server.port,
+        path: "/api/sessions/thread-parent/agent-runs",
+        method: "GET",
+        headers: { Authorization: "Bearer " + config.token },
+      });
+      assert.equal(runsRes.statusCode, 200);
+      assert.deepEqual(runsRes.body, [{
+        id: "thread-child",
         parentSessionId: "thread-parent",
-        sourceKind: "thread_spawn",
+        title: "Delegated explorer",
+        preview: "Delegated explorer",
+        cwd: "/repo",
+        createdAt: 1000,
+        updatedAt: 2000,
+        provider: null,
+        status: "idle",
+        agentName: null,
+        agentDisplayName: null,
         agentRole: "explorer",
         agentNickname: "scout",
         depth: 1,
-      });
+      }]);
     });
   });
 

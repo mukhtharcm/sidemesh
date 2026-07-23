@@ -15,7 +15,7 @@ import type {
   AgentSubmitInputResult,
 } from "./agent-provider.js";
 import { MultiAgentProvider } from "./multi-provider.js";
-import type { SessionLogSnapshot } from "./types.js";
+import type { SessionLogSnapshot, SessionSubAgentInfo } from "./types.js";
 
 describe("MultiAgentProvider", () => {
   it("wraps session ids and routes reads and writes back to the owning provider", async () => {
@@ -79,6 +79,61 @@ describe("MultiAgentProvider", () => {
     assert.match(created.thread.id, /^copilot:/);
     assert.equal(copilot.createdSessions.at(-1)?.provider, null);
     assert.equal(copilot.createdSessions.at(-1)?.cwd, "/repo/new");
+  });
+
+  it("namespaces sub-agent parent ids and scopes parent queries", async () => {
+    const codex = new StubProvider("codex", "Codex");
+    const copilot = new StubProvider("copilot", "GitHub Copilot");
+    codex.seedThread("child", "/repo/codex", {
+      subAgent: {
+        parentSessionId: "parent",
+        sourceKind: "thread_spawn",
+      },
+    });
+    copilot.seedThread("other", "/repo/copilot");
+    const provider = new MultiAgentProvider(
+      [
+        {
+          kind: "codex",
+          config: { kind: "codex", bin: "codex" },
+          provider: codex,
+        },
+        {
+          kind: "copilot",
+          config: {
+            kind: "copilot",
+            bin: "copilot",
+            stateDir: null,
+            allowAll: false,
+            configuredModel: null,
+          },
+          provider: copilot,
+        },
+      ],
+      "codex",
+    );
+    const wrappedParent = (await provider.listSessionThreads({
+      limit: 10,
+      archived: false,
+      includeSubAgents: true,
+    })).find((thread) => thread.subAgent)?.subAgent?.parentSessionId;
+    assert.ok(wrappedParent);
+    codex.lastListOptions = null;
+    copilot.lastListOptions = null;
+
+    const children = await provider.listSessionThreads({
+      limit: 10,
+      archived: false,
+      includeSubAgents: true,
+      subAgentParentId: wrappedParent,
+    });
+
+    assert.equal(children.length, 1);
+    assert.equal(children[0]?.subAgent?.parentSessionId, wrappedParent);
+    const codexListOptions =
+      codex.lastListOptions as AgentSessionListOptions | null;
+    assert.equal(codexListOptions?.subAgentParentId, "parent");
+    assert.equal(copilot.lastListOptions, null);
   });
 
   it("wraps live approval events so the server can route them safely", async () => {
@@ -361,6 +416,7 @@ class StubProvider
 
   public readonly createdSessions: AgentCreateSessionRequest[] = [];
   public lastSubmit: AgentSubmitInputRequest | null = null;
+  public lastListOptions: AgentSessionListOptions | null = null;
   private readonly threads = new Map<string, ReturnType<typeof stubThread>>();
 
   public constructor(
@@ -385,8 +441,9 @@ class StubProvider
   }
 
   public async listSessionThreads(
-    _options: AgentSessionListOptions,
+    options: AgentSessionListOptions,
   ): Promise<ReturnType<typeof stubThread>[]> {
+    this.lastListOptions = options;
     return [...this.threads.values()];
   }
 
@@ -484,6 +541,7 @@ function stubThread(
   overrides: Partial<{
     createdAt: number;
     updatedAt: number;
+    subAgent: SessionSubAgentInfo;
   }> = {},
 ) {
   return {
@@ -497,6 +555,7 @@ function stubThread(
     path: null,
     status: { type: "idle" },
     gitInfo: null,
+    subAgent: overrides.subAgent,
   };
 }
 
