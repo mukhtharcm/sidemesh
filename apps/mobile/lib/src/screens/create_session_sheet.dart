@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../api_client.dart';
+import '../composer_image_attachments.dart';
 import '../create_session_defaults_store.dart';
 import '../fs_models.dart';
 import '../models.dart';
@@ -16,12 +17,16 @@ import '../theme/app_colors.dart';
 import '../theme/color_contrast.dart';
 import '../theme/app_theme.dart';
 import '../theme/app_tokens.dart';
+import '../widgets/app_composer.dart';
 import '../widgets/app_dialogs.dart';
+import '../widgets/app_primitives.dart';
 import '../widgets/app_snackbar.dart';
 import '../widgets/app_sheets.dart';
 import '../widgets/launch_controls.dart';
 import '../widgets/launch_options_form.dart';
 import '../widgets/mesh_widgets.dart';
+import '../widgets/provider_access_mode_choices.dart';
+import '../widgets/reasoning_choice_list.dart';
 
 enum CreateSessionPresentation { sheet, dialog, page }
 
@@ -36,6 +41,7 @@ class CreateSessionDraftSeed {
     this.approval,
     this.sandbox,
     this.networkAccess,
+    this.accessMode,
     this.basedOnCurrentSession = false,
   });
 
@@ -60,6 +66,9 @@ class CreateSessionDraftSeed {
           policy.approval ?? ApprovalPolicy.fromWire(runtime?.approvalPolicy),
       sandbox: policy.sandbox ?? SandboxMode.fromWire(runtime?.sandboxMode),
       networkAccess: policy.networkAccess ?? runtime?.networkAccess,
+      accessMode:
+          _trimmedOrNull(policy.accessMode) ??
+          _trimmedOrNull(runtime?.accessMode),
       basedOnCurrentSession: true,
     );
   }
@@ -72,6 +81,7 @@ class CreateSessionDraftSeed {
   final ApprovalPolicy? approval;
   final SandboxMode? sandbox;
   final bool? networkAccess;
+  final String? accessMode;
   final bool basedOnCurrentSession;
 }
 
@@ -303,6 +313,7 @@ class CreateSessionSheet extends StatefulWidget {
     this.initialCwd,
     this.seed,
     this.presentation = CreateSessionPresentation.sheet,
+    this.imageAttachmentService = const SystemComposerImageAttachmentService(),
   });
 
   final HostProfile host;
@@ -310,6 +321,7 @@ class CreateSessionSheet extends StatefulWidget {
   final String? initialCwd;
   final CreateSessionDraftSeed? seed;
   final CreateSessionPresentation presentation;
+  final ComposerImageAttachmentService imageAttachmentService;
 
   @override
   State<CreateSessionSheet> createState() => _CreateSessionSheetState();
@@ -319,22 +331,28 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
   late final TextEditingController _cwdController;
   late final TextEditingController _promptController;
   late final TextEditingController _profileController;
+  final FocusNode _promptFocusNode = FocusNode();
 
   List<ModelCatalogEntry> _models = const <ModelCatalogEntry>[];
   List<ProviderModeSummary> _providerModes = const <ProviderModeSummary>[];
   List<ProviderProfileSummary> _profiles = const <ProviderProfileSummary>[];
+  List<ComposerImageAttachment> _draftAttachments =
+      const <ComposerImageAttachment>[];
   ModelCatalogEntry? _selectedModel;
   String? _mode;
   String? _reasoningEffort;
   String? _modelsError;
   String? _providerModesError;
   String? _profilesError;
+  ProviderAccessModeCatalog? _accessModeCatalog;
+  String? _accessModesError;
   String? _defaultProfileName;
   ApprovalPolicy _approval = ApprovalPolicy.onRequest;
   SandboxMode _sandbox = SandboxMode.workspaceWrite;
   bool _loadingModels = false;
   bool _loadingProviderModes = false;
   bool _loadingProfiles = false;
+  bool _loadingAccessModes = false;
   bool _providerModesUseFallback = false;
   bool _fastMode = false;
   bool _webSearch = false;
@@ -356,8 +374,11 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
   String? _providerModesLoadedForCwd;
   String? _providerModesLoadedForProvider;
   String? _profilesLoadedForCwd;
+  String? _accessModesLoadedForCwd;
+  String? _accessModesLoadedForProvider;
   String? _selectedProviderKind;
   String? _inheritedModel;
+  String? _accessMode;
 
   @override
   void initState() {
@@ -372,6 +393,7 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
     _fastMode = seed?.fastMode ?? defaults.fastMode;
     _webSearch = defaults.webSearch;
     _networkAccess = seed?.networkAccess ?? false;
+    _accessMode = _trimmedOrNull(seed?.accessMode);
     _selectedProviderKind = _trimmedOrNull(seed?.provider);
     _inheritedModel = _trimmedOrNull(seed?.model);
     _mode = _trimmedOrNull(seed?.mode);
@@ -394,6 +416,7 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
       ..removeListener(_handlePromptChanged)
       ..dispose();
     _profileController.dispose();
+    _promptFocusNode.dispose();
     super.dispose();
   }
 
@@ -517,6 +540,17 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
 
   bool get _supportsNetworkAccess =>
       _supports('runtimeControls', 'networkAccess');
+
+  bool get _supportsImageInput =>
+      _nodeInfo != null && _supports('input', 'imageUrl');
+
+  bool get _supportsAccessModes =>
+      _nodeInfo != null &&
+      _supports('configuration', 'accessModes') &&
+      _supports('runtimeControls', 'accessMode');
+
+  bool get _configurationIsLoading =>
+      _loadingNode || (_supportsAccessModes && _loadingAccessModes);
 
   bool _supports(String section, String feature) {
     final node = _nodeInfo;
@@ -669,6 +703,7 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
   }
 
   bool? get _networkAccessToSubmit {
+    if (_supportsAccessModes) return null;
     if (!_supportsNetworkAccess) return null;
     if (_effectiveSandbox == SandboxMode.dangerFullAccess) return null;
     return _networkAccess;
@@ -749,12 +784,14 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
   }
 
   String? get _approvalPolicyToSubmit {
+    if (_supportsAccessModes) return null;
     if (!_supportsApprovalPolicy) return null;
     if (_hasProfileRuntimeContext && !_approvalTouched) return null;
     return _effectiveApproval.wire;
   }
 
   String? get _sandboxModeToSubmit {
+    if (_supportsAccessModes) return null;
     if (!_supportsSandboxMode) return null;
     if (_hasProfileRuntimeContext && !_sandboxTouched) return null;
     return _effectiveSandbox.wire;
@@ -794,6 +831,15 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
       }
       if (_supportsProfiles && _currentCwd != null) {
         unawaited(_loadProfiles());
+      }
+      if (_supportsAccessModes) {
+        unawaited(_loadAccessModes());
+      }
+      if ((widget.presentation == CreateSessionPresentation.page ||
+              _showAdvanced) &&
+          _supportsModels &&
+          _supportsModelOverride) {
+        unawaited(_loadModels());
       }
     } catch (error) {
       if (!mounted) return;
@@ -849,6 +895,9 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
   }
 
   void _coerceForProviderCapabilities() {
+    if (!_supportsImageInput) {
+      _draftAttachments = const <ComposerImageAttachment>[];
+    }
     if (!_supportsProfiles) {
       _profileController.clear();
       _profiles = const <ProviderProfileSummary>[];
@@ -897,6 +946,63 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
     if (!_supportsNetworkAccess) {
       _networkAccess = false;
     }
+    if (!_supportsAccessModes) {
+      _accessMode = null;
+      _accessModeCatalog = null;
+      _accessModesError = null;
+    }
+  }
+
+  Future<void> _loadAccessModes({bool force = false}) async {
+    if (!_supportsAccessModes || _loadingAccessModes) return;
+    final cwd = _currentCwd;
+    final providerKind = _selectedProviderKindOrDefault;
+    if (!force &&
+        _accessModesLoadedForCwd == cwd &&
+        _accessModesLoadedForProvider == providerKind &&
+        _accessModesError == null) {
+      return;
+    }
+    setState(() {
+      _loadingAccessModes = true;
+      _accessModesError = null;
+    });
+    try {
+      final catalog = await widget.api.fetchAccessModes(
+        widget.host,
+        cwd: cwd,
+        agentProvider: providerKind,
+      );
+      if (!mounted) return;
+      if (cwd != _currentCwd ||
+          providerKind != _selectedProviderKindOrDefault) {
+        setState(() => _loadingAccessModes = false);
+        unawaited(_loadAccessModes(force: true));
+        return;
+      }
+      setState(() {
+        _accessModeCatalog = catalog;
+        _loadingAccessModes = false;
+        _accessModesLoadedForCwd = cwd;
+        _accessModesLoadedForProvider = providerKind;
+        _accessMode = resolveEnabledProviderAccessModeId(
+          catalog,
+          preferred: _accessMode,
+        );
+      });
+    } catch (error) {
+      if (!mounted) return;
+      if (cwd != _currentCwd ||
+          providerKind != _selectedProviderKindOrDefault) {
+        setState(() => _loadingAccessModes = false);
+        unawaited(_loadAccessModes(force: true));
+        return;
+      }
+      setState(() {
+        _loadingAccessModes = false;
+        _accessModesError = friendlyError(error);
+      });
+    }
   }
 
   void _selectProvider(String? providerKind) {
@@ -926,6 +1032,11 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
     _approvalTouched = false;
     _sandboxTouched = false;
     _webSearchTouched = false;
+    _accessModeCatalog = null;
+    _accessModesError = null;
+    _accessMode = null;
+    _accessModesLoadedForCwd = null;
+    _accessModesLoadedForProvider = null;
     _coerceForProviderCapabilities();
   }
 
@@ -938,7 +1049,8 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
         _modelsLoadedForCwd = null;
         _modelsLoadedForProfile = null;
       });
-      if (_showAdvanced &&
+      if ((_showAdvanced ||
+              widget.presentation == CreateSessionPresentation.page) &&
           _supportsModels &&
           _supportsModelOverride &&
           !_loadingModels) {
@@ -954,6 +1066,20 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
       });
       if (_supportsMode && !_loadingProviderModes) {
         unawaited(_loadProviderModes());
+      }
+    }
+    if (_accessModesLoadedForCwd != cwd) {
+      setState(() {
+        _accessModeCatalog = null;
+        _accessModesError = null;
+        _accessMode = null;
+        _accessModesLoadedForCwd = null;
+      });
+      if ((_showAdvanced ||
+              widget.presentation == CreateSessionPresentation.page) &&
+          _supportsAccessModes &&
+          !_loadingAccessModes) {
+        unawaited(_loadAccessModes());
       }
     }
     if (cwd == _profilesLoadedForCwd) {
@@ -1055,6 +1181,7 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
     if (!force &&
         _modelsLoadedForCwd == cwd &&
         _modelsLoadedForProfile == profile &&
+        _models.isNotEmpty &&
         _modelsError == null) {
       return;
     }
@@ -1246,6 +1373,9 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
         !_loadingProfiles) {
       unawaited(_loadProfiles());
     }
+    if (_showAdvanced && _supportsAccessModes && !_loadingAccessModes) {
+      unawaited(_loadAccessModes());
+    }
   }
 
   Future<void> _chooseProfile() async {
@@ -1301,18 +1431,248 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
     if (!mounted || result == null) {
       return;
     }
+    final attachmentCount = _draftAttachments.length;
     setState(() {
       _selectProvider(result);
     });
+    if (attachmentCount > 0 && _draftAttachments.isEmpty) {
+      showAppSnackBar(
+        context,
+        'Attachments were removed because $_providerName does not accept images.',
+      );
+    }
     if (_supportsProfiles && _currentCwd != null) {
       unawaited(_loadProfiles(force: true));
     }
     if (_supportsMode) {
       unawaited(_loadProviderModes(force: true));
     }
+    if (_supportsAccessModes) {
+      unawaited(_loadAccessModes());
+    }
     if (_showAdvanced) {
       unawaited(_loadModels(force: true));
     }
+  }
+
+  void _openDraftModelPicker() {
+    unawaited(_chooseModel());
+  }
+
+  String? _reasoningDescription(String? effort) {
+    if (effort == null) return null;
+    for (final option in _supportedReasoningOptions) {
+      if (option.reasoningEffort == effort) {
+        final description = option.description.trim();
+        return description.isEmpty ? null : description;
+      }
+    }
+    return null;
+  }
+
+  Future<void> _showDraftReasoningPicker() async {
+    final options = _supportedReasoningOptions;
+    final current = _effectiveReasoningEffort;
+    if (options.isEmpty) return;
+    final defaultReasoning =
+        _trimmedOrNull(_controlModel?.defaultReasoningEffort) ??
+        _trimmedOrNull(current) ??
+        options.first.reasoningEffort;
+    final currentReasoning = _trimmedOrNull(current) ?? defaultReasoning;
+    final selected = await showModalBottomSheet<String>(
+      context: context,
+      backgroundColor: Colors.transparent,
+      barrierColor: Colors.black.withValues(alpha: 0.28),
+      showDragHandle: false,
+      useSafeArea: true,
+      isScrollControlled: true,
+      builder: (sheetContext) => MeshBottomSheetScaffold(
+        icon: Icons.psychology_alt_rounded,
+        title: 'Choose thinking level',
+        description: 'Set how much thinking the first reply should use.',
+        maxWidth: 520,
+        maxHeightFactor: 0.72,
+        child: ReasoningChoiceList(
+          options: options,
+          currentReasoning: currentReasoning,
+          defaultReasoning: defaultReasoning,
+          onSelected: (effort) => Navigator.of(sheetContext).pop(effort),
+        ),
+      ),
+    );
+    if (!mounted || selected == null) return;
+    setState(() {
+      _reasoningEffort = selected;
+      _reasoningTouched = true;
+    });
+  }
+
+  Future<T?> _showDraftChoicePicker<T>({
+    required IconData icon,
+    required String title,
+    required String description,
+    required List<_DraftChoice<T>> choices,
+  }) {
+    return showModalBottomSheet<T>(
+      context: context,
+      backgroundColor: Colors.transparent,
+      barrierColor: Colors.black.withValues(alpha: 0.28),
+      showDragHandle: false,
+      useSafeArea: true,
+      isScrollControlled: true,
+      builder: (sheetContext) => MeshBottomSheetScaffold(
+        icon: icon,
+        title: title,
+        description: description,
+        maxWidth: 560,
+        maxHeightFactor: 0.72,
+        child: ListView.separated(
+          itemCount: choices.length,
+          separatorBuilder: (_, _) => const SizedBox(height: AppSpacing.sm),
+          itemBuilder: (context, index) {
+            final choice = choices[index];
+            final colors = context.colors;
+            return AppChoiceRow(
+              title: choice.label,
+              subtitle: choice.description,
+              icon: choice.icon,
+              selected: choice.selected,
+              enabled: choice.enabled,
+              selectedColor: choice.danger ? colors.danger : null,
+              selectedBackground: choice.danger ? colors.dangerMuted : null,
+              onTap: choice.enabled
+                  ? () => Navigator.of(sheetContext).pop(choice.value)
+                  : null,
+            );
+          },
+        ),
+      ),
+    );
+  }
+
+  Future<void> _showDraftModePicker() async {
+    final selected = await _showDraftChoicePicker<String>(
+      icon: Icons.alt_route_rounded,
+      title: 'Choose work style',
+      description: 'Set how the agent should approach this session.',
+      choices: [
+        _DraftChoice<String>(
+          value: '',
+          label: 'Use default',
+          description: 'Use the provider default for this workspace.',
+          icon: Icons.tune_rounded,
+          selected: _modeToSubmit == null,
+        ),
+        for (final mode in _availableModeChoices)
+          _DraftChoice<String>(
+            value: mode.id,
+            label: mode.label,
+            description:
+                mode.description ?? 'Use the ${mode.label} work style.',
+            icon: Icons.alt_route_rounded,
+            selected: _modeToSubmit == mode.id,
+          ),
+      ],
+    );
+    if (!mounted || selected == null) return;
+    setState(() => _mode = selected.isEmpty ? null : selected);
+  }
+
+  Future<void> _showDraftApprovalPicker() async {
+    final selected = await _showDraftChoicePicker<ApprovalPolicy>(
+      icon: Icons.verified_user_rounded,
+      title: 'Choose approval behavior',
+      description: 'Choose when the agent should pause and ask you.',
+      choices: [
+        for (final policy in _approvalOptions)
+          _DraftChoice<ApprovalPolicy>(
+            value: policy,
+            label: policy.label,
+            description: policy.description,
+            icon: Icons.verified_user_rounded,
+            selected: _effectiveApproval == policy,
+            danger: policy == ApprovalPolicy.never,
+          ),
+      ],
+    );
+    if (!mounted || selected == null) return;
+    setState(() {
+      _approval = selected;
+      _approvalTouched = true;
+    });
+  }
+
+  Future<void> _showDraftSandboxPicker() async {
+    final selected = await _showDraftChoicePicker<SandboxMode>(
+      icon: Icons.folder_special_rounded,
+      title: 'Choose file access',
+      description: 'Control which files and commands the agent can use.',
+      choices: [
+        for (final mode in SandboxMode.values)
+          _DraftChoice<SandboxMode>(
+            value: mode,
+            label: mode.label,
+            description: mode.description,
+            icon: Icons.folder_special_rounded,
+            selected: _effectiveSandbox == mode,
+            danger: mode == SandboxMode.dangerFullAccess,
+          ),
+      ],
+    );
+    if (!mounted || selected == null) return;
+    if (selected == SandboxMode.dangerFullAccess) {
+      final confirmed = await showMeshConfirmDialog(
+        context,
+        icon: Icons.gpp_maybe_outlined,
+        title: 'Enable full access?',
+        description: selected.description,
+        confirmLabel: 'Enable full access',
+        danger: true,
+      );
+      if (!mounted || !confirmed) return;
+    }
+    setState(() {
+      _sandbox = selected;
+      _sandboxTouched = true;
+    });
+  }
+
+  Future<void> _showDraftAccessPicker() async {
+    final catalog = _accessModeCatalog;
+    if (catalog == null || catalog.modes.isEmpty) return;
+    final selected = await _showDraftChoicePicker<ProviderAccessModeSummary>(
+      icon: Icons.shield_outlined,
+      title: 'Choose access',
+      description: 'Choose how the agent should handle sensitive actions.',
+      choices: [
+        for (final mode in catalog.modes)
+          _DraftChoice<ProviderAccessModeSummary>(
+            value: mode,
+            label: mode.label,
+            description: mode.disabledReason ?? mode.description,
+            icon: providerAccessModeIcon(mode.icon),
+            selected: mode.id == _accessMode,
+            enabled: mode.enabled,
+            danger: mode.isDangerous,
+          ),
+      ],
+    );
+    if (!mounted || selected == null) return;
+    await _selectAccessMode(selected);
+  }
+
+  Future<void> _saveDraftDefaults() async {
+    await CreateSessionDefaultsStore.instance.setDefaults(
+      CreateSessionDefaults(
+        approval: _effectiveApproval,
+        sandbox: _effectiveSandbox,
+        fastMode: _effectiveFastMode,
+        webSearch: _effectiveWebSearch,
+      ),
+    );
+    if (!mounted) return;
+    showAppSnackBar(context, 'Saved as default session setup.');
+    HapticFeedback.mediumImpact();
   }
 
   Future<void> _chooseModel() async {
@@ -1328,6 +1688,7 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
     final result = await showModalBottomSheet<_ModelPickerResult>(
       context: context,
       backgroundColor: Colors.transparent,
+      barrierColor: Colors.black.withValues(alpha: 0.28),
       showDragHandle: false,
       useSafeArea: true,
       isScrollControlled: true,
@@ -1344,6 +1705,10 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
     );
     if (!mounted || result == null) return;
 
+    _applyModelPickerResult(result);
+  }
+
+  void _applyModelPickerResult(_ModelPickerResult result) {
     setState(() {
       _selectedModel = result.model;
       _inheritedModel = result.model?.model;
@@ -1362,25 +1727,70 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
     });
   }
 
-  void _applyAutopilot() {
+  Future<void> _pickDraftImages() async {
+    if (_submitting) return;
+    if (!_supportsImageInput) {
+      showAppSnackBar(context, 'This agent does not accept image attachments.');
+      return;
+    }
+    try {
+      final update = await widget.imageAttachmentService.pickImages(
+        current: _draftAttachments,
+      );
+      if (!mounted || update == null) return;
+      _applyDraftImageAttachmentUpdate(update);
+    } catch (error) {
+      if (!mounted) return;
+      showAppSnackBar(
+        context,
+        'Failed to attach images: ${friendlyError(error)}',
+      );
+    }
+  }
+
+  Future<bool> _pasteDraftImage({bool reportEmpty = true}) async {
+    if (_submitting || !_supportsImageInput) return false;
+    try {
+      final update = await widget.imageAttachmentService.pasteImage(
+        current: _draftAttachments,
+        reportEmpty: reportEmpty,
+      );
+      if (!mounted) return false;
+      _applyDraftImageAttachmentUpdate(update);
+      return update.added;
+    } catch (error) {
+      if (!mounted) return false;
+      showAppSnackBar(
+        context,
+        'Failed to paste image: ${friendlyError(error)}',
+      );
+      return false;
+    }
+  }
+
+  void _applyDraftImageAttachmentUpdate(ComposerImageAttachmentUpdate update) {
     setState(() {
-      if (_supportsApprovalPolicy &&
-          _approvalOptions.contains(ApprovalPolicy.never)) {
-        _approval = ApprovalPolicy.never;
-        _approvalTouched = true;
-      }
-      if (_supportsSandboxMode) {
-        _sandbox = SandboxMode.dangerFullAccess;
-        _sandboxTouched = true;
-      }
+      _draftAttachments = update.attachments;
+    });
+    for (final message in update.feedback) {
+      showAppSnackBar(context, message);
+    }
+  }
+
+  void _removeDraftImage(String attachmentId) {
+    setState(() {
+      _draftAttachments = _draftAttachments
+          .where((attachment) => attachment.id != attachmentId)
+          .toList(growable: false);
     });
   }
 
   Future<void> _submit() async {
+    if (_submitting || _configurationIsLoading) return;
     final cwd = _cwdController.text.trim();
     final prompt = _promptController.text.trim();
-    if (cwd.isEmpty || prompt.isEmpty) {
-      setState(() => _error = 'Folder and task are required.');
+    if (cwd.isEmpty || (prompt.isEmpty && _draftAttachments.isEmpty)) {
+      setState(() => _error = 'Folder and a message or image are required.');
       return;
     }
 
@@ -1399,6 +1809,12 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
         widget.host,
         cwd: cwd,
         prompt: prompt,
+        input: <SessionInputItem>[
+          ..._draftAttachments.map(
+            (attachment) => SessionInputItem.image(attachment.dataUrl),
+          ),
+          if (prompt.isNotEmpty) SessionInputItem.text(prompt),
+        ],
         provider: _selectedProviderKindOrDefault,
         model: _supportsModelOverride
             ? _selectedModel?.model ?? _inheritedModel
@@ -1409,6 +1825,7 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
         approvalPolicy: _approvalPolicyToSubmit,
         sandboxMode: _sandboxModeToSubmit,
         networkAccess: _networkAccessToSubmit,
+        accessMode: _supportsAccessModes ? _accessMode : null,
         webSearch: _webSearchToSubmit,
         profile: _supportsProfiles ? _profileToSubmit : null,
       );
@@ -1421,7 +1838,14 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
           role: 'user',
           text: prompt,
           content: prompt.trim().isNotEmpty ? [TextBlock(prompt)] : const [],
-          attachments: const <SessionMessageAttachment>[],
+          attachments: _draftAttachments
+              .map(
+                (attachment) => SessionMessageAttachment(
+                  type: 'image',
+                  url: attachment.dataUrl,
+                ),
+              )
+              .toList(growable: false),
           createdAt: submittedAt,
           seq: 0,
         ),
@@ -1499,8 +1923,10 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
 
   Widget _buildDraftPage(BuildContext context) {
     final colors = context.colors;
-    final hasPrompt = _promptController.text.trim().isNotEmpty;
-    final canPop = !_showAdvanced && (_allowPop || !hasPrompt);
+    final hasDraft =
+        _promptController.text.trim().isNotEmpty ||
+        _draftAttachments.isNotEmpty;
+    final canPop = !_showAdvanced && (_allowPop || !hasDraft);
     return PopScope<SessionSummary>(
       canPop: canPop,
       onPopInvokedWithResult: (didPop, result) {
@@ -1649,30 +2075,283 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
   }
 
   Widget _buildDraftSettings(BuildContext context) {
-    return SingleChildScrollView(
-      padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
-      child: Center(
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 720),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Text(
-                'These settings apply when you send the first message.',
-                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                  color: context.colors.textSecondary,
-                ),
-              ),
-              const SizedBox(height: 16),
-              _buildPrimaryPanel(context, includeTask: false),
-              const SizedBox(height: 12),
-              _buildAdvancedPanel(
-                context,
-                showCollapseControl: false,
-                wrapInSurface: false,
-              ),
-            ],
+    final colors = context.colors;
+    final width = MediaQuery.sizeOf(context).width;
+    final effectiveReasoning = _effectiveReasoningEffort;
+    final selectedAccess = _selectedAccessMode;
+    final sessionRows = <Widget>[
+      if (_availableProviders.length > 1)
+        AppSettingsRow(
+          key: const ValueKey('create-session-provider-selector'),
+          icon: Icons.smart_toy_rounded,
+          title: 'Agent',
+          subtitle: _providerName,
+          trailing: const Icon(Icons.chevron_right_rounded),
+          onTap: _submitting ? null : _chooseProvider,
+        ),
+      AppSettingsRow(
+        icon: Icons.folder_open_rounded,
+        title: 'Folder',
+        trailing: IconButton(
+          tooltip: 'Browse folders on this machine',
+          onPressed: _submitting || _nodeInfo == null ? null : _browseDirectory,
+          icon: const Icon(Icons.folder_rounded),
+        ),
+        footer: TextField(
+          controller: _cwdController,
+          textInputAction: TextInputAction.done,
+          style: monoStyle(color: colors.textPrimary, fontSize: 13),
+          decoration: const InputDecoration(
+            border: InputBorder.none,
+            enabledBorder: InputBorder.none,
+            focusedBorder: InputBorder.none,
+            filled: false,
+            isDense: true,
+            hintText: '/Users/you/src/project',
+            contentPadding: EdgeInsets.zero,
           ),
+        ),
+      ),
+    ];
+    final agentRows = <Widget>[
+      if (_supportsProfiles)
+        AppSettingsRow(
+          icon: Icons.badge_rounded,
+          title: 'Profile',
+          subtitle: _profileLabel,
+          trailing: const Icon(Icons.chevron_right_rounded),
+          onTap: _submitting ? null : _chooseProfile,
+        ),
+      if (_supportsModels && _supportsModelOverride)
+        AppSettingsRow(
+          key: const ValueKey('new-session-model-selector'),
+          icon: Icons.memory_rounded,
+          title: 'Model',
+          subtitle: _modelLabel,
+          footer: _modelDescription.trim().isEmpty
+              ? null
+              : Text(
+                  _modelDescription,
+                  style: Theme.of(
+                    context,
+                  ).textTheme.bodySmall?.copyWith(color: colors.textSecondary),
+                ),
+          trailing: const Icon(Icons.chevron_right_rounded),
+          onTap: _submitting || _loadingModels ? null : _chooseModel,
+        ),
+      if (_supportsReasoningEffort && _supportsModels && _supportsModelOverride)
+        AppSettingsRow(
+          key: const ValueKey('new-session-thinking-selector'),
+          icon: Icons.psychology_alt_rounded,
+          title: 'Thinking',
+          subtitle: _controlModelIsAuto
+              ? 'Automatic for this model'
+              : effectiveReasoning == null
+              ? 'Use model default'
+              : reasoningEffortLabel(effectiveReasoning),
+          footer: _reasoningDescription(effectiveReasoning) == null
+              ? null
+              : Text(
+                  _reasoningDescription(effectiveReasoning)!,
+                  style: Theme.of(
+                    context,
+                  ).textTheme.bodySmall?.copyWith(color: colors.textSecondary),
+                ),
+          trailing: _controlModelIsAuto || _supportedReasoningOptions.isEmpty
+              ? null
+              : const Icon(Icons.chevron_right_rounded),
+          onTap:
+              _submitting ||
+                  _controlModelIsAuto ||
+                  _supportedReasoningOptions.isEmpty
+              ? null
+              : () => unawaited(_showDraftReasoningPicker()),
+        ),
+      if (_supportsMode)
+        AppSettingsRow(
+          icon: Icons.alt_route_rounded,
+          title: 'Work style',
+          subtitle: _sessionModeChoiceLabel(
+            _modeToSubmit,
+            _availableModeChoices,
+          ),
+          trailing: const Icon(Icons.chevron_right_rounded),
+          onTap: _submitting ? null : () => unawaited(_showDraftModePicker()),
+        ),
+      if (_supportsFastMode)
+        AppSettingsRow(
+          icon: Icons.bolt_rounded,
+          title: 'Fast mode',
+          subtitle: _fastSupported
+              ? 'Prefer the faster service tier.'
+              : 'Unavailable for the selected model.',
+          trailing: Switch.adaptive(
+            value: _effectiveFastMode,
+            onChanged: _submitting || !_fastSupported
+                ? null
+                : (value) => setState(() {
+                    _fastMode = value;
+                    _fastModeTouched = true;
+                  }),
+          ),
+          onTap: _submitting || !_fastSupported
+              ? null
+              : () => setState(() {
+                  _fastMode = !_effectiveFastMode;
+                  _fastModeTouched = true;
+                }),
+        ),
+    ];
+    final permissionRows = <Widget>[
+      if (_supportsAccessModes)
+        AppSettingsRow(
+          key: const ValueKey('new-session-access-selector'),
+          icon: selectedAccess == null
+              ? Icons.shield_outlined
+              : providerAccessModeIcon(selectedAccess.icon),
+          title: 'Access',
+          subtitle: _loadingAccessModes
+              ? 'Loading access options'
+              : selectedAccess?.label ?? 'Choose access',
+          footer: selectedAccess == null
+              ? _accessModesError == null
+                    ? null
+                    : Text(
+                        _accessModesError!,
+                        style: Theme.of(
+                          context,
+                        ).textTheme.bodySmall?.copyWith(color: colors.danger),
+                      )
+              : Text(
+                  selectedAccess.description,
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: selectedAccess.isDangerous
+                        ? colors.danger
+                        : colors.textSecondary,
+                  ),
+                ),
+          trailing: _loadingAccessModes
+              ? const SizedBox.square(
+                  dimension: AppSizes.icon,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                )
+              : const Icon(Icons.chevron_right_rounded),
+          onTap:
+              _submitting ||
+                  _loadingAccessModes ||
+                  _accessModeCatalog?.modes.isEmpty != false
+              ? null
+              : () => unawaited(_showDraftAccessPicker()),
+        ),
+      if (!_supportsAccessModes && _supportsApprovalPolicy)
+        AppSettingsRow(
+          icon: Icons.verified_user_rounded,
+          title: 'Approval',
+          subtitle: _effectiveApproval.label,
+          footer: Text(
+            _effectiveApproval.description,
+            style: Theme.of(
+              context,
+            ).textTheme.bodySmall?.copyWith(color: colors.textSecondary),
+          ),
+          trailing: const Icon(Icons.chevron_right_rounded),
+          onTap: _submitting
+              ? null
+              : () => unawaited(_showDraftApprovalPicker()),
+        ),
+      if (!_supportsAccessModes && _supportsSandboxMode)
+        AppSettingsRow(
+          icon: Icons.folder_special_rounded,
+          title: 'File access',
+          subtitle: _effectiveSandbox.label,
+          footer: Text(
+            _effectiveSandbox.description,
+            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+              color: _effectiveSandbox == SandboxMode.dangerFullAccess
+                  ? colors.danger
+                  : colors.textSecondary,
+            ),
+          ),
+          trailing: const Icon(Icons.chevron_right_rounded),
+          onTap: _submitting
+              ? null
+              : () => unawaited(_showDraftSandboxPicker()),
+        ),
+    ];
+    final networkRows = <Widget>[
+      if (!_supportsAccessModes &&
+          _supportsNetworkAccess &&
+          _effectiveSandbox != SandboxMode.dangerFullAccess)
+        AppSettingsRow(
+          icon: Icons.wifi_rounded,
+          title: 'Network access',
+          subtitle: 'Allow workspace commands to use the network.',
+          trailing: Switch.adaptive(
+            value: _networkAccess,
+            onChanged: _submitting
+                ? null
+                : (value) => setState(() => _networkAccess = value),
+          ),
+          onTap: _submitting
+              ? null
+              : () => setState(() => _networkAccess = !_networkAccess),
+        ),
+      if (_supportsWebSearch)
+        AppSettingsRow(
+          icon: Icons.public_rounded,
+          title: 'Live web search',
+          subtitle: 'Start the session with web search enabled.',
+          trailing: Switch.adaptive(
+            value: _effectiveWebSearch,
+            onChanged: _submitting
+                ? null
+                : (value) => setState(() {
+                    _webSearch = value;
+                    _webSearchTouched = true;
+                  }),
+          ),
+          onTap: _submitting
+              ? null
+              : () => setState(() {
+                  _webSearch = !_effectiveWebSearch;
+                  _webSearchTouched = true;
+                }),
+        ),
+    ];
+
+    return SingleChildScrollView(
+      padding: width >= 800 ? AppPadding.desktopPage : AppPadding.mobilePage,
+      child: AppContentColumn(
+        maxWidth: 720,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            AppListSection(title: 'Session', children: sessionRows),
+            if (agentRows.isNotEmpty) ...[
+              const SizedBox(height: AppSpacing.xl),
+              AppListSection(title: 'Model and behavior', children: agentRows),
+            ],
+            if (permissionRows.isNotEmpty) ...[
+              const SizedBox(height: AppSpacing.xl),
+              AppListSection(title: 'Permissions', children: permissionRows),
+            ],
+            if (networkRows.isNotEmpty) ...[
+              const SizedBox(height: AppSpacing.xl),
+              AppListSection(title: 'Network', children: networkRows),
+            ],
+            const SizedBox(height: AppSpacing.xl),
+            Align(
+              alignment: Alignment.centerLeft,
+              child: TextButton.icon(
+                onPressed: _submitting
+                    ? null
+                    : () => unawaited(_saveDraftDefaults()),
+                icon: const Icon(Icons.save_outlined, size: AppSizes.icon),
+                label: const Text('Use as defaults'),
+              ),
+            ),
+            const SizedBox(height: AppSpacing.lg),
+          ],
         ),
       ),
     );
@@ -1715,88 +2394,98 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
   }
 
   Widget _buildDraftComposer(BuildContext context) {
+    final width = MediaQuery.sizeOf(context).width;
+    final desktop = width >= 800;
     final colors = context.colors;
-    final canSend =
-        !_submitting &&
-        _promptController.text.trim().isNotEmpty &&
-        _currentCwd != null;
-    return SafeArea(
-      top: false,
-      child: Container(
-        key: const ValueKey('new-session-composer'),
-        width: double.infinity,
-        decoration: BoxDecoration(
-          color: colors.canvas,
-          border: Border(top: BorderSide(color: colors.border)),
+    final effectiveReasoning = _effectiveReasoningEffort;
+    final controls = <AppComposerControl>[
+      if (_supportsModels && _supportsModelOverride)
+        AppComposerControl(
+          key: const ValueKey('new-session-composer-model'),
+          icon: Icons.memory_rounded,
+          label: _modelLabel,
+          detail: _modelDescription,
+          tooltip: 'Choose model',
+          enabled: !_submitting,
+          onPressed: _openDraftModelPicker,
         ),
-        padding: const EdgeInsets.fromLTRB(14, 6, 14, 8),
-        child: Center(
-          child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 920),
-            child: Container(
-              decoration: BoxDecoration(
-                color: colors.surface,
-                borderRadius: AppShapes.card,
-                border: Border.all(color: colors.border),
-              ),
-              padding: const EdgeInsets.fromLTRB(14, 5, 6, 5),
-              child: Row(
-                crossAxisAlignment: CrossAxisAlignment.end,
-                children: [
-                  Expanded(
-                    child: TextField(
-                      key: const ValueKey('create-session-prompt-field'),
-                      controller: _promptController,
-                      autofocus: true,
-                      minLines: 1,
-                      maxLines: 5,
-                      textCapitalization: TextCapitalization.sentences,
-                      decoration: const InputDecoration(
-                        border: InputBorder.none,
-                        enabledBorder: InputBorder.none,
-                        focusedBorder: InputBorder.none,
-                        filled: false,
-                        hintText: 'Message the agent',
-                        isDense: true,
-                        contentPadding: EdgeInsets.symmetric(vertical: 10),
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  Semantics(
-                    label: 'Send message and create session',
-                    button: true,
-                    enabled: canSend,
-                    excludeSemantics: true,
-                    child: Tooltip(
-                      message: 'Send',
-                      child: FilledButton(
-                        key: const ValueKey('create-session-send-button'),
-                        onPressed: canSend ? _submit : null,
-                        style: FilledButton.styleFrom(
-                          minimumSize: const Size.square(44),
-                          maximumSize: const Size.square(44),
-                          padding: EdgeInsets.zero,
-                          shape: const CircleBorder(),
-                        ),
-                        child: _submitting
-                            ? const SizedBox(
-                                width: 18,
-                                height: 18,
-                                child: CircularProgressIndicator(
-                                  strokeWidth: 2,
-                                ),
-                              )
-                            : const Icon(Icons.arrow_upward_rounded),
-                      ),
-                    ),
-                  ),
-                ],
+      if (_supportsReasoningEffort &&
+          _supportsModels &&
+          _supportsModelOverride &&
+          !_controlModelIsAuto &&
+          _supportedReasoningOptions.isNotEmpty)
+        AppComposerControl(
+          key: const ValueKey('new-session-composer-thinking'),
+          icon: Icons.psychology_alt_rounded,
+          label: effectiveReasoning == null
+              ? 'Default'
+              : reasoningEffortLabel(effectiveReasoning),
+          detail: _reasoningDescription(effectiveReasoning),
+          tooltip: 'Choose thinking level',
+          enabled: !_submitting,
+          onPressed: () => unawaited(_showDraftReasoningPicker()),
+        ),
+    ];
+    final attachmentItems = _draftAttachments
+        .map(
+          (attachment) => AppComposerContextItem(
+            id: 'image-${attachment.id}',
+            icon: ClipRRect(
+              borderRadius: BorderRadius.circular(6),
+              child: Image.memory(
+                attachment.bytes,
+                width: 24,
+                height: 24,
+                fit: BoxFit.cover,
+                gaplessPlayback: true,
+                errorBuilder: (_, _, _) => Icon(
+                  Icons.image_rounded,
+                  size: 16,
+                  color: colors.textSecondary,
+                ),
               ),
             ),
+            label: attachment.name,
+            onRemove: () => _removeDraftImage(attachment.id),
           ),
-        ),
-      ),
+        )
+        .toList(growable: false);
+    return AppComposer(
+      key: const ValueKey('new-session-composer'),
+      controller: _promptController,
+      focusNode: _promptFocusNode,
+      sending: _submitting,
+      enabled: !_configurationIsLoading && _currentCwd != null,
+      autofocus: true,
+      hintText: 'Message the agent',
+      desktopHintText:
+          'Message the agent. Press Enter to start, Shift+Enter for a new line',
+      textFieldKey: const ValueKey('create-session-prompt-field'),
+      sendButtonKey: const ValueKey('create-session-send-button'),
+      sendSemanticsLabel: 'Send message and create session',
+      hasSendableContext: _draftAttachments.isNotEmpty,
+      leading: _supportsImageInput
+          ? AppComposerAddButton(
+              key: const ValueKey('new-session-attach-images'),
+              enabled: !_submitting,
+              onPressed: () => unawaited(_pickDraftImages()),
+              tooltip: 'Attach images',
+              icon: desktop
+                  ? Icons.add_photo_alternate_rounded
+                  : Icons.add_rounded,
+              compact: desktop,
+            )
+          : null,
+      onSend: _submit,
+      onNativePaste: _supportsImageInput
+          ? () => _pasteDraftImage(reportEmpty: false)
+          : null,
+      submitOnEnter: desktop,
+      maxLines: 5,
+      controls: controls,
+      header: attachmentItems.isEmpty
+          ? null
+          : AppComposerContextShelf(items: attachmentItems, desktop: desktop),
     );
   }
 
@@ -1806,7 +2495,7 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
       context,
       icon: Icons.delete_outline_rounded,
       title: 'Discard new session?',
-      description: 'Your unsent message will be lost.',
+      description: 'Your unsent draft will be lost.',
       confirmLabel: 'Discard',
       danger: true,
     );
@@ -1821,15 +2510,20 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
       _providerName,
       if (widget.seed?.basedOnCurrentSession ?? false)
         'Copied setup · No conversation history'
-      else if (_supportsModels && _supportsModelOverride)
-        _modelLabel,
+      else ...[
+        if (_supportsAccessModes && _selectedAccessMode != null)
+          _selectedAccessMode!.label,
+        if (_supportsModels && _supportsModelOverride) _modelLabel,
+      ],
     ];
     return parts.join(' · ');
   }
 
   bool get _draftUsesBroadPermissions =>
-      _effectiveApproval == ApprovalPolicy.never ||
-      _effectiveSandbox == SandboxMode.dangerFullAccess;
+      (_supportsAccessModes && (_selectedAccessMode?.isDangerous ?? false)) ||
+      (!_supportsAccessModes &&
+          (_effectiveApproval == ApprovalPolicy.never ||
+              _effectiveSandbox == SandboxMode.dangerFullAccess));
 
   Widget _buildHeader(BuildContext context) {
     final colors = context.colors;
@@ -2004,12 +2698,17 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
   }
 
   String _launchSummaryText() {
+    final accessLabel = _selectedAccessMode?.label;
     final parts = <String>[
       _providerName,
       if (_supportsProfiles) _profileLabel,
       if (_supportsModels && _supportsModelOverride) _modelLabel,
-      if (_supportsApprovalPolicy) _effectiveApproval.label,
-      if (_supportsSandboxMode) _effectiveSandbox.label,
+      if (_supportsAccessModes)
+        accessLabel ?? 'loading access'
+      else ...[
+        if (_supportsApprovalPolicy) _effectiveApproval.label,
+        if (_supportsSandboxMode) _effectiveSandbox.label,
+      ],
       if (_supportsNetworkAccess &&
           _networkAccess &&
           _effectiveSandbox != SandboxMode.dangerFullAccess)
@@ -2019,10 +2718,90 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
     return parts.join(' · ');
   }
 
+  Widget _buildAccessModes(BuildContext context) {
+    final colors = context.colors;
+    final catalog = _accessModeCatalog;
+    if (_loadingAccessModes && catalog == null) {
+      return const MeshSelectionCardSkeleton(
+        showIcon: false,
+        badgeCount: 0,
+        showCurrentValue: true,
+      );
+    }
+    if (_accessModesError != null && catalog == null) {
+      return Row(
+        children: [
+          Expanded(
+            child: Text(
+              _accessModesError!,
+              style: Theme.of(
+                context,
+              ).textTheme.bodySmall?.copyWith(color: colors.textSecondary),
+            ),
+          ),
+          TextButton(onPressed: _loadAccessModes, child: const Text('Retry')),
+        ],
+      );
+    }
+    if (catalog == null) return const SizedBox.shrink();
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          'Access',
+          style: Theme.of(context).textTheme.titleSmall?.copyWith(
+            color: colors.textPrimary,
+            fontWeight: AppWeights.title,
+          ),
+        ),
+        const SizedBox(height: 4),
+        if (catalog.modes.isEmpty)
+          Text(
+            'No access modes are available for this workspace.',
+            style: Theme.of(
+              context,
+            ).textTheme.bodySmall?.copyWith(color: colors.textSecondary),
+          )
+        else
+          ProviderAccessModeChoices(
+            modes: catalog.modes,
+            selectedModeId: _accessMode,
+            onSelected: (mode) => unawaited(_selectAccessMode(mode)),
+          ),
+        const SizedBox(height: AppSpacing.md),
+      ],
+    );
+  }
+
+  ProviderAccessModeSummary? get _selectedAccessMode {
+    final catalog = _accessModeCatalog;
+    if (catalog == null) return null;
+    return providerAccessModeById(catalog, _accessMode);
+  }
+
+  Future<void> _selectAccessMode(ProviderAccessModeSummary mode) async {
+    if (!mode.enabled) return;
+    if (mode.id == _accessMode) return;
+    final confirmation = mode.confirmation;
+    if (confirmation != null) {
+      final confirmed = await showMeshConfirmDialog(
+        context,
+        icon: providerAccessModeIcon(mode.icon),
+        title: confirmation.title,
+        description: confirmation.description,
+        confirmLabel: confirmation.confirmLabel,
+        danger: confirmation.danger,
+      );
+      if (!mounted || !confirmed) return;
+    }
+    if (!mounted) return;
+    setState(() => _accessMode = mode.id);
+  }
+
   Widget _buildAdvancedPanel(
     BuildContext context, {
+    bool showHeading = true,
     bool showCollapseControl = true,
-    bool wrapInSurface = true,
   }) {
     final effectiveReasoning = _effectiveReasoningEffort;
     String? reasoningDescription;
@@ -2036,28 +2815,33 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
     final content = Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        _PanelHeading(
-          icon: Icons.tune_rounded,
-          title: 'Session setup',
-          subtitle:
-              'Only the options available for $_providerName are shown here.',
-          trailing: showCollapseControl
-              ? IconButton(
-                  tooltip: 'Hide advanced',
-                  onPressed: _submitting ? null : _toggleAdvanced,
-                  icon: const Icon(Icons.expand_less_rounded),
-                )
-              : null,
-        ),
-        const SizedBox(height: 14),
+        if (showHeading) ...[
+          _PanelHeading(
+            icon: Icons.tune_rounded,
+            title: 'Session setup',
+            subtitle:
+                'Only the options available for $_providerName are shown here.',
+            trailing: showCollapseControl
+                ? IconButton(
+                    tooltip: 'Hide advanced',
+                    onPressed: _submitting ? null : _toggleAdvanced,
+                    icon: const Icon(Icons.expand_less_rounded),
+                  )
+                : null,
+          ),
+          const SizedBox(height: 14),
+        ],
+        if (_supportsAccessModes) _buildAccessModes(context),
         LaunchOptionsForm(
           dense: true,
           capabilities: LaunchOptionsCapabilities(
-            supportsApprovalPolicy: _supportsApprovalPolicy,
-            supportsSandboxMode: _supportsSandboxMode,
+            supportsApprovalPolicy:
+                !_supportsAccessModes && _supportsApprovalPolicy,
+            supportsSandboxMode: !_supportsAccessModes && _supportsSandboxMode,
             supportsFastMode: false,
             supportsWebSearch: _supportsWebSearch,
             supportsNetworkAccess:
+                !_supportsAccessModes &&
                 _supportsNetworkAccess &&
                 _effectiveSandbox != SandboxMode.dangerFullAccess,
             supportsSessionMode: _supportsMode,
@@ -2090,16 +2874,7 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
           onSessionModeChanged: (mode) => setState(() {
             _mode = mode;
           }),
-          permissionsTrailing:
-              _supportsApprovalPolicy &&
-                  _approvalOptions.contains(ApprovalPolicy.never) &&
-                  _supportsSandboxMode
-              ? TextButton.icon(
-                  onPressed: _applyAutopilot,
-                  icon: const Icon(Icons.auto_awesome_rounded, size: 16),
-                  label: const Text('Autopilot'),
-                )
-              : null,
+          permissionsTrailing: null,
           brainExtras: _buildBrainExtras(
             context,
             effectiveReasoning,
@@ -2138,13 +2913,7 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
         ),
       ],
     );
-    if (!wrapInSurface) return content;
-    return MeshSurface(
-      tone: MeshSurfaceTone.muted,
-      radius: AppRadii.control,
-      padding: const EdgeInsets.all(12),
-      child: content,
-    );
+    return content;
   }
 
   List<Widget>? _buildBrainExtras(
@@ -2156,7 +2925,7 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
     final colors = context.colors;
     final extras = <Widget>[];
 
-    if (_supportsProfiles) {
+    if (_supportsProfiles && _currentCwd != null) {
       extras.add(
         _loadingProfiles && _profiles.isEmpty
             ? const MeshSelectionCardSkeleton(compact: true, badgeCount: 2)
@@ -2181,6 +2950,7 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
         _loadingModels && _models.isEmpty
             ? const MeshSelectionCardSkeleton(compact: true, badgeCount: 3)
             : MeshSelectionCard(
+                key: const ValueKey('new-session-model-selector'),
                 title: 'Model',
                 icon: Icons.memory_rounded,
                 value: _modelLabel,
@@ -2238,7 +3008,7 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
             options: _supportedReasoningOptions
                 .map((option) => option.reasoningEffort)
                 .toList(),
-            optionLabel: _reasoningEffortLabel,
+            optionLabel: reasoningEffortLabel,
             isDefault: (value) =>
                 value == _controlModel?.defaultReasoningEffort,
             onChanged: (value) {
@@ -2300,7 +3070,7 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
             child: const Text('Cancel'),
           ),
           FilledButton.icon(
-            onPressed: _submitting ? null : _submit,
+            onPressed: _submitting || _configurationIsLoading ? null : _submit,
             icon: _submitting
                 ? SizedBox(
                     width: 16,
@@ -2321,7 +3091,9 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
               Wrap(spacing: 7, runSpacing: 7, children: _launchPills()),
               const SizedBox(height: 14),
               FilledButton.icon(
-                onPressed: _submitting ? null : _submit,
+                onPressed: _submitting || _configurationIsLoading
+                    ? null
+                    : _submit,
                 icon: _submitting
                     ? SizedBox(
                         width: 16,
@@ -2395,7 +3167,7 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
               ? 'thinking auto'
               : reasoning == null
               ? 'thinking default'
-              : _reasoningEffortLabel(reasoning),
+              : reasoningEffortLabel(reasoning),
           icon: Icons.psychology_alt_rounded,
         ),
       if (_supportsFastMode && _effectiveFastMode)
@@ -2404,33 +3176,43 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
           icon: Icons.bolt_rounded,
           tone: MeshPillTone.warning,
         ),
-      if (_supportsApprovalPolicy)
+      if (_supportsAccessModes && _selectedAccessMode != null)
         MeshPill(
-          label: _effectiveApproval.label,
-          icon: Icons.verified_user_rounded,
-        ),
-      if (_supportsSandboxMode)
-        MeshPill(
-          label: _effectiveSandbox.label,
-          icon: _effectiveSandbox == SandboxMode.dangerFullAccess
-              ? Icons.lock_open_rounded
-              : Icons.folder_special_rounded,
-          tone: _effectiveSandbox == SandboxMode.dangerFullAccess
+          label: _selectedAccessMode!.label,
+          icon: providerAccessModeIcon(_selectedAccessMode!.icon),
+          tone: _selectedAccessMode!.isDangerous
               ? MeshPillTone.danger
               : MeshPillTone.neutral,
         ),
+      if (!_supportsAccessModes) ...[
+        if (_supportsApprovalPolicy)
+          MeshPill(
+            label: _effectiveApproval.label,
+            icon: Icons.verified_user_rounded,
+          ),
+        if (_supportsSandboxMode)
+          MeshPill(
+            label: _effectiveSandbox.label,
+            icon: _effectiveSandbox == SandboxMode.dangerFullAccess
+                ? Icons.lock_open_rounded
+                : Icons.folder_special_rounded,
+            tone: _effectiveSandbox == SandboxMode.dangerFullAccess
+                ? MeshPillTone.danger
+                : MeshPillTone.neutral,
+          ),
+        if (_supportsNetworkAccess &&
+            _networkAccess &&
+            _effectiveSandbox != SandboxMode.dangerFullAccess)
+          const MeshPill(
+            label: 'network',
+            icon: Icons.wifi_rounded,
+            tone: MeshPillTone.info,
+          ),
+      ],
       if (_supportsWebSearch && _effectiveWebSearch)
         const MeshPill(
           label: 'web search',
           icon: Icons.public_rounded,
-          tone: MeshPillTone.info,
-        ),
-      if (_supportsNetworkAccess &&
-          _networkAccess &&
-          _effectiveSandbox != SandboxMode.dangerFullAccess)
-        const MeshPill(
-          label: 'network',
-          icon: Icons.wifi_rounded,
           tone: MeshPillTone.info,
         ),
     ];
@@ -2452,6 +3234,26 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
   }
 }
 
+class _DraftChoice<T> {
+  const _DraftChoice({
+    required this.value,
+    required this.label,
+    required this.description,
+    required this.icon,
+    required this.selected,
+    this.enabled = true,
+    this.danger = false,
+  });
+
+  final T value;
+  final String label;
+  final String description;
+  final IconData icon;
+  final bool selected;
+  final bool enabled;
+  final bool danger;
+}
+
 class _PanelHeading extends StatelessWidget {
   const _PanelHeading({
     required this.icon,
@@ -2467,46 +3269,11 @@ class _PanelHeading extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final colors = context.colors;
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Container(
-          width: 30,
-          height: 30,
-          decoration: BoxDecoration(
-            color: colors.surface,
-            borderRadius: BorderRadius.circular(9),
-            border: Border.all(color: colors.border),
-          ),
-          alignment: Alignment.center,
-          child: Icon(icon, color: colors.accent, size: 17),
-        ),
-        const SizedBox(width: 10),
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                title,
-                style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                  fontWeight: AppWeights.title,
-                  color: colors.textPrimary,
-                ),
-              ),
-              const SizedBox(height: 2),
-              Text(
-                subtitle,
-                style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                  color: colors.textSecondary,
-                  height: 1.35,
-                ),
-              ),
-            ],
-          ),
-        ),
-        if (trailing != null) ...[const SizedBox(width: 8), trailing!],
-      ],
+    return AppSectionHeader(
+      icon: icon,
+      title: title,
+      subtitle: subtitle,
+      trailing: trailing,
     );
   }
 }
@@ -2630,91 +3397,40 @@ class _ProviderPickerSheet extends StatelessWidget {
                         ),
                       ),
                       const SizedBox(height: 14),
-                      Row(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Container(
-                            width: 38,
-                            height: 38,
-                            decoration: BoxDecoration(
-                              color: colors.accentMuted,
-                              borderRadius: AppShapes.input,
-                              border: Border.all(
-                                color: colors.accent.withValues(alpha: 0.24),
-                              ),
-                            ),
-                            alignment: Alignment.center,
-                            child: Icon(
-                              Icons.account_tree_rounded,
-                              size: 19,
-                              color: colors.accent,
-                            ),
-                          ),
-                          const SizedBox(width: 12),
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  'Choose agent',
-                                  style: Theme.of(context).textTheme.titleMedium
-                                      ?.copyWith(
-                                        color: colors.textPrimary,
-                                        fontWeight: AppWeights.title,
-                                        letterSpacing: -0.2,
-                                      ),
-                                ),
-                                const SizedBox(height: 2),
-                                Text(
-                                  'Choose which agent to start for this session.',
-                                  style: Theme.of(context).textTheme.bodySmall
-                                      ?.copyWith(
-                                        color: colors.textSecondary,
-                                        fontWeight: AppWeights.body,
-                                      ),
-                                ),
-                              ],
-                            ),
-                          ),
-                          MeshIconButton(
-                            icon: Icons.close_rounded,
-                            tooltip: 'Close',
-                            color: colors.textSecondary,
-                            onTap: () => Navigator.of(context).pop(),
-                          ),
-                        ],
+                      AppSectionHeader(
+                        icon: Icons.account_tree_rounded,
+                        title: 'Choose agent',
+                        subtitle: 'Choose which agent starts this session.',
+                        trailing: IconButton(
+                          icon: const Icon(Icons.close_rounded),
+                          tooltip: 'Close',
+                          onPressed: () => Navigator.of(context).pop(),
+                        ),
                       ),
                       const SizedBox(height: 16),
-                      DecoratedBox(
-                        decoration: BoxDecoration(
-                          color: colors.surface,
-                          borderRadius: AppShapes.card,
-                          border: Border.all(color: colors.border),
-                        ),
-                        child: Column(
-                          children: [
-                            for (
-                              var index = 0;
-                              index < providers.length;
-                              index++
-                            ) ...[
-                              if (index > 0)
-                                Divider(
-                                  height: 1,
-                                  indent: 62,
-                                  color: colors.border.withValues(alpha: 0.72),
-                                ),
-                              _ProviderPickerTile(
-                                key: ValueKey(
-                                  'provider-picker-${providers[index].kind}',
-                                ),
-                                provider: providers[index],
-                                selected:
-                                    providers[index].kind == selectedProvider,
+                      Column(
+                        children: [
+                          for (
+                            var index = 0;
+                            index < providers.length;
+                            index++
+                          ) ...[
+                            if (index > 0)
+                              Divider(
+                                height: 1,
+                                indent: AppSizes.iconWell + AppSpacing.sm,
+                                color: colors.border,
                               ),
-                            ],
+                            _ProviderPickerTile(
+                              key: ValueKey(
+                                'provider-picker-${providers[index].kind}',
+                              ),
+                              provider: providers[index],
+                              selected:
+                                  providers[index].kind == selectedProvider,
+                            ),
                           ],
-                        ),
+                        ],
                       ),
                     ],
                   ),
@@ -2763,103 +3479,22 @@ class _ProviderPickerTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final colors = context.colors;
     final meta = provider.version.trim();
-    return MeshSurface(
-      onTap: () => Navigator.of(context).pop(provider.kind),
+    return AppChoiceRow(
+      title: _displayName,
+      subtitle: meta.isEmpty ? 'Starts with $_command' : '$meta · $_command',
+      icon: Icons.smart_toy_rounded,
       selected: selected,
-      tone: MeshSurfaceTone.muted,
-      radius: AppRadii.control,
-      padding: const EdgeInsets.fromLTRB(12, 11, 12, 11),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Container(
-            width: 38,
-            height: 38,
-            decoration: BoxDecoration(
-              color: selected
-                  ? colors.accentMuted
-                  : colors.surfaceMuted.withValues(alpha: 0.8),
-              borderRadius: AppShapes.input,
-              border: Border.all(
-                color: selected
-                    ? colors.accent.withValues(alpha: 0.38)
-                    : colors.border,
-              ),
-            ),
-            alignment: Alignment.center,
-            child: Icon(
-              selected
-                  ? Icons.radio_button_checked_rounded
-                  : Icons.smart_toy_rounded,
-              size: 19,
-              color: selected ? colors.accent : colors.textSecondary,
-            ),
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
+      onTap: () => Navigator.of(context).pop(provider.kind),
+      footer: _badges.isEmpty
+          ? null
+          : Wrap(
+              spacing: AppSpacing.sm,
+              runSpacing: AppSpacing.sm,
               children: [
-                Row(
-                  children: [
-                    Expanded(
-                      child: Text(
-                        _displayName,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                          color: colors.textPrimary,
-                          fontWeight: AppWeights.title,
-                        ),
-                      ),
-                    ),
-                    if (selected)
-                      MeshPill(
-                        label: 'current',
-                        icon: Icons.check_rounded,
-                        tone: MeshPillTone.accent,
-                      ),
-                  ],
-                ),
-                if (meta.isNotEmpty) ...[
-                  const SizedBox(height: 3),
-                  Text(
-                    meta,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                      color: colors.textSecondary,
-                    ),
-                  ),
-                ],
-                const SizedBox(height: 5),
-                Text(
-                  'Starts with $_command',
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: Theme.of(
-                    context,
-                  ).textTheme.bodySmall?.copyWith(color: colors.textTertiary),
-                ),
-                if (_badges.isNotEmpty) ...[
-                  const SizedBox(height: 7),
-                  Wrap(
-                    spacing: 7,
-                    runSpacing: 7,
-                    crossAxisAlignment: WrapCrossAlignment.center,
-                    children: [
-                      for (final badge in _badges)
-                        MeshInlineBadge(label: badge),
-                    ],
-                  ),
-                ],
+                for (final badge in _badges) MeshInlineBadge(label: badge),
               ],
             ),
-          ),
-        ],
-      ),
     );
   }
 }
@@ -3065,6 +3700,82 @@ class _ModelPickerSheetState extends State<_ModelPickerSheet> {
         })
         .toList(growable: false);
 
+    final content = Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        TextField(
+          controller: _queryController,
+          decoration: const InputDecoration(
+            prefixIcon: Icon(Icons.search_rounded),
+            hintText: 'Search models',
+          ),
+        ),
+        const SizedBox(height: 14),
+        Expanded(
+          child: filtered.isEmpty && query.isNotEmpty
+              ? Center(
+                  child: Text(
+                    'No models match that search.',
+                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                      color: colors.textSecondary,
+                    ),
+                  ),
+                )
+              : ListView.separated(
+                  padding: EdgeInsets.zero,
+                  itemCount: filtered.length + (query.isEmpty ? 1 : 0),
+                  separatorBuilder: (_, _) =>
+                      Divider(height: 1, indent: 20, color: colors.border),
+                  itemBuilder: (context, index) {
+                    if (query.isEmpty && index == 0) {
+                      final profileName = widget.profileName;
+                      return _ModelPickerTile(
+                        title: profileName == null
+                            ? 'Use machine default'
+                            : 'Use profile default',
+                        model: widget.inheritedModel,
+                        description: profileName == null
+                            ? 'Use the model already set on this machine.'
+                            : _profileModelInheritDescription(
+                                profileName,
+                                widget.profile,
+                                widget.providerName,
+                              ),
+                        selected: widget.currentModel == null,
+                        badges: <String>[
+                          'default',
+                          if (widget.profile?.isDefault ?? false) 'profile',
+                        ],
+                        onTap: () =>
+                            _select(context, const _ModelPickerResult()),
+                      );
+                    }
+                    final model = filtered[index - (query.isEmpty ? 1 : 0)];
+                    return _ModelPickerTile(
+                      title: model.displayName,
+                      model: model,
+                      description: model.description,
+                      selected: model.model == widget.currentModel,
+                      badges: <String>[
+                        if (model.isAutoModel) 'auto',
+                        if (model.isDefault) 'default',
+                        if (model.isProfileModel) 'profile',
+                        if (model.supportsFastMode) 'fast',
+                        ...model.supportedReasoningEfforts
+                            .take(3)
+                            .map(
+                              (option) =>
+                                  reasoningEffortLabel(option.reasoningEffort),
+                            ),
+                      ],
+                      onTap: () =>
+                          _select(context, _ModelPickerResult(model: model)),
+                    );
+                  },
+                ),
+        ),
+      ],
+    );
     return MeshBottomSheetScaffold(
       icon: Icons.memory_rounded,
       title: 'Choose a model',
@@ -3072,84 +3783,12 @@ class _ModelPickerSheetState extends State<_ModelPickerSheet> {
           ? 'Use the machine default, or choose a model just for this session.'
           : 'Use the model from profile ${widget.profileName}, or choose a different one just for this session.',
       maxWidth: 760,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          TextField(
-            controller: _queryController,
-            decoration: const InputDecoration(
-              prefixIcon: Icon(Icons.search_rounded),
-              hintText: 'Search models',
-            ),
-          ),
-          const SizedBox(height: 14),
-          Expanded(
-            child: filtered.isEmpty && query.isNotEmpty
-                ? Center(
-                    child: Text(
-                      'No models match that search.',
-                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                        color: colors.textSecondary,
-                      ),
-                    ),
-                  )
-                : ListView.separated(
-                    itemCount: filtered.length + (query.isEmpty ? 1 : 0),
-                    separatorBuilder: (_, _) => const SizedBox(height: 8),
-                    itemBuilder: (context, index) {
-                      if (query.isEmpty && index == 0) {
-                        final profileName = widget.profileName;
-                        return _ModelPickerTile(
-                          title: profileName == null
-                              ? 'Use machine default'
-                              : 'Use profile default',
-                          model: widget.inheritedModel,
-                          description: profileName == null
-                              ? 'Use the model already set on this machine.'
-                              : _profileModelInheritDescription(
-                                  profileName,
-                                  widget.profile,
-                                  widget.providerName,
-                                ),
-                          selected: widget.currentModel == null,
-                          badges: <String>[
-                            'default',
-                            if (widget.profile?.isDefault ?? false) 'profile',
-                          ],
-                          onTap: () => Navigator.of(
-                            context,
-                          ).pop(const _ModelPickerResult()),
-                        );
-                      }
-                      final model = filtered[index - (query.isEmpty ? 1 : 0)];
-                      return _ModelPickerTile(
-                        title: model.displayName,
-                        model: model,
-                        description: model.description,
-                        selected: model.model == widget.currentModel,
-                        badges: <String>[
-                          if (model.isAutoModel) 'auto',
-                          if (model.isDefault) 'default',
-                          if (model.isProfileModel) 'profile',
-                          if (model.supportsFastMode) 'fast',
-                          ...model.supportedReasoningEfforts
-                              .take(3)
-                              .map(
-                                (option) => _reasoningEffortLabel(
-                                  option.reasoningEffort,
-                                ),
-                              ),
-                        ],
-                        onTap: () => Navigator.of(
-                          context,
-                        ).pop(_ModelPickerResult(model: model)),
-                      );
-                    },
-                  ),
-          ),
-        ],
-      ),
+      child: content,
     );
+  }
+
+  void _select(BuildContext context, _ModelPickerResult result) {
+    Navigator.of(context).pop(result);
   }
 }
 
@@ -3173,59 +3812,38 @@ class _ModelPickerTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colors = context.colors;
-    return MeshSurface(
-      onTap: onTap,
+    return AppChoiceRow(
+      title: title,
+      subtitle: description,
+      icon: Icons.memory_rounded,
       selected: selected,
-      tone: MeshSurfaceTone.muted,
-      radius: AppRadii.control,
-      padding: const EdgeInsets.all(14),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Expanded(
-                child: Text(
-                  title,
-                  style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                    fontWeight: AppWeights.emphasis,
+      onTap: onTap,
+      footer: model == null && badges.isEmpty
+          ? null
+          : Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                if (model != null)
+                  Text(
+                    model!.model,
+                    style: monoStyle(
+                      color: colors.textSecondary,
+                      fontSize: 12,
+                      fontWeight: AppWeights.body,
+                    ),
                   ),
-                ),
-              ),
-              if (selected) const MeshInlineBadge(label: 'current'),
-            ],
-          ),
-          if (model != null) ...[
-            const SizedBox(height: 4),
-            Text(
-              model!.model,
-              style: monoStyle(
-                color: colors.textSecondary,
-                fontSize: 12,
-                fontWeight: AppWeights.body,
-              ),
+                if (model != null && badges.isNotEmpty)
+                  const SizedBox(height: AppSpacing.sm),
+                if (badges.isNotEmpty)
+                  Wrap(
+                    spacing: AppSpacing.sm,
+                    runSpacing: AppSpacing.sm,
+                    children: [
+                      for (final badge in badges) MeshInlineBadge(label: badge),
+                    ],
+                  ),
+              ],
             ),
-          ],
-          const SizedBox(height: 8),
-          Text(
-            description,
-            style: Theme.of(context).textTheme.bodySmall?.copyWith(
-              color: colors.textSecondary,
-              height: 1.35,
-            ),
-          ),
-          if (badges.isNotEmpty) ...[
-            const SizedBox(height: 8),
-            Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              children: badges
-                  .map((badge) => MeshInlineBadge(label: badge))
-                  .toList(),
-            ),
-          ],
-        ],
-      ),
     );
   }
 }
@@ -3247,18 +3865,6 @@ int _modelSortRank(ModelCatalogEntry model) {
   return model.isProfileModel ? 4000 : 10000;
 }
 
-String _reasoningEffortLabel(String value) {
-  return switch (value) {
-    'none' => 'None',
-    'minimal' => 'Minimal',
-    'low' => 'Low',
-    'medium' => 'Medium',
-    'high' => 'High',
-    'xhigh' => 'Extra high',
-    _ => value,
-  };
-}
-
 String _sessionModeChoiceLabel(
   String? value,
   Iterable<ProviderModeSummary> modes,
@@ -3275,7 +3881,7 @@ String _describeProviderProfile(ProviderProfileSummary profile) {
     if ((profile.serviceTier ?? '').isNotEmpty)
       '${_serviceTierLabel(profile.serviceTier!)} speed',
     if ((profile.reasoningEffort ?? '').isNotEmpty)
-      '${_reasoningEffortLabel(profile.reasoningEffort!)} thinking',
+      '${reasoningEffortLabel(profile.reasoningEffort!)} thinking',
     if ((profile.approvalPolicy ?? '').isNotEmpty)
       '${_approvalPolicyLabel(profile.approvalPolicy!)} approvals',
     if ((profile.sandboxMode ?? '').isNotEmpty)

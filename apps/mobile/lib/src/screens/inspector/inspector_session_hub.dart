@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../theme/app_colors.dart';
 import '../../theme/app_tokens.dart';
+import '../../widgets/app_primitives.dart';
 import '../../widgets/mesh_widgets.dart';
 import 'inspector_controller.dart';
 
@@ -106,15 +107,9 @@ class _SessionHubBody extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          _HubSection(
-            label: 'On this machine',
-            tools: workspaceTools,
-          ),
+          _HubSection(label: 'On this machine', tools: workspaceTools),
           const SizedBox(height: AppSpacing.md),
-          _HubSection(
-            label: 'This session',
-            tools: sessionTools,
-          ),
+          _HubSection(label: 'This session', tools: sessionTools),
         ],
       ),
     );
@@ -129,40 +124,9 @@ class _HubSection extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final colors = context.colors;
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: AppSpacing.xs),
-          child: Text(
-            label,
-            style: Theme.of(context).textTheme.labelMedium?.copyWith(
-              color: colors.textSecondary,
-              fontWeight: AppWeights.emphasis,
-              letterSpacing: 0.2,
-            ),
-          ),
-        ),
-        const SizedBox(height: AppSpacing.sm),
-        MeshCard(
-          padding: EdgeInsets.zero,
-          child: Column(
-            children: [
-              for (var index = 0; index < tools.length; index++) ...[
-                _HubToolRow(tool: tools[index]),
-                if (index != tools.length - 1)
-                  Builder(
-                    builder: (context) => Padding(
-                      padding: const EdgeInsets.only(left: 56, right: 12),
-                      child: Divider(height: 1, color: context.colors.border),
-                    ),
-                  ),
-              ],
-            ],
-          ),
-        ),
-      ],
+    return AppListSection(
+      title: label,
+      children: [for (final tool in tools) _HubToolRow(tool: tool)],
     );
   }
 }
@@ -194,16 +158,7 @@ class _HubToolRow extends StatelessWidget {
       dense: true,
       framed: false,
       radius: AppRadii.control,
-      leading: Container(
-        width: 32,
-        height: 32,
-        decoration: BoxDecoration(
-          color: colors.accentMuted,
-          borderRadius: BorderRadius.circular(AppRadii.control),
-        ),
-        alignment: Alignment.center,
-        child: Icon(tool.icon, size: 16, color: colors.accent),
-      ),
+      leading: AppIconWell(icon: tool.icon),
       title: Text(
         tool.label,
         style: Theme.of(context).textTheme.titleSmall?.copyWith(

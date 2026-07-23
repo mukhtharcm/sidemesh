@@ -1574,7 +1574,21 @@ describe("Copilot provider", () => {
           warning: undefined,
         },
       ]);
-      assert.equal(provider.respondToPendingAction!(action, "accept"), true);
+      assert.deepEqual(action.approval?.providerOptions, [
+        { id: "approve-once", label: "Allow once", kind: "allow_once" },
+        {
+          id: "approve-for-session",
+          label: "Allow for session",
+          kind: "allow_always",
+        },
+        { id: "reject", label: "Reject", kind: "reject_once" },
+      ]);
+      assert.equal(
+        provider.respondToPendingAction!(action, {
+          providerOptionId: "approve-once",
+        }),
+        true,
+      );
       await completed;
 
       const log = await provider.readSessionLog!({

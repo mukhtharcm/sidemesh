@@ -8,6 +8,7 @@ import '../theme/app_colors.dart';
 import '../theme/app_tokens.dart';
 import '../usage_models.dart';
 import '../usage_store.dart';
+import '../widgets/app_primitives.dart';
 import '../widgets/mesh_widgets.dart';
 
 class UsagePane extends StatefulWidget {
@@ -117,18 +118,20 @@ class _UsagePaneState extends State<UsagePane> {
 
     return Container(
       color: colors.canvas,
-      child: RefreshIndicator(
-        onRefresh: _store.refresh,
-        child: ListView(
+      child: AppContentColumn(
+        child: RefreshIndicator(
+          onRefresh: _store.refresh,
+          child: ListView(
           physics: const AlwaysScrollableScrollPhysics(),
           padding: EdgeInsets.fromLTRB(
-            widget.dense ? 14 : 18,
-            widget.topPadding + (widget.dense ? 12 : 18),
-            widget.dense ? 14 : 18,
-            24,
+            widget.dense ? AppSizes.desktopGutter : AppSizes.mobileGutter,
+            widget.topPadding + AppSpacing.md,
+            widget.dense ? AppSizes.desktopGutter : AppSizes.mobileGutter,
+            AppSpacing.xl,
           ),
           children: [
             _UsageHeader(
+              showTitle: widget.dense,
               hostCount: enabledHosts.length,
               accountCount: accounts.length,
               loading: _store.loading,
@@ -153,37 +156,33 @@ class _UsagePaneState extends State<UsagePane> {
             ] else ...[
               if (limits.isNotEmpty) ...[
                 const SizedBox(height: 16),
-                _SectionLabel(
+                const AppSectionHeader(
                   title: 'Limits',
                   subtitle:
                       'The usage windows your machines can confirm right now.',
                 ),
                 const SizedBox(height: 10),
-                ...limits.map(
-                  (account) => Padding(
-                    padding: const EdgeInsets.only(bottom: 10),
-                    child: _UsageAccountCard(account: account),
-                  ),
+                _UsageAccountCollection(
+                  accounts: limits,
+                  dense: widget.dense,
                 ),
               ],
               if (other.isNotEmpty) ...[
                 const SizedBox(height: 10),
-                _SectionLabel(
+                const AppSectionHeader(
                   title: 'Recent usage',
                   subtitle:
                       'Helpful usage data that may not include full limits yet.',
                 ),
                 const SizedBox(height: 10),
-                ...other.map(
-                  (account) => Padding(
-                    padding: const EdgeInsets.only(bottom: 10),
-                    child: _UsageAccountCard(account: account),
-                  ),
+                _UsageAccountCollection(
+                  accounts: other,
+                  dense: widget.dense,
                 ),
               ],
               if (unsupported.isNotEmpty) ...[
                 const SizedBox(height: 10),
-                _SectionLabel(
+                const AppSectionHeader(
                   title: 'Not available',
                   subtitle: 'These agents do not report usage to Sidemesh yet.',
                 ),
@@ -197,6 +196,7 @@ class _UsagePaneState extends State<UsagePane> {
               ],
             ],
           ],
+          ),
         ),
       ),
     );
@@ -213,6 +213,47 @@ class _UsagePaneState extends State<UsagePane> {
       }
     }
     return true;
+  }
+}
+
+class _UsageAccountCollection extends StatelessWidget {
+  const _UsageAccountCollection({required this.accounts, required this.dense});
+
+  final List<ReconciledUsageAccount> accounts;
+  final bool dense;
+
+  @override
+  Widget build(BuildContext context) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final useColumns = dense && constraints.maxWidth >= 720;
+        if (!useColumns) {
+          return Column(
+            children: [
+              for (var index = 0; index < accounts.length; index++) ...[
+                _UsageAccountCard(account: accounts[index]),
+                if (index < accounts.length - 1)
+                  const SizedBox(height: AppSpacing.sm),
+              ],
+            ],
+          );
+        }
+        const gap = AppSpacing.md;
+        final width = (constraints.maxWidth - gap) / 2;
+        return Wrap(
+          spacing: gap,
+          runSpacing: gap,
+          children: accounts
+              .map(
+                (account) => SizedBox(
+                  width: width,
+                  child: _UsageAccountCard(account: account),
+                ),
+              )
+              .toList(growable: false),
+        );
+      },
+    );
   }
 }
 
@@ -328,6 +369,7 @@ class _UsageWindowSkeleton extends StatelessWidget {
 
 class _UsageHeader extends StatelessWidget {
   const _UsageHeader({
+    required this.showTitle,
     required this.hostCount,
     required this.accountCount,
     required this.loading,
@@ -335,6 +377,7 @@ class _UsageHeader extends StatelessWidget {
     required this.onRefresh,
   });
 
+  final bool showTitle;
   final int hostCount;
   final int accountCount;
   final bool loading;
@@ -350,18 +393,20 @@ class _UsageHeader extends StatelessWidget {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(
-                'Usage',
-                style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                  fontWeight: AppWeights.title,
-                  color: colors.textPrimary,
+              if (showTitle) ...[
+                Text(
+                  'Usage',
+                  style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                    fontWeight: AppWeights.title,
+                    color: colors.textPrimary,
+                  ),
                 ),
-              ),
-              const SizedBox(height: 4),
+                const SizedBox(height: 4),
+              ],
               Text(
                 lastRefreshedAt == null
                     ? 'Checking ${hostCount == 1 ? "1 machine" : "$hostCount machines"}.'
-                    : 'Updated ${_relativeAge(lastRefreshedAt!)} ago from ${hostCount == 1 ? "1 machine" : "$hostCount machines"}${accountCount > 0 ? " across $accountCount accounts" : ""}.',
+                    : 'Updated ${_relativeAgeLabel(lastRefreshedAt!)} from ${hostCount == 1 ? "1 machine" : "$hostCount machines"}${accountCount > 0 ? " across $accountCount accounts" : ""}.',
                 style: TextStyle(color: colors.textSecondary),
               ),
             ],
@@ -372,32 +417,6 @@ class _UsageHeader extends StatelessWidget {
           tooltip: 'Refresh',
           onTap: onRefresh,
         ),
-      ],
-    );
-  }
-}
-
-class _SectionLabel extends StatelessWidget {
-  const _SectionLabel({required this.title, required this.subtitle});
-
-  final String title;
-  final String subtitle;
-
-  @override
-  Widget build(BuildContext context) {
-    final colors = context.colors;
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          title,
-          style: Theme.of(context).textTheme.titleSmall?.copyWith(
-            fontWeight: AppWeights.title,
-            color: colors.textPrimary,
-          ),
-        ),
-        const SizedBox(height: 2),
-        Text(subtitle, style: TextStyle(color: colors.textSecondary)),
       ],
     );
   }
@@ -414,6 +433,7 @@ class _UsageAccountCard extends StatelessWidget {
     final tone = account.isError ? MeshCardTone.muted : MeshCardTone.surface;
     return MeshCard(
       tone: tone,
+      bordered: account.isError,
       borderColor: account.isError
           ? colors.danger.withValues(alpha: 0.45)
           : null,
@@ -483,7 +503,7 @@ class _UsageAccountCard extends StatelessWidget {
     final plan = account.planType;
     if (plan != null && plan.isNotEmpty) parts.add(plan);
     parts.add('from ${account.latestHostLabel}');
-    parts.add('seen ${_relativeAge(account.latestObservedAt)} ago');
+    parts.add('seen ${_relativeAgeLabel(account.latestObservedAt)}');
     if (account.hostLabels.length > 1) {
       parts.add('matched on ${account.hostLabels.length} machines');
     }
@@ -568,6 +588,7 @@ class _CreditsRow extends StatelessWidget {
         : 'Credits ${credits.balanceLabel ?? credits.balance?.toStringAsFixed(2) ?? 'available'}';
     return MeshSurface(
       tone: MeshSurfaceTone.muted,
+      bordered: false,
       radius: AppRadii.control,
       padding: const EdgeInsets.all(12),
       child: Row(
@@ -597,6 +618,7 @@ class _UnsupportedUsageCard extends StatelessWidget {
     final colors = context.colors;
     return MeshCard(
       tone: MeshCardTone.muted,
+      bordered: false,
       padding: const EdgeInsets.all(14),
       child: Row(
         children: [
@@ -670,6 +692,11 @@ Color _colorForTone(AppColors colors, MeshPillTone tone) {
 String _relativeAge(DateTime at) {
   final diff = DateTime.now().difference(at);
   return _relativeDuration(diff);
+}
+
+String _relativeAgeLabel(DateTime at) {
+  final age = _relativeAge(at);
+  return age == 'just now' ? age : '$age ago';
 }
 
 String _relativeDuration(Duration duration) {

@@ -1,21 +1,16 @@
 import 'dart:async';
 import 'dart:convert';
-import 'dart:io';
 import 'dart:math' as math;
 
-import 'package:device_info_plus/device_info_plus.dart';
-import 'package:file_picker/file_picker.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:image/image.dart' as img;
-import 'package:permission_handler/permission_handler.dart';
-import 'package:super_clipboard/super_clipboard.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
 
 import '../api_client.dart';
+import '../composer_image_attachments.dart';
 import '../host_status_store.dart';
 import '../image_blob_cache_store.dart';
 import '../live_activity_service.dart';
@@ -61,13 +56,17 @@ import '../theme/app_tokens.dart';
 import '../windowing.dart';
 import '../widgets/app_snackbar.dart';
 import '../widgets/app_dialogs.dart';
+import '../widgets/app_composer.dart';
+import '../widgets/app_primitives.dart';
 import '../widgets/app_sheets.dart';
-import '../widgets/composer_paste_text_action.dart';
 import '../widgets/markdown_content.dart';
 import '../widgets/diff_view.dart';
+import '../widgets/launch_options_form.dart';
 import '../widgets/mesh_widgets.dart';
 import 'package:sidemesh_mobile/src/host_reconnect_scheduler.dart';
 import '../widgets/provider_badge.dart';
+import '../widgets/provider_access_mode_choices.dart';
+import '../widgets/reasoning_choice_list.dart';
 import '../relative_time_ticker.dart';
 import '../widgets/syntax_code_block.dart';
 
@@ -798,20 +797,6 @@ class _SessionScreenState extends State<SessionScreen>
   static const _liveUpdateFlushInterval = Duration(milliseconds: 48);
   static const _sessionCacheWriteDebounce = Duration(milliseconds: 900);
   static const _failedSendRetryWindow = Duration(minutes: 10);
-  static const _maxDraftImageCount = 4;
-  static const _maxDraftImageBytes = 5 * 1024 * 1024;
-  static const _maxDraftPayloadBytes = 9 * 1024 * 1024;
-  static const _maxDecodedDraftImageBytes = 18 * 1024 * 1024;
-  static const List<FileFormat> _clipboardImageFormats = <FileFormat>[
-    Formats.png,
-    Formats.jpeg,
-    Formats.webp,
-    Formats.gif,
-    Formats.bmp,
-    Formats.heic,
-    Formats.heif,
-  ];
-
   final _composerController = TextEditingController();
   final _searchController = TextEditingController();
   final _composerFocusNode = FocusNode(debugLabel: 'session_composer');
@@ -828,6 +813,8 @@ class _SessionScreenState extends State<SessionScreen>
   final StringBuffer _reasoningDeltaBuffer = StringBuffer();
   final Map<String, SessionActivity> _pendingActivityUpdates =
       <String, SessionActivity>{};
+  final ComposerImageAttachmentService _imageAttachmentService =
+      const SystemComposerImageAttachmentService();
 
   // Live-streaming state is held in notifiers so that mid-stream deltas only
   // rebuild the tiny widgets that display them, not the whole Scaffold/list.
@@ -839,8 +826,8 @@ class _SessionScreenState extends State<SessionScreen>
   List<SessionMessage> _messages = const [];
   List<SessionMessage> _optimisticMessages = const [];
   List<SessionActivity> _activities = const [];
-  List<_ComposerImageAttachment> _draftAttachments =
-      const <_ComposerImageAttachment>[];
+  List<ComposerImageAttachment> _draftAttachments =
+      const <ComposerImageAttachment>[];
   List<_ComposerSkillMention> _draftSkillMentions =
       const <_ComposerSkillMention>[];
   List<_ComposerFileMention> _draftFileMentions =
@@ -862,7 +849,6 @@ class _SessionScreenState extends State<SessionScreen>
   int _messageLimit = _initialMessageLimit;
   int _activityLimit = _initialActivityLimit;
   bool _running = false;
-  bool _composerFocused = false;
   bool _loading = true;
   bool _loadingOlderHistory = false;
   bool _sending = false;
@@ -1163,7 +1149,7 @@ class _SessionScreenState extends State<SessionScreen>
 
   void _coerceDraftsForProviderCapabilities() {
     if (!_supportsImageInput) {
-      _draftAttachments = const <_ComposerImageAttachment>[];
+      _draftAttachments = const <ComposerImageAttachment>[];
     }
     if (!_supportsSkillInput) {
       _draftSkillMentions = const <_ComposerSkillMention>[];
@@ -1218,7 +1204,7 @@ class _SessionScreenState extends State<SessionScreen>
   }
 
   void _applyComposerSeed(SessionComposerSeed seed) {
-    final draftAttachments = <_ComposerImageAttachment>[];
+    final draftAttachments = <ComposerImageAttachment>[];
     final draftSkillMentions = <_ComposerSkillMention>[];
     final draftFileMentions = <_ComposerFileMention>[];
     var attachmentIndex = 0;
@@ -1237,10 +1223,10 @@ class _SessionScreenState extends State<SessionScreen>
           }
           final mimeType = _inlineImageMimeType(dataUrl) ?? 'image/png';
           draftAttachments.add(
-            _ComposerImageAttachment(
+            ComposerImageAttachment(
               id: 'seed-image-$attachmentIndex',
               name:
-                  'attachment-${attachmentIndex + 1}${_imageExtensionForMimeType(mimeType)}',
+                  'attachment-${attachmentIndex + 1}${imageExtensionForMimeType(mimeType)}',
               mimeType: mimeType,
               bytes: bytes,
               dataUrl: dataUrl,
@@ -1453,6 +1439,11 @@ class _SessionScreenState extends State<SessionScreen>
       case InspectorSurfaceKind.sessionDetails:
         // Not persisted / not owned by the session screen yet.
         break;
+      case InspectorSurfaceKind.sessionControls:
+        // Controls are transient form state. Never restore a stale draft.
+        closeOrphan();
+        _openDefaultInspectorHub(controller, ownerKey);
+        break;
       case InspectorSurfaceKind.sessionHub:
         // Hub is the default; treat a persisted hub as if nothing was saved.
         closeOrphan();
@@ -1536,7 +1527,8 @@ class _SessionScreenState extends State<SessionScreen>
       _lastInspectorSurfaceKind = cur.kind;
       // Don't persist the hub — it's the default, not a deliberate user
       // choice. A real surface opened next will replace it in persistence.
-      if (cur.kind != InspectorSurfaceKind.sessionHub) {
+      if (cur.kind != InspectorSurfaceKind.sessionHub &&
+          cur.kind != InspectorSurfaceKind.sessionControls) {
         unawaited(InspectorPersistence.save(ownerKey, cur.kind));
       }
       return;
@@ -2062,14 +2054,10 @@ class _SessionScreenState extends State<SessionScreen>
     }
   }
 
-  /// Tracks composer focus changes → drives the animated pill border.
+  /// Tracks composer blur timing so desktop overlays can restore focus safely.
   void _handleComposerFocusChanged() {
-    final focused = _composerFocusNode.hasFocus;
-    if (!focused) {
+    if (!_composerFocusNode.hasFocus) {
       _lastComposerBlurAt = DateTime.now();
-    }
-    if (focused != _composerFocused) {
-      setState(() => _composerFocused = focused);
     }
   }
 
@@ -3494,21 +3482,11 @@ class _SessionScreenState extends State<SessionScreen>
     }
 
     try {
-      final pickerConfig = _composerImagePickerConfig();
-      if (pickerConfig.requestPhotoLibraryAccess &&
-          !await _ensureImagePickerAccess()) {
-        return;
-      }
-      final picked = await FilePicker.pickFiles(
-        allowMultiple: true,
-        withData: true,
-        type: pickerConfig.type,
-        allowedExtensions: pickerConfig.allowedExtensions,
+      final update = await _imageAttachmentService.pickImages(
+        current: _draftAttachments,
       );
-      if (!mounted || picked == null || picked.files.isEmpty) {
-        return;
-      }
-      await _addPickedDraftAttachments(picked.files);
+      if (!mounted || update == null) return;
+      _applyImageAttachmentUpdate(update);
     } catch (error) {
       if (!mounted) {
         return;
@@ -3518,134 +3496,6 @@ class _SessionScreenState extends State<SessionScreen>
         'Failed to attach images: ${friendlyError(error)}',
       );
     }
-  }
-
-  _ComposerImagePickerConfig _composerImagePickerConfig() {
-    if (!kIsWeb && Platform.isIOS) {
-      // `FileType.image` routes iOS through the Photos gallery picker instead
-      // of the Files document picker used by `FileType.custom`.
-      return const _ComposerImagePickerConfig(
-        type: FileType.image,
-        requestPhotoLibraryAccess: true,
-      );
-    }
-    return const _ComposerImagePickerConfig(
-      type: FileType.custom,
-      allowedExtensions: <String>[
-        'png',
-        'jpg',
-        'jpeg',
-        'webp',
-        'gif',
-        'bmp',
-        'heic',
-        'heif',
-      ],
-    );
-  }
-
-  Future<bool> _ensureImagePickerAccess() async {
-    if (kIsWeb || !Platform.isIOS) {
-      return true;
-    }
-    final status = await Permission.photos.request();
-    if (status.isGranted || status.isLimited) {
-      return true;
-    }
-    if (await _supportsIosPhotoPickerWithoutLibraryAccess()) {
-      return true;
-    }
-    if (!mounted) {
-      return false;
-    }
-    showAppSnackBar(
-      context,
-      status.isPermanentlyDenied || status.isRestricted
-          ? 'Photo library access is disabled for Sidemesh in iOS Settings.'
-          : 'Photo library access is required to attach images.',
-    );
-    return false;
-  }
-
-  Future<bool> _supportsIosPhotoPickerWithoutLibraryAccess() async {
-    final systemVersion = (await DeviceInfoPlugin().iosInfo).systemVersion;
-    final majorVersion = int.tryParse(systemVersion.split('.').first) ?? 0;
-    return majorVersion >= 14;
-  }
-
-  Future<void> _addPickedDraftAttachments(List<PlatformFile> files) async {
-    final nextAttachments = List<_ComposerImageAttachment>.from(
-      _draftAttachments,
-    );
-    var totalBytes = nextAttachments.fold<int>(
-      0,
-      (sum, item) => sum + item.byteLength,
-    );
-
-    for (final file in files) {
-      if (nextAttachments.length >= _maxDraftImageCount) {
-        if (!mounted) return;
-        showAppSnackBar(
-          context,
-          'You can attach up to $_maxDraftImageCount images per message.',
-        );
-        break;
-      }
-
-      final bytes = await _readPickedFileBytes(file);
-      if (bytes == null || bytes.isEmpty) {
-        if (!mounted) return;
-        showAppSnackBar(
-          context,
-          'Could not read ${file.name.isEmpty ? 'that image' : file.name}.',
-        );
-        continue;
-      }
-      if (bytes.length > _maxDecodedDraftImageBytes) {
-        if (!mounted) return;
-        showAppSnackBar(
-          context,
-          '${file.name.isEmpty ? 'That image' : file.name} is too large to process on-device.',
-        );
-        continue;
-      }
-
-      final mimeType = _mimeTypeForImageName(file.name);
-      if (mimeType == null) {
-        if (!mounted) return;
-        showAppSnackBar(
-          context,
-          '${file.name.isEmpty ? 'That file' : file.name} is not a supported image.',
-        );
-        continue;
-      }
-
-      final result = await _appendDraftImageAttachment(
-        nextAttachments: nextAttachments,
-        totalBytes: totalBytes,
-        name: file.name.isEmpty ? 'image' : file.name,
-        mimeType: mimeType,
-        bytes: bytes,
-      );
-      totalBytes = result.totalBytes;
-      if (result.shouldStop) {
-        break;
-      }
-    }
-
-    if (!mounted) {
-      return;
-    }
-    setState(() {
-      _draftAttachments = nextAttachments;
-    });
-  }
-
-  Future<Uint8List?> _readPickedFileBytes(PlatformFile file) async {
-    if (file.bytes != null) {
-      return file.bytes;
-    }
-    return file.xFile.readAsBytes();
   }
 
   Future<bool> _pasteComposerImage({bool showEmptyFeedback = true}) async {
@@ -3663,60 +3513,13 @@ class _SessionScreenState extends State<SessionScreen>
     }
 
     try {
-      final clipboard = SystemClipboard.instance;
-      if (clipboard == null) {
-        if (!mounted) return false;
-        if (showEmptyFeedback) {
-          showAppSnackBar(
-            context,
-            'Clipboard image paste is not supported here.',
-          );
-        }
-        return false;
-      }
-      final clipboardImage = await _readClipboardImage(clipboard);
-      if (!mounted) {
-        return false;
-      }
-      if (clipboardImage == null) {
-        if (showEmptyFeedback) {
-          showAppSnackBar(context, 'Clipboard does not contain an image.');
-        }
-        return false;
-      }
-
-      final nextAttachments = List<_ComposerImageAttachment>.from(
-        _draftAttachments,
+      final update = await _imageAttachmentService.pasteImage(
+        current: _draftAttachments,
+        reportEmpty: showEmptyFeedback,
       );
-      if (nextAttachments.length >= _maxDraftImageCount) {
-        showAppSnackBar(
-          context,
-          'You can attach up to $_maxDraftImageCount images per message.',
-        );
-        return false;
-      }
-
-      final totalBytes = nextAttachments.fold<int>(
-        0,
-        (sum, item) => sum + item.byteLength,
-      );
-      final result = await _appendDraftImageAttachment(
-        nextAttachments: nextAttachments,
-        totalBytes: totalBytes,
-        name: clipboardImage.name,
-        mimeType: clipboardImage.mimeType,
-        bytes: clipboardImage.bytes,
-      );
-      if (!result.added) {
-        return false;
-      }
-      if (!mounted) {
-        return false;
-      }
-      setState(() {
-        _draftAttachments = nextAttachments;
-      });
-      return true;
+      if (!mounted) return false;
+      _applyImageAttachmentUpdate(update);
+      return update.added;
     } catch (error) {
       if (!mounted) {
         return false;
@@ -3729,138 +3532,13 @@ class _SessionScreenState extends State<SessionScreen>
     }
   }
 
-  Future<_ClipboardImageData?> _readClipboardImage(
-    SystemClipboard clipboard,
-  ) async {
-    final reader = await clipboard.read();
-    for (final format in _clipboardImageFormats) {
-      if (!reader.canProvide(format)) {
-        continue;
-      }
-      final image = await _readClipboardImageForFormat(reader, format);
-      if (image != null) {
-        return image;
-      }
-    }
-    return null;
-  }
-
-  Future<_ClipboardImageData?> _readClipboardImageForFormat(
-    ClipboardReader reader,
-    FileFormat format,
-  ) {
-    final completer = Completer<_ClipboardImageData?>();
-    final progress = reader.getFile(
-      format,
-      (file) async {
-        final bytes = await file.readAll();
-        if (completer.isCompleted) {
-          return;
-        }
-        completer.complete(
-          _ClipboardImageData(
-            name:
-                file.fileName ??
-                'pasted-image${_imageExtensionForMimeType(_mimeTypeForClipboardFormat(format))}',
-            mimeType: _mimeTypeForClipboardFormat(format),
-            bytes: bytes,
-          ),
-        );
-      },
-      onError: (error) {
-        if (!completer.isCompleted) {
-          completer.completeError(error);
-        }
-      },
-    );
-    if (progress == null) {
-      return Future<_ClipboardImageData?>.value(null);
-    }
-    return completer.future.timeout(
-      const Duration(seconds: 10),
-      onTimeout: () => null,
-    );
-  }
-
-  Future<_PreparedDraftImage> _prepareDraftImageAttachment({
-    required String name,
-    required String mimeType,
-    required Uint8List bytes,
-  }) async {
-    final payload = await compute(_compressDraftImagePayload, <String, Object?>{
-      'name': name,
-      'mimeType': mimeType,
-      'bytes': bytes,
+  void _applyImageAttachmentUpdate(ComposerImageAttachmentUpdate update) {
+    setState(() {
+      _draftAttachments = update.attachments;
     });
-
-    return _PreparedDraftImage(
-      name: payload['name'] as String,
-      mimeType: payload['mimeType'] as String,
-      bytes: payload['bytes'] as Uint8List,
-    );
-  }
-
-  Future<_DraftImageAppendResult> _appendDraftImageAttachment({
-    required List<_ComposerImageAttachment> nextAttachments,
-    required int totalBytes,
-    required String name,
-    required String mimeType,
-    required Uint8List bytes,
-  }) async {
-    if (bytes.isEmpty) {
-      if (mounted) {
-        showAppSnackBar(
-          context,
-          'Could not read ${name.isEmpty ? 'that image' : name}.',
-        );
-      }
-      return _DraftImageAppendResult.skipped(totalBytes);
+    for (final message in update.feedback) {
+      showAppSnackBar(context, message);
     }
-    if (bytes.length > _maxDecodedDraftImageBytes) {
-      if (mounted) {
-        showAppSnackBar(
-          context,
-          '${name.isEmpty ? 'That image' : name} is too large to process on-device.',
-        );
-      }
-      return _DraftImageAppendResult.skipped(totalBytes);
-    }
-
-    final prepared = await _prepareDraftImageAttachment(
-      name: name,
-      mimeType: mimeType,
-      bytes: bytes,
-    );
-    if (!mounted) {
-      return _DraftImageAppendResult.skipped(totalBytes);
-    }
-    if (prepared.bytes.length > _maxDraftImageBytes) {
-      showAppSnackBar(
-        context,
-        '${prepared.name} is still larger than 5 MB after compression.',
-      );
-      return _DraftImageAppendResult.skipped(totalBytes);
-    }
-    if (totalBytes + prepared.bytes.length > _maxDraftPayloadBytes) {
-      showAppSnackBar(
-        context,
-        'Attached images are too large for one message. Remove one or pick a smaller file.',
-      );
-      return _DraftImageAppendResult.stop(totalBytes);
-    }
-
-    final dataUrl =
-        'data:${prepared.mimeType};base64,${base64Encode(prepared.bytes)}';
-    nextAttachments.add(
-      _ComposerImageAttachment(
-        id: 'draft-${DateTime.now().microsecondsSinceEpoch}-${nextAttachments.length}',
-        name: prepared.name,
-        mimeType: prepared.mimeType,
-        bytes: prepared.bytes,
-        dataUrl: dataUrl,
-      ),
-    );
-    return _DraftImageAppendResult.added(totalBytes + prepared.bytes.length);
   }
 
   void _removeDraftAttachment(String attachmentId) {
@@ -3871,67 +3549,9 @@ class _SessionScreenState extends State<SessionScreen>
     });
   }
 
-  String? _mimeTypeForImageName(String name) {
-    final lower = name.toLowerCase();
-    if (lower.endsWith('.jpg') || lower.endsWith('.jpeg')) {
-      return 'image/jpeg';
-    }
-    if (lower.endsWith('.png')) {
-      return 'image/png';
-    }
-    if (lower.endsWith('.webp')) {
-      return 'image/webp';
-    }
-    if (lower.endsWith('.gif')) {
-      return 'image/gif';
-    }
-    if (lower.endsWith('.bmp')) {
-      return 'image/bmp';
-    }
-    if (lower.endsWith('.heic')) {
-      return 'image/heic';
-    }
-    if (lower.endsWith('.heif')) {
-      return 'image/heif';
-    }
-    return null;
-  }
-
-  String _mimeTypeForClipboardFormat(FileFormat format) {
-    if (identical(format, Formats.png)) return 'image/png';
-    if (identical(format, Formats.jpeg)) return 'image/jpeg';
-    if (identical(format, Formats.webp)) return 'image/webp';
-    if (identical(format, Formats.gif)) return 'image/gif';
-    if (identical(format, Formats.bmp)) return 'image/bmp';
-    if (identical(format, Formats.heic)) return 'image/heic';
-    if (identical(format, Formats.heif)) return 'image/heif';
-    return 'image/png';
-  }
-
-  String _imageExtensionForMimeType(String mimeType) {
-    switch (mimeType) {
-      case 'image/jpeg':
-        return '.jpg';
-      case 'image/png':
-        return '.png';
-      case 'image/webp':
-        return '.webp';
-      case 'image/gif':
-        return '.gif';
-      case 'image/bmp':
-        return '.bmp';
-      case 'image/heic':
-        return '.heic';
-      case 'image/heif':
-        return '.heif';
-      default:
-        return '.png';
-    }
-  }
-
   List<SessionInputItem> _buildComposerInputItems(
     String text,
-    List<_ComposerImageAttachment> attachments,
+    List<ComposerImageAttachment> attachments,
     List<_ComposerSkillMention> skills,
     List<_ComposerFileMention> files,
   ) {
@@ -3953,7 +3573,7 @@ class _SessionScreenState extends State<SessionScreen>
   }
 
   List<SessionMessageAttachment> _buildDraftMessageAttachments(
-    List<_ComposerImageAttachment> attachments,
+    List<ComposerImageAttachment> attachments,
   ) {
     if (!_supportsImageInput) {
       return const <SessionMessageAttachment>[];
@@ -4135,6 +3755,7 @@ class _SessionScreenState extends State<SessionScreen>
     required String? approvalPolicy,
     required String? sandboxMode,
     required bool? networkAccess,
+    required String? accessMode,
     required Object error,
   }) async {
     final now = DateTime.now();
@@ -4157,6 +3778,7 @@ class _SessionScreenState extends State<SessionScreen>
       approvalPolicy: approvalPolicy,
       sandboxMode: sandboxMode,
       networkAccess: networkAccess,
+      accessMode: accessMode,
       lastError: friendlyError(error),
     );
     final saved = await _sendOutbox.upsert(pending);
@@ -4317,6 +3939,7 @@ class _SessionScreenState extends State<SessionScreen>
           approval: ApprovalPolicy.fromWire(pending.approvalPolicy),
           sandbox: SandboxMode.fromWire(pending.sandboxMode),
           networkAccess: pending.networkAccess,
+          accessMode: pending.accessMode,
         ),
         runtime: session.runtime,
         nodeInfo: _nodeInfo,
@@ -4335,6 +3958,7 @@ class _SessionScreenState extends State<SessionScreen>
         approvalPolicy: normalizedOverrides.approvalPolicy,
         sandboxMode: normalizedOverrides.sandboxMode,
         networkAccess: normalizedOverrides.networkAccess,
+        accessMode: normalizedOverrides.accessMode,
       );
       HostStatusStore.instance.markOnline(widget.host.id);
       await _sendOutbox.remove(pending);
@@ -4447,7 +4071,7 @@ class _SessionScreenState extends State<SessionScreen>
 
   Future<void> _sendInput() async {
     final text = _composerController.text.trim();
-    final draftAttachments = List<_ComposerImageAttachment>.from(
+    final draftAttachments = List<ComposerImageAttachment>.from(
       _draftAttachments,
     );
     final draftSkillMentions = List<_ComposerSkillMention>.from(
@@ -4495,6 +4119,7 @@ class _SessionScreenState extends State<SessionScreen>
       approvalPolicy: normalizedOverrides.approvalPolicy,
       sandboxMode: normalizedOverrides.sandboxMode,
       networkAccess: normalizedOverrides.networkAccess,
+      accessMode: normalizedOverrides.accessMode,
     );
     final clientMessageId = _clientMessageIdForSend(retrySignature);
     final optimisticMessage = SessionMessage(
@@ -4512,7 +4137,7 @@ class _SessionScreenState extends State<SessionScreen>
       _sending = true;
       _running = true;
       _awaitingAssistantReply = true;
-      _draftAttachments = const <_ComposerImageAttachment>[];
+      _draftAttachments = const <ComposerImageAttachment>[];
       _draftSkillMentions = const <_ComposerSkillMention>[];
       _clearLiveAssistantMessage();
       _upsertOptimisticMessage(optimisticMessage);
@@ -4537,6 +4162,7 @@ class _SessionScreenState extends State<SessionScreen>
         approvalPolicy: normalizedOverrides.approvalPolicy,
         sandboxMode: normalizedOverrides.sandboxMode,
         networkAccess: normalizedOverrides.networkAccess,
+        accessMode: normalizedOverrides.accessMode,
       );
       if (!mounted) {
         return;
@@ -4569,6 +4195,7 @@ class _SessionScreenState extends State<SessionScreen>
           approvalPolicy: normalizedOverrides.approvalPolicy,
           sandboxMode: normalizedOverrides.sandboxMode,
           networkAccess: normalizedOverrides.networkAccess,
+          accessMode: normalizedOverrides.accessMode,
           error: error,
         );
         if (!mounted) {
@@ -4601,7 +4228,7 @@ class _SessionScreenState extends State<SessionScreen>
         offset: _composerController.text.length,
       );
       final stillHasPending = _pendingAction != null;
-      final restoredAttachments = List<_ComposerImageAttachment>.from(
+      final restoredAttachments = List<ComposerImageAttachment>.from(
         draftAttachments,
       );
       final restoredSkillMentions = List<_ComposerSkillMention>.from(
@@ -4645,6 +4272,7 @@ class _SessionScreenState extends State<SessionScreen>
     required String? approvalPolicy,
     required String? sandboxMode,
     required bool? networkAccess,
+    required String? accessMode,
   }) {
     return jsonEncode({
       'input': inputItems.map((item) => item.toJson()).toList(),
@@ -4655,6 +4283,7 @@ class _SessionScreenState extends State<SessionScreen>
       'approvalPolicy': approvalPolicy,
       'sandboxMode': sandboxMode,
       'networkAccess': networkAccess,
+      'accessMode': accessMode,
     });
   }
 
@@ -4988,9 +4617,20 @@ class _SessionScreenState extends State<SessionScreen>
         _pendingAction = null;
       });
       _syncSessionLiveActivity();
+      final providerOptionId = response.payload['providerOptionId'];
+      String? providerOptionLabel;
+      if (providerOptionId is String) {
+        for (final option in action.approval?.providerOptions ?? const []) {
+          if (option.id == providerOptionId) {
+            providerOptionLabel = option.label;
+            break;
+          }
+        }
+      }
       final label = switch (action.kind) {
         'user_input' => 'Answer sent',
         'elicitation' => 'Response sent',
+        _ when providerOptionLabel != null => providerOptionLabel,
         _ => switch (response.payload['decision']) {
           'accept' => 'Approved this step',
           'acceptForSession' => 'Approved for the rest of the session',
@@ -5081,31 +4721,110 @@ class _SessionScreenState extends State<SessionScreen>
   }
 
   Future<void> _showSessionDetailsSheet(SessionSummary session) async {
-    final colors = context.colors;
     final gitLabel = _supportsGitStatus
         ? _gitHeaderLabel(session, _gitStatus)
         : null;
     final subAgentInfo = session.subAgent;
     final subAgentLabel = subAgentInfo?.label;
-    Widget sectionLabel(String title, String subtitle) {
+    Widget detailsContent(BuildContext surfaceContext) {
       return Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Text(
-            title,
-            style: Theme.of(context).textTheme.labelLarge?.copyWith(
-              color: colors.textPrimary,
-              fontWeight: AppWeights.title,
+          AppSectionHeader(
+            icon: Icons.info_outline_rounded,
+            title: session.title,
+            subtitle: 'Running on ${widget.host.label}',
+          ),
+          const SizedBox(height: AppSpacing.md),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: AppSpacing.md),
+            child: Wrap(
+              spacing: AppSpacing.sm,
+              runSpacing: AppSpacing.sm,
+              children: [
+                MeshPill(
+                  label: _running ? 'running' : 'idle',
+                  icon: _running
+                      ? Icons.play_circle_outline_rounded
+                      : Icons.pause_circle_outline_rounded,
+                  tone: _running ? MeshPillTone.success : MeshPillTone.neutral,
+                ),
+                MeshPill(label: session.source, icon: Icons.route_rounded),
+                if (subAgentLabel != null)
+                  MeshPill(
+                    label: subAgentLabel,
+                    icon: Icons.account_tree_outlined,
+                    tone: MeshPillTone.info,
+                  ),
+                if (gitLabel != null)
+                  MeshPill(
+                    label: gitLabel,
+                    icon: Icons.account_tree_rounded,
+                    tone: MeshPillTone.info,
+                  ),
+              ],
             ),
           ),
-          const SizedBox(height: 3),
-          Text(
-            subtitle,
-            style: Theme.of(context).textTheme.bodySmall?.copyWith(
-              color: colors.textSecondary,
-              height: 1.35,
+          const SizedBox(height: AppSpacing.xl),
+          const AppSectionHeader(
+            icon: Icons.route_rounded,
+            title: 'Overview',
+            subtitle: 'Where this session is running and how it started.',
+          ),
+          const SizedBox(height: AppSpacing.sm),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: AppSpacing.md),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                _DetailRow(label: 'Host', value: widget.host.label),
+                _DetailRow(label: 'Folder', value: session.cwd),
+                _DetailRow(
+                  label: 'Status',
+                  value: _running ? 'Running' : 'Idle',
+                ),
+                _DetailRow(label: 'Started from', value: session.source),
+                if (subAgentLabel != null)
+                  _DetailRow(label: 'Sub-agent', value: subAgentLabel),
+                if (subAgentInfo?.parentSessionId?.isNotEmpty == true)
+                  _DetailRow(
+                    label: 'Parent session',
+                    value: subAgentInfo!.parentSessionId!,
+                  ),
+                if (subAgentInfo != null)
+                  _DetailRow(
+                    label: 'Sub-agent source',
+                    value: _formatSubAgentSourceKind(subAgentInfo.sourceKind),
+                  ),
+                if (gitLabel != null) _DetailRow(label: 'Git', value: gitLabel),
+                if (gitLabel != null) ...[
+                  const SizedBox(height: AppSpacing.sm),
+                  OutlinedButton.icon(
+                    onPressed: () {
+                      Navigator.of(surfaceContext).pop();
+                      unawaited(_showGitSheet(session));
+                    },
+                    icon: const Icon(Icons.account_tree_rounded),
+                    label: const Text('View Git details'),
+                  ),
+                ],
+              ],
             ),
           ),
+          if (session.runtime != null) ...[
+            const SizedBox(height: AppSpacing.xl),
+            const AppSectionHeader(
+              icon: Icons.memory_rounded,
+              title: 'Runtime now',
+              subtitle: 'Live settings currently used by the agent.',
+            ),
+            const SizedBox(height: AppSpacing.sm),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: AppSpacing.md),
+              child: _SessionRuntimeDetails(runtime: session.runtime!),
+            ),
+          ],
+          const SizedBox(height: AppSpacing.xl),
         ],
       );
     }
@@ -5116,140 +4835,31 @@ class _SessionScreenState extends State<SessionScreen>
       showDragHandle: false,
       useSafeArea: true,
       isScrollControlled: true,
-      builder: (context) => MeshBottomSheetScaffold(
+      builder: (sheetContext) => MeshBottomSheetScaffold(
         icon: Icons.info_outline_rounded,
         title: 'Session details',
-        description:
-            'See where this session is running and the live settings the agent is using.',
+        description: 'Live session location, status, and runtime.',
         maxWidth: 760,
         maxHeightFactor: 0.86,
-        child: SingleChildScrollView(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              MeshCard(
-                tone: MeshCardTone.muted,
-                padding: const EdgeInsets.all(14),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      session.title,
-                      style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                        fontWeight: AppWeights.title,
-                      ),
-                    ),
-                    const SizedBox(height: 4),
-                    Text(
-                      'Running on ${widget.host.label}',
-                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                        color: colors.textSecondary,
-                      ),
-                    ),
-                    const SizedBox(height: 10),
-                    Wrap(
-                      spacing: 8,
-                      runSpacing: 8,
-                      children: [
-                        MeshPill(
-                          label: _running ? 'running' : 'idle',
-                          icon: _running
-                              ? Icons.play_circle_outline_rounded
-                              : Icons.pause_circle_outline_rounded,
-                          tone: _running
-                              ? MeshPillTone.success
-                              : MeshPillTone.neutral,
-                        ),
-                        MeshPill(
-                          label: session.source,
-                          icon: Icons.route_rounded,
-                          tone: MeshPillTone.neutral,
-                        ),
-                        if (subAgentLabel != null)
-                          MeshPill(
-                            label: subAgentLabel,
-                            icon: Icons.account_tree_outlined,
-                            tone: MeshPillTone.info,
-                          ),
-                        if (gitLabel != null)
-                          MeshPill(
-                            label: gitLabel,
-                            icon: Icons.account_tree_rounded,
-                            tone: MeshPillTone.info,
-                          ),
-                      ],
-                    ),
-                  ],
-                ),
-              ),
-              const SizedBox(height: 14),
-              sectionLabel(
-                'Overview',
-                'Where this session is running and how it started.',
-              ),
-              const SizedBox(height: 8),
-              MeshCard(
-                tone: MeshCardTone.muted,
-                padding: const EdgeInsets.fromLTRB(14, 12, 14, 2),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    _DetailRow(label: 'Host', value: widget.host.label),
-                    _DetailRow(label: 'Folder', value: session.cwd),
-                    _DetailRow(
-                      label: 'Status',
-                      value: _running ? 'Running' : 'Idle',
-                    ),
-                    _DetailRow(label: 'Started from', value: session.source),
-                    if (subAgentLabel != null)
-                      _DetailRow(label: 'Sub-agent', value: subAgentLabel),
-                    if (subAgentInfo?.parentSessionId?.isNotEmpty == true)
-                      _DetailRow(
-                        label: 'Parent session',
-                        value: subAgentInfo!.parentSessionId!,
-                      ),
-                    if (subAgentInfo != null)
-                      _DetailRow(
-                        label: 'Sub-agent source',
-                        value: _formatSubAgentSourceKind(
-                          subAgentInfo.sourceKind,
-                        ),
-                      ),
-                    if (gitLabel != null)
-                      _DetailRow(label: 'Git', value: gitLabel),
-                  ],
-                ),
-              ),
-              if (gitLabel != null) ...[
-                const SizedBox(height: 8),
-                OutlinedButton.icon(
-                  onPressed: () {
-                    Navigator.of(context).pop();
-                    unawaited(_showGitSheet(session));
-                  },
-                  icon: const Icon(Icons.account_tree_rounded, size: 18),
-                  label: const Text('View Git details'),
-                ),
-              ],
-              if (session.runtime != null) ...[
-                const SizedBox(height: 14),
-                sectionLabel(
-                  'Runtime now',
-                  'Live settings the agent is using for this session.',
-                ),
-                const SizedBox(height: 8),
-                _SessionRuntimeDetails(runtime: session.runtime!),
-              ],
-            ],
-          ),
-        ),
+        child: SingleChildScrollView(child: detailsContent(sheetContext)),
       ),
     );
     if (widget.desktopMode) {
       await _showDesktopOverlayWithComposerFocusRestore(showSheet);
       return;
     }
-    await showSheet();
+    await Navigator.of(context).push<void>(
+      MaterialPageRoute<void>(
+        builder: (pageContext) => Scaffold(
+          backgroundColor: pageContext.colors.canvas,
+          appBar: AppBar(title: const Text('Session details')),
+          body: SingleChildScrollView(
+            padding: AppPadding.mobilePage,
+            child: AppContentColumn(child: detailsContent(pageContext)),
+          ),
+        ),
+      ),
+    );
   }
 
   String? _cleanComposerLabel(String? value) {
@@ -5304,19 +4914,15 @@ class _SessionScreenState extends State<SessionScreen>
     return 'Choose model';
   }
 
-  bool _composerModelCustomized(SessionSummary session) {
-    return _cleanComposerLabel(_composerTurnConfig(session).model) != null;
-  }
-
   String _composerThinkingLabel(SessionSummary session) {
     final turnConfig = _composerTurnConfig(session);
     final override = _cleanComposerLabel(turnConfig.reasoningEffort);
     if (override != null) {
-      return _reasoningEffortLabel(override);
+      return reasoningEffortLabel(override);
     }
     final runtime = _cleanComposerLabel(session.runtime?.reasoningEffort);
     if (runtime != null) {
-      return _reasoningEffortLabel(runtime);
+      return reasoningEffortLabel(runtime);
     }
     return 'Auto';
   }
@@ -5330,11 +4936,6 @@ class _SessionScreenState extends State<SessionScreen>
       return 'Current thinking';
     }
     return 'Thinking';
-  }
-
-  bool _composerThinkingCustomized(SessionSummary session) {
-    return _cleanComposerLabel(_composerTurnConfig(session).reasoningEffort) !=
-        null;
   }
 
   String? _composerRuntimeModelProvider(SessionSummary session) {
@@ -5554,6 +5155,48 @@ class _SessionScreenState extends State<SessionScreen>
       providerName: providerName,
     );
     if (widget.desktopMode) {
+      final inspector = InspectorScope.maybeOf(context);
+      if (inspector != null && MediaQuery.sizeOf(context).width >= 900) {
+        final result = Completer<ModelCatalogEntry?>();
+        final ownerKey = _inspectorOwnerKey();
+        late VoidCallback listener;
+        void finish(ModelCatalogEntry? model) {
+          if (!result.isCompleted) result.complete(model);
+        }
+
+        listener = () {
+          final current = inspector.current;
+          if (current == null ||
+              current.kind != InspectorSurfaceKind.sessionControls ||
+              current.ownerKey != ownerKey) {
+            finish(null);
+          }
+        };
+        inspector.addListener(listener);
+        inspector.show(
+          InspectorSurface(
+            kind: InspectorSurfaceKind.sessionControls,
+            ownerKey: ownerKey,
+            title: 'Choose a model',
+            icon: Icons.memory_rounded,
+            bodyBuilder: (inspectorContext) => _ModelPickerSheet(
+              models: models,
+              currentModel: currentModel,
+              providerName: providerName,
+              embedded: true,
+              showEmbeddedHeader: false,
+              onBack: inspector.close,
+              onSelected: (model) {
+                finish(model);
+                inspector.close();
+              },
+            ),
+          ),
+        );
+        return result.future.whenComplete(
+          () => inspector.removeListener(listener),
+        );
+      }
       return showDialog<ModelCatalogEntry>(
         context: context,
         barrierColor: Colors.black.withValues(alpha: 0.35),
@@ -5573,6 +5216,7 @@ class _SessionScreenState extends State<SessionScreen>
     return showModalBottomSheet<ModelCatalogEntry>(
       context: context,
       backgroundColor: Colors.transparent,
+      barrierColor: Colors.black.withValues(alpha: 0.28),
       showDragHandle: false,
       useSafeArea: true,
       isScrollControlled: true,
@@ -5688,60 +5332,62 @@ class _SessionScreenState extends State<SessionScreen>
     await _turnConfigStore.ensureLoaded();
     if (!mounted) return;
     final runtime = session.runtime;
-    final isDesktop = widget.desktopMode;
-    final sheet = SessionControlsSheet(
-      api: widget.api,
-      host: widget.host,
-      session: session,
-      useBottomSheetChrome: !isDesktop,
-      runtimeModel: runtime?.model,
-      runtimeModelProvider: runtime?.modelProvider,
-      runtimeMode: runtime?.mode,
-      runtimeServiceTier: runtime?.serviceTier,
-      runtimeReasoningEffort: runtime?.reasoningEffort,
-      runtimeApproval: ApprovalPolicy.fromWire(runtime?.approvalPolicy),
-      runtimeSandbox: SandboxMode.fromWire(runtime?.sandboxMode),
-      runtimeNetworkAccess: runtime?.networkAccess,
-      policyStore: _policyStore,
-      turnConfigStore: _turnConfigStore,
-    );
-    if (isDesktop) {
-      await _showDesktopOverlayWithComposerFocusRestore(
-        () => showDialog<void>(
-          context: context,
-          barrierColor: Colors.black.withValues(alpha: 0.35),
-          builder: (dialogContext) => Dialog(
-            backgroundColor: Colors.transparent,
-            insetPadding: const EdgeInsets.symmetric(
-              horizontal: 48,
-              vertical: 48,
-            ),
-            child: ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 520, maxHeight: 640),
-              child: DecoratedBox(
-                decoration: BoxDecoration(
-                  color: dialogContext.colors.surfaceElevated,
-                  borderRadius: AppShapes.dialog,
-                  border: Border.all(color: dialogContext.colors.border),
-                  boxShadow: AppShadows.dialog(
-                    dialogContext.colors.textPrimary,
-                  ),
-                ),
-                child: ClipRRect(borderRadius: AppShapes.dialog, child: sheet),
-              ),
-            ),
+    final inspector = InspectorScope.maybeOf(context);
+    final isWideInspector =
+        widget.desktopMode &&
+        MediaQuery.sizeOf(context).width >= 900 &&
+        inspector != null;
+    if (isWideInspector) {
+      inspector.show(
+        InspectorSurface(
+          kind: InspectorSurfaceKind.sessionControls,
+          ownerKey: _inspectorOwnerKey(),
+          title: 'Session controls',
+          icon: Icons.tune_rounded,
+          bodyBuilder: (inspectorContext) => SessionControlsSheet(
+            api: widget.api,
+            host: widget.host,
+            session: session,
+            onClose: inspector.close,
+            runtimeModel: runtime?.model,
+            runtimeModelProvider: runtime?.modelProvider,
+            runtimeMode: runtime?.mode,
+            runtimeServiceTier: runtime?.serviceTier,
+            runtimeReasoningEffort: runtime?.reasoningEffort,
+            runtimeApproval: ApprovalPolicy.fromWire(runtime?.approvalPolicy),
+            runtimeSandbox: SandboxMode.fromWire(runtime?.sandboxMode),
+            runtimeNetworkAccess: runtime?.networkAccess,
+            runtimeAccessMode: runtime?.accessMode,
+            policyStore: _policyStore,
+            turnConfigStore: _turnConfigStore,
           ),
         ),
       );
       return;
     }
-    await showModalBottomSheet<void>(
-      context: context,
-      backgroundColor: Colors.transparent,
-      showDragHandle: false,
-      useSafeArea: true,
-      isScrollControlled: true,
-      builder: (sheetContext) => sheet,
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (pageContext) => Scaffold(
+          backgroundColor: pageContext.colors.canvas,
+          appBar: AppBar(title: const Text('Session controls')),
+          body: SessionControlsSheet(
+            api: widget.api,
+            host: widget.host,
+            session: session,
+            runtimeModel: runtime?.model,
+            runtimeModelProvider: runtime?.modelProvider,
+            runtimeMode: runtime?.mode,
+            runtimeServiceTier: runtime?.serviceTier,
+            runtimeReasoningEffort: runtime?.reasoningEffort,
+            runtimeApproval: ApprovalPolicy.fromWire(runtime?.approvalPolicy),
+            runtimeSandbox: SandboxMode.fromWire(runtime?.sandboxMode),
+            runtimeNetworkAccess: runtime?.networkAccess,
+            runtimeAccessMode: runtime?.accessMode,
+            policyStore: _policyStore,
+            turnConfigStore: _turnConfigStore,
+          ),
+        ),
+      ),
     );
   }
 
@@ -7337,7 +6983,6 @@ class _SessionScreenState extends State<SessionScreen>
             return _Composer(
               controller: _composerController,
               focusNode: _composerFocusNode,
-              isFocused: _composerFocused,
               attachments: _draftAttachments,
               skills: _draftSkillMentions,
               files: _draftFileMentions,
@@ -7373,9 +7018,6 @@ class _SessionScreenState extends State<SessionScreen>
               modelDetail: showModelPicker
                   ? _composerModelDetail(session)
                   : null,
-              modelCustomized: showModelPicker
-                  ? _composerModelCustomized(session)
-                  : false,
               onModelTap: showModelPicker
                   ? () => _showComposerModelPicker(session)
                   : null,
@@ -7385,9 +7027,6 @@ class _SessionScreenState extends State<SessionScreen>
               thinkingDetail: showThinkingPicker
                   ? _composerThinkingDetail(session)
                   : null,
-              thinkingCustomized: showThinkingPicker
-                  ? _composerThinkingCustomized(session)
-                  : false,
               onThinkingTap: showThinkingPicker
                   ? () => _showComposerThinkingPicker(session)
                   : null,

@@ -24,6 +24,7 @@ import {
 
 import {
   normalizePendingActionDecision,
+  parsePendingActionProviderOptionResponse,
   type PendingActionDecisionInput,
   type PendingActionResponseInput,
 } from "./approvals.js";
@@ -154,6 +155,8 @@ export const ACPX_PROVIDER_CAPABILITIES: AgentProviderCapabilities = {
   configuration: {
     models: true,
     profiles: false,
+    accessModes: false,
+    permissionProfiles: false,
     skills: false,
     skillManagement: false,
   },
@@ -166,6 +169,9 @@ export const ACPX_PROVIDER_CAPABILITIES: AgentProviderCapabilities = {
     sandboxMode: false,
     networkAccess: false,
     webSearch: false,
+    accessMode: false,
+    permissionProfile: false,
+    approvalsReviewer: false,
   },
   lifecycle: {
     restart: false,
@@ -458,25 +464,37 @@ export class AcpxAgentProvider
     action: AgentPendingAction,
     decision: PendingActionResponseInput,
   ): boolean {
-    const normalized = normalizePendingActionDecision(
-      decision as PendingActionDecisionInput,
-    );
-    if (!normalized) {
-      return false;
-    }
     let acpxDecision: AcpPermissionDecision;
-    switch (normalized.decision) {
-      case "approve":
-        acpxDecision = {
-          outcome: normalized.scope === "once" ? "allow_once" : "allow_always",
-        };
-        break;
-      case "decline":
-        acpxDecision = { outcome: "reject_once" };
-        break;
-      case "cancel":
-        acpxDecision = { outcome: "cancel" };
-        break;
+    const providerOption = parsePendingActionProviderOptionResponse(decision);
+    if (providerOption) {
+      const offered = action.approval?.providerOptions?.find(
+        (option) => option.id === providerOption.providerOptionId,
+      );
+      if (!offered) {
+        return false;
+      }
+      acpxDecision = { outcome: offered.kind };
+    } else {
+      const normalized = normalizePendingActionDecision(
+        decision as PendingActionDecisionInput,
+      );
+      if (!normalized) {
+        return false;
+      }
+      switch (normalized.decision) {
+        case "approve":
+          acpxDecision = {
+            outcome:
+              normalized.scope === "once" ? "allow_once" : "allow_always",
+          };
+          break;
+        case "decline":
+          acpxDecision = { outcome: "reject_once" };
+          break;
+        case "cancel":
+          acpxDecision = { outcome: "cancel" };
+          break;
+      }
     }
     return this.resolvePendingApproval(action.id, acpxDecision);
   }
@@ -798,7 +816,9 @@ export class AcpxAgentProvider
       detail: permissionDetail(request),
       requestedAt: Date.now(),
       canApprove: true,
-      canApproveForSession: true,
+      canApproveForSession: permissionOptions(request).some(
+        (option) => option.kind === "allow_always",
+      ),
       canDecline: true,
       cwd: await this.cwdForSession(sessionId),
       approval: approvalFromPermissionRequest(request, await this.cwdForSession(sessionId)),
@@ -1290,9 +1310,50 @@ function approvalFromPermissionRequest(
     detail: permissionDetail(request),
     cwd,
     targets: permissionTargets(request, cwd),
-    supportedScopes: ["once", "session"],
+    supportedScopes: legacyScopesForPermissionRequest(request),
     suggestedScope: "once",
+    providerOptions: permissionOptions(request),
   };
+}
+
+function permissionOptions(
+  request: AcpPermissionRequest,
+): NonNullable<PendingActionApproval["providerOptions"]> {
+  const options = Array.isArray(request.raw.options) ? request.raw.options : [];
+  return options.flatMap((option) => {
+    if (
+      !option ||
+      typeof option.optionId !== "string" ||
+      typeof option.name !== "string" ||
+      ![
+        "allow_once",
+        "allow_always",
+        "reject_once",
+        "reject_always",
+      ].includes(option.kind)
+    ) {
+      return [];
+    }
+    return [{
+      id: option.optionId,
+      label: option.name,
+      kind: option.kind,
+    }];
+  });
+}
+
+function legacyScopesForPermissionRequest(
+  request: AcpPermissionRequest,
+): PendingActionApproval["supportedScopes"] {
+  const options = permissionOptions(request);
+  return [
+    ...(options.some((option) => option.kind === "allow_once")
+      ? (["once"] as const)
+      : []),
+    ...(options.some((option) => option.kind === "allow_always")
+      ? (["session"] as const)
+      : []),
+  ];
 }
 
 function approvalCategoryForPermission(

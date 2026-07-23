@@ -345,7 +345,6 @@ class _SessionActionRow extends StatelessWidget {
   }
 }
 
-
 String? _gitHeaderLabel(SessionSummary session, SessionGitStatus? status) {
   final branch = status?.branch ?? session.gitInfo?.branch;
   final shortSha = status?.shortSha ?? session.gitInfo?.shortSha;
@@ -364,6 +363,7 @@ String? _gitHeaderLabel(SessionSummary session, SessionGitStatus? status) {
   }
   return label;
 }
+
 class _JumpToLatestPill extends StatelessWidget {
   const _JumpToLatestPill({required this.onTap});
 
@@ -386,11 +386,7 @@ class _JumpToLatestPill extends StatelessWidget {
           child: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Icon(
-                Icons.arrow_downward_rounded,
-                size: 16,
-                color: foreground,
-              ),
+              Icon(Icons.arrow_downward_rounded, size: 16, color: foreground),
               const SizedBox(width: 6),
               Text(
                 'Jump to latest',
@@ -1145,11 +1141,7 @@ class _PinnedMessageSheet extends StatelessWidget {
     final pinnedLinkStyle = linkTextStyleForBackground(
       background: colors.surfaceMuted,
       preferred: colors.accent,
-      fallbacks: [
-        colors.info,
-        colors.textPrimary,
-        colors.textSecondary,
-      ],
+      fallbacks: [colors.info, colors.textPrimary, colors.textSecondary],
       baseStyle: textStyle,
     );
     return MeshBottomSheetScaffold(
@@ -1752,6 +1744,57 @@ class _PendingActionCardState extends State<_PendingActionCard> {
           icon: const Icon(Icons.close_rounded, size: 18),
           label: const Text('Cancel'),
         ),
+      ];
+    }
+    final providerOptions = action.approval?.providerOptions ?? const [];
+    if (providerOptions.isNotEmpty) {
+      return [
+        for (var index = 0; index < providerOptions.length; index++)
+          if (providerOptions[index].rejects)
+            MeshDangerAction(
+              onPressed: _responding
+                  ? null
+                  : () {
+                      setState(() => _responding = true);
+                      widget.onRespond(
+                        PendingActionResponseDraft.providerOption(
+                          providerOptions[index].id,
+                        ),
+                      );
+                    },
+              icon: Icons.close_rounded,
+              label: providerOptions[index].label,
+            )
+          else if (index == 0)
+            FilledButton.icon(
+              onPressed: _responding
+                  ? null
+                  : () {
+                      setState(() => _responding = true);
+                      widget.onRespond(
+                        PendingActionResponseDraft.providerOption(
+                          providerOptions[index].id,
+                        ),
+                      );
+                    },
+              icon: const Icon(Icons.check_rounded, size: 18),
+              label: Text(providerOptions[index].label),
+            )
+          else
+            OutlinedButton.icon(
+              onPressed: _responding
+                  ? null
+                  : () {
+                      setState(() => _responding = true);
+                      widget.onRespond(
+                        PendingActionResponseDraft.providerOption(
+                          providerOptions[index].id,
+                        ),
+                      );
+                    },
+              icon: const Icon(Icons.check_rounded, size: 18),
+              label: Text(providerOptions[index].label),
+            ),
       ];
     }
     return [

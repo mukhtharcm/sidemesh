@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:sidemesh_mobile/src/api_client.dart';
+import 'package:sidemesh_mobile/src/composer_image_attachments.dart';
 import 'package:sidemesh_mobile/src/create_session_defaults_store.dart';
 import 'package:sidemesh_mobile/src/db.dart';
 import 'package:sidemesh_mobile/src/fs_models.dart';
@@ -15,10 +16,12 @@ import 'package:sidemesh_mobile/src/screens/host_detail_screen.dart';
 import 'package:sidemesh_mobile/src/screens/inspector/inspector_controller.dart';
 import 'package:sidemesh_mobile/src/screens/session_screen.dart';
 import 'package:sidemesh_mobile/src/session_local_store.dart';
+import 'package:sidemesh_mobile/src/session_message_seed_store.dart';
 import 'package:sidemesh_mobile/src/session_policy_store.dart';
 import 'package:sidemesh_mobile/src/session_turn_config_store.dart';
 import 'package:sidemesh_mobile/src/theme/app_palettes.dart';
 import 'package:sidemesh_mobile/src/theme/app_theme.dart';
+import 'package:sidemesh_mobile/src/widgets/app_composer.dart';
 import 'package:stream_channel/stream_channel.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
 
@@ -263,12 +266,20 @@ void main() {
     expect(modelButton, findsOneWidget);
     expect(tester.getSize(modelButton).height, greaterThanOrEqualTo(44));
 
-    final visibleChip = find.descendant(
-      of: modelButton,
-      matching: find.byType(AnimatedContainer),
+    final thinkingTooltip = find.byWidgetPredicate(
+      (widget) =>
+          widget is Tooltip &&
+          widget.message?.startsWith('Choose thinking level') == true,
     );
-    expect(visibleChip, findsOneWidget);
-    expect(tester.getSize(visibleChip).height, lessThanOrEqualTo(40));
+    final thinkingButton = find.descendant(
+      of: thinkingTooltip,
+      matching: find.byType(InkWell),
+    );
+    expect(thinkingButton, findsOneWidget);
+    expect(
+      tester.getCenter(modelButton).dy,
+      closeTo(tester.getCenter(thinkingButton).dy, 0.1),
+    );
 
     await tester.tap(modelButton);
     await _pumpFrames(tester);
@@ -276,10 +287,48 @@ void main() {
     expect(find.text('Choose a model'), findsOneWidget);
     expect(find.text('Model and thinking'), findsNothing);
     expect(find.text('Approvals'), findsNothing);
+    expect(find.byType(BottomSheet), findsOneWidget);
+    expect(find.byTooltip('Close'), findsOneWidget);
 
     await tester.pumpWidget(const SizedBox.shrink());
     await tester.pump();
   });
+
+  testWidgets(
+    'mobile session controls use a page and open model choices in a sheet',
+    (tester) async {
+      final api = _CapabilityFakeApi(
+        _nodeForCapabilities(_fullCapabilities),
+        models: const [_fakeModel],
+      );
+      addTearDown(api.dispose);
+
+      await _pumpApp(
+        tester,
+        SessionScreen(
+          host: _host('mobile-session-controls-page'),
+          session: _session('mobile-session-controls-page', provider: 'fake'),
+          api: api,
+        ),
+        size: const Size(390, 840),
+      );
+      await _pumpFrames(tester);
+
+      await tester.tap(find.byTooltip('Session controls').first);
+      await _pumpFrames(tester);
+
+      expect(find.text('Session controls'), findsWidgets);
+      expect(find.byType(BottomSheet), findsNothing);
+      expect(find.text('Model and thinking'), findsOneWidget);
+
+      await tester.tap(find.text('Fake Balanced'));
+      await _pumpFrames(tester);
+
+      expect(find.text('Choose a model'), findsOneWidget);
+      expect(find.byTooltip('Close'), findsOneWidget);
+      expect(find.byType(BottomSheet), findsOneWidget);
+    },
+  );
 
   testWidgets('composer thinking chip opens the thinking picker only', (
     tester,
@@ -598,7 +647,7 @@ void main() {
     expect(find.text('Internet access'), findsNothing);
   });
 
-  testWidgets('session controls show advertised runtime controls', (
+  testWidgets('session controls compact supported legacy policy controls', (
     tester,
   ) async {
     final api = _CapabilityFakeApi(
@@ -629,9 +678,99 @@ void main() {
 
     expect(find.text('Model and thinking'), findsOneWidget);
     expect(find.text('Mode'), findsOneWidget);
-    expect(find.text('Approvals'), findsOneWidget);
-    expect(find.text('File access'), findsOneWidget);
-    expect(find.text('Internet access'), findsOneWidget);
+    expect(find.byType(Slider), findsOneWidget);
+    expect(find.text('Permissions'), findsOneWidget);
+    expect(find.text('Approval'), findsOneWidget);
+    expect(find.text('Sandbox'), findsOneWidget);
+    expect(find.text('Network'), findsOneWidget);
+    expect(find.text('Network access'), findsOneWidget);
+    expect(find.text('Approvals'), findsNothing);
+    expect(find.text('File access'), findsNothing);
+    expect(find.text('Internet access'), findsNothing);
+  });
+
+  testWidgets('session controls show provider-owned access modes', (
+    tester,
+  ) async {
+    final host = _host('controls-native-permissions');
+    final session = _session('controls-native-permissions-session');
+    final api = _CapabilityFakeApi(
+      _nodeForCapabilities(_nativePermissionCapabilities),
+      models: const [_fakeModel],
+      accessModeCatalog: const ProviderAccessModeCatalog(
+        strategy: 'modes',
+        modes: [
+          ProviderAccessModeSummary(
+            id: 'ask-for-approval',
+            label: 'Ask for approval',
+            description: 'Ask before crossing the workspace boundary.',
+            icon: 'prompt',
+            tone: 'default',
+            enabled: true,
+          ),
+          ProviderAccessModeSummary(
+            id: 'approve-for-me',
+            label: 'Approve for me',
+            description: 'Use the provider reviewer.',
+            icon: 'automatic',
+            tone: 'default',
+            enabled: true,
+          ),
+          ProviderAccessModeSummary(
+            id: 'custom',
+            label: 'Provider configuration',
+            description: 'Use the provider configuration.',
+            icon: 'settings',
+            tone: 'default',
+            enabled: true,
+          ),
+        ],
+        defaultMode: 'custom',
+      ),
+    );
+
+    await _pumpApp(
+      tester,
+      SessionControlsSheet(
+        api: api,
+        host: host,
+        session: session,
+        runtimeModel: null,
+        runtimeModelProvider: null,
+        runtimeMode: null,
+        runtimeServiceTier: null,
+        runtimeReasoningEffort: null,
+        runtimeApproval: null,
+        runtimeSandbox: null,
+        runtimeNetworkAccess: null,
+        policyStore: SessionPolicyStore.instance,
+        turnConfigStore: SessionTurnConfigStore.instance,
+      ),
+      size: const Size(840, 1100),
+    );
+    await _pumpFrames(tester);
+
+    expect(find.text('Access'), findsOneWidget);
+    expect(find.text('Workspace'), findsNothing);
+    expect(find.text('Full access'), findsNothing);
+    expect(find.text('Unavailable'), findsNothing);
+    expect(find.text('Ask for approval'), findsOneWidget);
+    expect(find.text('Approve for me'), findsOneWidget);
+    expect(find.text('Provider configuration'), findsOneWidget);
+    expect(find.text('Permissions'), findsNothing);
+    expect(find.text('File access'), findsNothing);
+    expect(find.text('Internet access'), findsNothing);
+    expect(find.byTooltip('Back to session controls'), findsNothing);
+
+    await tester.ensureVisible(find.text('Apply'));
+    await tester.tap(find.text('Apply'));
+    await _pumpFrames(tester);
+
+    expect(
+      SessionPolicyStore.instance.policyFor(host, session.id).isEmpty,
+      isTrue,
+      reason: 'Applying untouched runtime defaults must not pin overrides.',
+    );
   });
 
   testWidgets('session controls use provider-defined mode catalogs', (
@@ -670,6 +809,57 @@ void main() {
     expect(find.text('Review'), findsOneWidget);
     expect(find.text('Interactive'), findsNothing);
     expect(find.text('Plan'), findsNothing);
+  });
+
+  testWidgets('session controls explain unavailable access modes', (
+    tester,
+  ) async {
+    final host = _host('controls-legacy-native-permissions');
+    final session = _session('controls-legacy-native-permissions-session');
+    final api = _CapabilityFakeApi(
+      _nodeForCapabilities(_nativePermissionCapabilities),
+      models: const [_fakeModel],
+      accessModeCatalog: const ProviderAccessModeCatalog(
+        strategy: 'modes',
+        modes: [
+          ProviderAccessModeSummary(
+            id: 'managed',
+            label: 'Managed access',
+            description: 'Use the organization policy.',
+            icon: 'settings',
+            tone: 'default',
+            enabled: false,
+            disabledReason: 'Restricted by the host administrator.',
+          ),
+        ],
+      ),
+    );
+
+    await _pumpApp(
+      tester,
+      SessionControlsSheet(
+        api: api,
+        host: host,
+        session: session,
+        runtimeModel: null,
+        runtimeModelProvider: null,
+        runtimeMode: null,
+        runtimeServiceTier: null,
+        runtimeReasoningEffort: null,
+        runtimeApproval: null,
+        runtimeSandbox: null,
+        runtimeNetworkAccess: null,
+        policyStore: SessionPolicyStore.instance,
+        turnConfigStore: SessionTurnConfigStore.instance,
+      ),
+      size: const Size(840, 1100),
+    );
+    await _pumpFrames(tester);
+
+    expect(find.text('Access'), findsOneWidget);
+    expect(find.text('Managed access'), findsOneWidget);
+    expect(find.text('Unavailable'), findsOneWidget);
+    expect(find.text('Restricted by the host administrator.'), findsOneWidget);
   });
 
   testWidgets('create session sheet hides unsupported launch controls', (
@@ -734,6 +924,136 @@ void main() {
     expect(find.text('Fast mode'), findsOneWidget);
     expect(find.text('Permissions'), findsOneWidget);
     expect(find.text('Live web search'), findsOneWidget);
+  });
+
+  testWidgets('create session submits the opaque provider access mode', (
+    tester,
+  ) async {
+    await CreateSessionDefaultsStore.instance.ensureLoaded();
+    final api = _CapabilityFakeApi(
+      _nodeForCapabilities(_nativePermissionCapabilities),
+      accessModeCatalog: const ProviderAccessModeCatalog(
+        strategy: 'modes',
+        modes: [
+          ProviderAccessModeSummary(
+            id: 'ask-for-approval',
+            label: 'Ask for approval',
+            description: 'Ask before crossing the workspace boundary.',
+            icon: 'prompt',
+            tone: 'default',
+            enabled: true,
+          ),
+          ProviderAccessModeSummary(
+            id: 'approve-for-me',
+            label: 'Approve for me',
+            description: 'Use the provider reviewer.',
+            icon: 'automatic',
+            tone: 'default',
+            enabled: true,
+          ),
+          ProviderAccessModeSummary(
+            id: 'full-access',
+            label: 'Full access',
+            description: 'Use the whole machine.',
+            icon: 'unrestricted',
+            tone: 'danger',
+            enabled: true,
+            confirmation: ProviderAccessModeConfirmation(
+              title: 'Enable full access?',
+              description: 'This mode can use the whole machine.',
+              confirmLabel: 'Enable full access',
+              danger: true,
+            ),
+          ),
+        ],
+        defaultMode: 'ask-for-approval',
+      ),
+    );
+
+    await _pumpApp(
+      tester,
+      CreateSessionSheet(
+        host: _host('create-native-permissions'),
+        api: api,
+        initialCwd: '/repo',
+        presentation: CreateSessionPresentation.dialog,
+      ),
+      size: const Size(1600, 1200),
+    );
+    await _pumpFrames(tester);
+
+    await tester.tap(find.text('Session setup'));
+    await _pumpFrames(tester);
+    expect(find.text('Workspace'), findsNothing);
+    await tester.tap(find.text('Full access'));
+    await _pumpFrames(tester);
+    await tester.tap(find.text('Enable full access'));
+    await _pumpFrames(tester);
+    await tester.enterText(
+      find.byKey(const ValueKey('create-session-prompt-field')),
+      'Use native permissions.',
+    );
+    await tester.tap(find.widgetWithText(FilledButton, 'Start session'));
+    await _pumpFrames(tester);
+
+    expect(api.lastCreateRequest?.accessMode, 'full-access');
+    expect(api.lastCreateRequest?.approvalPolicy, isNull);
+    expect(api.lastCreateRequest?.sandboxMode, isNull);
+    expect(api.lastCreateRequest?.networkAccess, isNull);
+  });
+
+  testWidgets('create session replaces an unavailable inherited access mode', (
+    tester,
+  ) async {
+    await CreateSessionDefaultsStore.instance.ensureLoaded();
+    final api = _CapabilityFakeApi(
+      _nodeForCapabilities(_nativePermissionCapabilities),
+      accessModeCatalog: const ProviderAccessModeCatalog(
+        strategy: 'modes',
+        modes: [
+          ProviderAccessModeSummary(
+            id: 'retired',
+            label: 'Retired mode',
+            description: 'No longer available.',
+            icon: 'settings',
+            tone: 'default',
+            enabled: false,
+            disabledReason: 'Disabled by the provider.',
+          ),
+          ProviderAccessModeSummary(
+            id: 'guarded',
+            label: 'Guarded',
+            description: 'Ask before sensitive actions.',
+            icon: 'prompt',
+            tone: 'default',
+            enabled: true,
+          ),
+        ],
+        defaultMode: 'guarded',
+      ),
+    );
+
+    await _pumpApp(
+      tester,
+      CreateSessionSheet(
+        host: _host('create-inherited-access'),
+        api: api,
+        initialCwd: '/repo',
+        seed: const CreateSessionDraftSeed(accessMode: 'retired'),
+        presentation: CreateSessionPresentation.dialog,
+      ),
+      size: const Size(1600, 1200),
+    );
+    await _pumpFrames(tester);
+
+    await tester.enterText(
+      find.byKey(const ValueKey('create-session-prompt-field')),
+      'Use the valid provider default.',
+    );
+    await tester.tap(find.widgetWithText(FilledButton, 'Start session'));
+    await _pumpFrames(tester);
+
+    expect(api.lastCreateRequest?.accessMode, 'guarded');
   });
 
   testWidgets('create session sheet sends selected provider for mixed hosts', (
@@ -1060,9 +1380,14 @@ void main() {
       find.byKey(const ValueKey('create-session-send-button')),
       findsOneWidget,
     );
+    expect(find.byType(AppComposer), findsOneWidget);
+    final draftModelControl = find.byKey(
+      const ValueKey('new-session-composer-model'),
+    );
+    expect(draftModelControl, findsOneWidget);
     expect(
       tester.getSize(find.byKey(const ValueKey('new-session-composer'))).height,
-      lessThanOrEqualTo(82),
+      lessThanOrEqualTo(150),
     );
     expect(
       tester
@@ -1089,7 +1414,19 @@ void main() {
     await _pumpFrames(tester);
     expect(find.text('Network access'), findsOneWidget);
     expect(find.text('Session settings'), findsOneWidget);
+    expect(find.text('Use as defaults'), findsOneWidget);
+    expect(find.text('Save as defaults'), findsNothing);
     expect(find.byKey(const ValueKey('new-session-composer')), findsNothing);
+
+    await tester.tap(find.byKey(const ValueKey('new-session-model-selector')));
+    await _pumpFrames(tester);
+    expect(find.text('Choose a model'), findsOneWidget);
+    expect(find.byType(BottomSheet), findsOneWidget);
+    expect(find.text('Fake Balanced'), findsOneWidget);
+
+    await tester.tap(find.byTooltip('Close'));
+    await _pumpFrames(tester);
+    expect(find.text('Session settings'), findsOneWidget);
 
     await tester.tap(find.byTooltip('Back to new session'));
     await _pumpFrames(tester);
@@ -1100,7 +1437,11 @@ void main() {
     );
     await tester.pump();
     final sendButton = find.byKey(const ValueKey('create-session-send-button'));
-    expect(tester.widget<FilledButton>(sendButton).onPressed, isNotNull);
+    final sendTapTarget = find.descendant(
+      of: sendButton,
+      matching: find.byType(InkWell),
+    );
+    expect(tester.widget<InkWell>(sendTapTarget).onTap, isNotNull);
     await tester.ensureVisible(sendButton);
     await tester.tap(sendButton);
     await tester.pumpAndSettle();
@@ -1117,6 +1458,229 @@ void main() {
     expect(api.lastCreateRequest!.networkAccess, isTrue);
     expect(await launch, isNotNull);
   });
+
+  testWidgets(
+    'new session shares the adaptive model and thinking composer controls',
+    (tester) async {
+      final api = _CapabilityFakeApi(
+        _nodeForCapabilities(_fullCapabilities),
+        models: const [_fakeModel],
+      );
+      addTearDown(api.dispose);
+
+      await _pumpApp(
+        tester,
+        CreateSessionSheet(
+          host: _host('draft-shared-composer'),
+          api: api,
+          initialCwd: '/repo',
+          presentation: CreateSessionPresentation.page,
+        ),
+        size: const Size(390, 840),
+      );
+      await _pumpFrames(tester);
+
+      expect(find.byType(AppComposer), findsOneWidget);
+      final modelControl = find.byKey(
+        const ValueKey('new-session-composer-model'),
+      );
+      final thinkingControl = find.byKey(
+        const ValueKey('new-session-composer-thinking'),
+      );
+      expect(modelControl, findsOneWidget);
+      expect(thinkingControl, findsOneWidget);
+      expect(
+        tester.getCenter(modelControl).dy,
+        closeTo(tester.getCenter(thinkingControl).dy, 0.1),
+      );
+
+      await tester.tap(
+        find.byKey(const ValueKey('new-session-settings-button')),
+      );
+      await _pumpFrames(tester);
+      expect(find.text('Use as defaults'), findsOneWidget);
+      expect(find.text('Save as defaults'), findsNothing);
+
+      await tester.tap(
+        find.byKey(const ValueKey('new-session-thinking-selector')),
+      );
+      await _pumpFrames(tester);
+      expect(find.text('Choose thinking level'), findsOneWidget);
+      expect(find.text('Medium'), findsWidgets);
+      await tester.tap(find.byTooltip('Close'));
+      await _pumpFrames(tester);
+    },
+  );
+
+  testWidgets('new session can start with an image and no text', (
+    tester,
+  ) async {
+    final semanticsHandle = tester.ensureSemantics();
+    final imageService = _FakeImageAttachmentService();
+    final api = _CapabilityFakeApi(
+      _nodeForCapabilities(_fullCapabilities),
+      models: const [_fakeModel],
+    );
+    addTearDown(api.dispose);
+    final host = _host('draft-image-only');
+    Future<SessionSummary?>? launch;
+
+    await _pumpApp(
+      tester,
+      Builder(
+        builder: (context) => FilledButton(
+          onPressed: () {
+            launch = Navigator.of(context).push<SessionSummary>(
+              MaterialPageRoute<SessionSummary>(
+                builder: (_) => CreateSessionSheet(
+                  host: host,
+                  api: api,
+                  initialCwd: '/repo',
+                  presentation: CreateSessionPresentation.page,
+                  imageAttachmentService: imageService,
+                ),
+              ),
+            );
+          },
+          child: const Text('New image session'),
+        ),
+      ),
+      size: const Size(390, 840),
+    );
+
+    await tester.tap(find.text('New image session'));
+    await _pumpFrames(tester);
+    final attachButton = find.byKey(
+      const ValueKey('new-session-attach-images'),
+    );
+    expect(attachButton, findsOneWidget);
+    expect(
+      find.semantics.byLabel('Attach images'),
+      isSemantics(
+        label: 'Attach images',
+        isButton: true,
+        hasEnabledState: true,
+        isEnabled: true,
+        hasTapAction: true,
+      ),
+    );
+
+    await tester.tap(attachButton);
+    await _pumpFrames(tester);
+
+    expect(imageService.pickCount, 1);
+    expect(
+      find.byKey(const ValueKey('composer-context-shelf')),
+      findsOneWidget,
+    );
+    expect(find.text('reference-image.png'), findsOneWidget);
+    final sendButton = find.byKey(const ValueKey('create-session-send-button'));
+    final sendTapTarget = find.descendant(
+      of: sendButton,
+      matching: find.byType(InkWell),
+    );
+    expect(tester.widget<InkWell>(sendTapTarget).onTap, isNotNull);
+
+    await tester.tap(sendButton);
+    await tester.pumpAndSettle();
+
+    expect(api.lastCreateRequest, isNotNull);
+    expect(api.lastCreateRequest!.prompt, isEmpty);
+    expect(api.lastCreateRequest!.input, hasLength(1));
+    expect(api.lastCreateRequest!.input!.single.type, 'image');
+    expect(
+      api.lastCreateRequest!.input!.single.url,
+      startsWith('data:image/png;base64,'),
+    );
+    final seeded = SessionMessageSeedStore.instance.take(
+      host,
+      'created-session',
+    );
+    expect(seeded, hasLength(1));
+    expect(seeded.single.text, isEmpty);
+    expect(seeded.single.attachments, hasLength(1));
+    expect(seeded.single.attachments.single.type, 'image');
+    expect(await launch, isNotNull);
+    semanticsHandle.dispose();
+  });
+
+  testWidgets(
+    'composer keeps long model and thinking controls side by side with context',
+    (tester) async {
+      final controller = TextEditingController(
+        text: List<String>.filled(
+          6,
+          'A long draft that fills the composer without moving its controls.',
+        ).join('\n'),
+      );
+      final focusNode = FocusNode();
+      addTearDown(controller.dispose);
+      addTearDown(focusNode.dispose);
+
+      await _pumpApp(
+        tester,
+        MediaQuery(
+          data: const MediaQueryData(textScaler: TextScaler.linear(1.35)),
+          child: AppComposer(
+            controller: controller,
+            focusNode: focusNode,
+            sending: false,
+            onSend: () {},
+            leading: AppComposerAddButton(enabled: true, onPressed: () {}),
+            controls: [
+              AppComposerControl(
+                key: const ValueKey('stress-model-control'),
+                icon: Icons.memory_rounded,
+                label: 'Extremely long frontier model display name',
+                tooltip: 'Choose model',
+                onPressed: () {},
+              ),
+              AppComposerControl(
+                key: const ValueKey('stress-thinking-control'),
+                icon: Icons.psychology_alt_rounded,
+                label: 'Extraordinarily deep thinking level',
+                tooltip: 'Choose thinking level',
+                onPressed: () {},
+              ),
+            ],
+            header: AppComposerContextShelf(
+              items: List<AppComposerContextItem>.generate(
+                4,
+                (index) => AppComposerContextItem(
+                  id: 'stress-$index',
+                  icon: const Icon(Icons.image_rounded, size: 16),
+                  label: 'long-reference-image-name-$index.png',
+                  onRemove: () {},
+                ),
+              ),
+            ),
+          ),
+        ),
+        size: const Size(320, 700),
+      );
+      await _pumpFrames(tester);
+
+      final model = find.byKey(const ValueKey('stress-model-control'));
+      final thinking = find.byKey(const ValueKey('stress-thinking-control'));
+      expect(model, findsOneWidget);
+      expect(thinking, findsOneWidget);
+      final modelRect = tester.getRect(model);
+      final thinkingRect = tester.getRect(thinking);
+      expect(modelRect.center.dy, closeTo(thinkingRect.center.dy, 0.1));
+      expect(modelRect.right, lessThanOrEqualTo(thinkingRect.left));
+      final modelContainer = tester.widget<Container>(
+        find.descendant(of: model, matching: find.byType(Container)),
+      );
+      final thinkingContainer = tester.widget<Container>(
+        find.descendant(of: thinking, matching: find.byType(Container)),
+      );
+      expect(
+        (modelContainer.decoration! as BoxDecoration).color,
+        (thinkingContainer.decoration! as BoxDecoration).color,
+      );
+      expect(tester.takeException(), isNull);
+    },
+  );
 
   testWidgets('new session confirms before discarding an unsent message', (
     tester,
@@ -1165,6 +1729,45 @@ void main() {
 
     expect(await launch, isNull);
     expect(find.text('What should the agent work on?'), findsNothing);
+  });
+
+  testWidgets('new session opens the model sheet before a folder is chosen', (
+    tester,
+  ) async {
+    final api = _CapabilityFakeApi(
+      _nodeForCapabilities(_fullCapabilities),
+      models: const [_fakeModel],
+    );
+    addTearDown(api.dispose);
+
+    await _pumpApp(
+      tester,
+      Builder(
+        builder: (context) => FilledButton(
+          onPressed: () => showCreateSessionLauncher(
+            context,
+            host: _host('model-before-folder'),
+            api: api,
+          ),
+          child: const Text('New session'),
+        ),
+      ),
+      size: const Size(430, 900),
+    );
+
+    await tester.tap(find.text('New session'));
+    await _pumpFrames(tester);
+    await tester.tap(find.byKey(const ValueKey('new-session-settings-button')));
+    await _pumpFrames(tester);
+    await tester.ensureVisible(
+      find.byKey(const ValueKey('new-session-model-selector')),
+    );
+    await tester.tap(find.byKey(const ValueKey('new-session-model-selector')));
+    await _pumpFrames(tester);
+
+    expect(find.text('Choose a model'), findsOneWidget);
+    expect(find.text('Fake Balanced'), findsOneWidget);
+    expect(find.byType(BottomSheet), findsOneWidget);
   });
 
   testWidgets('host detail exposes provider contract metadata', (tester) async {
@@ -1435,6 +2038,27 @@ const Map<String, Object?> _fullCapabilities = {
   },
 };
 
+final Map<String, Object?> _nativePermissionCapabilities = {
+  ..._fullCapabilities,
+  'configuration': {
+    'models': true,
+    'profiles': true,
+    'skills': true,
+    'accessModes': true,
+  },
+  'runtimeControls': {
+    'model': true,
+    'mode': true,
+    'reasoningEffort': true,
+    'fastMode': true,
+    'approvalPolicy': true,
+    'sandboxMode': true,
+    'networkAccess': true,
+    'webSearch': true,
+    'accessMode': true,
+  },
+};
+
 const Map<String, Object?> _minimalCapabilities = {
   'sessions': {
     'create': true,
@@ -1554,10 +2178,49 @@ const _codexProfile = ProviderProfileSummary(
   webSearch: 'live',
 );
 
+class _FakeImageAttachmentService implements ComposerImageAttachmentService {
+  int pickCount = 0;
+
+  ComposerImageAttachment get _attachment {
+    const encoded =
+        'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=';
+    return ComposerImageAttachment(
+      id: 'fake-image',
+      name: 'reference-image.png',
+      mimeType: 'image/png',
+      bytes: base64Decode(encoded),
+      dataUrl: 'data:image/png;base64,$encoded',
+    );
+  }
+
+  @override
+  Future<ComposerImageAttachmentUpdate?> pickImages({
+    required List<ComposerImageAttachment> current,
+  }) async {
+    pickCount += 1;
+    return ComposerImageAttachmentUpdate(
+      attachments: <ComposerImageAttachment>[...current, _attachment],
+      added: true,
+    );
+  }
+
+  @override
+  Future<ComposerImageAttachmentUpdate> pasteImage({
+    required List<ComposerImageAttachment> current,
+    bool reportEmpty = true,
+  }) async {
+    return ComposerImageAttachmentUpdate(
+      attachments: <ComposerImageAttachment>[...current, _attachment],
+      added: true,
+    );
+  }
+}
+
 class _CapturedCreateSessionRequest {
   const _CapturedCreateSessionRequest({
     required this.cwd,
     required this.prompt,
+    required this.input,
     required this.provider,
     required this.model,
     required this.mode,
@@ -1568,10 +2231,12 @@ class _CapturedCreateSessionRequest {
     required this.networkAccess,
     required this.webSearch,
     required this.profile,
+    required this.accessMode,
   });
 
   final String cwd;
   final String prompt;
+  final List<SessionInputItem>? input;
   final String? provider;
   final String? model;
   final String? mode;
@@ -1582,6 +2247,7 @@ class _CapturedCreateSessionRequest {
   final bool? networkAccess;
   final String? webSearch;
   final String? profile;
+  final String? accessMode;
 }
 
 class _CapabilityFakeApi extends ApiClient {
@@ -1590,12 +2256,14 @@ class _CapabilityFakeApi extends ApiClient {
     this.models = const <ModelCatalogEntry>[],
     this.modes = const <ProviderModeSummary>[],
     this.profiles = const <ProviderProfileSummary>[],
+    this.accessModeCatalog,
   });
 
   final NodeInfo node;
   final List<ModelCatalogEntry> models;
   final List<ProviderModeSummary> modes;
   final List<ProviderProfileSummary> profiles;
+  final ProviderAccessModeCatalog? accessModeCatalog;
   final _IdleWebSocketChannel _channel = _IdleWebSocketChannel();
   _CapturedCreateSessionRequest? lastCreateRequest;
 
@@ -1635,6 +2303,15 @@ class _CapabilityFakeApi extends ApiClient {
   }) async => ProviderModeCatalog(defaultMode: null, modes: modes);
 
   @override
+  Future<ProviderAccessModeCatalog> fetchAccessModes(
+    HostProfile host, {
+    String? cwd,
+    String? agentProvider,
+  }) async =>
+      accessModeCatalog ??
+      const ProviderAccessModeCatalog(strategy: 'modes', modes: []);
+
+  @override
   Future<SessionSummary> createSession(
     HostProfile host, {
     required String cwd,
@@ -1648,12 +2325,14 @@ class _CapabilityFakeApi extends ApiClient {
     String? approvalPolicy,
     String? sandboxMode,
     bool? networkAccess,
+    String? accessMode,
     String? webSearch,
     String? profile,
   }) async {
     lastCreateRequest = _CapturedCreateSessionRequest(
       cwd: cwd,
       prompt: prompt,
+      input: input,
       provider: provider,
       model: model,
       mode: mode,
@@ -1664,6 +2343,7 @@ class _CapabilityFakeApi extends ApiClient {
       networkAccess: networkAccess,
       webSearch: webSearch,
       profile: profile,
+      accessMode: accessMode,
     );
     return _session('created-session');
   }

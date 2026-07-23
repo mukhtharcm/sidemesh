@@ -26,6 +26,7 @@ import type { ContentfulStatusCode } from "hono/utils/http-status";
 import { WebSocketServer, type WebSocket } from "ws";
 
 import {
+  AgentProviderRequestError,
   hasProviderMethod,
   materializeAgentActivityDraft,
   requireProviderMethod,
@@ -2677,6 +2678,60 @@ export async function startServer(
     }),
   );
 
+  app.get(
+    "/api/access-modes",
+    asyncRoute(async (request, response) => {
+      const query = request.query as Record<string, unknown>;
+      const agentProvider = asString(query.agentProvider) || null;
+      const selectedProvider = providerEntryForKind(agentProvider);
+      if (!selectedProvider) {
+        response.status(400).json({ error: "unknown provider" });
+        return;
+      }
+      if (
+        !requireProviderCapability(
+          response,
+          selectedProvider.provider,
+          selectedProvider.provider.capabilities.configuration.accessModes,
+          "access mode listing",
+          "listAccessModes",
+        )
+      ) {
+        return;
+      }
+      const cwd = asString(query.cwd) || null;
+      response.json(await selectedProvider.provider.listAccessModes!({ cwd }));
+    }),
+  );
+
+  app.get(
+    "/api/permission-profiles",
+    asyncRoute(async (request, response) => {
+      const query = request.query as Record<string, unknown>;
+      const agentProvider = asString(query.agentProvider) || null;
+      const selectedProvider = providerEntryForKind(agentProvider);
+      if (!selectedProvider) {
+        response.status(400).json({ error: "unknown provider" });
+        return;
+      }
+      if (
+        !requireProviderCapability(
+          response,
+          selectedProvider.provider,
+          selectedProvider.provider.capabilities.configuration.permissionProfiles,
+          "permission profile listing",
+          "listPermissionProfiles",
+        )
+      ) {
+        return;
+      }
+      const cwd = asString(query.cwd) || null;
+      response.json(
+        await selectedProvider.provider.listPermissionProfiles!({ cwd }),
+      );
+    }),
+  );
+
   app.post(
     "/api/sessions/create",
     asyncRoute(async (request, response) => {
@@ -2833,7 +2888,30 @@ export async function startServer(
         pruneSessionInputDedupe();
         existingDedupe = sessionInputDedupe.get(dedupeKey);
         if (existingDedupe?.rawSignatureHash) {
-          if (existingDedupe.rawSignatureHash !== rawInputSignatureHash) {
+          const canMatchPreAccessModeSignature = !turnOverrides.accessMode;
+          const canMatchPrePermissionProfileSignature =
+            canMatchPreAccessModeSignature &&
+            !turnOverrides.permissionProfile &&
+            !turnOverrides.approvalsReviewer;
+          const matchesPreAccessModeSignature =
+            canMatchPreAccessModeSignature &&
+            existingDedupe.rawSignatureHash ===
+              hashPreAccessModeSessionInputSignature(
+                resolvedInput,
+                turnOverrides,
+              );
+          const matchesPrePermissionProfileSignature =
+            canMatchPrePermissionProfileSignature &&
+            existingDedupe.rawSignatureHash ===
+              hashPrePermissionProfileSessionInputSignature(
+                resolvedInput,
+                turnOverrides,
+              );
+          if (
+            existingDedupe.rawSignatureHash !== rawInputSignatureHash &&
+            !matchesPreAccessModeSignature &&
+            !matchesPrePermissionProfileSignature
+          ) {
             response.status(409).json({
               error: "clientMessageId was already used with different input",
             });
@@ -2867,11 +2945,33 @@ export async function startServer(
       };
 
       if (dedupeKey && existingDedupe && !existingDedupe.rawSignatureHash) {
+        const canMatchPreAccessModeSignature = !turnOverrides.accessMode;
+        const canMatchPrePermissionProfileSignature =
+          canMatchPreAccessModeSignature &&
+          !turnOverrides.permissionProfile &&
+          !turnOverrides.approvalsReviewer;
         const legacySignatureHash = hashLegacySessionInputSignature(
           resolvedInput,
           turnOverrides,
         );
-        if (existingDedupe.signatureHash === legacySignatureHash) {
+        const prePermissionProfileLegacySignatureHash =
+          hashPrePermissionProfileSessionInputSignature(
+            resolvedInput.filter((item) => item.type !== "file"),
+            turnOverrides,
+          );
+        const preAccessModeLegacySignatureHash =
+          hashPreAccessModeSessionInputSignature(
+            resolvedInput.filter((item) => item.type !== "file"),
+            turnOverrides,
+          );
+        if (
+          existingDedupe.signatureHash === legacySignatureHash ||
+          (canMatchPrePermissionProfileSignature &&
+            existingDedupe.signatureHash ===
+              prePermissionProfileLegacySignatureHash) ||
+          (canMatchPreAccessModeSignature &&
+            existingDedupe.signatureHash === preAccessModeLegacySignatureHash)
+        ) {
           const receipt =
             existingDedupe.receipt ?? (await existingDedupe.promise);
           if (receipt) {
@@ -2880,7 +2980,21 @@ export async function startServer(
           }
         }
         await resolveScopedInput();
-        if (existingDedupe.signatureHash !== inputSignatureHash) {
+        const prePermissionProfileSignatureHash =
+          hashPrePermissionProfileSessionInputSignature(
+            scopedInput!,
+            turnOverrides,
+          );
+        const preAccessModeSignatureHash =
+          hashPreAccessModeSessionInputSignature(scopedInput!, turnOverrides);
+        if (
+          existingDedupe.signatureHash !== inputSignatureHash &&
+          (!canMatchPrePermissionProfileSignature ||
+            existingDedupe.signatureHash !==
+              prePermissionProfileSignatureHash) &&
+          (!canMatchPreAccessModeSignature ||
+            existingDedupe.signatureHash !== preAccessModeSignatureHash)
+        ) {
           response.status(409).json({
             error: "clientMessageId was already used with different input",
           });
@@ -3405,6 +3519,7 @@ export async function startServer(
       return c.json({ error: message }, error.status as ContentfulStatusCode);
     }
     if (
+      error instanceof AgentProviderRequestError ||
       error instanceof TerminalError ||
       error instanceof WorkspaceAccessError ||
       error instanceof BrowserPreviewError
@@ -3825,6 +3940,21 @@ function unsupportedOverrideCapability(
   }
   if (overrides.webSearch && !provider.capabilities.runtimeControls.webSearch) {
     return `${provider.displayName} does not support web search overrides`;
+  }
+  if (overrides.accessMode && !provider.capabilities.runtimeControls.accessMode) {
+    return `${provider.displayName} does not support access mode overrides`;
+  }
+  if (
+    overrides.permissionProfile &&
+    !provider.capabilities.runtimeControls.permissionProfile
+  ) {
+    return `${provider.displayName} does not support permission profile overrides`;
+  }
+  if (
+    overrides.approvalsReviewer &&
+    !provider.capabilities.runtimeControls.approvalsReviewer
+  ) {
+    return `${provider.displayName} does not support approval reviewer overrides`;
   }
   if (overrides.profile && !provider.capabilities.configuration.profiles) {
     return `${provider.displayName} does not support profile overrides`;
@@ -4879,6 +5009,50 @@ function hashLegacySessionInputSignature(
   );
 }
 
+function hashPrePermissionProfileSessionInputSignature(
+  input: AgentSessionInputItem[],
+  overrides: AgentSessionOverrides,
+): string {
+  return createHash("sha256")
+    .update(
+      JSON.stringify({
+        input,
+        overrides: {
+          model: overrides.model,
+          reasoningEffort: overrides.reasoningEffort,
+          fastMode: overrides.fastMode,
+          approvalPolicy: overrides.approvalPolicy,
+          sandboxMode: overrides.sandboxMode,
+          networkAccess: overrides.networkAccess,
+        },
+      }),
+    )
+    .digest("hex");
+}
+
+function hashPreAccessModeSessionInputSignature(
+  input: AgentSessionInputItem[],
+  overrides: AgentSessionOverrides,
+): string {
+  return createHash("sha256")
+    .update(
+      JSON.stringify({
+        input,
+        overrides: {
+          model: overrides.model,
+          reasoningEffort: overrides.reasoningEffort,
+          fastMode: overrides.fastMode,
+          approvalPolicy: overrides.approvalPolicy,
+          sandboxMode: overrides.sandboxMode,
+          networkAccess: overrides.networkAccess,
+          permissionProfile: overrides.permissionProfile,
+          approvalsReviewer: overrides.approvalsReviewer,
+        },
+      }),
+    )
+    .digest("hex");
+}
+
 function buildTurnInputSignatureOverrides(
   overrides: AgentSessionOverrides,
 ): Record<string, unknown> {
@@ -4889,6 +5063,9 @@ function buildTurnInputSignatureOverrides(
     approvalPolicy: overrides.approvalPolicy,
     sandboxMode: overrides.sandboxMode,
     networkAccess: overrides.networkAccess,
+    accessMode: overrides.accessMode,
+    permissionProfile: overrides.permissionProfile,
+    approvalsReviewer: overrides.approvalsReviewer,
   };
 }
 
@@ -5667,6 +5844,9 @@ function parseCreateSessionOverrides(value: unknown): AgentSessionOverrides {
     networkAccess: parseOptionalBool(typed.networkAccess),
     webSearch: asString(typed.webSearch),
     profile: asString(typed.profile),
+    accessMode: asString(typed.accessMode),
+    permissionProfile: asString(typed.permissionProfile),
+    approvalsReviewer: asString(typed.approvalsReviewer),
   };
 }
 
@@ -5685,6 +5865,9 @@ function parseTurnOverrides(value: unknown): AgentSessionOverrides {
     networkAccess: parseOptionalBool(typed.networkAccess),
     webSearch: null,
     profile: null,
+    accessMode: asString(typed.accessMode),
+    permissionProfile: asString(typed.permissionProfile),
+    approvalsReviewer: asString(typed.approvalsReviewer),
   };
 }
 

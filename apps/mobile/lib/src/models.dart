@@ -922,6 +922,7 @@ class SessionRuntimeSummary {
     this.approvalPolicy,
     this.sandboxMode,
     this.networkAccess,
+    this.accessMode,
     this.summaryMode,
     this.personality,
     this.telemetry,
@@ -936,6 +937,7 @@ class SessionRuntimeSummary {
   final String? approvalPolicy;
   final String? sandboxMode;
   final bool? networkAccess;
+  final String? accessMode;
   final String? summaryMode;
   final String? personality;
   final SessionTelemetrySummary? telemetry;
@@ -950,6 +952,7 @@ class SessionRuntimeSummary {
     String? approvalPolicy,
     String? sandboxMode,
     bool? networkAccess,
+    String? accessMode,
     String? summaryMode,
     String? personality,
     SessionTelemetrySummary? telemetry,
@@ -964,6 +967,7 @@ class SessionRuntimeSummary {
     approvalPolicy: approvalPolicy ?? this.approvalPolicy,
     sandboxMode: sandboxMode ?? this.sandboxMode,
     networkAccess: networkAccess ?? this.networkAccess,
+    accessMode: accessMode ?? this.accessMode,
     summaryMode: summaryMode ?? this.summaryMode,
     personality: personality ?? this.personality,
     telemetry: clearTelemetry ? null : (telemetry ?? this.telemetry),
@@ -980,6 +984,7 @@ class SessionRuntimeSummary {
         approvalPolicy: json['approvalPolicy'] as String?,
         sandboxMode: json['sandboxMode'] as String?,
         networkAccess: json['networkAccess'] as bool?,
+        accessMode: json['accessMode'] as String?,
         summaryMode: json['summaryMode'] as String?,
         personality: json['personality'] as String?,
         telemetry: json['telemetry'] is Map<String, dynamic>
@@ -1001,6 +1006,7 @@ class SessionRuntimeSummary {
     'approvalPolicy': approvalPolicy,
     'sandboxMode': sandboxMode,
     'networkAccess': networkAccess,
+    'accessMode': accessMode,
     'summaryMode': summaryMode,
     'personality': personality,
     'telemetry': telemetry?.toJson(),
@@ -1681,6 +1687,90 @@ class ProviderProfileCatalog {
             .whereType<Map<String, dynamic>>()
             .map(ProviderProfileSummary.fromJson)
             .toList(),
+      );
+}
+
+class ProviderAccessModeCatalog {
+  const ProviderAccessModeCatalog({
+    required this.strategy,
+    required this.modes,
+    this.defaultMode,
+  });
+
+  final String strategy;
+  final List<ProviderAccessModeSummary> modes;
+  final String? defaultMode;
+
+  factory ProviderAccessModeCatalog.fromJson(Map<String, dynamic> json) =>
+      ProviderAccessModeCatalog(
+        strategy: _stringValue(json['strategy']),
+        modes: (json['modes'] as List<dynamic>? ?? const [])
+            .whereType<Map<String, dynamic>>()
+            .map(ProviderAccessModeSummary.fromJson)
+            .toList(growable: false),
+        defaultMode: _stringOrNull(json['defaultMode']),
+      );
+}
+
+class ProviderAccessModeSummary {
+  const ProviderAccessModeSummary({
+    required this.id,
+    required this.label,
+    required this.description,
+    required this.icon,
+    required this.tone,
+    required this.enabled,
+    this.disabledReason,
+    this.confirmation,
+  });
+
+  final String id;
+  final String label;
+  final String description;
+  final String icon;
+  final String tone;
+  final bool enabled;
+  final String? disabledReason;
+  final ProviderAccessModeConfirmation? confirmation;
+
+  bool get isDangerous => tone == 'danger';
+
+  factory ProviderAccessModeSummary.fromJson(Map<String, dynamic> json) =>
+      ProviderAccessModeSummary(
+        id: _stringValue(json['id']),
+        label: _stringValue(json['label']),
+        description: _stringValue(json['description']),
+        icon: _stringValue(json['icon']),
+        tone: _stringValue(json['tone']),
+        enabled: json['enabled'] == true,
+        disabledReason: _stringOrNull(json['disabledReason']),
+        confirmation: json['confirmation'] is Map<String, dynamic>
+            ? ProviderAccessModeConfirmation.fromJson(
+                json['confirmation'] as Map<String, dynamic>,
+              )
+            : null,
+      );
+}
+
+class ProviderAccessModeConfirmation {
+  const ProviderAccessModeConfirmation({
+    required this.title,
+    required this.description,
+    required this.confirmLabel,
+    required this.danger,
+  });
+
+  final String title;
+  final String description;
+  final String confirmLabel;
+  final bool danger;
+
+  factory ProviderAccessModeConfirmation.fromJson(Map<String, dynamic> json) =>
+      ProviderAccessModeConfirmation(
+        title: _stringValue(json['title']),
+        description: _stringValue(json['description']),
+        confirmLabel: _stringValue(json['confirmLabel']),
+        danger: json['danger'] == true,
       );
 }
 
@@ -2598,6 +2688,7 @@ class PendingActionApprovalDetails {
     this.detail,
     this.cwd,
     this.suggestedScope,
+    this.providerOptions = const <PendingActionProviderOption>[],
   });
 
   final String category;
@@ -2608,6 +2699,7 @@ class PendingActionApprovalDetails {
   final List<String> supportedScopes;
   final String? suggestedScope;
   final List<Map<String, dynamic>> targets;
+  final List<PendingActionProviderOption> providerOptions;
 
   factory PendingActionApprovalDetails.fromJson(Map<String, dynamic> json) =>
       PendingActionApprovalDetails(
@@ -2624,6 +2716,15 @@ class PendingActionApprovalDetails {
             .whereType<Map<dynamic, dynamic>>()
             .map((item) => item.cast<String, dynamic>())
             .toList(growable: false),
+        providerOptions: (json['providerOptions'] as List<dynamic>? ?? const [])
+            .whereType<Map<dynamic, dynamic>>()
+            .map(
+              (item) => PendingActionProviderOption.fromJson(
+                item.cast<String, dynamic>(),
+              ),
+            )
+            .where((option) => option.id.isNotEmpty)
+            .toList(growable: false),
       );
 
   Map<String, dynamic> toJson() => {
@@ -2635,6 +2736,41 @@ class PendingActionApprovalDetails {
     'supportedScopes': supportedScopes,
     'suggestedScope': suggestedScope,
     'targets': targets,
+    'providerOptions': providerOptions
+        .map((option) => option.toJson())
+        .toList(),
+  };
+}
+
+class PendingActionProviderOption {
+  const PendingActionProviderOption({
+    required this.id,
+    required this.label,
+    required this.kind,
+    this.description,
+  });
+
+  final String id;
+  final String label;
+  final String kind;
+  final String? description;
+
+  bool get allows => kind == 'allow_once' || kind == 'allow_always';
+  bool get rejects => kind == 'reject_once' || kind == 'reject_always';
+
+  factory PendingActionProviderOption.fromJson(Map<String, dynamic> json) =>
+      PendingActionProviderOption(
+        id: _stringValue(json['id']),
+        label: _stringValue(json['label']),
+        kind: _stringValue(json['kind']),
+        description: _stringOrNull(json['description']),
+      );
+
+  Map<String, dynamic> toJson() => {
+    'id': id,
+    'label': label,
+    'kind': kind,
+    'description': description,
   };
 }
 
@@ -2811,6 +2947,9 @@ class PendingActionResponseDraft {
 
   factory PendingActionResponseDraft.approval(String decision) =>
       PendingActionResponseDraft._({'decision': decision});
+
+  factory PendingActionResponseDraft.providerOption(String optionId) =>
+      PendingActionResponseDraft._({'providerOptionId': optionId});
 
   factory PendingActionResponseDraft.userInput({
     required String answer,

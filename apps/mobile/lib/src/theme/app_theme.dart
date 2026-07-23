@@ -86,11 +86,65 @@ ThemeData _buildTheme(
     scaffoldBackgroundColor: palette.canvas,
   );
 
-  final textTheme = base.textTheme.apply(
-    fontFamily: typography.interfaceFont.fontFamily,
-    bodyColor: palette.textPrimary,
-    displayColor: palette.textPrimary,
-  );
+  final fontFamily = typography.interfaceFont.fontFamily;
+  final textTheme = base.textTheme
+      .copyWith(
+        headlineSmall: base.textTheme.headlineSmall?.copyWith(
+          fontSize: 24,
+          height: 1.2,
+          fontWeight: AppWeights.strong,
+        ),
+        titleLarge: base.textTheme.titleLarge?.copyWith(
+          fontSize: 20,
+          height: 1.25,
+          fontWeight: AppWeights.strong,
+        ),
+        titleMedium: base.textTheme.titleMedium?.copyWith(
+          fontSize: 16,
+          height: 1.3,
+          fontWeight: AppWeights.title,
+        ),
+        titleSmall: base.textTheme.titleSmall?.copyWith(
+          fontSize: 14,
+          height: 1.3,
+          fontWeight: AppWeights.title,
+        ),
+        bodyLarge: base.textTheme.bodyLarge?.copyWith(
+          fontSize: 16,
+          height: 1.45,
+          fontWeight: AppWeights.body,
+        ),
+        bodyMedium: base.textTheme.bodyMedium?.copyWith(
+          fontSize: 14,
+          height: 1.4,
+          fontWeight: AppWeights.body,
+        ),
+        bodySmall: base.textTheme.bodySmall?.copyWith(
+          fontSize: 12,
+          height: 1.35,
+          fontWeight: AppWeights.body,
+        ),
+        labelLarge: base.textTheme.labelLarge?.copyWith(
+          fontSize: 14,
+          height: 1.2,
+          fontWeight: AppWeights.title,
+        ),
+        labelMedium: base.textTheme.labelMedium?.copyWith(
+          fontSize: 12,
+          height: 1.2,
+          fontWeight: AppWeights.emphasis,
+        ),
+        labelSmall: base.textTheme.labelSmall?.copyWith(
+          fontSize: 11,
+          height: 1.2,
+          fontWeight: AppWeights.emphasis,
+        ),
+      )
+      .apply(
+        fontFamily: fontFamily,
+        bodyColor: palette.textPrimary,
+        displayColor: palette.textPrimary,
+      );
 
   return base.copyWith(
     textTheme: textTheme,
@@ -112,7 +166,7 @@ ThemeData _buildTheme(
       scrolledUnderElevation: 0,
       centerTitle: false,
       titleTextStyle: textTheme.titleLarge?.copyWith(
-        fontWeight: AppWeights.title,
+        fontWeight: AppWeights.strong,
         letterSpacing: AppLetterSpacing.headline,
       ),
     ),
@@ -177,6 +231,41 @@ ThemeData _buildTheme(
         padding: WidgetStateProperty.all(const EdgeInsets.all(4)),
       ),
     ),
+    menuButtonTheme: MenuButtonThemeData(
+      style: ButtonStyle(
+        foregroundColor: WidgetStateProperty.resolveWith((states) {
+          return states.contains(WidgetState.disabled)
+              ? disabledControlForeground
+              : palette.textPrimary;
+        }),
+        iconColor: WidgetStateProperty.resolveWith((states) {
+          return states.contains(WidgetState.disabled)
+              ? disabledControlForeground
+              : palette.textSecondary;
+        }),
+        overlayColor: WidgetStateProperty.resolveWith((states) {
+          if (states.contains(WidgetState.hovered) ||
+              states.contains(WidgetState.focused) ||
+              states.contains(WidgetState.pressed)) {
+            return palette.surfaceMuted;
+          }
+          return Colors.transparent;
+        }),
+        textStyle: WidgetStatePropertyAll(
+          textTheme.bodyMedium?.copyWith(fontWeight: AppWeights.emphasis),
+        ),
+        minimumSize: const WidgetStatePropertyAll(
+          Size(0, AppSizes.menuItem),
+        ),
+        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+        padding: const WidgetStatePropertyAll(
+          EdgeInsets.symmetric(horizontal: AppSpacing.md),
+        ),
+        shape: WidgetStatePropertyAll(
+          RoundedRectangleBorder(borderRadius: AppShapes.input),
+        ),
+      ),
+    ),
     navigationBarTheme: NavigationBarThemeData(
       backgroundColor: palette.surface,
       surfaceTintColor: Colors.transparent,
@@ -207,7 +296,8 @@ ThemeData _buildTheme(
         disabledForegroundColor: disabledControlForeground,
         shape: RoundedRectangleBorder(borderRadius: AppShapes.input),
         textStyle: textTheme.labelLarge?.copyWith(fontWeight: AppWeights.title),
-        padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
+        minimumSize: const Size(0, AppSizes.control),
+        padding: const EdgeInsets.symmetric(horizontal: AppSpacing.lg),
       ),
     ),
     outlinedButtonTheme: OutlinedButtonThemeData(
@@ -215,17 +305,25 @@ ThemeData _buildTheme(
         foregroundColor: palette.textPrimary,
         side: BorderSide(color: controlBorder),
         shape: RoundedRectangleBorder(borderRadius: AppShapes.input),
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 13),
+        minimumSize: const Size(0, AppSizes.control),
+        padding: const EdgeInsets.symmetric(horizontal: AppSpacing.lg),
       ),
     ),
     textButtonTheme: TextButtonThemeData(
       style: TextButton.styleFrom(
         foregroundColor: accentOnSurface,
         textStyle: textTheme.labelLarge?.copyWith(fontWeight: AppWeights.title),
+        minimumSize: const Size(0, AppSizes.control),
+        padding: const EdgeInsets.symmetric(horizontal: AppSpacing.md),
       ),
     ),
     iconButtonTheme: IconButtonThemeData(
-      style: IconButton.styleFrom(foregroundColor: palette.textSecondary),
+      style: IconButton.styleFrom(
+        foregroundColor: palette.textSecondary,
+        minimumSize: const Size.square(AppSizes.control),
+        maximumSize: const Size.square(AppSizes.control),
+        iconSize: AppSizes.icon,
+      ),
     ),
     inputDecorationTheme: InputDecorationTheme(
       filled: true,
@@ -245,7 +343,11 @@ ThemeData _buildTheme(
       ),
       labelStyle: TextStyle(color: inputLabelColor),
       hintStyle: TextStyle(color: inputHintColor),
-      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+      constraints: const BoxConstraints(minHeight: AppSizes.control),
+      contentPadding: const EdgeInsets.symmetric(
+        horizontal: AppSpacing.lg,
+        vertical: AppSpacing.md,
+      ),
     ),
     dividerTheme: DividerThemeData(color: palette.border, space: 1),
     floatingActionButtonTheme: FloatingActionButtonThemeData(

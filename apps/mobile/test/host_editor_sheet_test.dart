@@ -7,20 +7,24 @@ import 'package:sidemesh_mobile/src/theme/app_palettes.dart';
 import 'package:sidemesh_mobile/src/theme/app_theme.dart';
 
 void main() {
-  testWidgets('host editor groups setup into clear sections on mobile', (
+  testWidgets('host editor presents one focused setup page on mobile', (
     tester,
   ) async {
     try {
       await _pumpHostEditor(tester);
 
       expect(find.text('Add host'), findsOneWidget);
-      expect(find.text('Pairing'), findsOneWidget);
-      expect(find.text('About this machine'), findsOneWidget);
-      expect(find.text('Connection'), findsOneWidget);
-      expect(find.text('Availability'), findsOneWidget);
-      expect(find.text('Scan code'), findsOneWidget);
+      expect(find.text('Pairing'), findsNothing);
+      expect(find.text('About this machine'), findsNothing);
+      expect(find.text('Connection'), findsNothing);
+      expect(find.text('Availability'), findsNothing);
+      expect(find.text('Scan'), findsOneWidget);
+      expect(find.text('Name'), findsOneWidget);
+      expect(find.text('Address'), findsOneWidget);
+      expect(find.text('Token'), findsOneWidget);
       expect(find.text('Check connection'), findsOneWidget);
       expect(find.text('Save host'), findsOneWidget);
+      expect(find.byType(Switch), findsOneWidget);
       expect(tester.takeException(), isNull);
     } finally {
       _resetHostEditorTestView(tester);
@@ -61,7 +65,6 @@ void main() {
       );
 
       expect(find.text('Edit host'), findsOneWidget);
-      expect(find.text('Availability'), findsOneWidget);
       expect(find.text('Save changes'), findsOneWidget);
       expect(find.byTooltip('Show token'), findsOneWidget);
 
@@ -89,7 +92,7 @@ Future<void> _pumpHostEditor(
   await tester.pumpWidget(
     MaterialApp(
       theme: buildLightTheme(ThemeVariant.codexAmber.light),
-      home: Scaffold(body: HostEditorSheet(initialHost: initialHost)),
+      home: HostEditorSheet(initialHost: initialHost, fullPage: true),
     ),
   );
   await tester.pumpAndSettle();

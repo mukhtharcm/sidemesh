@@ -69,8 +69,36 @@ Configuration:
 
 - `listModels`
 - `listProfiles`
+- `listAccessModes`
+- `listPermissionProfiles` (legacy compatibility)
 - `listSkills`
 - `writeSkillConfig`
+
+Access modes are provider-owned execution policies, not aliases for the
+daemon's workspace filesystem boundary. A provider that advertises
+`configuration.accessModes` returns display-ready choices with opaque IDs,
+labels, descriptions, semantic icon and tone hints, availability, optional
+confirmation copy, and a current default. It must also advertise
+`runtimeControls.accessMode` before accepting the selected ID on create or
+submit.
+
+Shared clients must not reconstruct provider semantics from an access-mode ID
+or receive the native permission tuple behind it. The selected adapter validates
+and translates the opaque ID immediately before calling its provider. Provider
+configuration, managed restrictions, and dangerous choices therefore remain
+truthful without teaching the Flutter app about one provider's wire protocol.
+
+`listPermissionProfiles`, `runtimeControls.permissionProfile`, and
+`runtimeControls.approvalsReviewer` remain temporarily for compatibility with
+older Sidemesh clients. New provider-neutral UI should use access modes and keep
+host filesystem scope separate from provider execution access.
+
+Approval requests may include provider-defined response options. Adapters must
+preserve the provider's option IDs and labels, map each option to one of the
+portable `allow_once`, `allow_always`, `reject_once`, or `reject_always` kinds,
+and route the selected ID back to the provider unchanged. Generic approval
+scopes remain a compatibility fallback for providers that do not expose native
+options.
 
 Model summaries should describe UI behavior without requiring the Flutter app
 to inspect provider-specific model names:
