@@ -19,6 +19,7 @@ import 'package:sidemesh_mobile/src/session_policy_store.dart';
 import 'package:sidemesh_mobile/src/session_turn_config_store.dart';
 import 'package:sidemesh_mobile/src/theme/app_palettes.dart';
 import 'package:sidemesh_mobile/src/theme/app_theme.dart';
+import 'package:sidemesh_mobile/src/widgets/app_composer.dart';
 import 'package:stream_channel/stream_channel.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
 
@@ -263,12 +264,20 @@ void main() {
     expect(modelButton, findsOneWidget);
     expect(tester.getSize(modelButton).height, greaterThanOrEqualTo(44));
 
-    final visibleChip = find.descendant(
-      of: modelButton,
-      matching: find.byType(AnimatedContainer),
+    final thinkingTooltip = find.byWidgetPredicate(
+      (widget) =>
+          widget is Tooltip &&
+          widget.message?.startsWith('Choose thinking level') == true,
     );
-    expect(visibleChip, findsOneWidget);
-    expect(tester.getSize(visibleChip).height, lessThanOrEqualTo(40));
+    final thinkingButton = find.descendant(
+      of: thinkingTooltip,
+      matching: find.byType(InkWell),
+    );
+    expect(thinkingButton, findsOneWidget);
+    expect(
+      tester.getCenter(modelButton).dy,
+      closeTo(tester.getCenter(thinkingButton).dy, 0.1),
+    );
 
     await tester.tap(modelButton);
     await _pumpFrames(tester);
@@ -1369,9 +1378,14 @@ void main() {
       find.byKey(const ValueKey('create-session-send-button')),
       findsOneWidget,
     );
+    expect(find.byType(AppComposer), findsOneWidget);
+    final draftModelControl = find.byKey(
+      const ValueKey('new-session-composer-model'),
+    );
+    expect(draftModelControl, findsOneWidget);
     expect(
       tester.getSize(find.byKey(const ValueKey('new-session-composer'))).height,
-      lessThanOrEqualTo(82),
+      lessThanOrEqualTo(150),
     );
     expect(
       tester
@@ -1398,6 +1412,8 @@ void main() {
     await _pumpFrames(tester);
     expect(find.text('Network access'), findsOneWidget);
     expect(find.text('Session settings'), findsOneWidget);
+    expect(find.text('Use as defaults'), findsOneWidget);
+    expect(find.text('Save as defaults'), findsNothing);
     expect(find.byKey(const ValueKey('new-session-composer')), findsNothing);
 
     await tester.tap(find.byKey(const ValueKey('new-session-model-selector')));
@@ -1419,7 +1435,11 @@ void main() {
     );
     await tester.pump();
     final sendButton = find.byKey(const ValueKey('create-session-send-button'));
-    expect(tester.widget<FilledButton>(sendButton).onPressed, isNotNull);
+    final sendTapTarget = find.descendant(
+      of: sendButton,
+      matching: find.byType(InkWell),
+    );
+    expect(tester.widget<InkWell>(sendTapTarget).onTap, isNotNull);
     await tester.ensureVisible(sendButton);
     await tester.tap(sendButton);
     await tester.pumpAndSettle();
@@ -1436,6 +1456,59 @@ void main() {
     expect(api.lastCreateRequest!.networkAccess, isTrue);
     expect(await launch, isNotNull);
   });
+
+  testWidgets(
+    'new session shares the adaptive model and thinking composer controls',
+    (tester) async {
+      final api = _CapabilityFakeApi(
+        _nodeForCapabilities(_fullCapabilities),
+        models: const [_fakeModel],
+      );
+      addTearDown(api.dispose);
+
+      await _pumpApp(
+        tester,
+        CreateSessionSheet(
+          host: _host('draft-shared-composer'),
+          api: api,
+          initialCwd: '/repo',
+          presentation: CreateSessionPresentation.page,
+        ),
+        size: const Size(390, 840),
+      );
+      await _pumpFrames(tester);
+
+      expect(find.byType(AppComposer), findsOneWidget);
+      final modelControl = find.byKey(
+        const ValueKey('new-session-composer-model'),
+      );
+      final thinkingControl = find.byKey(
+        const ValueKey('new-session-composer-thinking'),
+      );
+      expect(modelControl, findsOneWidget);
+      expect(thinkingControl, findsOneWidget);
+      expect(
+        tester.getCenter(modelControl).dy,
+        closeTo(tester.getCenter(thinkingControl).dy, 0.1),
+      );
+
+      await tester.tap(
+        find.byKey(const ValueKey('new-session-settings-button')),
+      );
+      await _pumpFrames(tester);
+      expect(find.text('Use as defaults'), findsOneWidget);
+      expect(find.text('Save as defaults'), findsNothing);
+
+      await tester.tap(
+        find.byKey(const ValueKey('new-session-thinking-selector')),
+      );
+      await _pumpFrames(tester);
+      expect(find.text('Choose thinking level'), findsOneWidget);
+      expect(find.text('Medium'), findsWidgets);
+      await tester.tap(find.byTooltip('Close'));
+      await _pumpFrames(tester);
+    },
+  );
 
   testWidgets('new session confirms before discarding an unsent message', (
     tester,

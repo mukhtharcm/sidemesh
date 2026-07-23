@@ -1019,7 +1019,7 @@ class _SessionControlsSheetState extends State<SessionControlsSheet> {
             else if (_selectedModelIsAuto)
               _InlineSettingNote(
                 text:
-                    'Auto models choose the thinking effort themselves. The agent will use ${_reasoningEffortLabel(effectiveReasoning ?? selectedModel?.defaultReasoningEffort ?? 'medium')}.',
+                    'Auto models choose the thinking effort themselves. The agent will use ${reasoningEffortLabel(effectiveReasoning ?? selectedModel?.defaultReasoningEffort ?? 'medium')}.',
               )
             else if (_supportedReasoningOptions.isEmpty)
               const _InlineSettingNote(
@@ -1213,7 +1213,7 @@ class _ReasoningEffortSlider extends StatelessWidget {
     }
     if (selectedIndex < 0) selectedIndex = 0;
     final selected = options[selectedIndex];
-    final selectedLabel = _reasoningEffortLabel(selected.reasoningEffort);
+    final selectedLabel = reasoningEffortLabel(selected.reasoningEffort);
     final isDefault = selected.reasoningEffort == defaultEffort;
 
     if (options.length == 1) {
@@ -1261,14 +1261,14 @@ class _ReasoningEffortSlider extends StatelessWidget {
           Row(
             children: [
               Text(
-                _reasoningEffortLabel(options.first.reasoningEffort),
+                reasoningEffortLabel(options.first.reasoningEffort),
                 style: Theme.of(
                   context,
                 ).textTheme.bodySmall?.copyWith(color: colors.textSecondary),
               ),
               const Spacer(),
               Text(
-                _reasoningEffortLabel(options.last.reasoningEffort),
+                reasoningEffortLabel(options.last.reasoningEffort),
                 style: Theme.of(
                   context,
                 ).textTheme.bodySmall?.copyWith(color: colors.textSecondary),
@@ -1559,24 +1559,11 @@ class _ReasoningPickerSheet extends StatelessWidget {
           'Set how much thinking the next reply should use with $modelLabel.',
       maxWidth: 520,
       maxHeightFactor: 0.72,
-      child: ListView.separated(
-        itemCount: options.length,
-        separatorBuilder: (_, _) => const SizedBox(height: 8),
-        itemBuilder: (context, index) {
-          final option = options[index];
-          final selected = option.reasoningEffort == currentReasoning;
-          final isDefault = option.reasoningEffort == defaultReasoning;
-          return AppChoiceRow(
-            title: _reasoningEffortLabel(option.reasoningEffort),
-            subtitle: option.description,
-            icon: Icons.psychology_alt_rounded,
-            selected: selected,
-            onTap: () => Navigator.of(context).pop(option.reasoningEffort),
-            trailing: !selected && isDefault
-                ? const MeshInlineBadge(label: 'default')
-                : null,
-          );
-        },
+      child: ReasoningChoiceList(
+        options: options,
+        currentReasoning: currentReasoning,
+        defaultReasoning: defaultReasoning,
+        onSelected: (effort) => Navigator.of(context).pop(effort),
       ),
     );
   }
@@ -1599,18 +1586,6 @@ int _modelSortRank(ModelCatalogEntry model) {
   final sortOrder = model.sortOrder;
   if (sortOrder != null) return sortOrder;
   return model.isProfileModel ? 4000 : 10000;
-}
-
-String _reasoningEffortLabel(String value) {
-  return switch (value) {
-    'none' => 'None',
-    'minimal' => 'Minimal',
-    'low' => 'Low',
-    'medium' => 'Medium',
-    'high' => 'High',
-    'xhigh' => 'Extra high',
-    _ => value,
-  };
 }
 
 String _sessionModeChoiceLabel(
