@@ -632,7 +632,7 @@ class _RuntimeSignalStrip extends StatelessWidget {
     final details = <String>[];
 
     final thread = threadStatus;
-    if (_shouldShowThreadStatus(thread)) {
+    if (_shouldShowThreadStatusEvent(thread)) {
       pills.add(
         MeshStatusBadge(
           label: _threadStatusLabel(thread!),
@@ -708,19 +708,6 @@ class _RuntimeSignalStrip extends StatelessWidget {
         ],
       ),
     );
-  }
-
-  bool _shouldShowThreadStatus(LiveEvent? event) {
-    if (event == null) {
-      return false;
-    }
-    final status = (event.status ?? '').trim();
-    if (status.isEmpty) {
-      return false;
-    }
-    return status != 'running' ||
-        (event.message?.isNotEmpty ?? false) ||
-        (event.pendingActionKind?.isNotEmpty ?? false);
   }
 
   bool _hasQueueData(LiveEvent? event) {
@@ -816,6 +803,19 @@ class _RuntimeSignalStrip extends StatelessWidget {
     final whole = delayMs % 1000 == 0;
     return whole ? '${seconds.toStringAsFixed(0)}s' : '${seconds.toStringAsFixed(1)}s';
   }
+}
+
+bool _shouldShowThreadStatusEvent(LiveEvent? event) {
+  if (event == null) {
+    return false;
+  }
+  final status = (event.status ?? '').trim();
+  if (status.isEmpty || status == 'closed') {
+    return false;
+  }
+  return status != 'running' ||
+      (event.message?.isNotEmpty ?? false) ||
+      (event.pendingActionKind?.isNotEmpty ?? false);
 }
 
 class _PendingSendStrip extends StatelessWidget {

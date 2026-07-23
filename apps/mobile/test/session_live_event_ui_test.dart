@@ -1234,12 +1234,27 @@ void main() {
       expect(find.textContaining('Cached transcript ·'), findsNothing);
       expect(find.textContaining('Reconnecting ·'), findsNothing);
 
+      await tester.pump(const Duration(milliseconds: 900));
+      expect(
+        find.descendant(
+          of: find.byKey(
+            const ValueKey<String>('session-freshness-indicator'),
+          ),
+          matching: find.byType(CircularProgressIndicator),
+        ),
+        findsOneWidget,
+      );
+
       snapshotReady.complete();
       await _pumpFrames(tester);
 
       expect(find.text('Fresh snapshot item.'), findsOneWidget);
       expect(find.text('Cached transcript item.'), findsNothing);
       expect(find.textContaining('Cached transcript ·'), findsNothing);
+      expect(
+        find.byKey(const ValueKey<String>('session-freshness-indicator')),
+        findsNothing,
+      );
     },
   );
 
@@ -1805,6 +1820,39 @@ void main() {
     expect(find.text('apps/mobile/lib/a.dart'), findsOneWidget);
     expect(find.text('apps/mobile/lib/b.dart'), findsOneWidget);
   });
+
+  testWidgets(
+    'closed thread status does not occupy composer space',
+    (tester) async {
+      final session = _session('closed-status-hidden', status: 'idle');
+      final api = _RichEventFakeApi(sessionSummary: session);
+      addTearDown(api.dispose);
+
+      await _pumpApp(
+        tester,
+        SessionScreen(
+          host: _host('closed-status-hidden'),
+          session: session,
+          api: api,
+          desktopMode: true,
+        ),
+        size: const Size(1180, 900),
+      );
+      await _pumpFrames(tester);
+
+      api.emit({
+        'type': 'thread_status_changed',
+        'sessionId': session.id,
+        'status': 'closed',
+        'message': 'The previous turn is complete.',
+      });
+      await _pumpFrames(tester);
+
+      expect(find.text('Closed'), findsNothing);
+      expect(find.text('The previous turn is complete.'), findsNothing);
+      expect(_composerTextFieldFinder(), findsOneWidget);
+    },
+  );
 
   testWidgets(
     'mobile running session shows stop pill and stops after confirmation',

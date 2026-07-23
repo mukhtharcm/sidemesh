@@ -233,6 +233,7 @@ class _DesktopShellState extends State<DesktopShell> {
   bool _showUsage = false;
   int _activeCount = 0;
   int _inboxCount = 0;
+  bool _recentVerificationActive = false;
   int _sessionOpenSerial = 0;
   String _query = '';
   RecentSessionFilters _recentFilters = const RecentSessionFilters();
@@ -1063,6 +1064,18 @@ class _DesktopShellState extends State<DesktopShell> {
                                       if (!mounted) return;
                                       setState(() => _activeCount = n);
                                     },
+                                    recentVerificationActive:
+                                        _recentVerificationActive,
+                                    onRecentVerificationChanged: (active) {
+                                      if (!mounted ||
+                                          active == _recentVerificationActive) {
+                                        return;
+                                      }
+                                      setState(
+                                        () =>
+                                            _recentVerificationActive = active,
+                                      );
+                                    },
                                     onInboxCountChanged: (n) {
                                       if (!mounted || n == _inboxCount) return;
                                       setState(() => _inboxCount = n);
@@ -1452,6 +1465,8 @@ class _Sidebar extends StatelessWidget {
     required this.onRemoveHost,
     required this.onToggleHostEnabled,
     required this.onActiveCountChanged,
+    required this.recentVerificationActive,
+    required this.onRecentVerificationChanged,
     required this.onInboxCountChanged,
     this.recentFilters = const RecentSessionFilters(),
     this.onRecentRunningOnlyChanged,
@@ -1483,6 +1498,8 @@ class _Sidebar extends StatelessWidget {
   final ValueChanged<HostProfile> onRemoveHost;
   final HostProfileActionCallback onToggleHostEnabled;
   final ValueChanged<int> onActiveCountChanged;
+  final bool recentVerificationActive;
+  final ValueChanged<bool> onRecentVerificationChanged;
   final ValueChanged<int> onInboxCountChanged;
   final RecentSessionFilters recentFilters;
   final ValueChanged<bool>? onRecentRunningOnlyChanged;
@@ -1535,6 +1552,9 @@ class _Sidebar extends StatelessWidget {
               child: _ListPaneHeader(
                 title: _sidebarSectionTitle(section),
                 trailing: headerAction,
+                verificationActive:
+                    section == _SidebarSection.recent &&
+                    recentVerificationActive,
               ),
             ),
             Padding(
@@ -1581,6 +1601,7 @@ class _Sidebar extends StatelessWidget {
                       onRemoveHost: onRemoveHost,
                       onAddHost: onAddHost,
                       onActiveCountChanged: onActiveCountChanged,
+                      onRecentVerificationChanged: onRecentVerificationChanged,
                       onInboxCountChanged: onInboxCountChanged,
                       onToggleHostEnabled: onToggleHostEnabled,
                       recentFilters: recentFilters,
@@ -1644,10 +1665,15 @@ class _DesktopSidebarLoadingState extends StatelessWidget {
 }
 
 class _ListPaneHeader extends StatelessWidget {
-  const _ListPaneHeader({required this.title, required this.trailing});
+  const _ListPaneHeader({
+    required this.title,
+    required this.trailing,
+    this.verificationActive = false,
+  });
 
   final String title;
   final Widget trailing;
+  final bool verificationActive;
 
   @override
   Widget build(BuildContext context) {
@@ -1658,15 +1684,26 @@ class _ListPaneHeader extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.center,
         children: [
           Expanded(
-            child: Text(
-              title,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                color: colors.textPrimary,
-                fontWeight: AppWeights.title,
-                letterSpacing: AppLetterSpacing.headline,
-              ),
+            child: Row(
+              children: [
+                Flexible(
+                  child: Text(
+                    title,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                      color: colors.textPrimary,
+                      fontWeight: AppWeights.title,
+                      letterSpacing: AppLetterSpacing.headline,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: AppSpacing.sm),
+                MeshDelayedActivityIndicator(
+                  key: const ValueKey('recent-freshness-indicator'),
+                  active: verificationActive,
+                ),
+              ],
             ),
           ),
           const SizedBox(width: 10),
@@ -1782,6 +1819,7 @@ class _SidebarPane extends StatelessWidget {
     required this.onAddHost,
     required this.onToggleHostEnabled,
     required this.onActiveCountChanged,
+    required this.onRecentVerificationChanged,
     required this.onInboxCountChanged,
     this.recentFilters = const RecentSessionFilters(),
   });
@@ -1801,6 +1839,7 @@ class _SidebarPane extends StatelessWidget {
   final VoidCallback onAddHost;
   final HostProfileActionCallback onToggleHostEnabled;
   final ValueChanged<int> onActiveCountChanged;
+  final ValueChanged<bool> onRecentVerificationChanged;
   final ValueChanged<int> onInboxCountChanged;
   final RecentSessionFilters recentFilters;
 
@@ -1816,6 +1855,7 @@ class _SidebarPane extends StatelessWidget {
           api: api,
           onOpenSession: onOpenSession,
           onActiveCountChanged: onActiveCountChanged,
+          onVerificationChanged: onRecentVerificationChanged,
           query: query,
           selectedSessionId: selectedSessionId,
           dense: true,
