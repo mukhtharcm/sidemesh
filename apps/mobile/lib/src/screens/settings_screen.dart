@@ -327,6 +327,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       onRefreshNotifications: _refreshNotificationStatus,
       onRequestNotifications: _requestNotifications,
       onEditLaunchDefaults: _editLaunchDefaults,
+      onRetryAppUpdateSettings: _appUpdateStore.refresh,
       onCheckForUpdatesNow: _checkForUpdatesNow,
       onSetAutomaticUpdateChecks: _setAutomaticUpdateChecks,
       onSetUpdateCheckInterval: _setUpdateCheckInterval,
@@ -751,6 +752,7 @@ class _SettingsContent extends StatelessWidget {
     required this.onRefreshNotifications,
     required this.onRequestNotifications,
     required this.onEditLaunchDefaults,
+    required this.onRetryAppUpdateSettings,
     required this.onCheckForUpdatesNow,
     required this.onSetAutomaticUpdateChecks,
     required this.onSetUpdateCheckInterval,
@@ -779,6 +781,7 @@ class _SettingsContent extends StatelessWidget {
   final Future<void> Function() onRefreshNotifications;
   final Future<void> Function() onRequestNotifications;
   final Future<void> Function() onEditLaunchDefaults;
+  final Future<void> Function() onRetryAppUpdateSettings;
   final Future<void> Function() onCheckForUpdatesNow;
   final Future<void> Function(bool value) onSetAutomaticUpdateChecks;
   final Future<void> Function(AppUpdateCheckIntervalOption option)
@@ -891,6 +894,7 @@ class _SettingsContent extends StatelessWidget {
               _AppUpdateSettingsCard(
                 appUpdateStore: appUpdateStore,
                 appVersionStore: appVersionStore,
+                onRetryAppUpdateSettings: onRetryAppUpdateSettings,
                 onCheckForUpdatesNow: onCheckForUpdatesNow,
                 onSetAutomaticUpdateChecks: onSetAutomaticUpdateChecks,
                 onSetUpdateCheckInterval: onSetUpdateCheckInterval,
@@ -1121,6 +1125,7 @@ class _AppUpdateSettingsCard extends StatelessWidget {
   const _AppUpdateSettingsCard({
     required this.appUpdateStore,
     required this.appVersionStore,
+    required this.onRetryAppUpdateSettings,
     required this.onCheckForUpdatesNow,
     required this.onSetAutomaticUpdateChecks,
     required this.onSetUpdateCheckInterval,
@@ -1128,6 +1133,7 @@ class _AppUpdateSettingsCard extends StatelessWidget {
 
   final AppUpdateSettingsStore appUpdateStore;
   final AppVersionStore appVersionStore;
+  final Future<void> Function() onRetryAppUpdateSettings;
   final Future<void> Function() onCheckForUpdatesNow;
   final Future<void> Function(bool value) onSetAutomaticUpdateChecks;
   final Future<void> Function(AppUpdateCheckIntervalOption option)
@@ -1143,6 +1149,7 @@ class _AppUpdateSettingsCard extends StatelessWidget {
         final versionInfo = appVersionStore.info;
         final supported = settings.supported;
         final loaded = settings.loaded;
+        final loadFailed = settings.loadFailed;
         final automaticChecks = settings.automaticallyChecksForUpdates;
         final checkNowEnabled =
             supported &&
@@ -1152,6 +1159,8 @@ class _AppUpdateSettingsCard extends StatelessWidget {
             !appUpdateStore.saving;
         final subtitle = !loaded
             ? 'Loading macOS update settings...'
+            : loadFailed
+            ? 'Could not load macOS update settings.'
             : supported
             ? automaticChecks
                   ? '${settings.intervalLabel} background checks are on.'
@@ -1160,7 +1169,11 @@ class _AppUpdateSettingsCard extends StatelessWidget {
         final versionLabel = versionInfo.loaded
             ? versionInfo.displayVersion
             : 'Version unavailable';
-        final cardBody = supported
+        final cardBody = !loaded
+            ? 'Reading the updater configuration for $versionLabel.'
+            : loadFailed
+            ? 'Sidemesh could not reach its macOS updater. Retry the connection, or restart the app if the problem continues.'
+            : supported
             ? 'You are on $versionLabel. Release builds can check for newer signed macOS downloads in the background.'
             : 'You are on $versionLabel. Install the signed production macOS build if you want in-app update checks.';
         final selectedInterval = settings.selectedIntervalOption;
@@ -1169,62 +1182,75 @@ class _AppUpdateSettingsCard extends StatelessWidget {
           title: 'Mac app updates',
           subtitle: subtitle,
           body: cardBody,
-          trailing: OutlinedButton(
-            onPressed: checkNowEnabled
-                ? () => unawaited(onCheckForUpdatesNow())
-                : null,
-            child: Text(appUpdateStore.checking ? 'Checking...' : 'Check now'),
-          ),
-          footer: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              _ToggleTile(
-                icon: Icons.schedule_rounded,
-                title: 'Check automatically',
-                subtitle:
-                    'Let Sidemesh ask Sparkle for new releases on a schedule. Manual checks stay available either way.',
-                value: automaticChecks && supported,
-                onChanged: loaded && supported && !appUpdateStore.saving
-                    ? (value) => unawaited(onSetAutomaticUpdateChecks(value))
-                    : null,
-              ),
-              const SizedBox(height: AppSpacing.md),
-              Text(
-                'How often',
-                style: Theme.of(context).textTheme.labelLarge?.copyWith(
-                  fontWeight: AppWeights.emphasis,
-                ),
-              ),
-              const SizedBox(height: AppSpacing.sm),
-              Wrap(
-                spacing: AppSpacing.sm,
-                runSpacing: AppSpacing.sm,
-                children: [
-                  for (final option in AppUpdateCheckIntervalOption.values)
-                    _UpdateIntervalOptionButton(
-                      option: option,
-                      selected: selectedInterval?.seconds == option.seconds,
-                      enabled:
-                          loaded &&
-                          supported &&
-                          automaticChecks &&
-                          !appUpdateStore.saving,
-                      onTap: () => unawaited(onSetUpdateCheckInterval(option)),
-                    ),
-                ],
-              ),
-              if (!automaticChecks && supported) ...[
-                const SizedBox(height: AppSpacing.sm),
-                Text(
-                  'Automatic checks are off, so this cadence is currently paused.',
-                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                    color: colors.textSecondary,
-                    height: 1.3,
+          trailing: loadFailed
+              ? OutlinedButton(
+                  onPressed: appUpdateStore.loading
+                      ? null
+                      : () => unawaited(onRetryAppUpdateSettings()),
+                  child: Text(appUpdateStore.loading ? 'Retrying...' : 'Retry'),
+                )
+              : supported
+              ? OutlinedButton(
+                  onPressed: checkNowEnabled
+                      ? () => unawaited(onCheckForUpdatesNow())
+                      : null,
+                  child: Text(
+                    appUpdateStore.checking ? 'Checking...' : 'Check now',
                   ),
-                ),
-              ],
-            ],
-          ),
+                )
+              : null,
+          footer: supported
+              ? Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    _ToggleTile(
+                      icon: Icons.schedule_rounded,
+                      title: 'Check automatically',
+                      subtitle:
+                          'Let Sidemesh ask Sparkle for new releases on a schedule. Manual checks stay available either way.',
+                      value: automaticChecks,
+                      onChanged: !appUpdateStore.saving
+                          ? (value) =>
+                                unawaited(onSetAutomaticUpdateChecks(value))
+                          : null,
+                    ),
+                    const SizedBox(height: AppSpacing.md),
+                    Text(
+                      'How often',
+                      style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                        fontWeight: AppWeights.emphasis,
+                      ),
+                    ),
+                    const SizedBox(height: AppSpacing.sm),
+                    Wrap(
+                      spacing: AppSpacing.sm,
+                      runSpacing: AppSpacing.sm,
+                      children: [
+                        for (final option
+                            in AppUpdateCheckIntervalOption.values)
+                          _UpdateIntervalOptionButton(
+                            option: option,
+                            selected:
+                                selectedInterval?.seconds == option.seconds,
+                            enabled: automaticChecks && !appUpdateStore.saving,
+                            onTap: () =>
+                                unawaited(onSetUpdateCheckInterval(option)),
+                          ),
+                      ],
+                    ),
+                    if (!automaticChecks) ...[
+                      const SizedBox(height: AppSpacing.sm),
+                      Text(
+                        'Automatic checks are off, so this cadence is currently paused.',
+                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color: colors.textSecondary,
+                          height: 1.3,
+                        ),
+                      ),
+                    ],
+                  ],
+                )
+              : null,
         );
       },
     );

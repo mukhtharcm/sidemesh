@@ -4,6 +4,8 @@ import 'package:flutter/services.dart';
 const int _minimumUpdateCheckIntervalSeconds = 3600;
 const int _defaultUpdateCheckIntervalSeconds = 86400;
 
+enum AppUpdateSettingsStatus { loading, ready, unsupported, failed }
+
 @immutable
 class AppUpdateCheckIntervalOption {
   const AppUpdateCheckIntervalOption({
@@ -49,32 +51,37 @@ class AppUpdateCheckIntervalOption {
 @immutable
 class AppUpdateSettings {
   const AppUpdateSettings({
-    required this.supported,
-    required this.loaded,
     required this.automaticallyChecksForUpdates,
     required this.updateCheckIntervalSeconds,
     required this.canCheckForUpdates,
-  });
+  }) : status = AppUpdateSettingsStatus.ready;
 
   const AppUpdateSettings.uninitialized()
-    : supported = false,
-      loaded = false,
+    : status = AppUpdateSettingsStatus.loading,
       automaticallyChecksForUpdates = false,
       updateCheckIntervalSeconds = _defaultUpdateCheckIntervalSeconds,
       canCheckForUpdates = false;
 
   const AppUpdateSettings.unsupported()
-    : supported = false,
-      loaded = true,
+    : status = AppUpdateSettingsStatus.unsupported,
       automaticallyChecksForUpdates = false,
       updateCheckIntervalSeconds = _defaultUpdateCheckIntervalSeconds,
       canCheckForUpdates = false;
 
-  final bool supported;
-  final bool loaded;
+  const AppUpdateSettings.failed()
+    : status = AppUpdateSettingsStatus.failed,
+      automaticallyChecksForUpdates = false,
+      updateCheckIntervalSeconds = _defaultUpdateCheckIntervalSeconds,
+      canCheckForUpdates = false;
+
+  final AppUpdateSettingsStatus status;
   final bool automaticallyChecksForUpdates;
   final int updateCheckIntervalSeconds;
   final bool canCheckForUpdates;
+
+  bool get supported => status == AppUpdateSettingsStatus.ready;
+  bool get loaded => status != AppUpdateSettingsStatus.loading;
+  bool get loadFailed => status == AppUpdateSettingsStatus.failed;
 
   int get normalizedUpdateCheckIntervalSeconds {
     final seconds = updateCheckIntervalSeconds;
@@ -180,9 +187,10 @@ class MethodChannelAppUpdateSettingsService
 
   AppUpdateSettings _settingsFromMap(Map<Object?, Object?>? data) {
     if (data == null) return const AppUpdateSettings.unsupported();
+    if (!_boolValue(data['supported'])) {
+      return const AppUpdateSettings.unsupported();
+    }
     return AppUpdateSettings(
-      supported: _boolValue(data['supported']),
-      loaded: true,
       automaticallyChecksForUpdates: _boolValue(
         data['automaticallyChecksForUpdates'],
       ),
@@ -208,9 +216,8 @@ class AppUpdateSettingsStore extends ChangeNotifier {
     : _service = service ?? MethodChannelAppUpdateSettingsService();
 
   @visibleForTesting
-  AppUpdateSettingsStore.forTesting({
-    required AppUpdateSettingsService service,
-  }) : this._withService(service);
+  AppUpdateSettingsStore.forTesting({required AppUpdateSettingsService service})
+    : this._withService(service);
 
   AppUpdateSettingsStore._withService(this._service);
 
@@ -240,8 +247,8 @@ class AppUpdateSettingsStore extends ChangeNotifier {
     try {
       _settings = await _service.fetchSettings();
     } catch (_) {
+      _settings = const AppUpdateSettings.failed();
       _loadFuture = null;
-      rethrow;
     } finally {
       _loading = false;
       notifyListeners();

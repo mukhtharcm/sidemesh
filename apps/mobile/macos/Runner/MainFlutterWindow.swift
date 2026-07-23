@@ -19,6 +19,8 @@ class MainFlutterWindow: NSWindow {
     self.minSize = NSSize(width: 760, height: 520)
 
     RegisterGeneratedPlugins(registry: flutterViewController)
+    (NSApplication.shared.delegate as? AppDelegate)?
+      .registerUpdaterChannel(with: flutterViewController)
     FlutterMultiWindowPlugin.setOnWindowCreatedCallback { controller in
       RegisterGeneratedPlugins(registry: controller)
     }
