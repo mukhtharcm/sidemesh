@@ -920,7 +920,7 @@ describe("codex rich live event mappings", () => {
       {
         method: "thread/list",
         params: {
-          limit: 10,
+          limit: 200,
           sortKey: "updated_at",
           sortDirection: "desc",
           sourceKinds: [
