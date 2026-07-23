@@ -18,6 +18,7 @@ import '../theme/color_contrast.dart';
 import '../theme/app_theme.dart';
 import '../theme/app_tokens.dart';
 import '../widgets/app_snackbar.dart';
+import '../widgets/desktop_sidebar_search_field.dart';
 import '../widgets/mesh_widgets.dart';
 import '../widgets/notification_permission_banner.dart';
 import '../widgets/recent_session_controls_menu.dart';
@@ -1538,7 +1539,7 @@ class _Sidebar extends StatelessWidget {
             ),
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 0, 16, 10),
-              child: _SidebarSearchField(
+              child: DesktopSidebarSearchField(
                 controller: searchController,
                 focusNode: searchFocus,
                 onClear: onClearSearch,
@@ -2115,118 +2116,6 @@ class _CloseSessionButton extends StatelessWidget {
             ),
           ),
         ),
-      ),
-    );
-  }
-}
-
-class _SidebarSearchField extends StatefulWidget {
-  const _SidebarSearchField({
-    required this.controller,
-    required this.focusNode,
-    required this.onClear,
-  });
-
-  final TextEditingController controller;
-  final FocusNode focusNode;
-  final VoidCallback onClear;
-
-  @override
-  State<_SidebarSearchField> createState() => _SidebarSearchFieldState();
-}
-
-class _SidebarSearchFieldState extends State<_SidebarSearchField> {
-  bool _focused = false;
-
-  @override
-  void initState() {
-    super.initState();
-    widget.focusNode.addListener(_handleFocus);
-    _focused = widget.focusNode.hasFocus;
-  }
-
-  @override
-  void dispose() {
-    widget.focusNode.removeListener(_handleFocus);
-    super.dispose();
-  }
-
-  void _handleFocus() {
-    if (!mounted) return;
-    if (widget.focusNode.hasFocus != _focused) {
-      setState(() => _focused = widget.focusNode.hasFocus);
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final colors = context.colors;
-    return AnimatedContainer(
-      duration: const Duration(milliseconds: 140),
-      decoration: BoxDecoration(
-        color: colors.composerBackground,
-        borderRadius: AppShapes.action,
-        border: Border.all(
-          color: _focused ? colors.accent : colors.border,
-          width: _focused ? 1.5 : 1,
-        ),
-      ),
-      padding: const EdgeInsets.symmetric(horizontal: 10),
-      child: Row(
-        children: [
-          Icon(
-            Icons.search_rounded,
-            size: 15,
-            color: _focused ? colors.accent : colors.textTertiary,
-          ),
-          const SizedBox(width: 8),
-          Expanded(
-            child: TextField(
-              controller: widget.controller,
-              focusNode: widget.focusNode,
-              style: TextStyle(fontSize: 12.5, color: colors.textPrimary),
-              cursorColor: colors.accent,
-              decoration: InputDecoration(
-                isDense: true,
-                border: InputBorder.none,
-                enabledBorder: InputBorder.none,
-                focusedBorder: InputBorder.none,
-                disabledBorder: InputBorder.none,
-                errorBorder: InputBorder.none,
-                focusedErrorBorder: InputBorder.none,
-                filled: false,
-                hoverColor: Colors.transparent,
-                focusColor: Colors.transparent,
-                hintText: 'Search (⌘F)',
-                hintStyle: TextStyle(
-                  color: colors.textTertiary,
-                  fontSize: 12.5,
-                ),
-                contentPadding: const EdgeInsets.symmetric(vertical: 9),
-              ),
-            ),
-          ),
-          AnimatedBuilder(
-            animation: widget.controller,
-            builder: (context, _) {
-              if (widget.controller.text.isEmpty) {
-                return const SizedBox.shrink();
-              }
-              return InkWell(
-                borderRadius: AppShapes.action,
-                onTap: widget.onClear,
-                child: Padding(
-                  padding: const EdgeInsets.all(4),
-                  child: Icon(
-                    Icons.close_rounded,
-                    size: 14,
-                    color: colors.textTertiary,
-                  ),
-                ),
-              );
-            },
-          ),
-        ],
       ),
     );
   }
