@@ -5,6 +5,53 @@ import 'package:sidemesh_mobile/src/theme/app_theme.dart';
 import 'package:sidemesh_mobile/src/widgets/mesh_widgets.dart';
 
 void main() {
+  testWidgets('delayed activity indicator ignores short refreshes', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      _wrap(
+        const MeshDelayedActivityIndicator(
+          active: true,
+          delay: Duration(milliseconds: 500),
+        ),
+      ),
+    );
+
+    expect(find.byType(CircularProgressIndicator), findsNothing);
+    await tester.pump(const Duration(milliseconds: 499));
+    expect(find.byType(CircularProgressIndicator), findsNothing);
+
+    await tester.pumpWidget(
+      _wrap(
+        const MeshDelayedActivityIndicator(
+          active: false,
+          delay: Duration(milliseconds: 500),
+        ),
+      ),
+    );
+    await tester.pump(const Duration(milliseconds: 1));
+
+    expect(find.byType(CircularProgressIndicator), findsNothing);
+  });
+
+  testWidgets('delayed activity indicator appears for a sustained refresh', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      _wrap(
+        const MeshDelayedActivityIndicator(
+          active: true,
+          delay: Duration(milliseconds: 500),
+        ),
+      ),
+    );
+
+    await tester.pump(const Duration(milliseconds: 500));
+
+    expect(find.byType(CircularProgressIndicator), findsOneWidget);
+    expect(find.bySemanticsLabel('Checking for updates'), findsOneWidget);
+  });
+
   testWidgets('MeshSurface forwards taps', (tester) async {
     var taps = 0;
     await tester.pumpWidget(

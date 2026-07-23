@@ -93,6 +93,7 @@ class _SidemeshHomeScreenState extends State<SidemeshHomeScreen>
   bool _searchExpanded = false;
   int _activeCount = 0;
   int _inboxCount = 0;
+  bool _recentVerificationActive = false;
   String _query = '';
   RecentSessionFilters _recentFilters = const RecentSessionFilters();
   bool _handlingNotificationIntent = false;
@@ -624,6 +625,7 @@ class _SidemeshHomeScreenState extends State<SidemeshHomeScreen>
                   ? _toggleRecentFavoritesOnly
                   : null,
               onOpenSettings: _openSettings,
+              verificationActive: _tabIndex == 0 && _recentVerificationActive,
             ),
             const NotificationPermissionBanner(),
             if (mobileClientNotice != null)
@@ -659,6 +661,13 @@ class _SidemeshHomeScreenState extends State<SidemeshHomeScreen>
                           onActiveCountChanged: (count) {
                             if (!mounted) return;
                             setState(() => _activeCount = count);
+                          },
+                          onVerificationChanged: (active) {
+                            if (!mounted ||
+                                active == _recentVerificationActive) {
+                              return;
+                            }
+                            setState(() => _recentVerificationActive = active);
                           },
                           filters: _recentFilters,
                         ),
@@ -766,6 +775,7 @@ class _HomeStickyHeader extends StatelessWidget {
     required this.onUnreadOnlyChanged,
     required this.onFavoritesOnlyChanged,
     required this.onOpenSettings,
+    required this.verificationActive,
   });
 
   final _TabDef tab;
@@ -779,6 +789,7 @@ class _HomeStickyHeader extends StatelessWidget {
   final ValueChanged<bool>? onUnreadOnlyChanged;
   final ValueChanged<bool>? onFavoritesOnlyChanged;
   final VoidCallback onOpenSettings;
+  final bool verificationActive;
 
   @override
   Widget build(BuildContext context) {
@@ -797,15 +808,23 @@ class _HomeStickyHeader extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.center,
             children: [
               Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
+                child: Row(
                   children: [
-                    Text(
-                      tab.title,
-                      style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                        color: colors.textPrimary,
-                        fontWeight: AppWeights.strong,
+                    Flexible(
+                      child: Text(
+                        tab.title,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                          color: colors.textPrimary,
+                          fontWeight: AppWeights.strong,
+                        ),
                       ),
+                    ),
+                    const SizedBox(width: AppSpacing.sm),
+                    MeshDelayedActivityIndicator(
+                      key: const ValueKey('recent-freshness-indicator'),
+                      active: verificationActive,
                     ),
                   ],
                 ),
@@ -1285,6 +1304,7 @@ class RecentPane extends StatefulWidget {
     this.screenAwakeController,
     this.filters = const RecentSessionFilters(),
     this.onAddHost,
+    this.onVerificationChanged,
   });
 
   final List<HostProfile> hosts;
@@ -1301,6 +1321,7 @@ class RecentPane extends StatefulWidget {
   final ScreenAwakeController? screenAwakeController;
   final RecentSessionFilters filters;
   final VoidCallback? onAddHost;
+  final ValueChanged<bool>? onVerificationChanged;
 
   @override
   State<RecentPane> createState() => _RecentPaneState();
@@ -1368,6 +1389,7 @@ class _RecentPaneState extends State<RecentPane> {
   bool _searchLoading = false;
   Timer? _searchDebounce;
   int _searchRequestId = 0;
+  bool? _lastReportedVerification;
 
   @override
   void initState() {
@@ -1377,6 +1399,7 @@ class _RecentPaneState extends State<RecentPane> {
     RecentSessionViewStore.instance.ensureLoaded();
     _store.addListener(_handleStoreChanged);
     _store.configure(hosts: widget.hosts, api: widget.api);
+    _reportVerificationState();
     unawaited(_loadCollapsedGroups());
   }
 
@@ -1523,7 +1546,20 @@ class _RecentPaneState extends State<RecentPane> {
 
   void _handleStoreChanged() {
     if (!mounted) return;
+    _reportVerificationState();
     _emitActiveCount();
+  }
+
+  void _reportVerificationState() {
+    final next = _store.isLoading && _store.entries.isNotEmpty;
+    if (_lastReportedVerification == next) {
+      return;
+    }
+    _lastReportedVerification = next;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      widget.onVerificationChanged?.call(next);
+    });
   }
 
   void _emitActiveCount() {
@@ -1856,11 +1892,20 @@ class _RecentPaneState extends State<RecentPane> {
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             if (widget.showGroupingMenu)
-              const Padding(
+              Padding(
                 padding: EdgeInsets.fromLTRB(16, 0, 16, 4),
                 child: Align(
                   alignment: Alignment.centerRight,
-                  child: RecentSessionControlsMenu(),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      MeshDelayedActivityIndicator(
+                        active: _store.isLoading && _store.entries.isNotEmpty,
+                      ),
+                      const SizedBox(width: AppSpacing.sm),
+                      const RecentSessionControlsMenu(),
+                    ],
+                  ),
                 ),
               ),
             SizedBox(height: widget.dense ? 4 : 8),

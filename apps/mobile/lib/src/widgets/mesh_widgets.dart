@@ -1,9 +1,98 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../theme/app_colors.dart';
 import '../theme/color_contrast.dart';
 import '../theme/app_theme.dart';
 import '../theme/app_tokens.dart';
+
+/// A compact, delayed activity indicator for background verification.
+///
+/// The fixed footprint prevents nearby header content from shifting. Short
+/// refreshes stay invisible so cached content can appear immediately without
+/// flashing progress chrome.
+class MeshDelayedActivityIndicator extends StatefulWidget {
+  const MeshDelayedActivityIndicator({
+    super.key,
+    required this.active,
+    this.delay = const Duration(milliseconds: 800),
+    this.size = 12,
+    this.strokeWidth = 1.5,
+    this.semanticLabel = 'Checking for updates',
+  });
+
+  final bool active;
+  final Duration delay;
+  final double size;
+  final double strokeWidth;
+  final String semanticLabel;
+
+  @override
+  State<MeshDelayedActivityIndicator> createState() =>
+      _MeshDelayedActivityIndicatorState();
+}
+
+class _MeshDelayedActivityIndicatorState
+    extends State<MeshDelayedActivityIndicator> {
+  Timer? _timer;
+  bool _visible = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _syncVisibility();
+  }
+
+  @override
+  void didUpdateWidget(covariant MeshDelayedActivityIndicator oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.active != oldWidget.active || widget.delay != oldWidget.delay) {
+      _syncVisibility();
+    }
+  }
+
+  void _syncVisibility() {
+    _timer?.cancel();
+    _timer = null;
+    if (!widget.active) {
+      _visible = false;
+      return;
+    }
+    if (_visible) {
+      return;
+    }
+    _timer = Timer(widget.delay, () {
+      if (!mounted || !widget.active) {
+        return;
+      }
+      setState(() => _visible = true);
+    });
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox.square(
+      dimension: widget.size,
+      child: _visible
+          ? Semantics(
+              label: widget.semanticLabel,
+              liveRegion: true,
+              child: CircularProgressIndicator(
+                color: context.colors.accent,
+                strokeWidth: widget.strokeWidth,
+              ),
+            )
+          : null,
+    );
+  }
+}
 
 /// Small pill chip used for status / metadata.
 class MeshPill extends StatelessWidget {
