@@ -10,6 +10,7 @@ import 'package:sidemesh_mobile/src/db.dart';
 import 'package:sidemesh_mobile/src/models.dart';
 import 'package:sidemesh_mobile/src/screens/session_screen.dart';
 import 'package:sidemesh_mobile/src/session_local_store.dart';
+import 'package:sidemesh_mobile/src/session_read_store.dart';
 import 'package:sidemesh_mobile/src/theme/app_palettes.dart';
 import 'package:sidemesh_mobile/src/theme/app_theme.dart';
 import 'package:stream_channel/stream_channel.dart';
@@ -24,6 +25,7 @@ void main() {
 
   setUp(() async {
     SessionLocalStore.instance.resetMigrationState();
+    SessionReadStore.instance.resetForTest();
     final db = await SidemeshDb.instance;
     await db.delete('sessions');
     SharedPreferences.setMockInitialValues(<String, Object>{});
@@ -585,7 +587,7 @@ void main() {
 
     expect(find.text('Cached transcript item.'), findsOneWidget);
     expect(
-      find.text('Cached transcript · waiting for latest host snapshot'),
+      find.text('Cached transcript · host snapshot not verified'),
       findsNothing,
     );
   });
@@ -1229,13 +1231,16 @@ void main() {
     );
     await _pumpFrames(tester);
 
+    expect(api.fetchLogCalls, 1);
+
     api.emit({'type': 'hello', 'sessionId': session.id, 'nextSeq': 3});
     await _pumpFrames(tester);
 
+    expect(api.fetchLogCalls, 1);
     expect(find.text('Cached transcript item.'), findsOneWidget);
     expect(find.text('Fresh snapshot item.'), findsNothing);
     expect(
-      find.text('Cached transcript · syncing latest changes'),
+      find.text('Cached transcript · verifying host snapshot'),
       findsOneWidget,
     );
 
@@ -1245,9 +1250,85 @@ void main() {
     expect(find.text('Fresh snapshot item.'), findsOneWidget);
     expect(find.text('Cached transcript item.'), findsNothing);
     expect(
-      find.text('Cached transcript · waiting for latest host snapshot'),
+      find.text('Cached transcript · host snapshot not verified'),
       findsNothing,
     );
+  });
+
+  testWidgets('cached transcript does not mark latest session seen before snapshot verifies', (
+    tester,
+  ) async {
+    final host = _host('cached-read-state');
+    final staleUpdatedAt = DateTime(2026, 1, 1, 12);
+    final freshUpdatedAt = DateTime(2026, 1, 1, 12, 30);
+    final cachedSession = _session(
+      'cached-read-state',
+      updatedAt: staleUpdatedAt,
+    );
+    final freshSession = _session(
+      'cached-read-state',
+      updatedAt: freshUpdatedAt,
+    );
+    final snapshotReady = Completer<void>();
+    final api = _RichEventFakeApi(
+      sessionSummary: freshSession,
+      fetchLogBlocker: snapshotReady.future,
+      messages: [
+        _assistantMessage(
+          id: 'msg-1',
+          text: 'Fresh snapshot item.',
+          content: const [TextBlock('Fresh snapshot item.')],
+        ),
+      ],
+    );
+    addTearDown(api.dispose);
+
+    await SessionReadStore.instance.ensureLoaded();
+    SessionReadStore.instance.markUnread(host, freshSession.id);
+
+    await SessionLocalStore.instance.saveSessionLog(
+      host,
+      SessionLog(
+        session: cachedSession,
+        messages: [
+          _assistantMessage(
+            id: 'msg-1',
+            text: 'Cached transcript item.',
+            content: const [TextBlock('Cached transcript item.')],
+          ),
+        ],
+        activities: const [],
+        pendingAction: null,
+        history: const SessionLogHistorySummary(
+          isTruncated: false,
+          totalMessages: 1,
+          returnedMessages: 1,
+          totalActivities: 0,
+          returnedActivities: 0,
+        ),
+      ),
+    );
+
+    await _pumpApp(
+      tester,
+      SessionScreen(
+        host: host,
+        session: freshSession,
+        api: api,
+        desktopMode: true,
+      ),
+      size: const Size(1180, 900),
+    );
+    await _pumpFrames(tester);
+
+    expect(find.text('Cached transcript item.'), findsOneWidget);
+    expect(SessionReadStore.instance.isUnread(host, freshSession), isTrue);
+
+    snapshotReady.complete();
+    await _pumpFrames(tester);
+
+    expect(find.text('Fresh snapshot item.'), findsOneWidget);
+    expect(SessionReadStore.instance.isUnread(host, freshSession), isFalse);
   });
 
   testWidgets('completed assistant message keeps collapsed reasoning visible', (
@@ -1869,7 +1950,11 @@ HostProfile _host(String id) => HostProfile(
   token: 'test-token',
 );
 
-SessionSummary _session(String id, {String status = 'idle'}) {
+SessionSummary _session(
+  String id, {
+  String status = 'idle',
+  DateTime? updatedAt,
+}) {
   final now = DateTime(2026, 1, 1, 12);
   return SessionSummary(
     id: id,
@@ -1877,7 +1962,7 @@ SessionSummary _session(String id, {String status = 'idle'}) {
     preview: '',
     cwd: '/repo',
     createdAt: now,
-    updatedAt: now,
+    updatedAt: updatedAt ?? now,
     source: 'fake',
     provider: null,
     status: status,
@@ -2271,6 +2356,7 @@ class _RichEventFakeApi extends ApiClient {
   final SessionSummary? sessionSummary;
   final SessionStatus? sessionStatus;
   final PendingAction? pendingAction;
+  int fetchLogCalls = 0;
   int stopSessionCalls = 0;
   int sendInputCalls = 0;
   String? lastInputText;
@@ -2285,6 +2371,7 @@ class _RichEventFakeApi extends ApiClient {
     int? messageLimit,
     int? activityLimit,
   }) async {
+    fetchLogCalls += 1;
     final blocker = fetchLogBlocker;
     if (blocker != null) {
       await blocker;

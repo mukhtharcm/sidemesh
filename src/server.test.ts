@@ -582,6 +582,27 @@ class SlowReadFakeProvider extends RestartableFakeProvider {
   }
 }
 
+class BlockingLogReadFakeProvider extends RestartableFakeProvider {
+  private releaseLogRead!: () => void;
+  private readonly logReadGate = new Promise<void>((resolve) => {
+    this.releaseLogRead = resolve;
+  });
+  public readSessionLogCalls = 0;
+
+  public release(): void {
+    this.releaseLogRead();
+  }
+
+  public override async readSessionLog(
+    thread: ThreadRecord,
+    options?: AgentSessionLogOptions,
+  ): Promise<SessionLogSnapshot> {
+    this.readSessionLogCalls += 1;
+    await this.logReadGate;
+    return super.readSessionLog(thread, options);
+  }
+}
+
 class ImmediateCompletionProvider extends EventEmitter implements AgentProvider {
   public readonly kind = "fake";
   public readonly displayName = "Immediate Completion Provider";
@@ -3202,6 +3223,38 @@ describe("session live rich events", () => {
         await closeSessionLiveSocket(primaryLive.socket);
         await closeSessionLiveSocket(secondaryLive.socket);
       }
+    });
+  });
+
+  it("coalesces concurrent session log reads with identical limits", async () => {
+    const stateDir = await mkdtemp(nodePath.join(tmpdir(), "sidemesh-server-live-test-"));
+    const provider = new BlockingLogReadFakeProvider();
+    const runtime = makeCustomSingleProviderRuntime(provider);
+    await withServerRuntime(makeConfig(stateDir), runtime, async (server, config) => {
+      const sessionId = "fake-restart-session";
+      const logPath =
+        `/api/sessions/${encodeURIComponent(sessionId)}/log?messageLimit=120&activityLimit=80`;
+      const makeLogRequest = () =>
+        request({
+          hostname: "127.0.0.1",
+          port: server.port,
+          path: logPath,
+          method: "GET",
+          headers: { Authorization: "Bearer " + config.token },
+        });
+
+      const first = makeLogRequest();
+      const second = makeLogRequest();
+      await waitFor(
+        () => provider.readSessionLogCalls === 1 ? true : null,
+        "single in-flight log read",
+      );
+      provider.release();
+
+      const [firstResponse, secondResponse] = await Promise.all([first, second]);
+      assert.equal(firstResponse.statusCode, 200);
+      assert.equal(secondResponse.statusCode, 200);
+      assert.equal(provider.readSessionLogCalls, 1);
     });
   });
 
