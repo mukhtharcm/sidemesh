@@ -54,16 +54,17 @@ class _DesktopSidebarSearchFieldState extends State<DesktopSidebarSearchField> {
   Widget build(BuildContext context) {
     final colors = context.colors;
     return Container(
-      height: AppSizes.control,
+      height: AppSizes.compactControl,
       decoration: BoxDecoration(
         color: colors.composerBackground,
-        borderRadius: AppShapes.action,
+        borderRadius: AppShapes.input,
         border: Border.all(
-          color: _focused ? colors.accent : colors.border,
-          width: _focused ? 1.5 : 1,
+          color: _focused
+              ? colors.accent.withValues(alpha: 0.72)
+              : colors.border.withValues(alpha: 0.8),
         ),
       ),
-      padding: const EdgeInsets.symmetric(horizontal: AppSpacing.md),
+      padding: const EdgeInsets.symmetric(horizontal: AppSpacing.sm),
       child: Row(
         children: [
           Icon(
@@ -76,41 +77,44 @@ class _DesktopSidebarSearchFieldState extends State<DesktopSidebarSearchField> {
             child: Align(
               alignment: Alignment.center,
               child: SizedBox(
-                height: 20,
-                child: Transform.translate(
-                  offset: const Offset(0, 1),
-                  child: TextField(
-                    controller: widget.controller,
-                    focusNode: widget.focusNode,
-                    textAlignVertical: TextAlignVertical.center,
-                    style: TextStyle(fontSize: 12.5, color: colors.textPrimary),
-                    cursorColor: colors.accent,
-                    cursorHeight: 18,
-                    cursorWidth: 1.5,
-                    cursorRadius: const Radius.circular(1),
-                    decoration: InputDecoration(
-                      isCollapsed: true,
-                      border: InputBorder.none,
-                      enabledBorder: InputBorder.none,
-                      focusedBorder: InputBorder.none,
-                      disabledBorder: InputBorder.none,
-                      errorBorder: InputBorder.none,
-                      focusedErrorBorder: InputBorder.none,
-                      filled: false,
-                      hoverColor: Colors.transparent,
-                      focusColor: Colors.transparent,
-                      hint: Padding(
-                        padding: const EdgeInsets.only(left: 2),
-                        child: Text(
-                          'Search (⌘F)',
-                          style: TextStyle(
-                            color: colors.textTertiary,
-                            fontSize: 12.5,
-                          ),
-                        ),
-                      ),
-                      contentPadding: EdgeInsets.zero,
+                height: 18,
+                child: TextField(
+                  controller: widget.controller,
+                  focusNode: widget.focusNode,
+                  textAlignVertical: TextAlignVertical.center,
+                  strutStyle: const StrutStyle(
+                    fontSize: 13,
+                    height: 1.2,
+                    forceStrutHeight: true,
+                  ),
+                  style: TextStyle(
+                    color: colors.textPrimary,
+                    fontSize: 13,
+                    height: 1.2,
+                  ),
+                  cursorColor: colors.accent,
+                  cursorHeight: 16,
+                  cursorWidth: 1.5,
+                  cursorRadius: const Radius.circular(1),
+                  decoration: InputDecoration(
+                    isCollapsed: true,
+                    border: InputBorder.none,
+                    enabledBorder: InputBorder.none,
+                    focusedBorder: InputBorder.none,
+                    disabledBorder: InputBorder.none,
+                    errorBorder: InputBorder.none,
+                    focusedErrorBorder: InputBorder.none,
+                    filled: false,
+                    hoverColor: Colors.transparent,
+                    focusColor: Colors.transparent,
+                    hintText: 'Search (⌘F)',
+                    hintStyle: TextStyle(
+                      color: colors.textTertiary,
+                      fontSize: 13,
+                      height: 1.2,
                     ),
+                    contentPadding: EdgeInsets.zero,
+                    constraints: const BoxConstraints.tightFor(height: 18),
                   ),
                 ),
               ),
