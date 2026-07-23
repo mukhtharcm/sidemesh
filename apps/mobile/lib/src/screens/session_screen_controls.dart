@@ -53,7 +53,6 @@ class _SessionControlsSheetState extends State<SessionControlsSheet> {
   bool _loadingAccessModes = false;
   String? _accessModesError;
   NodeInfo? _nodeInfo;
-  bool _showingModelPicker = false;
 
   @override
   void initState() {
@@ -534,7 +533,43 @@ class _SessionControlsSheetState extends State<SessionControlsSheet> {
       }
     }
 
-    setState(() => _showingModelPicker = true);
+    final picker = _ModelPickerSheet(
+      models: _models,
+      currentModel: _effectiveModelValue,
+      providerName: _runtimeModelProvider,
+    );
+    final ModelCatalogEntry? selected;
+    if (widget.onClose != null && MediaQuery.sizeOf(context).width >= 900) {
+      selected = await showDialog<ModelCatalogEntry>(
+        context: context,
+        barrierColor: Colors.black.withValues(alpha: 0.35),
+        builder: (dialogContext) => Dialog(
+          backgroundColor: Colors.transparent,
+          insetPadding: const EdgeInsets.symmetric(
+            horizontal: 48,
+            vertical: 48,
+          ),
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 760, maxHeight: 640),
+            child: picker,
+          ),
+        ),
+      );
+    } else {
+      selected = await showModalBottomSheet<ModelCatalogEntry>(
+        context: context,
+        backgroundColor: Colors.transparent,
+        barrierColor: Colors.black.withValues(alpha: 0.28),
+        showDragHandle: false,
+        useSafeArea: true,
+        isScrollControlled: true,
+        builder: (sheetContext) => picker,
+      );
+    }
+    if (!mounted || selected == null) {
+      return;
+    }
+    _applySelectedModel(selected);
   }
 
   void _close() {
@@ -828,20 +863,6 @@ class _SessionControlsSheetState extends State<SessionControlsSheet> {
     final colors = context.colors;
     final theme = Theme.of(context);
     final bottomInset = MediaQuery.of(context).viewInsets.bottom;
-    if (_showingModelPicker) {
-      final picker = _ModelPickerSheet(
-        models: _models,
-        currentModel: _effectiveModelValue,
-        providerName: _runtimeModelProvider,
-        embedded: true,
-        onBack: () => setState(() => _showingModelPicker = false),
-        onSelected: (model) {
-          _applySelectedModel(model);
-          setState(() => _showingModelPicker = false);
-        },
-      );
-      return SafeArea(top: false, child: picker);
-    }
     final selectedModel = _selectedModelEntry;
     final effectiveReasoning = _effectiveReasoningEffort;
     String? reasoningDescription;

@@ -4914,10 +4914,6 @@ class _SessionScreenState extends State<SessionScreen>
     return 'Choose model';
   }
 
-  bool _composerModelCustomized(SessionSummary session) {
-    return _cleanComposerLabel(_composerTurnConfig(session).model) != null;
-  }
-
   String _composerThinkingLabel(SessionSummary session) {
     final turnConfig = _composerTurnConfig(session);
     final override = _cleanComposerLabel(turnConfig.reasoningEffort);
@@ -4940,11 +4936,6 @@ class _SessionScreenState extends State<SessionScreen>
       return 'Current thinking';
     }
     return 'Thinking';
-  }
-
-  bool _composerThinkingCustomized(SessionSummary session) {
-    return _cleanComposerLabel(_composerTurnConfig(session).reasoningEffort) !=
-        null;
   }
 
   String? _composerRuntimeModelProvider(SessionSummary session) {
@@ -5222,22 +5213,14 @@ class _SessionScreenState extends State<SessionScreen>
         ),
       );
     }
-    return Navigator.of(context).push<ModelCatalogEntry>(
-      MaterialPageRoute<ModelCatalogEntry>(
-        builder: (pageContext) => Scaffold(
-          backgroundColor: pageContext.colors.canvas,
-          body: SafeArea(
-            child: _ModelPickerSheet(
-              models: models,
-              currentModel: currentModel,
-              providerName: providerName,
-              embedded: true,
-              onBack: () => Navigator.of(pageContext).maybePop(),
-              onSelected: (model) => Navigator.of(pageContext).pop(model),
-            ),
-          ),
-        ),
-      ),
+    return showModalBottomSheet<ModelCatalogEntry>(
+      context: context,
+      backgroundColor: Colors.transparent,
+      barrierColor: Colors.black.withValues(alpha: 0.28),
+      showDragHandle: false,
+      useSafeArea: true,
+      isScrollControlled: true,
+      builder: (sheetContext) => picker,
     );
   }
 
@@ -7035,9 +7018,6 @@ class _SessionScreenState extends State<SessionScreen>
               modelDetail: showModelPicker
                   ? _composerModelDetail(session)
                   : null,
-              modelCustomized: showModelPicker
-                  ? _composerModelCustomized(session)
-                  : false,
               onModelTap: showModelPicker
                   ? () => _showComposerModelPicker(session)
                   : null,
@@ -7047,9 +7027,6 @@ class _SessionScreenState extends State<SessionScreen>
               thinkingDetail: showThinkingPicker
                   ? _composerThinkingDetail(session)
                   : null,
-              thinkingCustomized: showThinkingPicker
-                  ? _composerThinkingCustomized(session)
-                  : false,
               onThinkingTap: showThinkingPicker
                   ? () => _showComposerThinkingPicker(session)
                   : null,
