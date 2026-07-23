@@ -185,7 +185,25 @@ class ApiClient {
       queryParameters: limit == null ? null : {'limit': '$limit'},
       operation: 'load recent sessions',
     );
-    return _decodeList(response).map(SessionSummary.fromJson).toList();
+    return _decodeList(response)
+        .map(SessionSummary.fromJson)
+        .where((session) => !session.isSubAgent)
+        .toList();
+  }
+
+  Future<List<AgentRunSummary>> fetchAgentRuns(
+    HostProfile host,
+    String parentSessionId, {
+    int? limit,
+  }) async {
+    final response = await _get(
+      host,
+      '/api/sessions/${Uri.encodeComponent(parentSessionId)}/agent-runs',
+      queryParameters: limit == null ? null : {'limit': '$limit'},
+      timeout: _standardReadTimeout,
+      operation: 'load agents',
+    );
+    return _decodeList(response).map(AgentRunSummary.fromJson).toList();
   }
 
   Future<List<SessionSummary>> searchSessions(
@@ -204,7 +222,10 @@ class ApiClient {
       timeout: _standardReadTimeout,
       operation: 'search sessions',
     );
-    return _decodeList(response).map(SessionSummary.fromJson).toList();
+    return _decodeList(response)
+        .map(SessionSummary.fromJson)
+        .where((session) => !session.isSubAgent)
+        .toList();
   }
 
   Future<List<PendingAction>> fetchPendingActions(HostProfile host) async {

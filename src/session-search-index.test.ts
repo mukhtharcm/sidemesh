@@ -600,7 +600,7 @@ describe("SessionSearchIndex", () => {
     await index2.close();
   });
 
-  it("schema v3 migration preserves search data while normalizing timestamps", async () => {
+  it("schema v4 migration clears peer-session search data for rebuild", async () => {
     const db = new DatabaseSync(dbPath);
     const createdAtSeconds = Math.trunc(NOW / 1000) - 60;
     const updatedAtSeconds = Math.trunc(NOW / 1000);
@@ -639,7 +639,7 @@ describe("SessionSearchIndex", () => {
       );
     `);
     db.prepare(
-      `INSERT INTO session_search_meta (key, value) VALUES ('schema_version', '2')`
+      `INSERT INTO session_search_meta (key, value) VALUES ('schema_version', '3')`
     ).run();
     db.prepare(`
       INSERT INTO session_search_documents (
@@ -682,26 +682,19 @@ describe("SessionSearchIndex", () => {
     await index.open();
 
     const results = await index.search("stale", 10);
-    assert.equal(results.length, 1);
-    assert.equal(results[0].sessionId, "stale-session");
-    assert.equal(index.getStats().indexedSessions, 1);
+    assert.deepEqual(results, []);
+    assert.equal(index.getStats().indexedSessions, 0);
 
     await index.close();
 
     const reopened = new DatabaseSync(dbPath);
     const counts = reopened.prepare(`
       SELECT
-        created_at AS createdAt,
-        updated_at AS updatedAt,
         (SELECT COUNT(*) FROM session_search_documents) AS documentCount,
         (SELECT COUNT(*) FROM manifest) AS manifestCount,
         (SELECT COUNT(*) FROM session_manifest) AS sessionManifestCount,
         (SELECT COUNT(*) FROM session_fts) AS ftsCount
-      FROM session_search_documents
-      WHERE session_id = 'stale-session'
     `).get() as {
-      createdAt: number;
-      updatedAt: number;
       documentCount: number;
       manifestCount: number;
       sessionManifestCount: number;
@@ -709,12 +702,10 @@ describe("SessionSearchIndex", () => {
     };
     reopened.close();
 
-    assert.equal(counts.createdAt, createdAtSeconds * 1000);
-    assert.equal(counts.updatedAt, updatedAtSeconds * 1000);
-    assert.equal(counts.documentCount, 1);
-    assert.equal(counts.manifestCount, 1);
+    assert.equal(counts.documentCount, 0);
+    assert.equal(counts.manifestCount, 0);
     assert.equal(counts.sessionManifestCount, 0);
-    assert.equal(counts.ftsCount, 1);
+    assert.equal(counts.ftsCount, 0);
   });
   it("rollout-indexed sessions support filter queries", async () => {
     const index = new SessionSearchIndex(dbPath);
