@@ -1807,10 +1807,6 @@ class _RecentPaneState extends State<RecentPane> {
             ? const <_SessionGroup>[]
             : _groupEntries(sortedEntries);
         final isGrouped = groupByProject && groups.isNotEmpty;
-        final hasCachedEntries =
-            _store.entries.isNotEmpty &&
-            _store.confirmedHostIds.length < widget.hosts.length;
-        final isRefreshing = _store.pendingHostIds.isNotEmpty;
         final failureLabels = _mergeHostLabels(
           _store.failedHostLabels,
           _searchFailedHostLabels,
@@ -1836,12 +1832,6 @@ class _RecentPaneState extends State<RecentPane> {
             child: ListView(
               physics: const AlwaysScrollableScrollPhysics(),
               children: [
-                if (isRefreshing)
-                  _RecentProgressStrip(
-                    remaining: _store.pendingHostIds.length,
-                    total: widget.hosts.length,
-                    showingCached: hasCachedEntries,
-                  ),
                 if (hasFailures)
                   _RecentErrorBanner(
                     hostLabels: failureLabels,
@@ -1861,7 +1851,7 @@ class _RecentPaneState extends State<RecentPane> {
             ),
           );
         }
-        final leadingStrips = (isRefreshing ? 1 : 0) + (hasFailures ? 1 : 0);
+        final leadingStrips = hasFailures ? 1 : 0;
         return Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
@@ -1873,16 +1863,6 @@ class _RecentPaneState extends State<RecentPane> {
                   child: RecentSessionControlsMenu(),
                 ),
               ),
-            if (_searchLoading)
-              const Padding(
-                padding: EdgeInsets.fromLTRB(16, 4, 16, 6),
-                child: MeshStatusRail(
-                  label: 'Updating results',
-                  icon: Icons.search_rounded,
-                  active: true,
-                  tone: MeshStatusRailTone.accent,
-                ),
-              ),
             SizedBox(height: widget.dense ? 4 : 8),
             Expanded(
               child: RefreshIndicator(
@@ -1892,10 +1872,8 @@ class _RecentPaneState extends State<RecentPane> {
                     ? _buildGroupedList(
                         context,
                         groups,
-                        isRefreshing: isRefreshing,
                         hasFailures: hasFailures,
                         failureLabels: failureLabels,
-                        hasCachedEntries: hasCachedEntries,
                         handleRefresh: handleRefresh,
                       )
                     : ListView.separated(
@@ -1905,16 +1883,6 @@ class _RecentPaneState extends State<RecentPane> {
                             SizedBox(height: widget.dense ? 2 : AppSpacing.sm),
                         itemBuilder: (context, index) {
                           var offset = 0;
-                          if (isRefreshing) {
-                            if (index == offset) {
-                              return _RecentProgressStrip(
-                                remaining: _store.pendingHostIds.length,
-                                total: widget.hosts.length,
-                                showingCached: hasCachedEntries,
-                              );
-                            }
-                            offset += 1;
-                          }
                           if (hasFailures) {
                             if (index == offset) {
                               return _RecentErrorBanner(
@@ -1939,10 +1907,8 @@ class _RecentPaneState extends State<RecentPane> {
   Widget _buildGroupedList(
     BuildContext context,
     List<_SessionGroup> groups, {
-    required bool isRefreshing,
     required bool hasFailures,
     required List<String> failureLabels,
-    required bool hasCachedEntries,
     required Future<void> Function() handleRefresh,
   }) {
     final padding =
@@ -1953,7 +1919,6 @@ class _RecentPaneState extends State<RecentPane> {
     return ListView.builder(
       padding: padding,
       itemCount:
-          (isRefreshing ? 1 : 0) +
           (hasFailures ? 1 : 0) +
           groups.fold<int>(0, (sum, g) {
             final collapsed = widget.dense && _collapsedGroups.contains(g.key);
@@ -1961,19 +1926,6 @@ class _RecentPaneState extends State<RecentPane> {
           }),
       itemBuilder: (context, index) {
         var offset = 0;
-        if (isRefreshing) {
-          if (index == offset) {
-            return Padding(
-              padding: EdgeInsets.only(bottom: widget.dense ? 6 : 10),
-              child: _RecentProgressStrip(
-                remaining: _store.pendingHostIds.length,
-                total: widget.hosts.length,
-                showingCached: hasCachedEntries,
-              ),
-            );
-          }
-          offset += 1;
-        }
         if (hasFailures) {
           if (index == offset) {
             return Padding(
@@ -2589,9 +2541,7 @@ class _InboxPaneState extends State<InboxPane> {
             return matchesSearchQuery(haystack, query);
           }).toList();
 
-    final isRefreshing = _store.isLoading;
     final hasFailures = _store.failedHostLabels.isNotEmpty;
-    final hasCachedEntries = allEntries.isNotEmpty;
     final hasVisibleContent = pending.isNotEmpty || entries.isNotEmpty;
     final sectionSpacing = SizedBox(height: widget.dense ? 8 : 12);
     final cardSpacing = SizedBox(height: widget.dense ? 4 : 10);
@@ -2604,13 +2554,6 @@ class _InboxPaneState extends State<InboxPane> {
             ? const EdgeInsets.fromLTRB(8, 4, 8, 24)
             : const EdgeInsets.fromLTRB(16, 8, 16, 32),
         children: [
-          if (isRefreshing)
-            _RecentProgressStrip(
-              remaining: _store.pendingHostsRemaining,
-              total: _store.totalHosts,
-              showingCached: hasCachedEntries,
-            ),
-          if (isRefreshing) sectionSpacing,
           if (hasFailures)
             _RecentErrorBanner(
               hostLabels: _store.failedHostLabels,
@@ -4830,36 +4773,6 @@ String _randomId() {
     12,
     (_) => alphabet[random.nextInt(alphabet.length)],
   ).join();
-}
-
-class _RecentProgressStrip extends StatelessWidget {
-  const _RecentProgressStrip({
-    required this.remaining,
-    required this.total,
-    required this.showingCached,
-  });
-
-  final int remaining;
-  final int total;
-  final bool showingCached;
-
-  @override
-  Widget build(BuildContext context) {
-    final loaded = (total - remaining).clamp(0, total);
-    final progress = total <= 0 ? 0.0 : loaded / total;
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 6, 16, 6),
-      child: MeshStatusRail(
-        label: showingCached
-            ? 'Syncing sessions, $loaded of $total hosts ready'
-            : 'Loading sessions, $loaded of $total hosts ready',
-        icon: Icons.hub_rounded,
-        progress: progress,
-        active: true,
-        tone: MeshStatusRailTone.accent,
-      ),
-    );
-  }
 }
 
 class _RecentErrorBanner extends StatelessWidget {
