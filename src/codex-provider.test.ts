@@ -909,13 +909,18 @@ describe("codex rich live event mappings", () => {
       },
     };
 
-    const listed = await provider.listSessionThreads({ limit: 10, archived: false });
+    const listed = await provider.listSessionThreads({
+      limit: 10,
+      archived: false,
+      includeSubAgents: true,
+      subAgentParentId: "thread-parent",
+    });
 
     assert.deepEqual(requests, [
       {
         method: "thread/list",
         params: {
-          limit: 10,
+          limit: 200,
           sortKey: "updated_at",
           sortDirection: "desc",
           sourceKinds: [
@@ -936,6 +941,47 @@ describe("codex rich live event mappings", () => {
       agentNickname: "scout",
       depth: 2,
     });
+  });
+
+  it("paginates past child-only pages when listing top-level sessions", async () => {
+    const provider = new CodexAgentProvider("codex") as any;
+    const requests: unknown[] = [];
+    provider.bridge = {
+      request: async (method: string, params: unknown) => {
+        assert.equal(method, "thread/list");
+        requests.push(params);
+        if (requests.length === 1) {
+          return {
+            data: [
+              {
+                ...createThread(),
+                id: "thread-child",
+                source: {
+                  subAgent: {
+                    thread_spawn: { parent_thread_id: "thread-parent" },
+                  },
+                },
+              },
+            ],
+            nextCursor: "page-2",
+          };
+        }
+        return {
+          data: [{ ...createThread(), id: "thread-primary" }],
+          nextCursor: null,
+        };
+      },
+    };
+
+    const listed = await provider.listSessionThreads({
+      limit: 1,
+      archived: false,
+    });
+
+    assert.deepEqual(listed.map((thread: ThreadRecord) => thread.id), [
+      "thread-primary",
+    ]);
+    assert.equal((requests[1] as { cursor?: string }).cursor, "page-2");
   });
 
   it("normalizes Codex thread status, plan, reasoning, and warning notifications", () => {

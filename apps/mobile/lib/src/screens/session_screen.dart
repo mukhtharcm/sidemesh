@@ -22,12 +22,14 @@ import '../provider_labels.dart';
 import '../search_query.dart';
 import 'browser_preview_screen.dart';
 import 'browser_tabs_screen.dart';
+import 'agent_runs_screen.dart';
 import 'create_session_sheet.dart';
 import 'file_browser_screen.dart';
 import 'file_viewer_screen.dart';
 import 'image_viewer_screen.dart';
 import 'terminal_screen.dart';
 import 'inspector/inspector_browser_tabs.dart';
+import 'inspector/inspector_agents.dart';
 import 'inspector/inspector_browser_preview.dart';
 import 'inspector/inspector_controller.dart';
 import 'inspector/inspector_file_browser.dart';
@@ -1342,6 +1344,16 @@ class _SessionScreenState extends State<SessionScreen>
       return;
     }
     switch (kind) {
+      case InspectorSurfaceKind.agents:
+        controller.show(
+          buildInspectorAgentsSurface(
+            ownerKey: ownerKey,
+            host: widget.host,
+            session: _session ?? widget.session,
+            api: widget.api,
+          ),
+        );
+        break;
       case InspectorSurfaceKind.search:
         controller.show(
           buildInspectorSearchSurface(
@@ -1707,6 +1719,34 @@ class _SessionScreenState extends State<SessionScreen>
               _openWorkspaceFile(path);
             });
           },
+        ),
+      ),
+    );
+  }
+
+  void _openAgentsPanel() {
+    final width = MediaQuery.of(context).size.width;
+    final scope = InspectorScope.maybeOf(context);
+    final session = _session ?? widget.session;
+    if (width >= 900 && scope != null) {
+      scope.toggle(
+        buildInspectorAgentsSurface(
+          ownerKey: _inspectorOwnerKey(),
+          host: widget.host,
+          session: session,
+          api: widget.api,
+        ),
+      );
+      return;
+    }
+    unawaited(
+      Navigator.of(context).push(
+        MaterialPageRoute<void>(
+          builder: (_) => AgentRunsScreen(
+            host: widget.host,
+            session: session,
+            api: widget.api,
+          ),
         ),
       ),
     );
@@ -6266,6 +6306,9 @@ class _SessionScreenState extends State<SessionScreen>
           _openResourcesPanel();
         }
         break;
+      case 'agents':
+        _openAgentsPanel();
+        break;
       case 'favorite':
         _toggleFavorite();
         break;
@@ -6327,6 +6370,12 @@ class _SessionScreenState extends State<SessionScreen>
       _SessionActionGroup(
         label: 'Open',
         actions: [
+          const _SessionActionSpec(
+            value: 'agents',
+            label: 'Agents',
+            detail: 'View agents spawned by this session.',
+            icon: Icons.account_tree_rounded,
+          ),
           if (_supportsBrowserPreview)
             _SessionActionSpec(
               value: 'preview',

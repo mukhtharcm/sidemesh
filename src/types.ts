@@ -248,6 +248,23 @@ export interface SessionSummary {
   matchRank?: number | null;
 }
 
+export interface AgentRunSummary {
+  id: string;
+  parentSessionId: string;
+  title: string;
+  preview: string;
+  cwd: string;
+  createdAt: number;
+  updatedAt: number;
+  provider?: string | null;
+  status: string;
+  agentName?: string | null;
+  agentDisplayName?: string | null;
+  agentRole?: string | null;
+  agentNickname?: string | null;
+  depth?: number | null;
+}
+
 export interface GitInfoSummary {
   sha: string | null;
   branch: string | null;

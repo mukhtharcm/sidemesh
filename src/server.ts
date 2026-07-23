@@ -39,6 +39,7 @@ import {
 } from "./agent-provider.js";
 import type {
   ActiveTurnState,
+  AgentRunSummary,
   ApprovalLiveEvent,
   GitInfoSummary,
   HostCapabilities,
@@ -1033,6 +1034,10 @@ export async function startServer(
     } catch {
       try {
         const thread = await readSession(provider, sessionId, false);
+        if (sessionSubAgentForThread(thread)) {
+          broadcastRecentSessionsLive({ type: "remove", sessionId });
+          return;
+        }
         const session = await buildRecentSessionSummary(
           provider,
           runtimeCache,
@@ -1846,6 +1851,10 @@ export async function startServer(
           if (!thread) {
             return null;
           }
+          if (sessionSubAgentForThread(thread)) {
+            await searchIndex.remove(result.sessionId).catch(() => undefined);
+            return null;
+          }
           const runtime = await loadCachedSessionRuntime(provider, thread, runtimeCache, "active");
           const session = mapSession(
             thread,
@@ -1868,6 +1877,56 @@ export async function startServer(
         .sort(compareSessionSearchSummary)
         .slice(0, limit);
       response.json(sessions);
+    }),
+  );
+
+  app.get(
+    "/api/sessions/:sessionId/agent-runs",
+    asyncRoute(async (request, response) => {
+      const sessionId = pathParam(request.params.sessionId);
+      const sessionProvider = providerEntryForSessionId(sessionId);
+      if (!sessionProvider) {
+        response.status(400).json({ error: "unknown provider" });
+        return;
+      }
+      if (
+        !requireProviderCapability(
+          response,
+          sessionProvider.provider,
+          sessionProvider.provider.capabilities.sessions.history,
+          "agent runs",
+          "listSessionThreads",
+        )
+      ) {
+        return;
+      }
+      const requestedLimit = Math.max(
+        1,
+        Math.min(
+          asInteger((request.query as Record<string, unknown>)?.limit) ?? 100,
+          200,
+        ),
+      );
+      const listThreads = requireProviderMethod(
+        provider,
+        "listSessionThreads",
+        "agent runs",
+      );
+      const threads = await listThreads.call(provider, {
+        limit: requestedLimit,
+        archived: false,
+        includeSubAgents: true,
+        subAgentParentId: sessionId,
+      });
+      const runs = threads
+        .map(mapAgentRun)
+        .filter(
+          (run): run is AgentRunSummary =>
+            run != null && run.parentSessionId === sessionId,
+        )
+        .sort((left, right) => right.updatedAt - left.updatedAt)
+        .slice(0, requestedLimit);
+      response.json(runs);
     }),
   );
 
@@ -3554,11 +3613,22 @@ export async function startServer(
           const threads = await provider.listSessionThreads!({
             limit: 200,
             archived,
+            includeSubAgents: false,
           });
           const batches = chunkArray(threads, batchSize);
           for (const batch of batches) {
             for (const thread of batch) {
               try {
+                if (sessionSubAgentForThread(thread)) {
+                  const staleSessionKey = indexedSessionIdForProvider(
+                    providerRuntime,
+                    providerKind,
+                    thread.id,
+                  );
+                  await searchIndex.remove(staleSessionKey);
+                  totalRemoved++;
+                  continue;
+                }
                 const log = await provider.readSessionLog!(thread, {
                   messageLimit: 200,
                   activityLimit: 200,
@@ -4113,11 +4183,14 @@ async function buildRecentSessionSummaries(
     sessionId: string,
   ) => LiveThreadStatus | null | Promise<LiveThreadStatus | null>,
 ): Promise<SessionSummary[]> {
-  if (threads.length === 0) {
+  const topLevelThreads = threads.filter(
+    (thread) => sessionSubAgentForThread(thread) == null,
+  );
+  if (topLevelThreads.length === 0) {
     return [];
   }
   const sessions = await mapWithConcurrency(
-    threads,
+    topLevelThreads,
     RECENT_SESSION_RUNTIME_CONCURRENCY,
     async (thread) =>
       mapSession(
@@ -4167,6 +4240,7 @@ async function listSessions(
   const threads = await listThreads.call(provider, {
     limit,
     archived: false,
+    includeSubAgents: false,
   });
   const mergedThreads = await mergeRecentUnindexedThreads(
     provider,
@@ -4330,6 +4404,10 @@ async function indexSessionForSearch(
   }
   try {
     const thread = await readSession(provider, sessionId, false);
+    if (sessionSubAgentForThread(thread)) {
+      await searchIndex.remove(sessionId);
+      return;
+    }
     const log = await provider.readSessionLog!(thread, {
       messageLimit: 200,
       activityLimit: 200,
@@ -4800,6 +4878,29 @@ function mapSession(
     gitInfo: mapGitInfo(thread.gitInfo),
     isSubAgent: subAgent != null,
     subAgent,
+  };
+}
+
+function mapAgentRun(thread: ThreadRecord): AgentRunSummary | null {
+  const subAgent = sessionSubAgentForThread(thread);
+  if (!subAgent?.parentSessionId) {
+    return null;
+  }
+  return {
+    id: thread.id,
+    parentSessionId: subAgent.parentSessionId,
+    title: sanitizeTitle(thread.name || thread.preview),
+    preview: thread.preview,
+    cwd: thread.cwd,
+    createdAt: threadTimestampMillis(thread.createdAt),
+    updatedAt: threadTimestampMillis(thread.updatedAt),
+    provider: providerKindForThread(thread),
+    status: resolvedSessionStatus(thread, null),
+    agentName: subAgent.agentName ?? null,
+    agentDisplayName: subAgent.agentDisplayName ?? null,
+    agentRole: subAgent.agentRole ?? null,
+    agentNickname: subAgent.agentNickname ?? null,
+    depth: subAgent.depth ?? null,
   };
 }
 

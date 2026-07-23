@@ -25,6 +25,7 @@ class ApiClient {
 
   static const Duration _quickReadTimeout = Duration(seconds: 6);
   static const Duration _standardReadTimeout = Duration(seconds: 12);
+  static const Duration _agentRunsReadTimeout = Duration(seconds: 30);
   static const Duration _transcriptReadTimeout = Duration(seconds: 25);
   static const Duration _diffReadTimeout = Duration(seconds: 25);
   static const Duration _turnWriteTimeout = Duration(seconds: 45);
@@ -185,7 +186,25 @@ class ApiClient {
       queryParameters: limit == null ? null : {'limit': '$limit'},
       operation: 'load recent sessions',
     );
-    return _decodeList(response).map(SessionSummary.fromJson).toList();
+    return _decodeList(response)
+        .map(SessionSummary.fromJson)
+        .where((session) => !session.isSubAgent)
+        .toList();
+  }
+
+  Future<List<AgentRunSummary>> fetchAgentRuns(
+    HostProfile host,
+    String parentSessionId, {
+    int? limit,
+  }) async {
+    final response = await _get(
+      host,
+      '/api/sessions/${Uri.encodeComponent(parentSessionId)}/agent-runs',
+      queryParameters: limit == null ? null : {'limit': '$limit'},
+      timeout: _agentRunsReadTimeout,
+      operation: 'load agents',
+    );
+    return _decodeList(response).map(AgentRunSummary.fromJson).toList();
   }
 
   Future<List<SessionSummary>> searchSessions(
@@ -204,7 +223,10 @@ class ApiClient {
       timeout: _standardReadTimeout,
       operation: 'search sessions',
     );
-    return _decodeList(response).map(SessionSummary.fromJson).toList();
+    return _decodeList(response)
+        .map(SessionSummary.fromJson)
+        .where((session) => !session.isSubAgent)
+        .toList();
   }
 
   Future<List<PendingAction>> fetchPendingActions(HostProfile host) async {

@@ -142,6 +142,13 @@ export interface AgentSubmitInputResult {
 export interface AgentSessionListOptions {
   limit: number;
   archived: boolean;
+  /**
+   * Includes provider-owned child sessions spawned by another session.
+   * Normal session-history surfaces intentionally leave this false.
+   */
+  includeSubAgents?: boolean;
+  /** Limits child-session discovery to runs spawned by this parent. */
+  subAgentParentId?: string;
 }
 
 export interface AgentSessionResumeOptions {
