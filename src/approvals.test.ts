@@ -51,6 +51,10 @@ describe("provider-neutral approvals", () => {
   });
 
   it("normalizes legacy and structured response bodies", () => {
+    assert.deepEqual(
+      parsePendingActionResponseBody({ providerOptionId: "allow-once" }),
+      { providerOptionId: "allow-once" },
+    );
     assert.deepEqual(parsePendingActionResponseBody({ decision: "accept" }), {
       decision: "approve",
       scope: "once",

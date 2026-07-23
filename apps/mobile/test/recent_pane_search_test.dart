@@ -14,6 +14,7 @@ import 'package:sidemesh_mobile/src/session_read_store.dart';
 import 'package:sidemesh_mobile/src/theme/app_palettes.dart';
 import 'package:sidemesh_mobile/src/theme/app_theme.dart';
 import 'package:sidemesh_mobile/src/theme/theme_controller.dart';
+import 'package:sidemesh_mobile/src/widgets/recent_session_controls_menu.dart';
 import 'package:stream_channel/stream_channel.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
 

@@ -308,10 +308,19 @@ sleep 10
       events,
       (action) => action.kind === "permissions",
     );
+    assert.deepEqual(permissionAction.approval?.providerOptions, [
+      { id: "once", label: "Allow once", kind: "allow_once" },
+      {
+        id: "always",
+        label: "Allow matching requests",
+        kind: "allow_always",
+        description: "Remember the suggested patterns for this OpenCode session.",
+      },
+      { id: "reject", label: "Reject", kind: "reject_once" },
+    ]);
     assert.equal(
       provider.respondToPendingAction(permissionAction, {
-        decision: "approve",
-        scope: "location",
+        providerOptionId: "always",
       }),
       true,
     );

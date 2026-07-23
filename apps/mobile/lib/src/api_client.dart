@@ -137,6 +137,25 @@ class ApiClient {
     return ProviderProfileCatalog.fromJson(_decodeObject(response));
   }
 
+  Future<ProviderAccessModeCatalog> fetchAccessModes(
+    HostProfile host, {
+    String? cwd,
+    String? agentProvider,
+  }) async {
+    final queryParameters = <String, String>{
+      if ((cwd ?? '').isNotEmpty) 'cwd': cwd!,
+      if ((agentProvider ?? '').isNotEmpty) 'agentProvider': agentProvider!,
+    };
+    final response = await _get(
+      host,
+      '/api/access-modes',
+      queryParameters: queryParameters.isEmpty ? null : queryParameters,
+      timeout: _standardReadTimeout,
+      operation: 'load access modes',
+    );
+    return ProviderAccessModeCatalog.fromJson(_decodeObject(response));
+  }
+
   Future<ProviderModeCatalog> fetchModes(
     HostProfile host, {
     String? cwd,
@@ -544,6 +563,7 @@ class ApiClient {
     bool? networkAccess,
     String? webSearch,
     String? profile,
+    String? accessMode,
   }) async {
     final body = <String, dynamic>{'cwd': cwd, 'prompt': prompt};
     if ((provider ?? '').isNotEmpty) {
@@ -579,6 +599,9 @@ class ApiClient {
     if ((profile ?? '').isNotEmpty) {
       body['profile'] = profile;
     }
+    if ((accessMode ?? '').isNotEmpty) {
+      body['accessMode'] = accessMode;
+    }
     final response = await _post(
       host,
       '/api/sessions/create',
@@ -602,6 +625,7 @@ class ApiClient {
     String? approvalPolicy,
     String? sandboxMode,
     bool? networkAccess,
+    String? accessMode,
   }) async {
     final body = <String, dynamic>{
       if (text.isNotEmpty) 'text': text,
@@ -625,6 +649,9 @@ class ApiClient {
       ...?networkAccess == null
           ? null
           : <String, dynamic>{'networkAccess': networkAccess},
+      ...?(accessMode ?? '').isEmpty
+          ? null
+          : <String, dynamic>{'accessMode': accessMode},
     };
     await _post(
       host,

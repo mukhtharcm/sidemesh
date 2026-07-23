@@ -226,11 +226,15 @@ describe("AcpxAgentProvider", () => {
     assert.equal(openedEvent.action.sessionId, "session-approval");
     assert.equal(openedEvent.action.kind, "command");
     assert.equal(openedEvent.action.approval?.category, "command");
+    assert.deepEqual(openedEvent.action.approval?.providerOptions, [
+      { id: "allow-this", label: "Allow this command", kind: "allow_once" },
+      { id: "allow-session", label: "Allow similar commands", kind: "allow_always" },
+      { id: "deny-this", label: "Deny", kind: "reject_once" },
+    ]);
 
     assert.equal(
       provider.respondToPendingAction(openedEvent.action, {
-        decision: "approve",
-        scope: "session",
+        providerOptionId: "allow-session",
       }),
       true,
     );
@@ -376,7 +380,11 @@ function makePermissionRequest(): AcpPermissionRequest {
         kind: "execute",
         rawInput: { command: "npm", args: ["test"] },
       },
-      options: [],
+      options: [
+        { optionId: "allow-this", name: "Allow this command", kind: "allow_once" },
+        { optionId: "allow-session", name: "Allow similar commands", kind: "allow_always" },
+        { optionId: "deny-this", name: "Deny", kind: "reject_once" },
+      ],
     },
   } as unknown as AcpPermissionRequest;
 }

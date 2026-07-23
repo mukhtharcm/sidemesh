@@ -38,6 +38,7 @@ export function buildCodexInitializeParams(clientVersion: string) {
       version: clientVersion,
     },
     capabilities: {
+      experimentalApi: true,
       mcpServerOpenaiFormElicitation: true,
     },
   };

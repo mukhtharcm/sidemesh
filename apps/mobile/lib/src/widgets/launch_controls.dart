@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../theme/app_colors.dart';
 import '../theme/app_tokens.dart';
+import 'app_primitives.dart';
 import 'mesh_widgets.dart';
 
 /// Shared visual atoms used by launch-option surfaces (create-session,
@@ -133,18 +134,17 @@ class LaunchSelectorRow extends StatelessWidget {
   }
 }
 
-/// Outlined group container with an icon, title, optional trailing widget,
-/// and a vertical stack of children.
+/// Section heading with an optional trailing widget and a vertical stack of
+/// controls. The section deliberately uses the page canvas instead of adding
+/// another surface around controls that already have an edge.
 class LaunchControlGroup extends StatelessWidget {
   const LaunchControlGroup({
     super.key,
-    required this.icon,
     required this.title,
     required this.children,
     this.trailing,
   });
 
-  final IconData icon;
   final String title;
   final List<Widget> children;
   final Widget? trailing;
@@ -152,34 +152,26 @@ class LaunchControlGroup extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colors = context.colors;
-    return MeshSurface(
-      tone: MeshSurfaceTone.muted,
-      width: double.infinity,
-      radius: AppRadii.control,
-      padding: AppPadding.cardSm,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Icon(icon, size: 16, color: colors.accent),
-              const SizedBox(width: AppSpacing.sm),
-              Expanded(
-                child: Text(
-                  title,
-                  style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                    fontWeight: AppWeights.emphasis,
-                    color: colors.textPrimary,
-                  ),
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            Expanded(
+              child: Text(
+                title,
+                style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                  fontWeight: AppWeights.title,
+                  color: colors.textPrimary,
                 ),
               ),
-              ?trailing,
-            ],
-          ),
-          const SizedBox(height: AppSpacing.sm),
-          ...children,
-        ],
-      ),
+            ),
+            ?trailing,
+          ],
+        ),
+        const SizedBox(height: AppSpacing.sm),
+        ...children,
+      ],
     );
   }
 }
@@ -245,7 +237,7 @@ class LaunchChoiceWrap<T> extends StatelessWidget {
                       ? accent.withValues(alpha: 0.14)
                       : colors.surfaceMuted,
                   borderRadius: BorderRadius.circular(999),
-                  border: Border.all(color: selected ? accent : colors.border),
+                  border: selected ? Border.all(color: accent) : null,
                 ),
                 child: Row(
                   mainAxisSize: MainAxisSize.min,
@@ -299,45 +291,12 @@ class LaunchSwitchRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final colors = context.colors;
-    return MeshSurface(
-      tone: value ? MeshSurfaceTone.surface : MeshSurfaceTone.muted,
-      selected: value,
-      radius: AppRadii.control,
-      padding: const EdgeInsets.fromLTRB(10, 8, 8, 8),
-      child: Row(
-        children: [
-          Icon(
-            icon,
-            size: 18,
-            color: value ? colors.accent : colors.textSecondary,
-          ),
-          const SizedBox(width: 9),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  title,
-                  style: Theme.of(context).textTheme.labelLarge?.copyWith(
-                    fontWeight: AppWeights.title,
-                    color: colors.textPrimary,
-                  ),
-                ),
-                const SizedBox(height: 1),
-                Text(
-                  subtitle,
-                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                    color: colors.textSecondary,
-                    height: 1.25,
-                  ),
-                ),
-              ],
-            ),
-          ),
-          Switch(value: value, onChanged: enabled ? onChanged : null),
-        ],
-      ),
+    return AppSettingsRow(
+      icon: icon,
+      title: title,
+      subtitle: subtitle,
+      onTap: enabled ? () => onChanged(!value) : null,
+      trailing: Switch(value: value, onChanged: enabled ? onChanged : null),
     );
   }
 }
@@ -384,21 +343,7 @@ class _IconChip extends StatelessWidget {
       _IconChipTone.surface => colors.surface,
       _IconChipTone.accent => colors.accentMuted,
     };
-    final border = switch (tone) {
-      _IconChipTone.surface => colors.border,
-      _IconChipTone.accent => colors.accent.withValues(alpha: 0.24),
-    };
-    return Container(
-      width: 32,
-      height: 32,
-      decoration: BoxDecoration(
-        color: bg,
-        borderRadius: BorderRadius.circular(11),
-        border: Border.all(color: border),
-      ),
-      alignment: Alignment.center,
-      child: Icon(icon, color: colors.accent, size: 17),
-    );
+    return AppIconWell(icon: icon, background: bg);
   }
 }
 

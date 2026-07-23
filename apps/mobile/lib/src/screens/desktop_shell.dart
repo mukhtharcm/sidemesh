@@ -20,6 +20,7 @@ import '../theme/app_tokens.dart';
 import '../widgets/app_snackbar.dart';
 import '../widgets/mesh_widgets.dart';
 import '../widgets/notification_permission_banner.dart';
+import '../widgets/recent_session_controls_menu.dart';
 import '../onboarding_store.dart';
 import '../theme/theme_controller.dart';
 import 'desktop_welcome_overlay.dart';
@@ -1494,11 +1495,24 @@ class _Sidebar extends StatelessWidget {
         .where((host) => host.enabled)
         .toList(growable: false);
     final canStartSession = enabledHosts.isNotEmpty;
-    final headerAction = switch (section) {
-      _SidebarSection.recent => _ListPaneActionButton(
-        icon: Icons.add_rounded,
-        label: 'New',
-        onTap: hosts.isEmpty || canStartSession ? onStartSession : null,
+    final Widget headerAction = switch (section) {
+      _SidebarSection.recent => Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          RecentSessionControlsMenu(
+            showGrouping: query.trim().isEmpty,
+            filters: recentFilters,
+            onRunningOnlyChanged: onRecentRunningOnlyChanged,
+            onUnreadOnlyChanged: onRecentUnreadOnlyChanged,
+            onFavoritesOnlyChanged: onRecentFavoritesOnlyChanged,
+          ),
+          const SizedBox(width: AppSpacing.xs),
+          _ListPaneActionButton(
+            icon: Icons.add_rounded,
+            label: 'New',
+            onTap: hosts.isEmpty || canStartSession ? onStartSession : null,
+          ),
+        ],
       ),
       _SidebarSection.hosts => _ListPaneActionButton(
         icon: Icons.add_link_rounded,
@@ -1530,17 +1544,6 @@ class _Sidebar extends StatelessWidget {
                 onClear: onClearSearch,
               ),
             ),
-            if (section == _SidebarSection.recent)
-              Padding(
-                padding: const EdgeInsets.fromLTRB(16, 0, 16, 10),
-                child: _RecentControlsBar(
-                  showGrouping: query.trim().isEmpty,
-                  filters: recentFilters,
-                  onRunningOnlyChanged: onRecentRunningOnlyChanged,
-                  onUnreadOnlyChanged: onRecentUnreadOnlyChanged,
-                  onFavoritesOnlyChanged: onRecentFavoritesOnlyChanged,
-                ),
-              ),
             if (!canStartSession && section == _SidebarSection.recent)
               Padding(
                 padding: const EdgeInsets.fromLTRB(16, 0, 16, 10),
@@ -1725,113 +1728,6 @@ class _ListPaneActionButton extends StatelessWidget {
           ),
         ),
       ),
-    );
-  }
-}
-
-class _RecentControlsBar extends StatelessWidget {
-  const _RecentControlsBar({
-    required this.showGrouping,
-    required this.filters,
-    required this.onRunningOnlyChanged,
-    required this.onUnreadOnlyChanged,
-    required this.onFavoritesOnlyChanged,
-  });
-
-  final bool showGrouping;
-  final RecentSessionFilters filters;
-  final ValueChanged<bool>? onRunningOnlyChanged;
-  final ValueChanged<bool>? onUnreadOnlyChanged;
-  final ValueChanged<bool>? onFavoritesOnlyChanged;
-
-  @override
-  Widget build(BuildContext context) {
-    return Wrap(
-      spacing: 6,
-      runSpacing: 6,
-      crossAxisAlignment: WrapCrossAlignment.center,
-      children: [
-        if (showGrouping) const RecentSessionGroupingControl(compact: true),
-        _RecentFilterToken(
-          icon: Icons.star_rounded,
-          label: 'Favorites',
-          selected: filters.favoritesOnly,
-          onTap: onFavoritesOnlyChanged == null
-              ? null
-              : () => onFavoritesOnlyChanged!(!filters.favoritesOnly),
-        ),
-        _RecentFilterToken(
-          icon: Icons.play_circle_outline_rounded,
-          label: 'Running',
-          selected: filters.runningOnly,
-          onTap: onRunningOnlyChanged == null
-              ? null
-              : () => onRunningOnlyChanged!(!filters.runningOnly),
-        ),
-        _RecentFilterToken(
-          icon: Icons.mark_chat_unread_rounded,
-          label: 'Unread',
-          selected: filters.unreadOnly,
-          onTap: onUnreadOnlyChanged == null
-              ? null
-              : () => onUnreadOnlyChanged!(!filters.unreadOnly),
-        ),
-      ],
-    );
-  }
-}
-
-class _RecentFilterToken extends StatelessWidget {
-  const _RecentFilterToken({
-    required this.icon,
-    required this.label,
-    required this.selected,
-    this.onTap,
-  });
-
-  final IconData icon;
-  final String label;
-  final bool selected;
-  final VoidCallback? onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    final colors = context.colors;
-    final foreground = selected ? colors.accent : colors.textSecondary;
-    final token = AnimatedContainer(
-      duration: const Duration(milliseconds: 140),
-      curve: Curves.easeOutCubic,
-      padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 7),
-      decoration: BoxDecoration(
-        color: selected
-            ? colors.accentMuted.withValues(alpha: 0.72)
-            : Colors.transparent,
-        borderRadius: AppShapes.badge,
-        border: Border.all(
-          color: selected
-              ? colors.accent.withValues(alpha: 0.28)
-              : Colors.transparent,
-        ),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(icon, size: 14, color: foreground),
-          const SizedBox(width: 6),
-          Text(
-            label,
-            style: Theme.of(context).textTheme.labelMedium?.copyWith(
-              color: selected ? colors.textPrimary : colors.textSecondary,
-              fontWeight: selected ? AppWeights.emphasis : AppWeights.body,
-            ),
-          ),
-        ],
-      ),
-    );
-    if (onTap == null) return token;
-    return Material(
-      color: Colors.transparent,
-      child: InkWell(borderRadius: AppShapes.badge, onTap: onTap, child: token),
     );
   }
 }

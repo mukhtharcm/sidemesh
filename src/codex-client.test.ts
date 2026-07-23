@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import { buildCodexInitializeParams } from "./codex-client.js";
 
 describe("Codex app-server initialization", () => {
-  it("identifies the installed Sidemesh client on the stable protocol surface", () => {
+  it("opts into the permission-profile API while identifying Sidemesh", () => {
     const params = buildCodexInitializeParams("1.2.3");
 
     assert.deepEqual(params, {
@@ -14,9 +14,9 @@ describe("Codex app-server initialization", () => {
         version: "1.2.3",
       },
       capabilities: {
+        experimentalApi: true,
         mcpServerOpenaiFormElicitation: true,
       },
     });
-    assert.equal("experimentalApi" in params.capabilities, false);
   });
 });

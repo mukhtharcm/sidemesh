@@ -160,7 +160,7 @@ class LaunchOptionsForm extends StatelessWidget {
   bool get _hasNetwork =>
       capabilities.supportsWebSearch || capabilities.supportsNetworkAccess;
 
-  double get _gap => dense ? AppSpacing.sm : AppSpacing.md;
+  double get _gap => dense ? AppSpacing.lg : AppSpacing.xl;
 
   @override
   Widget build(BuildContext context) {
@@ -185,8 +185,7 @@ class LaunchOptionsForm extends StatelessWidget {
 
   Widget _buildBrainGroup(BuildContext context) {
     return LaunchControlGroup(
-      icon: Icons.memory_rounded,
-      title: 'Agent',
+      title: 'Model and thinking',
       children: [
         if (brainExtras != null) ...[
           for (var i = 0; i < brainExtras!.length; i++) ...[
@@ -233,7 +232,6 @@ class LaunchOptionsForm extends StatelessWidget {
 
   Widget _buildPermissionsGroup(BuildContext context) {
     return LaunchControlGroup(
-      icon: Icons.verified_user_rounded,
       title: 'Permissions',
       trailing: permissionsTrailing,
       children: [
@@ -277,7 +275,6 @@ class LaunchOptionsForm extends StatelessWidget {
 
   Widget _buildNetworkGroup(BuildContext context) {
     return LaunchControlGroup(
-      icon: Icons.public_rounded,
       title: 'Network',
       children: [
         if (capabilities.supportsNetworkAccess)

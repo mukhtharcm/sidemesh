@@ -10,6 +10,8 @@ import type {
   LiveThreadStatus,
   ModelSummary,
   ProviderModeCatalog,
+  ProviderAccessModeCatalog,
+  ProviderPermissionProfileCatalog,
   PendingAction,
   PendingActionKind,
   ProviderProfileCatalog,
@@ -31,6 +33,16 @@ export interface AgentProviderEvents {
   liveEvent: [event: AgentProviderLiveEvent];
   stderr: [line: string];
   exit: [code: number | null];
+}
+
+export class AgentProviderRequestError extends Error {
+  public constructor(
+    message: string,
+    public readonly status = 400,
+  ) {
+    super(message);
+    this.name = "AgentProviderRequestError";
+  }
 }
 
 export type AgentSessionActivityDraft =
@@ -95,6 +107,11 @@ export interface AgentSessionOverrides {
   networkAccess: boolean | null;
   webSearch: string | null;
   profile: string | null;
+  accessMode?: string | null;
+  /** @deprecated Legacy wire fields retained for older Sidemesh clients. */
+  permissionProfile?: string | null;
+  /** @deprecated Legacy wire fields retained for older Sidemesh clients. */
+  approvalsReviewer?: string | null;
 }
 
 export interface AgentCreateSessionRequest {
@@ -134,6 +151,8 @@ export interface AgentSessionResumeOptions {
   serviceTier?: string | null;
   approvalPolicy?: string;
   sandbox?: string;
+  permissions?: string;
+  approvalsReviewer?: string;
   config?: Record<string, unknown>;
 }
 
@@ -144,6 +163,14 @@ export interface AgentModelListOptions {
 }
 
 export interface AgentProfileListOptions {
+  cwd: string | null;
+}
+
+export interface AgentAccessModeListOptions {
+  cwd: string | null;
+}
+
+export interface AgentPermissionProfileListOptions {
   cwd: string | null;
 }
 
@@ -196,6 +223,8 @@ export interface AgentProviderCapabilities {
   configuration: {
     models: boolean;
     profiles: boolean;
+    accessModes: boolean;
+    permissionProfiles: boolean;
     skills: boolean;
     skillManagement: boolean;
   };
@@ -208,6 +237,9 @@ export interface AgentProviderCapabilities {
     sandboxMode: boolean;
     networkAccess: boolean;
     webSearch: boolean;
+    accessMode: boolean;
+    permissionProfile: boolean;
+    approvalsReviewer: boolean;
   };
   lifecycle: {
     restart: boolean;
@@ -378,6 +410,12 @@ export interface AgentConfigurationProvider {
   writeSkillConfig(request: AgentSkillConfigWriteRequest): Promise<unknown>;
   listModels(options: AgentModelListOptions): Promise<ModelSummary[]>;
   listProfiles(options: AgentProfileListOptions): Promise<ProviderProfileCatalog>;
+  listAccessModes(
+    options: AgentAccessModeListOptions,
+  ): Promise<ProviderAccessModeCatalog>;
+  listPermissionProfiles(
+    options: AgentPermissionProfileListOptions,
+  ): Promise<ProviderPermissionProfileCatalog>;
   listModes(options: AgentModeListOptions): Promise<ProviderModeCatalog>;
 }
 

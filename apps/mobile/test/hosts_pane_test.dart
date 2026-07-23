@@ -61,4 +61,36 @@ void main() {
     expect(removes, 0);
     expect(toggles, 0);
   });
+
+  testWidgets('HostsPane lets users inspect a disabled host', (tester) async {
+    var opens = 0;
+    const host = HostProfile(
+      id: 'host-disabled',
+      label: 'Paused Mac',
+      baseUrl: 'http://paused.local:8787',
+      token: 'token',
+      enabled: false,
+    );
+
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: buildLightTheme(ThemeVariant.codexAmber.light),
+        home: Scaffold(
+          body: HostsPane(
+            hosts: const [host],
+            hostNodes: const {},
+            installedAppVersion: '1.0.0',
+            onOpenHost: (_) => opens++,
+            onEditHost: (_) {},
+            onRemoveHost: (_) {},
+            onToggleEnabled: (_) {},
+            onAddHost: () {},
+          ),
+        ),
+      ),
+    );
+
+    await tester.tap(find.text('Paused Mac'));
+    expect(opens, 1);
+  });
 }

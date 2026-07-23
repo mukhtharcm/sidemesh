@@ -1021,6 +1021,10 @@ export function parseRuntime(parsed: any): SessionRuntimeSummary | null {
       approvalPolicy: asOptionalString(typed.approval_policy),
       sandboxMode: asOptionalString(typed.sandbox_policy?.type),
       networkAccess: asOptionalBoolean(typed.sandbox_policy?.network_access),
+      permissionProfile: asOptionalString(
+        typed.active_permission_profile?.id ?? typed.permission_profile?.id,
+      ),
+      approvalsReviewer: asOptionalString(typed.approvals_reviewer),
       updatedAt: parseTimestamp(parsed.timestamp),
       turnId: undefined,
     };
@@ -1032,7 +1036,9 @@ export function parseRuntime(parsed: any): SessionRuntimeSummary | null {
       !runtime.reasoningEffort &&
       !runtime.approvalPolicy &&
       !runtime.sandboxMode &&
-      runtime.networkAccess === undefined
+      runtime.networkAccess === undefined &&
+      !runtime.permissionProfile &&
+      !runtime.approvalsReviewer
     ) {
       return null;
     }

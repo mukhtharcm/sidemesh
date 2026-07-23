@@ -12,7 +12,6 @@ class _Composer extends StatelessWidget {
   const _Composer({
     required this.controller,
     required this.focusNode,
-    required this.isFocused,
     required this.attachments,
     required this.skills,
     required this.files,
@@ -41,11 +40,9 @@ class _Composer extends StatelessWidget {
     this.onAddFileTrigger,
     this.modelLabel,
     this.modelDetail,
-    this.modelCustomized = false,
     this.onModelTap,
     this.thinkingLabel,
     this.thinkingDetail,
-    this.thinkingCustomized = false,
     this.onThinkingTap,
     this.submitOnEnter = false,
   });
@@ -53,10 +50,7 @@ class _Composer extends StatelessWidget {
   final TextEditingController controller;
   final FocusNode focusNode;
 
-  /// Whether the text field currently has focus; drives the animated pill style.
-  final bool isFocused;
-
-  final List<_ComposerImageAttachment> attachments;
+  final List<ComposerImageAttachment> attachments;
   final List<_ComposerSkillMention> skills;
   final List<_ComposerFileMention> files;
 
@@ -95,136 +89,46 @@ class _Composer extends StatelessWidget {
 
   final String? modelLabel;
   final String? modelDetail;
-  final bool modelCustomized;
   final VoidCallback? onModelTap;
   final String? thinkingLabel;
   final String? thinkingDetail;
-  final bool thinkingCustomized;
   final VoidCallback? onThinkingTap;
 
   final bool submitOnEnter;
 
   @override
   Widget build(BuildContext context) {
-    final colors = context.colors;
-    final isMacDesktop =
-        submitOnEnter && defaultTargetPlatform == TargetPlatform.macOS;
     final isDesktop = submitOnEnter;
-    final hintColor = readableTextOn(
-      colors,
-      background: colors.composerBackground,
-      preferred: colors.textTertiary,
-      additionalFallbacks: <Color>[colors.textSecondary],
-    );
-
-    // ── Zone 1: text field ──────────────────────────────────────────────────
-    Widget field = TextField(
-      controller: controller,
-      focusNode: focusNode,
-      minLines: 1,
-      maxLines: 6,
-      onTapOutside: isMacDesktop ? null : (_) => onDismiss(),
-      style: Theme.of(context).textTheme.bodyMedium,
-      decoration: InputDecoration(
-        hintText: submitOnEnter
-            ? 'Reply here. Press Enter to send, Shift+Enter for a new line'
-            : 'Reply here',
-        hintStyle: TextStyle(color: hintColor),
-        border: InputBorder.none,
-        enabledBorder: InputBorder.none,
-        focusedBorder: InputBorder.none,
-        filled: false,
-        fillColor: Colors.transparent,
-        isDense: true,
-        // Padding is handled by the animated pill container below.
-        contentPadding: EdgeInsets.zero,
-      ),
-    );
-
-    field = Actions(
-      actions: <Type, Action<Intent>>{
-        PasteTextIntent: ComposerPasteTextAction(onPasteImage: onNativePaste),
-      },
-      child: field,
-    );
-
-    if (submitOnEnter) {
-      field = CallbackShortcuts(
-        bindings: <ShortcutActivator, VoidCallback>{
-          const SingleActivator(LogicalKeyboardKey.enter): () {
-            if (!sending) onSend();
-          },
-          const SingleActivator(LogicalKeyboardKey.enter, shift: true): () {
-            final selection = controller.selection;
-            final text = controller.text;
-            final start = selection.start < 0 ? text.length : selection.start;
-            final end = selection.end < 0 ? text.length : selection.end;
-            final before = text.substring(0, start);
-            final after = text.substring(end);
-            final next = '$before\n$after';
-            controller.value = TextEditingValue(
-              text: next,
-              selection: TextSelection.collapsed(offset: start + 1),
-            );
-          },
-        },
-        child: field,
-      );
-    }
-
-    // ── Zone 1: bar row ─────────────────────────────────────────────────────
     final bool showPlusButton =
         !isDesktop &&
         (supportsImageInput || supportsSkillInput || supportsFileMentions);
     final bool showModelButton = modelLabel != null && onModelTap != null;
     final bool showThinkingButton =
         thinkingLabel != null && onThinkingTap != null;
-
-    final modelControlButton = showModelButton
-        ? _ComposerModelButton(
-            label: modelLabel!,
-            detail: modelDetail,
-            customized: modelCustomized,
-            icon: Icons.memory_rounded,
-            tooltipLabel: 'Choose model',
-            onPressed: onModelTap!,
-            compact: !isDesktop,
-          )
-        : null;
-    final thinkingControlButton = showThinkingButton
-        ? _ComposerModelButton(
-            label: thinkingLabel!,
-            detail: thinkingDetail,
-            customized: thinkingCustomized,
-            icon: Icons.psychology_alt_rounded,
-            tooltipLabel: 'Choose thinking level',
-            onPressed: onThinkingTap!,
-            compact: !isDesktop,
-          )
-        : null;
-    final controlButtons = <Widget>[
-      ?modelControlButton,
-      ?thinkingControlButton,
+    final controls = <AppComposerControl>[
+      if (showModelButton)
+        AppComposerControl(
+          icon: Icons.memory_rounded,
+          label: modelLabel!,
+          detail: modelDetail,
+          tooltip: 'Choose model',
+          onPressed: onModelTap!,
+        ),
+      if (showThinkingButton)
+        AppComposerControl(
+          icon: Icons.psychology_alt_rounded,
+          label: thinkingLabel!,
+          detail: thinkingDetail,
+          tooltip: 'Choose thinking level',
+          onPressed: onThinkingTap!,
+        ),
     ];
-
-    final textArea = Padding(
-      padding: EdgeInsets.symmetric(
-        horizontal: isDesktop ? 4 : 6,
-        vertical: isFocused ? 10 : 8,
-      ),
-      child: field,
-    );
-
-    final toolbarRow = Row(
-      crossAxisAlignment: CrossAxisAlignment.center,
-      children: [
-        // Paste remains available through native shortcuts/menu; the visible
-        // action here is only for adding new context.
-        if (isDesktop && supportsImageInput) ...[
-          _ComposerAttachButton(enabled: !sending, onPressed: onPickImages),
-          const SizedBox(width: 6),
-        ] else if (showPlusButton) ...[
-          _ComposerPlusButton(
+    final hasContext =
+        attachments.isNotEmpty || skills.isNotEmpty || files.isNotEmpty;
+    final leading = isDesktop && supportsImageInput
+        ? _ComposerAttachButton(enabled: !sending, onPressed: onPickImages)
+        : showPlusButton
+        ? _ComposerPlusButton(
             enabled: !sending,
             supportsImageInput: supportsImageInput,
             supportsSkillInput: supportsSkillInput,
@@ -232,141 +136,73 @@ class _Composer extends StatelessWidget {
             onPickImages: onPickImages,
             onAddSkillTrigger: onAddSkillTrigger,
             onAddFileTrigger: onAddFileTrigger,
+          )
+        : null;
+
+    return AppComposer(
+      controller: controller,
+      focusNode: focusNode,
+      sending: sending,
+      onSend: onSend,
+      onDismiss: onDismiss,
+      onNativePaste: onNativePaste,
+      submitOnEnter: submitOnEnter,
+      desktopHintText:
+          'Reply here. Press Enter to send, Shift+Enter for a new line',
+      hasSendableContext: hasContext,
+      leading: leading,
+      controls: controls,
+      header: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          AnimatedSize(
+            duration: AppMotion.quick,
+            curve: AppMotion.standard,
+            child: (supportsSkillInput && activeSkillQuery != null)
+                ? Padding(
+                    padding: const EdgeInsets.fromLTRB(14, 8, 14, 0),
+                    child: _ComposerSkillSuggestionTray(
+                      query: activeSkillQuery!,
+                      suggestions: skillSuggestions,
+                      loading: loadingSkills,
+                      error: skillError,
+                      onSelectSkill: onSelectSkill,
+                    ),
+                  )
+                : const SizedBox.shrink(),
           ),
-          const SizedBox(width: 6),
+          AnimatedSize(
+            duration: AppMotion.quick,
+            curve: AppMotion.standard,
+            child: activeFileQuery != null
+                ? Padding(
+                    padding: const EdgeInsets.fromLTRB(14, 8, 14, 0),
+                    child: _ComposerFileSuggestionTray(
+                      query: activeFileQuery!,
+                      suggestions: fileSuggestions,
+                      loading: loadingFileSearch,
+                      error: fileError,
+                      onSelectFile: onSelectFile,
+                    ),
+                  )
+                : const SizedBox.shrink(),
+          ),
+          AnimatedSize(
+            duration: AppMotion.reveal,
+            curve: AppMotion.standard,
+            child: hasContext
+                ? _ComposerContextShelf(
+                    attachments: attachments,
+                    skills: skills,
+                    files: files,
+                    onRemoveAttachment: onRemoveAttachment,
+                    onRemoveSkill: onRemoveSkill,
+                    onRemoveFile: onRemoveFile,
+                    isDesktop: isDesktop,
+                  )
+                : const SizedBox.shrink(),
+          ),
         ],
-        Expanded(
-          child: controlButtons.isEmpty
-              ? const SizedBox.shrink()
-              : Wrap(
-                  alignment: WrapAlignment.end,
-                  crossAxisAlignment: WrapCrossAlignment.center,
-                  spacing: 6,
-                  runSpacing: 6,
-                  children: controlButtons,
-                ),
-        ),
-        SizedBox(width: controlButtons.isEmpty ? 0 : 8),
-        _SendButton(
-          sending: sending,
-          controller: controller,
-          hasAttachments: attachments.isNotEmpty,
-          hasSkills: skills.isNotEmpty || files.isNotEmpty,
-          onSend: onSend,
-          compact: isDesktop,
-        ),
-      ],
-    );
-
-    final barContent = Column(
-      mainAxisSize: MainAxisSize.min,
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        textArea,
-        SizedBox(height: isDesktop ? 6 : 8),
-        toolbarRow,
-      ],
-    );
-
-    final barRow = AnimatedContainer(
-      duration: AppMotion.quick,
-      curve: AppMotion.standard,
-      decoration: BoxDecoration(
-        color: colors.composerBackground,
-        borderRadius: BorderRadius.circular(isDesktop ? 10 : AppRadii.control),
-        border: Border.all(
-          color: isFocused
-              ? colors.accent.withValues(alpha: 0.42)
-              : colors.border.withValues(alpha: 0.82),
-        ),
-      ),
-      padding: EdgeInsets.fromLTRB(
-        isDesktop ? 10 : 9,
-        isDesktop ? 8 : 9,
-        isDesktop ? 10 : 9,
-        isDesktop ? 8 : 9,
-      ),
-      child: barContent,
-    );
-
-    final hasContext =
-        attachments.isNotEmpty || skills.isNotEmpty || files.isNotEmpty;
-
-    return SafeArea(
-      top: false,
-      child: Container(
-        // Use BoxDecoration so the top border is drawn as decoration inside
-        // the box bounds — adds zero height unlike a child Container.
-        decoration: BoxDecoration(
-          color: colors.canvas,
-          border: Border(top: BorderSide(color: colors.border)),
-        ),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            // ── Zone 3a: Skill suggestion tray ─────────────────────────────
-            // Lives *above* the context shelf so it overlays the conversation
-            // list visually without being clipped by the pill.
-            AnimatedSize(
-              duration: AppMotion.quick,
-              curve: AppMotion.standard,
-              child: (supportsSkillInput && activeSkillQuery != null)
-                  ? Padding(
-                      padding: const EdgeInsets.fromLTRB(14, 8, 14, 0),
-                      child: _ComposerSkillSuggestionTray(
-                        query: activeSkillQuery!,
-                        suggestions: skillSuggestions,
-                        loading: loadingSkills,
-                        error: skillError,
-                        onSelectSkill: onSelectSkill,
-                      ),
-                    )
-                  : const SizedBox.shrink(),
-            ),
-
-            // ── Zone 3b: File suggestion tray ──────────────────────────────
-            AnimatedSize(
-              duration: AppMotion.quick,
-              curve: AppMotion.standard,
-              child: activeFileQuery != null
-                  ? Padding(
-                      padding: const EdgeInsets.fromLTRB(14, 8, 14, 0),
-                      child: _ComposerFileSuggestionTray(
-                        query: activeFileQuery!,
-                        suggestions: fileSuggestions,
-                        loading: loadingFileSearch,
-                        error: fileError,
-                        onSelectFile: onSelectFile,
-                      ),
-                    )
-                  : const SizedBox.shrink(),
-            ),
-
-            // ── Zone 2: Context shelf ──────────────────────────────────────
-            // Horizontal scroll row of flat chips; smoothly animates in/out.
-            AnimatedSize(
-              duration: AppMotion.reveal,
-              curve: AppMotion.standard,
-              child: hasContext
-                  ? _ComposerContextShelf(
-                      attachments: attachments,
-                      skills: skills,
-                      files: files,
-                      onRemoveAttachment: onRemoveAttachment,
-                      onRemoveSkill: onRemoveSkill,
-                      onRemoveFile: onRemoveFile,
-                      isDesktop: isDesktop,
-                    )
-                  : const SizedBox.shrink(),
-            ),
-
-            // ── Zone 1: The bar ────────────────────────────────────────────
-            Padding(
-              padding: const EdgeInsets.fromLTRB(14, 8, 14, 12),
-              child: barRow,
-            ),
-          ],
-        ),
       ),
     );
   }
@@ -387,7 +223,7 @@ class _ComposerContextShelf extends StatelessWidget {
     required this.isDesktop,
   });
 
-  final List<_ComposerImageAttachment> attachments;
+  final List<ComposerImageAttachment> attachments;
   final List<_ComposerSkillMention> skills;
   final List<_ComposerFileMention> files;
   final ValueChanged<String> onRemoveAttachment;
@@ -413,160 +249,59 @@ class _ComposerContextShelf extends StatelessWidget {
       files.map((item) => item.file),
     );
 
-    // Build chip list: images first, then skills, then file mentions.
-    final chips = <Widget>[
-      for (final a in attachments)
-        _ComposerShelfChip(
-          icon: isDesktop
-              ? ClipRRect(
-                  borderRadius: BorderRadius.circular(6),
-                  child: Image.memory(
-                    a.bytes,
-                    width: 20,
-                    height: 20,
-                    fit: BoxFit.cover,
-                    gaplessPlayback: true,
-                  ),
-                )
-              : Icon(Icons.image_rounded, size: 14, color: shelfSecondary),
-          label: a.name,
-          // Show file size as sublabel only on desktop where space allows.
-          sublabel: isDesktop ? _formatByteCount(a.byteLength) : null,
-          onRemove: () => onRemoveAttachment(a.id),
-        ),
-      for (final s in skills)
-        _ComposerShelfChip(
-          icon: Icon(Icons.auto_awesome_rounded, size: 14, color: shelfAccent),
-          label: s.tokenText,
-          onRemove: () => onRemoveSkill(s.skill.path),
-        ),
-      for (final f in files)
-        _ComposerShelfChip(
-          icon: Icon(
-            f.file.isDirectory
-                ? Icons.folder_rounded
-                : Icons.insert_drive_file_rounded,
-            size: 14,
-            color: shelfSecondary,
-          ),
-          label: _fileShelfLabel(
-            f.file,
-            showParent:
-                duplicateFileNames.contains(_fileNameKey(f.file)) && !isDesktop,
-          ),
-          sublabel: isDesktop ? _compactFileParentPath(f.file) : null,
-          onRemove: () => onRemoveFile(f.file.path),
-        ),
-    ];
-
-    return SizedBox(
-      // Slightly taller on desktop to give room for sublabels.
-      height: isDesktop ? 52 : 44,
-      child: ListView.separated(
-        scrollDirection: Axis.horizontal,
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
-        itemCount: chips.length,
-        separatorBuilder: (_, index) => const SizedBox(width: 8),
-        itemBuilder: (ctx, i) => chips[i],
-      ),
-    );
-  }
-}
-
-/// A compact pill-shaped chip for the context shelf.
-/// Replaces the taller, richer desktop-style chips in the old pill interior.
-class _ComposerShelfChip extends StatelessWidget {
-  const _ComposerShelfChip({
-    required this.icon,
-    required this.label,
-    required this.onRemove,
-    this.sublabel,
-  });
-
-  final Widget icon;
-  final String label;
-  final String? sublabel;
-  final VoidCallback onRemove;
-
-  @override
-  Widget build(BuildContext context) {
-    final colors = context.colors;
-    final foreground = readableTextOn(
-      colors,
-      background: colors.surfaceMuted,
-      preferred: colors.textPrimary,
-    );
-    final secondary = readableTextOn(
-      colors,
-      background: colors.surfaceMuted,
-      preferred: colors.textTertiary,
-      additionalFallbacks: <Color>[colors.textSecondary],
-    );
-    final iconForeground = visibleUiColorOn(
-      colors,
-      background: colors.surfaceMuted,
-      preferred: colors.textSecondary,
-    );
-    final borderColor = visibleBorderOn(
-      colors,
-      background: colors.surfaceMuted,
-      preferred: colors.border,
-    );
-    return Container(
-      decoration: BoxDecoration(
-        color: colors.surfaceMuted,
-        borderRadius: AppShapes.pill,
-        border: Border.all(color: borderColor),
-      ),
-      padding: const EdgeInsets.only(left: 8, right: 4, top: 4, bottom: 4),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          icon,
-          const SizedBox(width: 6),
-          ConstrainedBox(
-            constraints: BoxConstraints(maxWidth: sublabel != null ? 170 : 150),
-            child: sublabel != null
-                ? Column(
-                    mainAxisSize: MainAxisSize.min,
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        label,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                          color: foreground,
-                          fontWeight: AppWeights.emphasis,
-                        ),
-                      ),
-                      Text(
-                        sublabel!,
-                        style: monoStyle(color: secondary, fontSize: 10),
-                      ),
-                    ],
-                  )
-                : Text(
-                    label,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                      color: foreground,
-                      fontWeight: AppWeights.emphasis,
+    return AppComposerContextShelf(
+      desktop: isDesktop,
+      items: <AppComposerContextItem>[
+        for (final a in attachments)
+          AppComposerContextItem(
+            id: 'image-${a.id}',
+            icon: isDesktop
+                ? ClipRRect(
+                    borderRadius: BorderRadius.circular(6),
+                    child: Image.memory(
+                      a.bytes,
+                      width: 20,
+                      height: 20,
+                      fit: BoxFit.cover,
+                      gaplessPlayback: true,
                     ),
-                  ),
+                  )
+                : Icon(Icons.image_rounded, size: 14, color: shelfSecondary),
+            label: a.name,
+            sublabel: isDesktop ? _formatByteCount(a.byteLength) : null,
+            onRemove: () => onRemoveAttachment(a.id),
           ),
-          const SizedBox(width: 2),
-          InkWell(
-            onTap: onRemove,
-            borderRadius: AppShapes.pill,
-            child: Padding(
-              padding: const EdgeInsets.all(3),
-              child: Icon(Icons.close_rounded, size: 14, color: iconForeground),
+        for (final s in skills)
+          AppComposerContextItem(
+            id: 'skill-${s.skill.path}',
+            icon: Icon(
+              Icons.auto_awesome_rounded,
+              size: 14,
+              color: shelfAccent,
             ),
+            label: s.tokenText,
+            onRemove: () => onRemoveSkill(s.skill.path),
           ),
-        ],
-      ),
+        for (final f in files)
+          AppComposerContextItem(
+            id: 'file-${f.file.path}',
+            icon: Icon(
+              f.file.isDirectory
+                  ? Icons.folder_rounded
+                  : Icons.insert_drive_file_rounded,
+              size: 14,
+              color: shelfSecondary,
+            ),
+            label: _fileShelfLabel(
+              f.file,
+              showParent:
+                  duplicateFileNames.contains(_fileNameKey(f.file)) &&
+                  !isDesktop,
+            ),
+            sublabel: isDesktop ? _compactFileParentPath(f.file) : null,
+            onRemove: () => onRemoveFile(f.file.path),
+          ),
+      ],
     );
   }
 }
@@ -654,34 +389,9 @@ class _ComposerPlusButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final colors = context.colors;
-    final background = colors.composerBackground;
-    final iconColor = visibleUiColorOn(
-      colors,
-      background: background,
-      preferred: colors.textSecondary,
-    );
-    return Tooltip(
-      message: 'Add',
-      child: Material(
-        color: Colors.transparent,
-        child: InkWell(
-          borderRadius: AppShapes.badge,
-          onTap: enabled ? () => _handleTap(context) : null,
-          child: SizedBox(
-            width: 44,
-            height: 44,
-            child: Center(
-              child: Container(
-                width: 38,
-                height: 38,
-                alignment: Alignment.center,
-                child: Icon(Icons.add_rounded, color: iconColor, size: 20),
-              ),
-            ),
-          ),
-        ),
-      ),
+    return AppComposerAddButton(
+      enabled: enabled,
+      onPressed: () => _handleTap(context),
     );
   }
 }
@@ -695,230 +405,12 @@ class _ComposerAttachButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final colors = context.colors;
-    final iconColor = visibleUiColorOn(
-      colors,
-      background: colors.composerBackground,
-      preferred: enabled ? colors.accent : colors.textSecondary,
-    );
-    return Tooltip(
-      message: 'Attach images',
-      child: Material(
-        color: Colors.transparent,
-        child: InkWell(
-          borderRadius: AppShapes.badge,
-          onTap: enabled ? onPressed : null,
-          child: SizedBox(
-            width: 34,
-            height: 34,
-            child: Icon(
-              Icons.add_photo_alternate_rounded,
-              color: iconColor,
-              size: 20,
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class _ComposerModelButton extends StatelessWidget {
-  const _ComposerModelButton({
-    required this.label,
-    required this.detail,
-    required this.customized,
-    required this.icon,
-    required this.tooltipLabel,
-    required this.onPressed,
-    this.compact = false,
-  });
-
-  final String label;
-  final String? detail;
-  final bool customized;
-  final IconData icon;
-  final String tooltipLabel;
-  final VoidCallback onPressed;
-  final bool compact;
-
-  @override
-  Widget build(BuildContext context) {
-    final colors = context.colors;
-    final maxWidth = compact ? 136.0 : 154.0;
-    final minHeight = compact ? 38.0 : 34.0;
-    final hitPadding = compact ? 3.0 : 0.0;
-    final background = customized
-        ? colors.accentMuted
-        : colors.composerBackground;
-    final iconColor = visibleUiColorOn(
-      colors,
-      background: background,
-      preferred: customized ? colors.accent : colors.textSecondary,
-    );
-    final labelColor = readableTextOn(
-      colors,
-      background: background,
-      preferred: colors.textPrimary,
-    );
-    final chevronColor = visibleUiColorOn(
-      colors,
-      background: background,
-      preferred: colors.textSecondary,
-    );
-    final borderColor = customized
-        ? visibleBorderOn(
-            colors,
-            background: background,
-            preferred: colors.accent,
-          )
-        : Colors.transparent;
-    return Tooltip(
-      message: detail == null ? tooltipLabel : '$tooltipLabel: $detail',
-      child: Material(
-        color: Colors.transparent,
-        child: InkWell(
-          borderRadius: AppShapes.badge,
-          onTap: onPressed,
-          child: Padding(
-            padding: EdgeInsets.symmetric(vertical: hitPadding),
-            child: AnimatedContainer(
-              duration: AppMotion.quick,
-              curve: AppMotion.standard,
-              constraints: BoxConstraints(
-                maxWidth: maxWidth,
-                minHeight: minHeight,
-              ),
-              padding: EdgeInsets.symmetric(
-                horizontal: compact ? 9 : 9,
-                vertical: compact ? 7 : 6,
-              ),
-              decoration: BoxDecoration(
-                color: customized ? colors.accentMuted : Colors.transparent,
-                borderRadius: AppShapes.badge,
-                border: Border.all(color: borderColor),
-              ),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(icon, size: compact ? 14 : 15, color: iconColor),
-                  const SizedBox(width: 6),
-                  Flexible(
-                    child: Text(
-                      label,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: monoStyle(
-                        color: labelColor,
-                        fontSize: compact ? 11 : 11.5,
-                        fontWeight: AppWeights.title,
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: 4),
-                  Icon(
-                    Icons.expand_more_rounded,
-                    size: 16,
-                    color: chevronColor,
-                  ),
-                ],
-              ),
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Send button
-// ─────────────────────────────────────────────────────────────────────────────
-
-class _SendButton extends StatelessWidget {
-  const _SendButton({
-    required this.sending,
-    required this.controller,
-    required this.hasAttachments,
-    required this.hasSkills,
-    required this.onSend,
-    this.compact = false,
-  });
-
-  final bool sending;
-  final TextEditingController controller;
-  final bool hasAttachments;
-  final bool hasSkills;
-  final VoidCallback onSend;
-  final bool compact;
-
-  @override
-  Widget build(BuildContext context) {
-    final colors = context.colors;
-    return AnimatedBuilder(
-      animation: controller,
-      builder: (context, _) {
-        final hasText = controller.text.trim().isNotEmpty;
-        final canSend = !sending && (hasText || hasAttachments || hasSkills);
-        final showActive = sending || canSend;
-        final bgColor = sending
-            ? colors.surfaceMuted
-            : (canSend ? colors.accent : colors.surfaceMuted);
-        final activeForeground = readableActionForeground(
-          colors,
-          colors.accent,
-        );
-        final quietForeground = visibleUiColorOn(
-          colors,
-          background: colors.surfaceMuted,
-          preferred: colors.textSecondary,
-        );
-        final quietBorder = visibleBorderOn(
-          colors,
-          background: colors.surfaceMuted,
-          preferred: colors.border,
-        );
-        final hitSize = compact ? 36.0 : 44.0;
-        final size = compact ? 36.0 : 38.0;
-        final radius = compact ? AppRadii.iconWell : AppRadii.action;
-        return Material(
-          color: Colors.transparent,
-          child: InkWell(
-            borderRadius: BorderRadius.circular(radius),
-            onTap: canSend ? onSend : null,
-            child: SizedBox(
-              width: hitSize,
-              height: hitSize,
-              child: Center(
-                child: Container(
-                  width: size,
-                  height: size,
-                  decoration: BoxDecoration(
-                    color: bgColor,
-                    borderRadius: BorderRadius.circular(radius),
-                    border: showActive ? null : Border.all(color: quietBorder),
-                  ),
-                  alignment: Alignment.center,
-                  child: sending
-                      ? SizedBox(
-                          width: 18,
-                          height: 18,
-                          child: CircularProgressIndicator(
-                            strokeWidth: 2,
-                            color: quietForeground,
-                          ),
-                        )
-                      : Icon(
-                          Icons.arrow_upward_rounded,
-                          size: compact ? 19 : 22,
-                          color: canSend ? activeForeground : quietForeground,
-                        ),
-                ),
-              ),
-            ),
-          ),
-        );
-      },
+    return AppComposerAddButton(
+      enabled: enabled,
+      onPressed: onPressed,
+      tooltip: 'Attach images',
+      icon: Icons.add_photo_alternate_rounded,
+      compact: true,
     );
   }
 }
@@ -1418,26 +910,8 @@ String _fileMentionToken(FsSearchResult file) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Data models (unchanged from original)
+// Composer query and mention state
 // ─────────────────────────────────────────────────────────────────────────────
-
-class _ComposerImageAttachment {
-  const _ComposerImageAttachment({
-    required this.id,
-    required this.name,
-    required this.mimeType,
-    required this.bytes,
-    required this.dataUrl,
-  });
-
-  final String id;
-  final String name;
-  final String mimeType;
-  final Uint8List bytes;
-  final String dataUrl;
-
-  int get byteLength => bytes.length;
-}
 
 class _ComposerSkillMention {
   const _ComposerSkillMention({required this.skill, required this.tokenText});
@@ -1495,61 +969,4 @@ class _ActiveComposerFileQuery {
   final int start;
   final int end;
   final String query;
-}
-
-class _PreparedDraftImage {
-  const _PreparedDraftImage({
-    required this.name,
-    required this.mimeType,
-    required this.bytes,
-  });
-
-  final String name;
-  final String mimeType;
-  final Uint8List bytes;
-}
-
-class _ComposerImagePickerConfig {
-  const _ComposerImagePickerConfig({
-    required this.type,
-    this.allowedExtensions,
-    this.requestPhotoLibraryAccess = false,
-  });
-
-  final FileType type;
-  final List<String>? allowedExtensions;
-  final bool requestPhotoLibraryAccess;
-}
-
-class _DraftImageAppendResult {
-  const _DraftImageAppendResult._({
-    required this.totalBytes,
-    required this.added,
-    required this.shouldStop,
-  });
-
-  const _DraftImageAppendResult.added(int totalBytes)
-    : this._(totalBytes: totalBytes, added: true, shouldStop: false);
-
-  const _DraftImageAppendResult.skipped(int totalBytes)
-    : this._(totalBytes: totalBytes, added: false, shouldStop: false);
-
-  const _DraftImageAppendResult.stop(int totalBytes)
-    : this._(totalBytes: totalBytes, added: false, shouldStop: true);
-
-  final int totalBytes;
-  final bool added;
-  final bool shouldStop;
-}
-
-class _ClipboardImageData {
-  const _ClipboardImageData({
-    required this.name,
-    required this.mimeType,
-    required this.bytes,
-  });
-
-  final String name;
-  final String mimeType;
-  final Uint8List bytes;
 }

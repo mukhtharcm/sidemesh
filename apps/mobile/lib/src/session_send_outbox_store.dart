@@ -26,6 +26,7 @@ class PendingSessionSend {
     this.approvalPolicy,
     this.sandboxMode,
     this.networkAccess,
+    this.accessMode,
     this.lastError,
     this.blocked = false,
   });
@@ -48,6 +49,7 @@ class PendingSessionSend {
   final String? approvalPolicy;
   final String? sandboxMode;
   final bool? networkAccess;
+  final String? accessMode;
   final String? lastError;
   final bool blocked;
 
@@ -81,6 +83,7 @@ class PendingSessionSend {
       approvalPolicy: approvalPolicy,
       sandboxMode: sandboxMode,
       networkAccess: networkAccess,
+      accessMode: accessMode,
       lastError: clearLastError ? null : (lastError ?? this.lastError),
       blocked: blocked ?? this.blocked,
     );
@@ -113,6 +116,7 @@ class PendingSessionSend {
       networkAccess: json['networkAccess'] is bool
           ? json['networkAccess'] as bool
           : null,
+      accessMode: _stringOrNull(json['accessMode']),
       lastError: _stringOrNull(json['lastError']),
       blocked: json['blocked'] is bool ? json['blocked'] as bool : false,
     );
@@ -137,6 +141,7 @@ class PendingSessionSend {
     'approvalPolicy': approvalPolicy,
     'sandboxMode': sandboxMode,
     'networkAccess': networkAccess,
+    'accessMode': accessMode,
     'lastError': lastError,
     'blocked': blocked,
   };

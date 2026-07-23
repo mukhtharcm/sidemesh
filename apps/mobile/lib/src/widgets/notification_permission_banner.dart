@@ -125,8 +125,8 @@ class _BannerBody extends StatelessWidget {
     return Row(
       crossAxisAlignment: CrossAxisAlignment.center,
       children: [
-        _BellBadge(colors: colors, size: 24),
-        const SizedBox(width: 10),
+        _BellBadge(colors: colors),
+        const SizedBox(width: AppSpacing.sm),
         Expanded(
           child: Text(
             'Approval alerts',
@@ -185,8 +185,8 @@ class _CompactBannerBody extends StatelessWidget {
         Row(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            _BellBadge(colors: colors, size: 28),
-            const SizedBox(width: 10),
+            _BellBadge(colors: colors),
+            const SizedBox(width: AppSpacing.sm),
             Expanded(
               child: Text(
                 'Turn on alerts',
@@ -223,25 +223,23 @@ class _CompactBannerBody extends StatelessWidget {
 }
 
 class _BellBadge extends StatelessWidget {
-  const _BellBadge({required this.colors, this.size = 34});
+  const _BellBadge({required this.colors});
 
   final AppColors colors;
-  final double size;
 
   @override
   Widget build(BuildContext context) {
     return Container(
-      width: size,
-      height: size,
+      width: AppSizes.iconWell,
+      height: AppSizes.iconWell,
       decoration: BoxDecoration(
         color: colors.accent.withValues(alpha: 0.16),
-        borderRadius: BorderRadius.circular(size * 0.35),
-        border: Border.all(color: colors.accent.withValues(alpha: 0.28)),
+        borderRadius: AppShapes.input,
       ),
       alignment: Alignment.center,
       child: Icon(
         Icons.notifications_active_rounded,
-        size: size * 0.55,
+        size: AppSizes.compactIcon,
         color: colors.accent,
       ),
     );

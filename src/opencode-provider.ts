@@ -30,6 +30,7 @@ import type {
 } from "./agent-provider.js";
 import {
   normalizePendingActionDecision,
+  parsePendingActionProviderOptionResponse,
   parsePendingActionElicitationResponse,
   parsePendingActionUserInputResponse,
   type PendingActionResponseInput,
@@ -485,6 +486,8 @@ export const OPENCODE_PROVIDER_CAPABILITIES: AgentProviderCapabilities = {
   configuration: {
     models: true,
     profiles: false,
+    accessModes: false,
+    permissionProfiles: false,
     skills: true,
     skillManagement: false,
   },
@@ -497,6 +500,9 @@ export const OPENCODE_PROVIDER_CAPABILITIES: AgentProviderCapabilities = {
     sandboxMode: false,
     networkAccess: false,
     webSearch: false,
+    accessMode: false,
+    permissionProfile: false,
+    approvalsReviewer: false,
   },
   lifecycle: {
     restart: true,
@@ -802,16 +808,28 @@ export class OpenCodeAgentProvider
       return false;
     }
     if (action.providerRequestKind === "opencode/permission") {
-      const normalized = normalizePendingActionDecision(decision as any);
-      if (!normalized) {
-        return false;
+      const providerOption = parsePendingActionProviderOptionResponse(decision);
+      let reply: "once" | "always" | "reject";
+      if (providerOption) {
+        const offered = existing.approval?.providerOptions?.find(
+          (option) => option.id === providerOption.providerOptionId,
+        );
+        if (!offered) {
+          return false;
+        }
+        reply = offered.id as "once" | "always" | "reject";
+      } else {
+        const normalized = normalizePendingActionDecision(decision as any);
+        if (!normalized) {
+          return false;
+        }
+        reply =
+          normalized.decision === "approve"
+            ? normalized.scope === "once"
+              ? "once"
+              : "always"
+            : "reject";
       }
-      const reply =
-        normalized.decision === "approve"
-          ? normalized.scope === "location"
-            ? "always"
-            : "once"
-          : "reject";
       cache?.pendingActions.delete(action.id);
       void this.respondToPermission(existing, reply);
       return true;
@@ -2448,8 +2466,18 @@ function permissionToPendingAction(
         : undefined,
     cwd,
     targets,
-    supportedScopes: ["once", "location"],
+    supportedScopes: ["once", "session"],
     suggestedScope: "once",
+    providerOptions: [
+      { id: "once", label: "Allow once", kind: "allow_once" },
+      {
+        id: "always",
+        label: "Allow matching requests",
+        kind: "allow_always",
+        description: "Remember the suggested patterns for this OpenCode session.",
+      },
+      { id: "reject", label: "Reject", kind: "reject_once" },
+    ],
   };
   return {
     id: `permission:${request.id}`,
@@ -2461,7 +2489,7 @@ function permissionToPendingAction(
     detail: request.patterns.join(", ") || request.permission,
     requestedAt: Date.now(),
     canApprove: true,
-    canApproveForSession: false,
+    canApproveForSession: true,
     canDecline: true,
     approval,
     providerRequestId: request.id,

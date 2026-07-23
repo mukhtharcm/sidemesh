@@ -111,6 +111,8 @@ export const FAKE_PROVIDER_CAPABILITIES: AgentProviderCapabilities = {
   configuration: {
     models: true,
     profiles: true,
+    accessModes: false,
+    permissionProfiles: false,
     skills: true,
     skillManagement: true,
   },
@@ -123,6 +125,9 @@ export const FAKE_PROVIDER_CAPABILITIES: AgentProviderCapabilities = {
     sandboxMode: true,
     networkAccess: true,
     webSearch: true,
+    accessMode: false,
+    permissionProfile: false,
+    approvalsReviewer: false,
   },
   lifecycle: {
     restart: false,
@@ -214,6 +219,7 @@ function disableApprovals(capabilities: AgentProviderCapabilities): void {
 function disableConfiguration(capabilities: AgentProviderCapabilities): void {
   capabilities.configuration.models = false;
   capabilities.configuration.profiles = false;
+  capabilities.configuration.accessModes = false;
   capabilities.configuration.skills = false;
   capabilities.configuration.skillManagement = false;
 }

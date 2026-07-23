@@ -32,6 +32,7 @@ import {
   type PendingActionResponseInput,
   type PendingActionUserInputResponse,
   normalizePendingActionDecision,
+  parsePendingActionProviderOptionResponse,
 } from "./approvals.js";
 import {
   approveOnce,
@@ -200,6 +201,8 @@ export const COPILOT_PROVIDER_CAPABILITIES: AgentProviderCapabilities = {
   configuration: {
     models: true,
     profiles: false,
+    accessModes: false,
+    permissionProfiles: false,
     skills: true,
     skillManagement: true,
   },
@@ -212,6 +215,9 @@ export const COPILOT_PROVIDER_CAPABILITIES: AgentProviderCapabilities = {
     sandboxMode: false,
     networkAccess: false,
     webSearch: false,
+    accessMode: false,
+    permissionProfile: false,
+    approvalsReviewer: false,
   },
   lifecycle: {
     restart: false,
@@ -586,16 +592,18 @@ export class CopilotAgentProvider
   ): boolean {
     const pending = this.pendingPermissions.get(action.id);
     if (pending) {
-      const normalized = normalizePendingActionDecision(
-        decision as PendingActionDecisionInput,
-      );
-      if (!normalized) {
-        return false;
-      }
-      const result = buildCopilotPermissionResult(
-        normalized,
-        pending.action.providerPayload,
-      );
+      const providerOption = parsePendingActionProviderOptionResponse(decision);
+      const result = providerOption
+        ? buildCopilotProviderOptionResult(
+            pending.action,
+            providerOption.providerOptionId,
+          )
+        : buildCopilotPermissionResult(
+            normalizePendingActionDecision(
+              decision as PendingActionDecisionInput,
+            ),
+            pending.action.providerPayload,
+          );
       if (!result) {
         return false;
       }
@@ -2753,6 +2761,17 @@ function buildCopilotPendingAction(
       supportedScopes: canApproveForSession ? ["once", "session"] : ["once"],
       suggestedScope: "once",
       targets: copilotApprovalTargets(typed),
+      providerOptions: [
+        { id: "approve-once", label: "Allow once", kind: "allow_once" },
+        ...(canApproveForSession
+          ? [{
+              id: "approve-for-session",
+              label: "Allow for session",
+              kind: "allow_always" as const,
+            }]
+          : []),
+        { id: "reject", label: "Reject", kind: "reject_once" },
+      ],
     },
     providerRequestId: actionId,
     providerRequestKind: `copilot/${request.kind}/requestPermission`,
@@ -3261,9 +3280,12 @@ function canApproveCopilotPermissionForSession(
 }
 
 function buildCopilotPermissionResult(
-  decision: NormalizedPendingActionDecision,
+  decision: NormalizedPendingActionDecision | null,
   request: unknown,
 ): CopilotSdkPermissionResult | null {
+  if (!decision) {
+    return null;
+  }
   if (decision.decision === "approve" && decision.scope === "once") {
     return approveOnce();
   }
@@ -3275,6 +3297,23 @@ function buildCopilotPermissionResult(
     return rejectPermission();
   }
   return null;
+}
+
+function buildCopilotProviderOptionResult(
+  action: AgentPendingAction,
+  optionId: string,
+): CopilotSdkPermissionResult | null {
+  if (!action.approval?.providerOptions?.some((option) => option.id === optionId)) {
+    return null;
+  }
+  if (optionId === "approve-once") {
+    return approveOnce();
+  }
+  if (optionId === "approve-for-session") {
+    const approval = copilotSessionApproval(action.providerPayload);
+    return approval ? { kind: "approve-for-session", approval } : approveOnce();
+  }
+  return optionId === "reject" ? rejectPermission() : null;
 }
 
 function isCopilotUserInputResponse(

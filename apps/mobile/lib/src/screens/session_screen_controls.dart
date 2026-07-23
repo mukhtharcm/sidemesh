@@ -14,9 +14,10 @@ class SessionControlsSheet extends StatefulWidget {
     required this.runtimeApproval,
     required this.runtimeSandbox,
     required this.runtimeNetworkAccess,
+    this.runtimeAccessMode,
     required this.policyStore,
     required this.turnConfigStore,
-    this.useBottomSheetChrome = true,
+    this.onClose,
   });
 
   final ApiClient api;
@@ -30,9 +31,10 @@ class SessionControlsSheet extends StatefulWidget {
   final ApprovalPolicy? runtimeApproval;
   final SandboxMode? runtimeSandbox;
   final bool? runtimeNetworkAccess;
+  final String? runtimeAccessMode;
   final SessionPolicyStore policyStore;
   final SessionTurnConfigStore turnConfigStore;
-  final bool useBottomSheetChrome;
+  final VoidCallback? onClose;
 
   @override
   State<SessionControlsSheet> createState() => _SessionControlsSheetState();
@@ -47,6 +49,9 @@ class _SessionControlsSheetState extends State<SessionControlsSheet> {
   bool _loadingProviderModes = false;
   bool _loadingNode = false;
   String? _modelsError;
+  ProviderAccessModeCatalog? _accessModeCatalog;
+  bool _loadingAccessModes = false;
+  String? _accessModesError;
   NodeInfo? _nodeInfo;
 
   @override
@@ -108,6 +113,11 @@ class _SessionControlsSheetState extends State<SessionControlsSheet> {
   bool get _supportsNetworkAccess =>
       _supports('runtimeControls', 'networkAccess');
 
+  bool get _supportsAccessModes =>
+      _nodeInfo != null &&
+      _supports('configuration', 'accessModes') &&
+      _supports('runtimeControls', 'accessMode');
+
   bool _supports(String section, String feature) {
     final node = _nodeInfo;
     if (node == null) return true;
@@ -141,26 +151,20 @@ class _SessionControlsSheetState extends State<SessionControlsSheet> {
   SandboxMode get _effectiveSandbox =>
       _policy.sandbox ?? widget.runtimeSandbox ?? SandboxMode.workspaceWrite;
 
-  bool get _effectiveNetworkOn {
+  bool get _effectiveNetworkAccess {
     if (_effectiveSandbox == SandboxMode.dangerFullAccess) return true;
     return _policy.networkAccess ?? widget.runtimeNetworkAccess ?? false;
   }
 
-  bool get _networkToggleDisabled =>
-      _effectiveSandbox == SandboxMode.dangerFullAccess;
-
-  bool get _isAutopilot =>
-      _effectiveApproval == ApprovalPolicy.never &&
-      _effectiveSandbox == SandboxMode.dangerFullAccess;
-
   ApprovalPolicy _resolvedApprovalPolicy(ApprovalPolicy? value) {
-    if (_approvalOptions.contains(value)) {
-      return value!;
-    }
-    return _approvalOptions.isEmpty
-        ? ApprovalPolicy.untrusted
-        : _approvalOptions.first;
+    if (_approvalOptions.contains(value)) return value!;
+    return _approvalOptions.first;
   }
+
+  String? get _effectiveAccessMode =>
+      _trimmedOrNull(_policy.accessMode) ??
+      _trimmedOrNull(widget.runtimeAccessMode) ??
+      _trimmedOrNull(_accessModeCatalog?.defaultMode);
 
   String? get _effectiveModelValue {
     final local = _trimmedOrNull(_turnConfig.model);
@@ -305,6 +309,9 @@ class _SessionControlsSheetState extends State<SessionControlsSheet> {
       if (_supportsMode) {
         unawaited(_loadProviderModes(force: true));
       }
+      if (_supportsAccessModes) {
+        unawaited(_loadAccessModes());
+      }
     } catch (error) {
       if (!mounted) return;
       setState(() {
@@ -326,6 +333,9 @@ class _SessionControlsSheetState extends State<SessionControlsSheet> {
     }
     if (!_supportsNetworkAccess) {
       nextPolicy = nextPolicy.copyWith(networkAccess: null);
+    }
+    if (!_supportsAccessModes) {
+      nextPolicy = nextPolicy.copyWith(accessMode: null);
     }
 
     var nextConfig = _turnConfig;
@@ -349,6 +359,40 @@ class _SessionControlsSheetState extends State<SessionControlsSheet> {
 
     _policy = nextPolicy;
     _turnConfig = nextConfig;
+  }
+
+  Future<void> _loadAccessModes() async {
+    if (!_supportsAccessModes || _loadingAccessModes) return;
+    setState(() {
+      _loadingAccessModes = true;
+      _accessModesError = null;
+    });
+    try {
+      final catalog = await widget.api.fetchAccessModes(
+        widget.host,
+        cwd: widget.session.cwd,
+        agentProvider: widget.session.provider,
+      );
+      if (!mounted) return;
+      setState(() {
+        _accessModeCatalog = catalog;
+        _loadingAccessModes = false;
+        final selectedPolicyMode = providerAccessModeById(
+          catalog,
+          _policy.accessMode,
+        );
+        if (_policy.accessMode != null &&
+            !(selectedPolicyMode?.enabled ?? false)) {
+          _policy = _policy.copyWith(accessMode: null);
+        }
+      });
+    } catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _loadingAccessModes = false;
+        _accessModesError = friendlyError(error);
+      });
+    }
   }
 
   Future<void> _loadProviderModes({bool force = false}) async {
@@ -489,23 +533,52 @@ class _SessionControlsSheetState extends State<SessionControlsSheet> {
       }
     }
 
-    final selected = await showModalBottomSheet<ModelCatalogEntry>(
-      context: context,
-      backgroundColor: Colors.transparent,
-      showDragHandle: false,
-      useSafeArea: true,
-      isScrollControlled: true,
-      builder: (sheetContext) => _ModelPickerSheet(
-        models: _models,
-        currentModel: _effectiveModelValue,
-        providerName: _runtimeModelProvider,
-      ),
+    final picker = _ModelPickerSheet(
+      models: _models,
+      currentModel: _effectiveModelValue,
+      providerName: _runtimeModelProvider,
     );
+    final ModelCatalogEntry? selected;
+    if (widget.onClose != null && MediaQuery.sizeOf(context).width >= 900) {
+      selected = await showDialog<ModelCatalogEntry>(
+        context: context,
+        barrierColor: Colors.black.withValues(alpha: 0.35),
+        builder: (dialogContext) => Dialog(
+          backgroundColor: Colors.transparent,
+          insetPadding: const EdgeInsets.symmetric(
+            horizontal: 48,
+            vertical: 48,
+          ),
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 760, maxHeight: 640),
+            child: picker,
+          ),
+        ),
+      );
+    } else {
+      selected = await showModalBottomSheet<ModelCatalogEntry>(
+        context: context,
+        backgroundColor: Colors.transparent,
+        barrierColor: Colors.black.withValues(alpha: 0.28),
+        showDragHandle: false,
+        useSafeArea: true,
+        isScrollControlled: true,
+        builder: (sheetContext) => picker,
+      );
+    }
     if (!mounted || selected == null) {
       return;
     }
-
     _applySelectedModel(selected);
+  }
+
+  void _close() {
+    final onClose = widget.onClose;
+    if (onClose != null) {
+      onClose();
+      return;
+    }
+    Navigator.of(context).maybePop();
   }
 
   void _applySelectedModel(ModelCatalogEntry selected) {
@@ -542,9 +615,20 @@ class _SessionControlsSheetState extends State<SessionControlsSheet> {
 
   Future<void> _save() async {
     final savedPolicy = SessionPolicy(
-      approval: _supportsApprovalPolicy ? _policy.approval : null,
-      sandbox: _supportsSandboxMode ? _policy.sandbox : null,
-      networkAccess: _supportsNetworkAccess ? _policy.networkAccess : null,
+      approval: _supportsAccessModes
+          ? null
+          : (_supportsApprovalPolicy && _policy.approval != null
+                ? _effectiveApproval
+                : null),
+      sandbox: _supportsAccessModes
+          ? null
+          : (_supportsSandboxMode ? _policy.sandbox : null),
+      networkAccess: _supportsAccessModes
+          ? null
+          : (_supportsNetworkAccess ? _policy.networkAccess : null),
+      accessMode: _supportsAccessModes
+          ? _trimmedOrNull(_policy.accessMode)
+          : null,
     );
     final savedTurnConfig = _normalisedTurnConfig(
       SessionTurnConfig(
@@ -567,7 +651,7 @@ class _SessionControlsSheetState extends State<SessionControlsSheet> {
       savedTurnConfig,
     );
     if (!mounted) return;
-    Navigator.of(context).pop();
+    _close();
     showAppSnackBar(
       context,
       savedPolicy.isEmpty && savedTurnConfig.isEmpty
@@ -578,22 +662,10 @@ class _SessionControlsSheetState extends State<SessionControlsSheet> {
 
   void _reset() {
     setState(() {
-      _policy = SessionPolicy.factoryDefaults;
+      _policy = _supportsAccessModes
+          ? const SessionPolicy()
+          : SessionPolicy.factoryDefaults;
       _turnConfig = _factoryTurnConfig();
-    });
-  }
-
-  void _applyAutopilot() {
-    setState(() {
-      _policy = _policy.copyWith(
-        approval:
-            _supportsApprovalPolicy &&
-                _approvalOptions.contains(ApprovalPolicy.never)
-            ? ApprovalPolicy.never
-            : null,
-        sandbox: _supportsSandboxMode ? SandboxMode.dangerFullAccess : null,
-        networkAccess: _supportsNetworkAccess ? true : null,
-      );
     });
   }
 
@@ -681,6 +753,111 @@ class _SessionControlsSheetState extends State<SessionControlsSheet> {
     return null;
   }
 
+  Widget _buildActions(BuildContext context) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final reset = TextButton.icon(
+          onPressed: _reset,
+          icon: const Icon(Icons.restart_alt_rounded, size: 18),
+          label: const Text('Reset'),
+        );
+        final cancel = TextButton(
+          onPressed: _close,
+          child: const Text('Cancel'),
+        );
+        final apply = FilledButton.icon(
+          onPressed: _save,
+          icon: const Icon(Icons.check_rounded, size: 18),
+          label: const Text('Apply'),
+        );
+        if (constraints.maxWidth < 380) {
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              apply,
+              const SizedBox(height: 4),
+              Row(children: [reset, const Spacer(), cancel]),
+            ],
+          );
+        }
+        return Row(
+          children: [
+            reset,
+            const Spacer(),
+            cancel,
+            const SizedBox(width: 8),
+            apply,
+          ],
+        );
+      },
+    );
+  }
+
+  Widget _buildAccessModeControls(BuildContext context) {
+    final colors = context.colors;
+    final theme = Theme.of(context);
+    final catalog = _accessModeCatalog;
+    if (_loadingAccessModes && catalog == null) {
+      return const MeshSelectionCardSkeleton(
+        showIcon: false,
+        badgeCount: 0,
+        showCurrentValue: true,
+      );
+    }
+    if (_accessModesError != null && catalog == null) {
+      return Row(
+        children: [
+          Expanded(
+            child: Text(
+              _accessModesError!,
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: colors.textSecondary,
+              ),
+            ),
+          ),
+          TextButton(onPressed: _loadAccessModes, child: const Text('Retry')),
+        ],
+      );
+    }
+    if (catalog == null || catalog.modes.isEmpty) {
+      return Text(
+        'No access modes are available for this session.',
+        style: theme.textTheme.bodySmall?.copyWith(color: colors.textSecondary),
+      );
+    }
+    return ProviderAccessModeChoices(
+      modes: catalog.modes,
+      selectedModeId: _effectiveAccessMode,
+      onSelected: (mode) => unawaited(_selectAccessMode(mode)),
+    );
+  }
+
+  Future<void> _selectAccessMode(ProviderAccessModeSummary mode) async {
+    if (!mode.enabled) return;
+    if (mode.id == _effectiveAccessMode) return;
+    final confirmation = mode.confirmation;
+    if (confirmation != null) {
+      final confirmed = await showMeshConfirmDialog(
+        context,
+        icon: providerAccessModeIcon(mode.icon),
+        title: confirmation.title,
+        description: confirmation.description,
+        confirmLabel: confirmation.confirmLabel,
+        danger: confirmation.danger,
+      );
+      if (!mounted || !confirmed) return;
+    }
+    if (!mounted) return;
+    setState(() {
+      _policy = _policy.copyWith(
+        approval: null,
+        sandbox: null,
+        networkAccess: null,
+        accessMode: mode.id,
+      );
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
     final colors = context.colors;
@@ -698,23 +875,20 @@ class _SessionControlsSheetState extends State<SessionControlsSheet> {
     final showModelControls = _supportsModels && _supportsModelOverride;
     final showModeControls = _supportsMode;
     final showReasoningControls = showModelControls && _supportsReasoningEffort;
-    final showAutopilot =
-        _supportsApprovalPolicy &&
-        _approvalOptions.contains(ApprovalPolicy.never) &&
-        _supportsSandboxMode &&
-        _supportsNetworkAccess;
-    final showPolicyControls =
-        _supportsApprovalPolicy ||
-        _supportsSandboxMode ||
-        _supportsNetworkAccess;
+    final showAccessControls = _supportsAccessModes;
+    final showLegacyPolicyControls =
+        _nodeInfo != null &&
+        !showAccessControls &&
+        (_supportsApprovalPolicy ||
+            _supportsSandboxMode ||
+            _supportsNetworkAccess);
     final showAnyControls =
         showModeControls ||
         showModelControls ||
         showReasoningControls ||
         _showFastSection ||
-        showPolicyControls;
-    final intro =
-        'Choose the model, mode, approvals, file access, and internet behavior for the next reply in this session. If the agent is already working, the changes wait for the current reply to finish.';
+        showAccessControls ||
+        showLegacyPolicyControls;
     final content = Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -864,64 +1038,26 @@ class _SessionControlsSheetState extends State<SessionControlsSheet> {
             if (_loadingModels && _models.isEmpty)
               const MeshChipSkeletonWrap()
             else if (_selectedModelIsAuto)
-              Container(
-                width: double.infinity,
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(
-                  color: colors.surfaceMuted,
-                  borderRadius: BorderRadius.circular(12),
-                  border: Border.all(color: colors.border),
-                ),
-                child: Text(
-                  'Auto models choose the thinking effort themselves. The agent will use ${_reasoningEffortLabel(effectiveReasoning ?? selectedModel?.defaultReasoningEffort ?? 'medium')}.',
-                  style: theme.textTheme.bodyMedium?.copyWith(
-                    color: colors.textSecondary,
-                    height: 1.35,
-                  ),
-                ),
+              _InlineSettingNote(
+                text:
+                    'Auto models choose the thinking effort themselves. The agent will use ${reasoningEffortLabel(effectiveReasoning ?? selectedModel?.defaultReasoningEffort ?? 'medium')}.',
               )
             else if (_supportedReasoningOptions.isEmpty)
-              Container(
-                width: double.infinity,
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(
-                  color: colors.surfaceMuted,
-                  borderRadius: BorderRadius.circular(12),
-                  border: Border.all(color: colors.border),
-                ),
-                child: Text(
-                  'This model does not expose adjustable thinking effort.',
-                  style: theme.textTheme.bodyMedium?.copyWith(
-                    color: colors.textSecondary,
-                    height: 1.35,
-                  ),
-                ),
+              const _InlineSettingNote(
+                text: 'This model does not expose adjustable thinking effort.',
               )
             else ...[
-              Wrap(
-                spacing: 8,
-                runSpacing: 8,
-                children: _supportedReasoningOptions.map((option) {
-                  final isDefault =
-                      selectedModel != null &&
-                      option.reasoningEffort ==
-                          selectedModel.defaultReasoningEffort;
-                  final selected = option.reasoningEffort == effectiveReasoning;
-                  return _ReasoningChoiceChip(
-                    label: _reasoningEffortLabel(option.reasoningEffort),
-                    selected: selected,
-                    isDefault: isDefault,
-                    onTap: () {
-                      setState(() {
-                        _turnConfig = _normalisedTurnConfig(
-                          _turnConfig.copyWith(
-                            reasoningEffort: option.reasoningEffort,
-                          ),
-                        );
-                      });
-                    },
-                  );
-                }).toList(),
+              _ReasoningEffortSlider(
+                options: _supportedReasoningOptions,
+                selectedEffort: effectiveReasoning,
+                defaultEffort: selectedModel?.defaultReasoningEffort,
+                onChanged: (effort) {
+                  setState(() {
+                    _turnConfig = _normalisedTurnConfig(
+                      _turnConfig.copyWith(reasoningEffort: effort),
+                    );
+                  });
+                },
               ),
               if (reasoningDescription != null &&
                   reasoningDescription.trim().isNotEmpty) ...[
@@ -958,136 +1094,64 @@ class _SessionControlsSheetState extends State<SessionControlsSheet> {
               },
             ),
           ],
-          if (showPolicyControls) ...[
+          if (showAccessControls) ...[
             const SizedBox(height: 18),
-            if (showAutopilot) ...[
-              _PolicyAutopilotCard(
-                active: _isAutopilot,
-                onTap: _applyAutopilot,
-                colors: colors,
+            Text(
+              'Access',
+              style: theme.textTheme.labelLarge?.copyWith(
+                color: colors.textSecondary,
+                letterSpacing: 0.4,
               ),
-              const SizedBox(height: 22),
-            ],
-            if (_supportsApprovalPolicy) ...[
-              Text(
-                'Approvals',
-                style: theme.textTheme.labelLarge?.copyWith(
-                  color: colors.textSecondary,
-                  letterSpacing: 0.4,
-                ),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              'Choose how the provider should handle sensitive actions.',
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: colors.textSecondary,
               ),
-              const SizedBox(height: 8),
-              for (final policy in _approvalOptions)
-                _PolicyRadioTile<ApprovalPolicy>(
-                  value: policy,
-                  groupValue: _effectiveApproval,
-                  title: policy.label,
-                  subtitle: policy.description,
-                  fromRuntime:
-                      _policy.approval == null &&
-                      widget.runtimeApproval == policy,
-                  onSelected: (value) {
-                    setState(() {
-                      _policy = _policy.copyWith(approval: value);
-                    });
-                  },
-                ),
-            ],
-            if (_supportsApprovalPolicy && _supportsSandboxMode)
-              const SizedBox(height: 18),
-            if (_supportsSandboxMode) ...[
-              Text(
-                'File access',
-                style: theme.textTheme.labelLarge?.copyWith(
-                  color: colors.textSecondary,
-                  letterSpacing: 0.4,
-                ),
+            ),
+            const SizedBox(height: 6),
+            _buildAccessModeControls(context),
+          ],
+          if (showLegacyPolicyControls) ...[
+            const SizedBox(height: 18),
+            LaunchOptionsForm(
+              dense: true,
+              value: LaunchOptionsValue(
+                approval: _effectiveApproval,
+                sandbox: _effectiveSandbox,
+                networkAccess: _effectiveNetworkAccess,
               ),
-              const SizedBox(height: 8),
-              for (final sandbox in SandboxMode.values)
-                _PolicyRadioTile<SandboxMode>(
-                  value: sandbox,
-                  groupValue: _effectiveSandbox,
-                  title: sandbox.label,
-                  subtitle: sandbox.description,
-                  fromRuntime:
-                      _policy.sandbox == null &&
-                      widget.runtimeSandbox == sandbox,
-                  danger: sandbox == SandboxMode.dangerFullAccess,
-                  onSelected: (value) {
-                    setState(() {
-                      _policy = _policy.copyWith(sandbox: value);
-                    });
-                  },
-                ),
-            ],
-            if ((_supportsApprovalPolicy || _supportsSandboxMode) &&
-                _supportsNetworkAccess)
-              const SizedBox(height: 18),
-            if (_supportsNetworkAccess) ...[
-              Text(
-                'Internet access',
-                style: theme.textTheme.labelLarge?.copyWith(
-                  color: colors.textSecondary,
-                  letterSpacing: 0.4,
-                ),
+              capabilities: LaunchOptionsCapabilities(
+                supportsApprovalPolicy: _supportsApprovalPolicy,
+                supportsSandboxMode: _supportsSandboxMode,
+                supportsNetworkAccess:
+                    _supportsNetworkAccess &&
+                    _effectiveSandbox != SandboxMode.dangerFullAccess,
+                approvalOptions: _approvalOptions,
               ),
-              const SizedBox(height: 8),
-              _PolicyNetworkTile(
-                value: _effectiveNetworkOn,
-                disabled: _networkToggleDisabled,
-                subtitle: _networkToggleDisabled
-                    ? 'Full access already includes internet access.'
-                    : (_effectiveSandbox == SandboxMode.workspaceWrite ||
-                          _effectiveSandbox == SandboxMode.readOnly)
-                    ? 'Let tools like gh, curl, or pip use the internet. Off by default for read-only and workspace-write modes.'
-                    : 'Let tools use the internet.',
-                onChanged: (value) {
-                  setState(() {
-                    _policy = _policy.copyWith(networkAccess: value);
-                  });
-                },
-              ),
-            ],
+              onApprovalChanged: (approval) {
+                setState(() {
+                  _policy = _policy.copyWith(approval: approval);
+                });
+              },
+              onSandboxChanged: (sandbox) {
+                setState(() {
+                  _policy = _policy.copyWith(sandbox: sandbox);
+                });
+              },
+              onNetworkAccessChanged: (networkAccess) {
+                setState(() {
+                  _policy = _policy.copyWith(networkAccess: networkAccess);
+                });
+              },
+            ),
           ],
         ],
         const SizedBox(height: 22),
-        Row(
-          children: [
-            TextButton.icon(
-              onPressed: _reset,
-              icon: const Icon(Icons.restart_alt_rounded, size: 18),
-              label: const Text('Reset'),
-            ),
-            const Spacer(),
-            TextButton(
-              onPressed: () => Navigator.of(context).pop(),
-              child: const Text('Cancel'),
-            ),
-            const SizedBox(width: 8),
-            FilledButton.icon(
-              onPressed: _save,
-              icon: const Icon(Icons.check_rounded, size: 18),
-              label: const Text('Apply'),
-            ),
-          ],
-        ),
+        _buildActions(context),
       ],
     );
-
-    if (widget.useBottomSheetChrome) {
-      return MeshBottomSheetScaffold(
-        icon: Icons.tune_rounded,
-        title: 'Session controls',
-        description: intro,
-        maxWidth: 760,
-        maxHeightFactor: 0.9,
-        child: SingleChildScrollView(
-          padding: EdgeInsets.only(bottom: bottomInset),
-          child: content,
-        ),
-      );
-    }
 
     return Padding(
       padding: EdgeInsets.only(bottom: bottomInset),
@@ -1095,27 +1159,7 @@ class _SessionControlsSheetState extends State<SessionControlsSheet> {
         top: false,
         child: SingleChildScrollView(
           padding: const EdgeInsets.fromLTRB(20, 8, 20, 24),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                'Session controls',
-                style: theme.textTheme.titleMedium?.copyWith(
-                  fontWeight: AppWeights.title,
-                ),
-              ),
-              const SizedBox(height: 6),
-              Text(
-                intro,
-                style: theme.textTheme.bodyMedium?.copyWith(
-                  color: colors.textSecondary,
-                  height: 1.4,
-                ),
-              ),
-              const SizedBox(height: 18),
-              content,
-            ],
-          ),
+          child: content,
         ),
       ),
     );
@@ -1164,6 +1208,100 @@ class _ReasoningChoiceChip extends StatelessWidget {
   }
 }
 
+class _ReasoningEffortSlider extends StatelessWidget {
+  const _ReasoningEffortSlider({
+    required this.options,
+    required this.selectedEffort,
+    required this.defaultEffort,
+    required this.onChanged,
+  });
+
+  final List<ModelReasoningEffortOption> options;
+  final String? selectedEffort;
+  final String? defaultEffort;
+  final ValueChanged<String> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    var selectedIndex = options.indexWhere(
+      (option) => option.reasoningEffort == selectedEffort,
+    );
+    if (selectedIndex < 0) {
+      selectedIndex = options.indexWhere(
+        (option) => option.reasoningEffort == defaultEffort,
+      );
+    }
+    if (selectedIndex < 0) selectedIndex = 0;
+    final selected = options[selectedIndex];
+    final selectedLabel = reasoningEffortLabel(selected.reasoningEffort);
+    final isDefault = selected.reasoningEffort == defaultEffort;
+
+    if (options.length == 1) {
+      return Text(
+        selectedLabel,
+        style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+          color: colors.textPrimary,
+          fontWeight: AppWeights.emphasis,
+        ),
+      );
+    }
+
+    return Semantics(
+      label: 'Reasoning effort',
+      value: selectedLabel,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Row(
+            children: [
+              Text(
+                selectedLabel,
+                style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                  color: colors.accent,
+                  fontWeight: AppWeights.title,
+                ),
+              ),
+              if (isDefault) ...[
+                const SizedBox(width: 8),
+                const MeshInlineBadge(label: 'default'),
+              ],
+            ],
+          ),
+          Slider(
+            value: selectedIndex.toDouble(),
+            min: 0,
+            max: (options.length - 1).toDouble(),
+            divisions: options.length - 1,
+            label: selectedLabel,
+            onChanged: (value) {
+              final index = value.round().clamp(0, options.length - 1);
+              onChanged(options[index].reasoningEffort);
+            },
+          ),
+          Row(
+            children: [
+              Text(
+                reasoningEffortLabel(options.first.reasoningEffort),
+                style: Theme.of(
+                  context,
+                ).textTheme.bodySmall?.copyWith(color: colors.textSecondary),
+              ),
+              const Spacer(),
+              Text(
+                reasoningEffortLabel(options.last.reasoningEffort),
+                style: Theme.of(
+                  context,
+                ).textTheme.bodySmall?.copyWith(color: colors.textSecondary),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 class _FastModeTile extends StatelessWidget {
   const _FastModeTile({
     required this.value,
@@ -1177,46 +1315,46 @@ class _FastModeTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    return AppSettingsRow(
+      icon: Icons.bolt_rounded,
+      title: 'Fast mode',
+      subtitle: enabled
+          ? 'Prefer the faster service tier on the next reply.'
+          : 'This model does not support Fast mode.',
+      onTap: enabled ? () => onChanged(!value) : null,
+      trailing: Switch(value: value, onChanged: enabled ? onChanged : null),
+    );
+  }
+}
+
+class _InlineSettingNote extends StatelessWidget {
+  const _InlineSettingNote({required this.text});
+
+  final String text;
+
+  @override
+  Widget build(BuildContext context) {
     final colors = context.colors;
-    return MeshSurface(
-      selected: value,
-      tone: MeshSurfaceTone.muted,
-      radius: AppRadii.control,
-      padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 4),
       child: Row(
-        crossAxisAlignment: CrossAxisAlignment.center,
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Icon(
-            Icons.bolt_rounded,
-            size: 20,
-            color: value ? colors.accent : colors.textSecondary,
+            Icons.info_outline_rounded,
+            size: 18,
+            color: colors.textTertiary,
           ),
-          const SizedBox(width: 12),
+          const SizedBox(width: 10),
           Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  'Fast mode',
-                  style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                    fontWeight: FontWeight.w600,
-                    color: colors.textPrimary,
-                  ),
-                ),
-                const SizedBox(height: 2),
-                Text(
-                  enabled
-                      ? 'Prefer the faster service tier on the next reply.'
-                      : 'This model does not support Fast mode.',
-                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                    color: colors.textSecondary,
-                    height: 1.35,
-                  ),
-                ),
-              ],
+            child: Text(
+              text,
+              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                color: colors.textSecondary,
+                height: 1.35,
+              ),
             ),
           ),
-          Switch(value: value, onChanged: enabled ? onChanged : null),
         ],
       ),
     );
@@ -1228,11 +1366,19 @@ class _ModelPickerSheet extends StatefulWidget {
     required this.models,
     required this.currentModel,
     required this.providerName,
+    this.embedded = false,
+    this.showEmbeddedHeader = true,
+    this.onBack,
+    this.onSelected,
   });
 
   final List<ModelCatalogEntry> models;
   final String? currentModel;
   final String? providerName;
+  final bool embedded;
+  final bool showEmbeddedHeader;
+  final VoidCallback? onBack;
+  final ValueChanged<ModelCatalogEntry>? onSelected;
 
   @override
   State<_ModelPickerSheet> createState() => _ModelPickerSheetState();
@@ -1277,115 +1423,137 @@ class _ModelPickerSheetState extends State<_ModelPickerSheet> {
         })
         .toList(growable: false);
 
-    return MeshBottomSheetScaffold(
-      icon: Icons.memory_rounded,
-      title: 'Choose a model',
-      description: widget.providerName == null
-          ? 'Pick the model for the next reply. Auto models keep things simple, while named models let you choose thinking effort.'
-          : 'Pick the model for the next reply in this session.',
-      maxWidth: 760,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          TextField(
+    final content = Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        if (widget.embedded && widget.showEmbeddedHeader) ...[
+          Padding(
+            padding: const EdgeInsets.fromLTRB(12, 8, 12, 12),
+            child: Row(
+              children: [
+                Tooltip(
+                  message: 'Back to session controls',
+                  child: TextButton.icon(
+                    onPressed: widget.onBack,
+                    icon: const Icon(Icons.arrow_back_rounded, size: 18),
+                    label: const Text('All controls'),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Choose a model',
+                        style: Theme.of(context).textTheme.titleMedium
+                            ?.copyWith(fontWeight: AppWeights.title),
+                      ),
+                      Text(
+                        'Changes apply to the next reply.',
+                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color: colors.textSecondary,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+        Padding(
+          padding: widget.embedded
+              ? const EdgeInsets.symmetric(horizontal: 16)
+              : EdgeInsets.zero,
+          child: TextField(
             controller: _queryController,
             decoration: const InputDecoration(
               prefixIcon: Icon(Icons.search_rounded),
               hintText: 'Search models',
             ),
           ),
-          const SizedBox(height: 14),
-          Expanded(
-            child: filtered.isEmpty
-                ? Center(
-                    child: Text(
-                      'No models match that search.',
-                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                        color: colors.textSecondary,
-                      ),
+        ),
+        const SizedBox(height: 14),
+        Expanded(
+          child: filtered.isEmpty
+              ? Center(
+                  child: Text(
+                    'No models match that search.',
+                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                      color: colors.textSecondary,
                     ),
-                  )
-                : ListView.separated(
-                    itemCount: filtered.length,
-                    separatorBuilder: (_, _) => const SizedBox(height: 8),
-                    itemBuilder: (context, index) {
-                      final model = filtered[index];
-                      final isCurrent =
-                          model.model == _trimmedOrNull(widget.currentModel);
-                      return MeshSurface(
-                        onTap: () => Navigator.of(context).pop(model),
-                        selected: isCurrent,
-                        tone: MeshSurfaceTone.muted,
-                        radius: AppRadii.control,
-                        padding: const EdgeInsets.all(14),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Row(
-                              children: [
-                                Expanded(
-                                  child: Text(
-                                    model.displayName,
-                                    style: Theme.of(context)
-                                        .textTheme
-                                        .titleSmall
-                                        ?.copyWith(fontWeight: FontWeight.w700),
-                                  ),
-                                ),
-                                if (isCurrent)
-                                  const MeshInlineBadge(label: 'current'),
-                              ],
-                            ),
-                            const SizedBox(height: 4),
-                            Text(
-                              model.model,
-                              style: monoStyle(
-                                color: colors.textSecondary,
-                                fontSize: 12,
-                                fontWeight: FontWeight.w600,
-                              ),
-                            ),
-                            const SizedBox(height: 8),
-                            Wrap(
-                              spacing: 8,
-                              runSpacing: 8,
-                              children: [
-                                if (widget.providerName != null)
-                                  MeshInlineBadge(label: widget.providerName!),
-                                if (model.isAutoModel)
-                                  const MeshInlineBadge(label: 'auto'),
-                                if (model.isDefault)
-                                  const MeshInlineBadge(label: 'default'),
-                                if (model.supportsFastMode)
-                                  const MeshInlineBadge(label: 'fast'),
-                                ...model.supportedReasoningEfforts
-                                    .take(3)
-                                    .map(
-                                      (option) => MeshInlineBadge(
-                                        label: _reasoningEffortLabel(
-                                          option.reasoningEffort,
-                                        ),
-                                      ),
-                                    ),
-                              ],
-                            ),
-                            const SizedBox(height: 8),
-                            Text(
-                              model.description,
-                              style: Theme.of(context).textTheme.bodySmall
-                                  ?.copyWith(
-                                    color: colors.textSecondary,
-                                    height: 1.35,
-                                  ),
-                            ),
-                          ],
-                        ),
-                      );
-                    },
                   ),
-          ),
-        ],
-      ),
+                )
+              : ListView.separated(
+                  padding: widget.embedded
+                      ? const EdgeInsets.fromLTRB(8, 0, 8, 24)
+                      : EdgeInsets.zero,
+                  itemCount: filtered.length,
+                  separatorBuilder: (_, _) =>
+                      Divider(height: 1, indent: 56, color: colors.border),
+                  itemBuilder: (context, index) {
+                    final model = filtered[index];
+                    final isCurrent =
+                        model.model == _trimmedOrNull(widget.currentModel);
+                    return AppChoiceRow(
+                      title: model.displayName,
+                      subtitle: model.description,
+                      icon: Icons.memory_rounded,
+                      selected: isCurrent,
+                      onTap: () {
+                        final onSelected = widget.onSelected;
+                        if (onSelected != null) {
+                          onSelected(model);
+                        } else {
+                          Navigator.of(context).pop(model);
+                        }
+                      },
+                      footer: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            model.model,
+                            style: monoStyle(
+                              color: colors.textSecondary,
+                              fontSize: 12,
+                              fontWeight: AppWeights.body,
+                            ),
+                          ),
+                          const SizedBox(height: AppSpacing.sm),
+                          Wrap(
+                            spacing: AppSpacing.sm,
+                            runSpacing: AppSpacing.sm,
+                            children: [
+                              if (widget.providerName != null)
+                                MeshInlineBadge(label: widget.providerName!),
+                              if (model.isAutoModel)
+                                const MeshInlineBadge(label: 'auto'),
+                              if (model.isDefault)
+                                const MeshInlineBadge(label: 'default'),
+                              if (model.supportsFastMode)
+                                const MeshInlineBadge(label: 'fast'),
+                            ],
+                          ),
+                        ],
+                      ),
+                    );
+                  },
+                ),
+        ),
+      ],
+    );
+    if (widget.embedded) {
+      return content;
+    }
+    return MeshBottomSheetScaffold(
+      icon: Icons.memory_rounded,
+      title: 'Choose a model',
+      description: widget.providerName == null
+          ? 'Pick the model for the next reply. Auto models keep things simple.'
+          : 'Pick the model for the next reply in this session.',
+      maxWidth: 760,
+      child: content,
     );
   }
 }
@@ -1405,7 +1573,6 @@ class _ReasoningPickerSheet extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final colors = context.colors;
     return MeshBottomSheetScaffold(
       icon: Icons.psychology_alt_rounded,
       title: 'Choose thinking level',
@@ -1413,279 +1580,11 @@ class _ReasoningPickerSheet extends StatelessWidget {
           'Set how much thinking the next reply should use with $modelLabel.',
       maxWidth: 520,
       maxHeightFactor: 0.72,
-      child: ListView.separated(
-        itemCount: options.length,
-        separatorBuilder: (_, _) => const SizedBox(height: 8),
-        itemBuilder: (context, index) {
-          final option = options[index];
-          final selected = option.reasoningEffort == currentReasoning;
-          final isDefault = option.reasoningEffort == defaultReasoning;
-          return MeshSurface(
-            onTap: () => Navigator.of(context).pop(option.reasoningEffort),
-            selected: selected,
-            tone: MeshSurfaceTone.muted,
-            radius: AppRadii.control,
-            padding: const EdgeInsets.all(14),
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Icon(
-                  Icons.psychology_alt_rounded,
-                  size: 19,
-                  color: selected ? colors.accent : colors.textSecondary,
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(
-                        children: [
-                          Expanded(
-                            child: Text(
-                              _reasoningEffortLabel(option.reasoningEffort),
-                              style: Theme.of(context).textTheme.titleSmall
-                                  ?.copyWith(fontWeight: FontWeight.w700),
-                            ),
-                          ),
-                          if (selected) const MeshInlineBadge(label: 'current'),
-                          if (!selected && isDefault)
-                            const MeshInlineBadge(label: 'default'),
-                        ],
-                      ),
-                      if (option.description.trim().isNotEmpty) ...[
-                        const SizedBox(height: 6),
-                        Text(
-                          option.description.trim(),
-                          style: Theme.of(context).textTheme.bodySmall
-                              ?.copyWith(
-                                color: colors.textSecondary,
-                                height: 1.35,
-                              ),
-                        ),
-                      ],
-                    ],
-                  ),
-                ),
-              ],
-            ),
-          );
-        },
-      ),
-    );
-  }
-}
-
-class _PolicyAutopilotCard extends StatelessWidget {
-  const _PolicyAutopilotCard({
-    required this.active,
-    required this.onTap,
-    required this.colors,
-  });
-
-  final bool active;
-  final VoidCallback onTap;
-  final AppColors colors;
-
-  @override
-  Widget build(BuildContext context) {
-    return MeshSurface(
-      onTap: onTap,
-      selected: active,
-      tone: MeshSurfaceTone.muted,
-      radius: AppRadii.control,
-      padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Icon(Icons.auto_awesome_rounded, color: colors.accent, size: 20),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  'Hands-off mode',
-                  style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                    fontWeight: FontWeight.w700,
-                    color: colors.textPrimary,
-                  ),
-                ),
-                const SizedBox(height: 2),
-                Text(
-                  'Approvals off, full file access, internet on. The agent keeps going without stopping to ask you first.',
-                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                    color: colors.textSecondary,
-                    height: 1.35,
-                  ),
-                ),
-              ],
-            ),
-          ),
-          if (active)
-            Icon(Icons.check_circle_rounded, color: colors.accent, size: 20),
-        ],
-      ),
-    );
-  }
-}
-
-class _PolicyNetworkTile extends StatelessWidget {
-  const _PolicyNetworkTile({
-    required this.value,
-    required this.disabled,
-    required this.subtitle,
-    required this.onChanged,
-  });
-
-  final bool value;
-  final bool disabled;
-  final String subtitle;
-  final ValueChanged<bool> onChanged;
-
-  @override
-  Widget build(BuildContext context) {
-    final colors = context.colors;
-    return MeshSurface(
-      selected: value,
-      tone: MeshSurfaceTone.muted,
-      radius: AppRadii.control,
-      padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.center,
-        children: [
-          Icon(
-            value ? Icons.public_rounded : Icons.public_off_rounded,
-            size: 20,
-            color: value ? colors.accent : colors.textSecondary,
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  'Use the internet',
-                  style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                    fontWeight: FontWeight.w600,
-                    color: colors.textPrimary,
-                  ),
-                ),
-                const SizedBox(height: 2),
-                Text(
-                  subtitle,
-                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                    color: colors.textSecondary,
-                    height: 1.35,
-                  ),
-                ),
-              ],
-            ),
-          ),
-          Switch(value: value, onChanged: disabled ? null : onChanged),
-        ],
-      ),
-    );
-  }
-}
-
-class _PolicyRadioTile<T> extends StatelessWidget {
-  const _PolicyRadioTile({
-    required this.value,
-    required this.groupValue,
-    required this.title,
-    required this.subtitle,
-    required this.onSelected,
-    this.fromRuntime = false,
-    this.danger = false,
-  });
-
-  final T value;
-  final T groupValue;
-  final String title;
-  final String subtitle;
-  final bool fromRuntime;
-  final bool danger;
-  final ValueChanged<T> onSelected;
-
-  @override
-  Widget build(BuildContext context) {
-    final colors = context.colors;
-    final selected = value == groupValue;
-    final accent = danger ? colors.danger : colors.accent;
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 8),
-      child: MeshSurface(
-        onTap: () => onSelected(value),
-        selected: selected && !danger,
-        tone: selected && danger
-            ? MeshSurfaceTone.danger
-            : MeshSurfaceTone.muted,
-        borderColor: selected ? accent : colors.border,
-        radius: AppRadii.control,
-        padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Icon(
-              selected
-                  ? Icons.radio_button_checked_rounded
-                  : Icons.radio_button_unchecked_rounded,
-              size: 20,
-              color: selected ? accent : colors.textSecondary,
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    children: [
-                      Expanded(
-                        child: Text(
-                          title,
-                          style: Theme.of(context).textTheme.titleSmall
-                              ?.copyWith(
-                                fontWeight: FontWeight.w600,
-                                color: colors.textPrimary,
-                              ),
-                        ),
-                      ),
-                      if (fromRuntime)
-                        Container(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 6,
-                            vertical: 2,
-                          ),
-                          decoration: BoxDecoration(
-                            color: colors.surfaceMuted,
-                            borderRadius: BorderRadius.circular(6),
-                            border: Border.all(color: colors.border),
-                          ),
-                          child: Text(
-                            'current',
-                            style: Theme.of(context).textTheme.labelSmall
-                                ?.copyWith(
-                                  color: colors.textSecondary,
-                                  letterSpacing: 0.4,
-                                ),
-                          ),
-                        ),
-                    ],
-                  ),
-                  const SizedBox(height: 2),
-                  Text(
-                    subtitle,
-                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                      color: colors.textSecondary,
-                      height: 1.35,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ],
-        ),
+      child: ReasoningChoiceList(
+        options: options,
+        currentReasoning: currentReasoning,
+        defaultReasoning: defaultReasoning,
+        onSelected: (effort) => Navigator.of(context).pop(effort),
       ),
     );
   }
@@ -1708,18 +1607,6 @@ int _modelSortRank(ModelCatalogEntry model) {
   final sortOrder = model.sortOrder;
   if (sortOrder != null) return sortOrder;
   return model.isProfileModel ? 4000 : 10000;
-}
-
-String _reasoningEffortLabel(String value) {
-  return switch (value) {
-    'none' => 'None',
-    'minimal' => 'Minimal',
-    'low' => 'Low',
-    'medium' => 'Medium',
-    'high' => 'High',
-    'xhigh' => 'Extra high',
-    _ => value,
-  };
 }
 
 String _sessionModeChoiceLabel(

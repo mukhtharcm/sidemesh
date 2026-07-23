@@ -15,6 +15,7 @@ class SessionSendOverrides {
   String? get approvalPolicy => policy.approval?.wire;
   String? get sandboxMode => policy.sandbox?.wire;
   bool? get networkAccess => policy.networkAccess;
+  String? get accessMode => _trimmedOrNull(policy.accessMode);
 }
 
 SessionSendOverrides normalizeSessionSendOverrides({
@@ -42,9 +43,21 @@ SessionSendOverrides normalizeSessionSendOverrides({
   var approval = policy.approval;
   var sandbox = policy.sandbox;
   var networkAccess = policy.networkAccess;
+  var accessMode = _trimmedOrNull(policy.accessMode);
 
   bool supports(String feature) =>
       capabilities == null || capabilities.supports('runtimeControls', feature);
+
+  if (!supports('accessMode')) {
+    accessMode = null;
+  } else {
+    approval = null;
+    sandbox = null;
+    networkAccess = null;
+    if (accessMode == _trimmedOrNull(runtime?.accessMode)) {
+      accessMode = null;
+    }
+  }
 
   if (!supports('model')) {
     model = null;
@@ -113,6 +126,7 @@ SessionSendOverrides normalizeSessionSendOverrides({
       approval: approval,
       sandbox: sandbox,
       networkAccess: networkAccess,
+      accessMode: accessMode,
     ),
   );
 }

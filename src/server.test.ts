@@ -36,8 +36,10 @@ import {
   summarizeAgentProviderConfig,
 } from "./provider-registry.js";
 import type { AgentProviderRuntime, AgentProviderRuntimeEntry } from "./provider-factory.js";
+import { AgentProviderRequestError } from "./agent-provider.js";
 import type {
   AgentCreateSessionRequest,
+  AgentAccessModeListOptions,
   AgentCreateSessionResult,
   AgentPendingAction,
   AgentProvider,
@@ -50,6 +52,7 @@ import type {
   AgentSubmitInputResult,
 } from "./agent-provider.js";
 import type {
+  ProviderAccessModeCatalog,
   ProviderModeCatalog,
   SessionLogSnapshot,
   ThreadRecord,
@@ -168,6 +171,7 @@ async function writeLegacyDedupeReceipt(
   key: string,
   signatureHash: string,
   receipt: { mode: string; turnId: string | null; messageId: string },
+  rawSignatureHash?: string,
 ): Promise<void> {
   await mkdir(stateDir, { recursive: true });
   await writeFile(
@@ -178,6 +182,7 @@ async function writeLegacyDedupeReceipt(
         {
           key,
           signatureHash,
+          ...(rawSignatureHash ? { rawSignatureHash } : {}),
           createdAt: Date.now(),
           updatedAt: Date.now(),
           receipt,
@@ -200,6 +205,26 @@ function legacyInputSignature(input: AgentSessionInputItem[]): string {
           approvalPolicy: null,
           sandboxMode: null,
           networkAccess: null,
+        },
+      }),
+    )
+    .digest("hex");
+}
+
+function preAccessModeInputSignature(input: AgentSessionInputItem[]): string {
+  return createHash("sha256")
+    .update(
+      JSON.stringify({
+        input,
+        overrides: {
+          model: null,
+          reasoningEffort: null,
+          fastMode: null,
+          approvalPolicy: null,
+          sandboxMode: null,
+          networkAccess: null,
+          permissionProfile: null,
+          approvalsReviewer: null,
         },
       }),
     )
@@ -356,11 +381,64 @@ class ModeCatalogOnlyProvider
   }
 }
 
+class AccessModeCatalogOnlyProvider
+  extends EventEmitter
+  implements AgentProviderCore, Pick<AgentProvider, "listAccessModes">
+{
+  public readonly kind = "fake";
+  public readonly displayName = "Access Mode Catalog Provider";
+  public readonly capabilities: AgentProviderCapabilities = {
+    ...FAKE_PROVIDER_CAPABILITIES,
+    configuration: {
+      ...FAKE_PROVIDER_CAPABILITIES.configuration,
+      accessModes: true,
+    },
+    runtimeControls: {
+      ...FAKE_PROVIDER_CAPABILITIES.runtimeControls,
+      accessMode: true,
+    },
+  };
+
+  public requestedCwd: string | null = null;
+
+  public async start(): Promise<void> {}
+
+  public async getVersion(): Promise<string> {
+    return "test-provider 1.0.0";
+  }
+
+  public async listAccessModes(
+    options: AgentAccessModeListOptions,
+  ): Promise<ProviderAccessModeCatalog> {
+    this.requestedCwd = options.cwd;
+    return {
+      strategy: "modes",
+      defaultMode: "guarded",
+      modes: [
+        {
+          id: "guarded",
+          label: "Guarded",
+          description: "Ask before sensitive actions.",
+          icon: "prompt",
+          tone: "default",
+          enabled: true,
+          disabledReason: null,
+          confirmation: null,
+        },
+      ],
+    };
+  }
+}
+
 const RESTARTABLE_FAKE_CAPABILITIES: AgentProviderCapabilities = {
   ...FAKE_PROVIDER_CAPABILITIES,
   lifecycle: {
     ...FAKE_PROVIDER_CAPABILITIES.lifecycle,
     restart: true,
+  },
+  runtimeControls: {
+    ...FAKE_PROVIDER_CAPABILITIES.runtimeControls,
+    accessMode: true,
   },
 };
 
@@ -543,6 +621,19 @@ class RestartableFakeProvider
           }
         : {}),
     };
+  }
+}
+
+class RejectingAccessModeProvider extends RestartableFakeProvider {
+  public override async createSession(
+    request: AgentCreateSessionRequest,
+  ): Promise<AgentCreateSessionResult> {
+    if (request.overrides.accessMode === "retired") {
+      throw new AgentProviderRequestError(
+        "The selected access mode is no longer available.",
+      );
+    }
+    return super.createSession(request);
   }
 }
 
@@ -1825,6 +1916,35 @@ describe("session input item parsing", () => {
     return realpath(cwd);
   }
 
+  it("returns a request error when a provider rejects a stale access mode", async () => {
+    const stateDir = await mkdtemp(nodePath.join(tmpdir(), "sidemesh-server-test-"));
+    const runtime = makeCustomSingleProviderRuntime(
+      new RejectingAccessModeProvider(),
+    );
+    await withServerRuntime(makeConfig(stateDir), runtime, async (server, config) => {
+      const response = await request({
+        hostname: "127.0.0.1",
+        port: server.port,
+        path: "/api/sessions/create",
+        method: "POST",
+        headers: {
+          Authorization: "Bearer " + config.token,
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          cwd: "/tmp",
+          prompt: "start",
+          accessMode: "retired",
+        }),
+      });
+
+      assert.equal(response.statusCode, 400);
+      assert.deepEqual(response.body, {
+        error: "The selected access mode is no longer available.",
+      });
+    });
+  });
+
   it("passes file input items through create and submit routes", async () => {
     const stateDir = await mkdtemp(nodePath.join(tmpdir(), "sidemesh-server-test-"));
     const cwd = await prepareFileInputWorkspace(stateDir);
@@ -2040,6 +2160,78 @@ describe("session input item parsing", () => {
         ...legacyReceipt,
         replayed: true,
       });
+      assert.equal(provider.submittedInputs, 0);
+    });
+  });
+
+  it("replays pre-access-mode receipts without accepting a changed access mode", async () => {
+    const stateDir = await mkdtemp(nodePath.join(tmpdir(), "sidemesh-server-test-"));
+    const clientMessageId = "pre-access-mode-retry";
+    const input = [
+      {
+        type: "text" as const,
+        text: "retry after upgrade",
+        text_elements: [],
+      },
+    ];
+    const receipt = {
+      mode: "turn",
+      turnId: "pre-access-turn",
+      messageId: "pre-access-message",
+    };
+    const oldSignature = preAccessModeInputSignature(input);
+    await writeLegacyDedupeReceipt(
+      stateDir,
+      `fake-restart-session:${clientMessageId}`,
+      oldSignature,
+      receipt,
+      oldSignature,
+    );
+
+    const provider = new RestartableFakeProvider();
+    const runtime = makeCustomSingleProviderRuntime(provider);
+    await withServerRuntime(makeConfig(stateDir), runtime, async (server, config) => {
+      const created = await request({
+        hostname: "127.0.0.1",
+        port: server.port,
+        path: "/api/sessions/create",
+        method: "POST",
+        headers: {
+          Authorization: "Bearer " + config.token,
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({ cwd: "/tmp", prompt: "start" }),
+      });
+      assert.equal(created.statusCode, 201);
+
+      const send = (accessMode?: string) =>
+        request({
+          hostname: "127.0.0.1",
+          port: server.port,
+          path: "/api/sessions/fake-restart-session/input",
+          method: "POST",
+          headers: {
+            Authorization: "Bearer " + config.token,
+            "content-type": "application/json",
+          },
+          body: JSON.stringify({
+            clientMessageId,
+            input,
+            ...(accessMode ? { accessMode } : {}),
+          }),
+        });
+
+      const retry = await send();
+      assert.equal(retry.statusCode, 200);
+      assert.deepEqual(retry.body, { ...receipt, replayed: true });
+      assert.equal(provider.submittedInputs, 0);
+
+      const changed = await send("guarded");
+      assert.equal(changed.statusCode, 409);
+      assert.equal(
+        (changed.body as any).error,
+        "clientMessageId was already used with different input",
+      );
       assert.equal(provider.submittedInputs, 0);
     });
   });
@@ -3763,6 +3955,22 @@ describe("provider-scoped catalog routes", () => {
       assert.equal(
         (await request({
           ...baseRequest,
+          path: "/api/access-modes",
+          method: "GET",
+        })).statusCode,
+        501,
+      );
+      assert.equal(
+        (await request({
+          ...baseRequest,
+          path: "/api/permission-profiles",
+          method: "GET",
+        })).statusCode,
+        501,
+      );
+      assert.equal(
+        (await request({
+          ...baseRequest,
           path: `/api/skills?cwd=${encodeURIComponent("/tmp")}`,
           method: "GET",
         })).statusCode,
@@ -3800,6 +4008,8 @@ describe("provider-scoped catalog routes", () => {
         "/api/modes?agentProvider=unknown",
         "/api/models?agentProvider=unknown",
         "/api/profiles?agentProvider=unknown",
+        "/api/access-modes?agentProvider=unknown",
+        "/api/permission-profiles?agentProvider=unknown",
         `/api/skills?agentProvider=unknown&cwd=${encodeURIComponent("/tmp")}`,
       ]) {
         const res = await request({ ...baseRequest, path, method: "GET" });
@@ -3841,6 +4051,8 @@ describe("provider-scoped catalog routes", () => {
           "/api/modes",
           "/api/models",
           "/api/profiles",
+          "/api/access-modes",
+          "/api/permission-profiles",
           `/api/skills?cwd=${encodeURIComponent("/tmp")}`,
         ]) {
           const res = await request({ ...baseRequest, path, method: "GET" });
@@ -3885,6 +4097,43 @@ describe("provider-scoped catalog routes", () => {
           modes: [
             { id: "build", label: "Build" },
             { id: "review", label: "Review" },
+          ],
+        });
+      },
+    );
+  });
+
+  it("returns provider-owned access modes without exposing provider internals", async () => {
+    const stateDir = await mkdtemp(nodePath.join(tmpdir(), "sidemesh-server-test-"));
+    const config = makeConfig(stateDir);
+    const provider = new AccessModeCatalogOnlyProvider();
+    await withServerRuntime(
+      config,
+      makeCustomSingleProviderRuntime(provider),
+      async (server, runtimeConfig) => {
+        const res = await request({
+          hostname: "127.0.0.1",
+          port: server.port,
+          path: `/api/access-modes?cwd=${encodeURIComponent("/repo/app")}`,
+          method: "GET",
+          headers: { Authorization: "Bearer " + runtimeConfig.token },
+        });
+        assert.equal(res.statusCode, 200);
+        assert.equal(provider.requestedCwd, "/repo/app");
+        assert.deepEqual(res.body, {
+          strategy: "modes",
+          defaultMode: "guarded",
+          modes: [
+            {
+              id: "guarded",
+              label: "Guarded",
+              description: "Ask before sensitive actions.",
+              icon: "prompt",
+              tone: "default",
+              enabled: true,
+              disabledReason: null,
+              confirmation: null,
+            },
           ],
         });
       },
