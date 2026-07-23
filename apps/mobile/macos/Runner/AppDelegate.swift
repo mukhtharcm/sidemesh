@@ -10,7 +10,6 @@ class AppDelegate: FlutterAppDelegate {
   override func applicationDidFinishLaunching(_ notification: Notification) {
     super.applicationDidFinishLaunching(notification)
     configureUpdater()
-    configureUpdaterChannel()
   }
 
   override func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
@@ -22,6 +21,9 @@ class AppDelegate: FlutterAppDelegate {
   }
 
   private func configureUpdater() {
+    guard updaterController == nil else {
+      return
+    }
     guard hasSparkleConfiguration else {
       return
     }
@@ -73,20 +75,8 @@ class AppDelegate: FlutterAppDelegate {
     appMenu.insertItem(item, at: insertIndex)
   }
 
-  private func configureUpdaterChannel(retryCount: Int = 0) {
+  func registerUpdaterChannel(with flutterViewController: FlutterViewController) {
     guard updaterChannel == nil else {
-      return
-    }
-
-    guard
-      let flutterViewController = mainFlutterWindow?.contentViewController as? FlutterViewController
-    else {
-      guard retryCount < 4 else {
-        return
-      }
-      DispatchQueue.main.async { [weak self] in
-        self?.configureUpdaterChannel(retryCount: retryCount + 1)
-      }
       return
     }
 
@@ -102,6 +92,7 @@ class AppDelegate: FlutterAppDelegate {
   }
 
   private func handleUpdaterMethodCall(_ call: FlutterMethodCall, result: @escaping FlutterResult) {
+    configureUpdater()
     switch call.method {
     case "getState":
       result(updaterStatePayload())
