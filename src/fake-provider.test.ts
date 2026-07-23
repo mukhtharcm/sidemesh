@@ -46,7 +46,7 @@ describe("fake test provider", () => {
     const input: AgentSessionInputItem[] = [
       {
         type: "text",
-        text: "run tools with approval:command approval:tool approval:file approval:permissions image",
+        text: "run tools with tool-attachment approval:command approval:tool approval:file approval:permissions image",
         text_elements: [],
       },
       {
@@ -107,6 +107,10 @@ describe("fake test provider", () => {
       [...new Set(log.activities.map((activity) => activity.type))].sort(),
       ["command", "file_change", "image_generation", "tool", "turn_diff", "web_search"],
     );
+    const tool = log.activities.find((activity) => activity.type === "tool");
+    assert.equal(tool?.type, "tool");
+    assert.equal(tool.attachments?.length, 1);
+    assert.match(tool.attachments?.[0]?.url ?? "", /^data:image\/png;base64,/);
     assert.ok(log.nextSeq > 0);
 
     const paged = await provider.readSessionLog(thread, {

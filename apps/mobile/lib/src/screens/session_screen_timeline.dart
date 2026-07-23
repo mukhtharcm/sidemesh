@@ -2678,6 +2678,17 @@ class _ActivityCardState extends State<_ActivityCard> {
       widgets.add(const SizedBox(height: 12));
     }
 
+    if (activity.toolAttachments.isNotEmpty) {
+      widgets.add(
+        _MessageAttachmentsSection(
+          host: widget.host,
+          api: widget.api,
+          attachments: activity.toolAttachments,
+        ),
+      );
+      widgets.add(const SizedBox(height: 12));
+    }
+
     if (result.isNotEmpty) {
       widgets.add(_activityCodeBlock(context, 'Result', result, 'json'));
       widgets.add(const SizedBox(height: 12));

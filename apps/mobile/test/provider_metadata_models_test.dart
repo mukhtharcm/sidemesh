@@ -421,6 +421,12 @@ void main() {
       'title': 'Read README.md',
       'args': {'path': 'README.md'},
       'result': {'content': 'hello'},
+      'attachments': [
+        {
+          'type': 'image',
+          'url': 'data:image/png;base64,AAAA',
+        },
+      ],
       'semantic': {
         'category': 'filesystem',
         'action': 'read',
@@ -439,6 +445,18 @@ void main() {
     expect(nested.toolSemantic?.action, 'read');
     expect(nested.toolTarget, 'README.md');
     expect(nested.toolTargets, ['README.md']);
+    expect(nested.toolAttachments, hasLength(1));
+    expect(nested.toolAttachments.single.isImage, isTrue);
+    expect(
+      nested.toJson()['attachments'],
+      [
+        {
+          'type': 'image',
+          'url': 'data:image/png;base64,AAAA',
+          'path': null,
+        },
+      ],
+    );
 
     final legacy = SessionActivity.fromJson({
       'id': 'tool-2',
