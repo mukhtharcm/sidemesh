@@ -59,12 +59,14 @@ import type {
   ModelSummary,
   PendingActionElicitationField,
   SessionActivity,
+  SessionActorInfo,
   SkillCatalogEntry,
   SkillSummary,
   SessionLogSnapshot,
   SessionMessage,
   SessionMessageAttachment,
   SessionRuntimeSummary,
+  SessionSubAgentRunInfo,
   ToolActivitySemantic,
   ToolActivitySemanticTarget,
   ToolActivity,
@@ -91,6 +93,7 @@ interface CopilotSessionState {
   archived: boolean;
   nextSeq: number;
   draftAssistantMessages: Map<string, CopilotDraftAssistantMessage>;
+  actorRegistry: CopilotActorRegistry;
   copilotSessionId: string | null;
   copilotSessionCreated: boolean;
   sdkSession?: CopilotSdkSession | null;
@@ -103,6 +106,7 @@ interface CopilotDraftAssistantMessage {
   content: SessionMessageContentBlock[];
   phase: "commentary" | "final_answer";
   createdAt: number;
+  actor?: SessionActorInfo | null;
 }
 
 interface CopilotStateFile {
@@ -126,9 +130,16 @@ interface ActiveCopilotTurn {
   turnId: string;
   sdkSession: CopilotSdkSession;
   assistantBuffers: Map<string, string>;
+  assistantActors: Map<string, SessionActorInfo | null>;
   reasoningBlocks: SessionMessageContentBlock[];
   completedAssistantMessageIds: Set<string>;
   resolve(status: string): void;
+}
+
+interface CopilotActorRegistry {
+  byAgentId: Map<string, SessionActorInfo>;
+  byParentToolCallId: Map<string, SessionActorInfo>;
+  selectedCustomAgent: SessionActorInfo | null;
 }
 
 interface PendingCopilotPermission {
@@ -782,6 +793,7 @@ export class CopilotAgentProvider
       archived: false,
       nextSeq: 0,
       draftAssistantMessages: new Map(),
+      actorRegistry: createCopilotActorRegistry(),
       copilotSessionId: id,
       copilotSessionCreated: false,
     };
@@ -828,6 +840,7 @@ export class CopilotAgentProvider
           turnId,
           sdkSession,
           assistantBuffers: new Map(),
+          assistantActors: new Map(),
           reasoningBlocks: [],
           completedAssistantMessageIds: new Set(),
           resolve,
@@ -1014,6 +1027,22 @@ export class CopilotAgentProvider
       return;
     }
 
+    if (event.type === "subagent.selected") {
+      resolveCopilotActorForEvent(session.actorRegistry, event);
+      return;
+    }
+
+    if (event.type === "subagent.deselected") {
+      clearSelectedCopilotActor(session.actorRegistry, event);
+      return;
+    }
+
+    if (event.type === "system.notification") {
+      resolveCopilotActorForEvent(session.actorRegistry, event);
+    }
+
+    const actor = resolveCopilotActorForEvent(session.actorRegistry, event);
+
     if (event.type === "subagent.started") {
       this.upsertAndEmitActivity(session, active?.turnId ?? null, {
         id: event.data.toolCallId ?? event.id,
@@ -1027,6 +1056,8 @@ export class CopilotAgentProvider
         result: null,
         isError: false,
         semantic: null,
+        actor,
+        subAgentRun: buildCopilotSubAgentRunInfo(asRecord(event.data) ?? {}),
       });
       return;
     }
@@ -1047,6 +1078,8 @@ export class CopilotAgentProvider
         result: { type: "success", summary: "Subagent completed" },
         isError: false,
         semantic: null,
+        actor,
+        subAgentRun: buildCopilotSubAgentRunInfo(asRecord(event.data) ?? {}),
       });
       return;
     }
@@ -1067,6 +1100,8 @@ export class CopilotAgentProvider
         },
         isError: true,
         semantic: null,
+        actor,
+        subAgentRun: buildCopilotSubAgentRunInfo(asRecord(event.data) ?? {}),
       });
       return;
     }
@@ -1155,14 +1190,16 @@ export class CopilotAgentProvider
       event.type === "session.compaction_start" ||
       event.type === "session.compaction_complete"
     ) {
-      this.replaceRuntime(
-        session,
-        applyCopilotRuntimeEvent(
-          session.runtime,
-          event,
-          millisFromDateLike(event.timestamp) ?? Date.now(),
-        ),
-      );
+      if (shouldApplyCopilotRuntimeEvent(actor, event)) {
+        this.replaceRuntime(
+          session,
+          applyCopilotRuntimeEvent(
+            session.runtime,
+            event,
+            millisFromDateLike(event.timestamp) ?? Date.now(),
+          ),
+        );
+      }
       return;
     }
 
@@ -1177,6 +1214,7 @@ export class CopilotAgentProvider
         messageId,
         `${active.assistantBuffers.get(messageId) ?? ""}${delta}`,
       );
+      active.assistantActors.set(messageId, cloneSessionActorInfo(actor));
       this.syncDraftAssistantMessages(session, active);
       this.emit("liveEvent", {
         type: "assistant_delta",
@@ -1184,6 +1222,7 @@ export class CopilotAgentProvider
         turnId: active.turnId,
         itemId: messageId,
         delta,
+        actor,
       });
       return;
     }
@@ -1197,6 +1236,8 @@ export class CopilotAgentProvider
       if (active.completedAssistantMessageIds.has(messageId)) {
         return;
       }
+      const messageActor =
+        actor ?? active.assistantActors.get(messageId) ?? null;
       const text = event.data.content.trim();
       if (text.length > 0) {
         this.appendAndEmitAssistantMessage(
@@ -1205,11 +1246,13 @@ export class CopilotAgentProvider
           text,
           assistantPhase(event.data.phase),
           messageId,
+          messageActor,
         );
         session.draftAssistantMessages.delete(messageId);
       }
       active.completedAssistantMessageIds.add(messageId);
       active.assistantBuffers.delete(messageId);
+      active.assistantActors.delete(messageId);
       this.persistEventually();
       return;
     }
@@ -1255,6 +1298,7 @@ export class CopilotAgentProvider
           event.data.arguments,
           null,
         ),
+        actor,
       });
       return;
     }
@@ -1312,6 +1356,7 @@ export class CopilotAgentProvider
             event.data.result ?? event.data.error ?? null,
           ),
         ),
+        actor,
       });
     }
   }
@@ -1385,6 +1430,7 @@ export class CopilotAgentProvider
           trimmed,
           "final_answer",
           messageId,
+          active.assistantActors.get(messageId) ?? null,
         );
         active.completedAssistantMessageIds.add(messageId);
       }
@@ -1397,6 +1443,7 @@ export class CopilotAgentProvider
       }
     }
 
+    active.assistantActors.clear();
     this.activeTurns.delete(sessionId);
     const turn = session.turns.find(
       (candidate) => candidate.id === active.turnId,
@@ -1447,13 +1494,14 @@ export class CopilotAgentProvider
     text: string,
     phase: "commentary" | "final_answer",
     id: string,
+    actor: SessionActorInfo | null = null,
   ): void {
-    this.appendAssistantMessage(session, turnId, text, phase, id);
+    this.appendAssistantMessage(session, turnId, text, phase, id, actor);
     this.emit("liveEvent", {
       type: "assistant_message_completed",
       sessionId: session.thread.id,
       turnId,
-      message: { id, text, phase },
+      message: { id, text, phase, actor },
     });
   }
 
@@ -1483,6 +1531,9 @@ export class CopilotAgentProvider
       seq: existing?.seq ?? session.nextSeq++,
     } as SessionActivity;
     session.activities.set(activity.id, next);
+    if (next.type === "tool") {
+      registerCopilotActor(session.actorRegistry, next.actor, next.subAgentRun?.parentToolCallId ?? null);
+    }
     this.touch(session);
     this.persistEventually();
     return next;
@@ -1678,6 +1729,7 @@ export class CopilotAgentProvider
     text: string,
     phase: "commentary" | "final_answer",
     id = `copilot-assistant-${randomUUID()}`,
+    actor: SessionActorInfo | null = null,
   ): void {
     const active = this.activeTurns.get(session.thread.id);
     const content = cloneSessionMessageContentBlocks(
@@ -1690,6 +1742,7 @@ export class CopilotAgentProvider
       content,
       attachments: [],
       phase,
+      actor,
     });
     const turn = this.requireTurn(session, turnId);
     turn.items = [
@@ -1712,6 +1765,7 @@ export class CopilotAgentProvider
         phase: "final_answer" as const,
         createdAt:
           session.draftAssistantMessages.get(messageId)?.createdAt ?? Date.now(),
+        actor: cloneSessionActorInfo(active.assistantActors.get(messageId)),
       };
       const existing = session.draftAssistantMessages.get(messageId);
       if (copilotDraftAssistantMessageEquals(existing, next)) {
@@ -1734,6 +1788,7 @@ export class CopilotAgentProvider
       content?: SessionMessageContentBlock[];
       attachments: SessionMessageAttachment[];
       phase?: "commentary" | "final_answer";
+      actor?: SessionActorInfo | null;
     },
   ): SessionMessage {
     const blocks = message.content && message.content.length > 0
@@ -1746,10 +1801,14 @@ export class CopilotAgentProvider
       content: blocks,
       attachments: message.attachments,
       phase: message.phase,
+      actor: cloneSessionActorInfo(message.actor),
       createdAt: Date.now(),
       seq: session.nextSeq++,
     };
     session.messages.push(next);
+    if (message.role === "assistant") {
+      registerCopilotActor(session.actorRegistry, next.actor);
+    }
     this.touch(session);
     return next;
   }
@@ -1834,6 +1893,7 @@ export class CopilotAgentProvider
                 normalizeStoredCopilotDraftAssistantMessage(draft),
               ]),
             ),
+            actorRegistry: createCopilotActorRegistry(),
             copilotSessionId: item.copilotSessionId ?? null,
             copilotSessionCreated:
               item.copilotSessionCreated ?? item.copilotSessionId != null,
@@ -1851,6 +1911,7 @@ export class CopilotAgentProvider
             );
             stateChangedOnLoad = true;
           }
+          rebuildCopilotActorRegistry(state);
           restoredSessions.set(state.thread.id, state);
         }
         this.archivedSessionIds.clear();
@@ -1986,6 +2047,7 @@ export class CopilotAgentProvider
       archived: this.archivedSessionIds.has(sessionId),
       nextSeq: 0,
       draftAssistantMessages: new Map(),
+      actorRegistry: createCopilotActorRegistry(),
       copilotSessionId: sessionId,
       copilotSessionCreated: true,
     };
@@ -2006,6 +2068,7 @@ export class CopilotAgentProvider
       state.runtime = parsed.runtime;
       state.nextSeq = parsed.nextSeq;
     }
+    rebuildCopilotActorRegistry(state);
     normalizeInactiveCopilotSessionState(state);
     this.sessions.set(sessionId, state);
     await this.persistSoon();
@@ -3397,6 +3460,7 @@ function parseSdkSessionEvents(
 } {
   const messages: SessionMessage[] = [];
   const activities = new Map<string, import("./types.js").SessionActivity>();
+  const actorRegistry = createCopilotActorRegistry();
   let seq = 0;
   let runtime: SessionRuntimeSummary | null = null;
   let updatedAt: number | undefined;
@@ -3404,11 +3468,29 @@ function parseSdkSessionEvents(
   for (const event of events) {
     const timestamp = millisFromDateLike(event.timestamp) ?? Date.now();
     updatedAt = timestamp;
-    const data = (event.data ?? {}) as Record<string, any>;
+    const data = (asRecord(event.data) ?? {}) as Record<string, unknown>;
+
+    if (event.type === "subagent.selected") {
+      resolveCopilotActorForEvent(actorRegistry, event);
+      continue;
+    }
+
+    if (event.type === "subagent.deselected") {
+      clearSelectedCopilotActor(actorRegistry, event);
+      continue;
+    }
+
+    if (event.type === "system.notification") {
+      resolveCopilotActorForEvent(actorRegistry, event);
+      continue;
+    }
+
+    const actor = resolveCopilotActorForEvent(actorRegistry, event);
 
     if (
       event.type === "session.model_change" &&
-      typeof data.newModel === "string"
+      typeof data.newModel === "string" &&
+      shouldApplyCopilotRuntimeEvent(actor, event)
     ) {
       runtime = withRuntimeMetadata(runtime, {
         model: data.newModel,
@@ -3445,7 +3527,9 @@ function parseSdkSessionEvents(
       event.type === "session.compaction_start" ||
       event.type === "session.compaction_complete"
     ) {
-      runtime = applyCopilotRuntimeEvent(runtime, event, timestamp);
+      if (shouldApplyCopilotRuntimeEvent(actor, event)) {
+        runtime = applyCopilotRuntimeEvent(runtime, event, timestamp);
+      }
       continue;
     }
 
@@ -3466,7 +3550,10 @@ function parseSdkSessionEvents(
       event.type === "assistant.message" &&
       typeof data.content === "string"
     ) {
-      if (typeof data.model === "string") {
+      if (
+        typeof data.model === "string" &&
+        shouldApplyCopilotRuntimeEvent(actor, event)
+      ) {
         runtime = withRuntimeMetadata(runtime, {
           model: data.model,
           updatedAt: timestamp,
@@ -3488,8 +3575,101 @@ function parseSdkSessionEvents(
           createdAt: timestamp,
           seq: seq++,
           phase: "final_answer",
+          actor,
         });
       }
+      continue;
+    }
+
+    if (event.type === "subagent.started") {
+      const activityId = stringValue(data.toolCallId) ?? event.id;
+      activities.set(activityId, {
+        id: activityId,
+        type: "tool",
+        turnId: null,
+        createdAt: timestamp,
+        seq: seq++,
+        status: "in_progress",
+        toolName: stringValue(data.agentName) ?? "subagent",
+        title:
+          stringValue(data.agentDisplayName) ??
+          stringValue(data.agentName) ??
+          "Subagent",
+        args: null,
+        output: null,
+        result: null,
+        isError: false,
+        semantic: null,
+        actor,
+        subAgentRun: buildCopilotSubAgentRunInfo(data),
+      });
+      continue;
+    }
+
+    if (event.type === "subagent.completed") {
+      const activityId = stringValue(data.toolCallId) ?? event.id;
+      const durationMs = numericValue(data.durationMs);
+      const duration = durationMs != null
+        ? ` (${Math.round(durationMs / 1000)}s)`
+        : "";
+      const existing = activities.get(activityId);
+      const existingTool = existing?.type === "tool" ? existing : null;
+      activities.set(activityId, {
+        id: activityId,
+        type: "tool",
+        turnId: existingTool?.turnId ?? null,
+        createdAt: existingTool?.createdAt ?? timestamp,
+        seq: existingTool?.seq ?? seq++,
+        status: "completed",
+        toolName:
+          existingTool?.toolName ??
+          stringValue(data.agentName) ??
+          "subagent",
+        title:
+          existingTool?.title ??
+          `${stringValue(data.agentDisplayName) ?? stringValue(data.agentName) ?? "Subagent"}${duration}`,
+        args: existingTool?.args ?? null,
+        output: existingTool?.output ?? null,
+        result: { type: "success", summary: "Subagent completed" },
+        isError: false,
+        semantic: existingTool?.semantic ?? null,
+        actor,
+        subAgentRun: buildCopilotSubAgentRunInfo(data),
+      });
+      continue;
+    }
+
+    if (event.type === "subagent.failed") {
+      const activityId = stringValue(data.toolCallId) ?? event.id;
+      const existing = activities.get(activityId);
+      const existingTool = existing?.type === "tool" ? existing : null;
+      activities.set(activityId, {
+        id: activityId,
+        type: "tool",
+        turnId: existingTool?.turnId ?? null,
+        createdAt: existingTool?.createdAt ?? timestamp,
+        seq: existingTool?.seq ?? seq++,
+        status: "failed",
+        toolName:
+          existingTool?.toolName ??
+          stringValue(data.agentName) ??
+          "subagent",
+        title:
+          existingTool?.title ??
+          stringValue(data.agentDisplayName) ??
+          stringValue(data.agentName) ??
+          "Subagent",
+        args: existingTool?.args ?? null,
+        output: existingTool?.output ?? null,
+        result: {
+          type: "error",
+          summary: stringValue(data.error) ?? "Subagent failed",
+        },
+        isError: true,
+        semantic: existingTool?.semantic ?? null,
+        actor,
+        subAgentRun: buildCopilotSubAgentRunInfo(data),
+      });
       continue;
     }
 
@@ -3511,6 +3691,7 @@ function parseSdkSessionEvents(
         result: null,
         isError: null,
         semantic: inferCopilotToolSemantic(data.toolName, data.arguments, null),
+        actor,
       });
       continue;
     }
@@ -3519,7 +3700,10 @@ function parseSdkSessionEvents(
       event.type === "tool.execution_complete" &&
       typeof data.toolCallId === "string"
     ) {
-      if (typeof data.model === "string") {
+      if (
+        typeof data.model === "string" &&
+        shouldApplyCopilotRuntimeEvent(actor, event)
+      ) {
         runtime = withRuntimeMetadata(runtime, {
           model: data.model,
           updatedAt: timestamp,
@@ -3554,6 +3738,7 @@ function parseSdkSessionEvents(
             data.result ?? data.error ?? null,
           ),
         ),
+        actor,
       });
     }
   }
@@ -3973,6 +4158,288 @@ function millisFromDateLike(value: Date | string | undefined): number | null {
   return Number.isFinite(millis) ? millis : null;
 }
 
+function createCopilotActorRegistry(): CopilotActorRegistry {
+  return {
+    byAgentId: new Map(),
+    byParentToolCallId: new Map(),
+    selectedCustomAgent: null,
+  };
+}
+
+function cloneSessionActorInfo(
+  actor: SessionActorInfo | null | undefined,
+): SessionActorInfo | null {
+  return actor ? { ...actor } : null;
+}
+
+function cloneSessionSubAgentRunInfo(
+  info: SessionSubAgentRunInfo | null | undefined,
+): SessionSubAgentRunInfo | null {
+  return info ? { ...info } : null;
+}
+
+function rebuildCopilotActorRegistry(session: CopilotSessionState): void {
+  session.actorRegistry = createCopilotActorRegistry();
+  for (const message of session.messages) {
+    registerCopilotActor(session.actorRegistry, message.actor);
+  }
+  for (const activity of session.activities.values()) {
+    if (activity.type !== "tool") {
+      continue;
+    }
+    const actor = activity.actor
+      ? {
+          ...activity.actor,
+          parentToolCallId:
+            activity.actor.parentToolCallId ??
+            activity.subAgentRun?.parentToolCallId ??
+            null,
+        }
+      : null;
+    registerCopilotActor(session.actorRegistry, actor);
+  }
+  for (const draft of session.draftAssistantMessages.values()) {
+    registerCopilotActor(session.actorRegistry, draft.actor);
+  }
+}
+
+function mergeSessionActorInfo(
+  existing: SessionActorInfo | null | undefined,
+  incoming: SessionActorInfo | null | undefined,
+): SessionActorInfo | null {
+  if (!existing && !incoming) {
+    return null;
+  }
+  if (!existing) {
+    return cloneSessionActorInfo(incoming);
+  }
+  if (!incoming) {
+    return cloneSessionActorInfo(existing);
+  }
+  return {
+    kind: incoming.kind ?? existing.kind,
+    providerKind: incoming.providerKind ?? existing.providerKind,
+    agentId: incoming.agentId ?? existing.agentId,
+    agentName: incoming.agentName ?? existing.agentName,
+    agentDisplayName: incoming.agentDisplayName ?? existing.agentDisplayName,
+    agentDescription: incoming.agentDescription ?? existing.agentDescription,
+    model: incoming.model ?? existing.model,
+    parentToolCallId: incoming.parentToolCallId ?? existing.parentToolCallId,
+  };
+}
+
+function registerCopilotActor(
+  registry: CopilotActorRegistry,
+  actor: SessionActorInfo | null | undefined,
+  lookupId: string | null = null,
+): SessionActorInfo | null {
+  let merged = mergeSessionActorInfo(null, actor);
+  if (!merged) {
+    return null;
+  }
+  if (!merged.providerKind) {
+    merged.providerKind = "copilot";
+  }
+
+  const storeById = (id: string): void => {
+    merged = mergeSessionActorInfo(registry.byAgentId.get(id) ?? null, merged);
+    if (merged) {
+      registry.byAgentId.set(id, merged);
+    }
+  };
+
+  if (merged.agentId) {
+    storeById(merged.agentId);
+  }
+  if (lookupId && lookupId !== merged.agentId) {
+    storeById(lookupId);
+  }
+  if (merged.parentToolCallId) {
+    merged = mergeSessionActorInfo(
+      registry.byParentToolCallId.get(merged.parentToolCallId) ?? null,
+      merged,
+    );
+    const parentToolCallId = merged?.parentToolCallId;
+    if (merged && parentToolCallId) {
+      registry.byParentToolCallId.set(parentToolCallId, merged);
+    }
+  }
+  if (!merged) {
+    return null;
+  }
+  if (merged.kind === "custom_agent") {
+    registry.selectedCustomAgent = merged;
+  }
+  return merged;
+}
+
+function clearSelectedCopilotActor(
+  registry: CopilotActorRegistry,
+  event: CopilotSdkSessionEvent,
+): void {
+  const selected = registry.selectedCustomAgent;
+  if (!selected) {
+    return;
+  }
+  const agentId = copilotEventAgentId(event);
+  if (!agentId || !selected.agentId || selected.agentId === agentId) {
+    registry.selectedCustomAgent = null;
+  }
+}
+
+function resolveCopilotActorForEvent(
+  registry: CopilotActorRegistry,
+  event: CopilotSdkSessionEvent,
+): SessionActorInfo | null {
+  const data = asRecord(event.data) ?? {};
+  const eventAgentId = copilotEventAgentId(event);
+  const parentToolCallId = copilotEventParentToolCallId(event.type, data);
+  const lookupId = copilotActorLookupIdFromEventData(event.type, data);
+  const notificationKind = asRecord(data.kind);
+
+  let tracked = eventAgentId ? registry.byAgentId.get(eventAgentId) ?? null : null;
+  if (!tracked && lookupId) {
+    tracked = registry.byAgentId.get(lookupId) ?? null;
+  }
+  if (!tracked && parentToolCallId) {
+    tracked = registry.byParentToolCallId.get(parentToolCallId) ?? null;
+  }
+
+  let kind = tracked?.kind ?? null;
+  if (event.type === "subagent.selected") {
+    kind = "custom_agent";
+  } else if (
+    event.type === "subagent.started" ||
+    event.type === "subagent.completed" ||
+    event.type === "subagent.failed"
+  ) {
+    kind = "subagent";
+  } else if (stringValue(notificationKind?.type) === "agent_completed") {
+    kind = "subagent";
+  } else if (!kind && parentToolCallId) {
+    kind = "subagent";
+  } else if (
+    !kind &&
+    eventAgentId &&
+    registry.selectedCustomAgent?.agentId === eventAgentId
+  ) {
+    kind = "custom_agent";
+  }
+
+  if (!kind && !tracked) {
+    return null;
+  }
+
+  return registerCopilotActor(
+    registry,
+    {
+      kind: kind ?? tracked!.kind,
+      providerKind: "copilot",
+      agentId:
+        eventAgentId ??
+        tracked?.agentId ??
+        (kind === "subagent" ? lookupId ?? null : null),
+      agentName:
+        stringValue(data.agentName) ??
+        stringValue(notificationKind?.agentType) ??
+        tracked?.agentName ??
+        null,
+      agentDisplayName:
+        stringValue(data.agentDisplayName) ??
+        tracked?.agentDisplayName ??
+        null,
+      agentDescription:
+        stringValue(data.agentDescription) ??
+        stringValue(notificationKind?.description) ??
+        tracked?.agentDescription ??
+        null,
+      model: stringValue(data.model) ?? tracked?.model ?? null,
+      parentToolCallId:
+        parentToolCallId ?? tracked?.parentToolCallId ?? null,
+    },
+    lookupId,
+  );
+}
+
+function copilotEventAgentId(event: CopilotSdkSessionEvent): string | null {
+  return stringValue((event as unknown as Record<string, unknown>).agentId) ?? null;
+}
+
+function copilotEventParentToolCallId(
+  eventType: string,
+  data: Record<string, unknown>,
+): string | null {
+  const parent = stringValue(data.parentToolCallId);
+  if (parent) {
+    return parent;
+  }
+  if (
+    eventType === "subagent.started" ||
+    eventType === "subagent.completed" ||
+    eventType === "subagent.failed"
+  ) {
+    return stringValue(data.toolCallId) ?? null;
+  }
+  return null;
+}
+
+function copilotActorLookupIdFromEventData(
+  eventType: string,
+  data: Record<string, unknown>,
+): string | null {
+  const notificationKind = asRecord(data.kind);
+  if (eventType === "system.notification") {
+    return stringValue(notificationKind?.agentId) ?? null;
+  }
+  const argumentsRecord = asRecord(data.arguments);
+  const telemetry = asRecord(data.toolTelemetry);
+  const restricted = asRecord(telemetry?.restrictedProperties);
+  return (
+    stringValue(restricted?.agent_id) ??
+    stringValue(argumentsRecord?.agent_id) ??
+    stringValue(argumentsRecord?.agentId) ??
+    null
+  );
+}
+
+function buildCopilotSubAgentRunInfo(
+  data: Record<string, unknown>,
+): SessionSubAgentRunInfo | null {
+  const parentToolCallId =
+    stringValue(data.parentToolCallId) ?? stringValue(data.toolCallId);
+  const durationMs = numericValue(data.durationMs) ?? null;
+  const totalTokens = numericValue(data.totalTokens) ?? null;
+  const totalToolCalls = numericValue(data.totalToolCalls) ?? null;
+  if (
+    !parentToolCallId &&
+    durationMs == null &&
+    totalTokens == null &&
+    totalToolCalls == null
+  ) {
+    return null;
+  }
+  return {
+    parentToolCallId: parentToolCallId ?? null,
+    durationMs,
+    totalTokens,
+    totalToolCalls,
+  };
+}
+
+function shouldApplyCopilotRuntimeEvent(
+  actor: SessionActorInfo | null,
+  event: CopilotSdkSessionEvent,
+): boolean {
+  if (actor?.kind === "subagent") {
+    return false;
+  }
+  if (event.type !== "assistant.usage") {
+    return true;
+  }
+  const data = asRecord(event.data);
+  return stringValue(data?.parentToolCallId) == null;
+}
+
 function withRuntimeMetadata(
   runtime: SessionRuntimeSummary | null,
   patch: Partial<SessionRuntimeSummary>,
@@ -4327,6 +4794,7 @@ function materializeInterruptedCopilotDraftMessages(
         createdAt: draft.createdAt,
         seq: session.nextSeq++,
         phase: draft.phase,
+        actor: cloneSessionActorInfo(draft.actor),
       });
       if (draft.text.trim().length > 0) {
         session.thread.preview = draft.text;
@@ -4399,6 +4867,7 @@ function normalizeStoredCopilotDraftAssistantMessage(
     ...draft,
     content: cloneSessionMessageContentBlocks(draft.content ?? []),
     phase: draft.phase === "commentary" ? "commentary" : "final_answer",
+    actor: cloneSessionActorInfo(draft.actor),
   };
 }
 
@@ -4408,6 +4877,7 @@ function cloneCopilotDraftAssistantMessage(
   return {
     ...draft,
     content: cloneSessionMessageContentBlocks(draft.content),
+    actor: cloneSessionActorInfo(draft.actor),
   };
 }
 
@@ -4654,6 +5124,7 @@ function cloneMessage(message: SessionMessage): SessionMessage {
     ...message,
     content: cloneSessionMessageContentBlocks(message.content),
     attachments: message.attachments.map((attachment) => ({ ...attachment })),
+    actor: cloneSessionActorInfo(message.actor),
   };
 }
 
@@ -4672,6 +5143,13 @@ function cloneActivity(activity: SessionActivity): SessionActivity {
     return {
       ...activity,
       changes: activity.changes.map((change) => ({ ...change })),
+    };
+  }
+  if (activity.type === "tool") {
+    return {
+      ...activity,
+      actor: cloneSessionActorInfo(activity.actor),
+      subAgentRun: cloneSessionSubAgentRunInfo(activity.subAgentRun),
     };
   }
   return { ...activity };

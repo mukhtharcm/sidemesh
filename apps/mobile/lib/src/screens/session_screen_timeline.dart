@@ -9,6 +9,7 @@ class _LiveAssistantMessageState {
     required this.phase,
     this.live = true,
     this.reasoning = '',
+    this.actor,
   });
 
   final String id;
@@ -18,12 +19,15 @@ class _LiveAssistantMessageState {
   final int seq;
   final String? phase;
   final bool live;
+  final SessionActorInfo? actor;
 
   _LiveAssistantMessageState copyWith({
     String? text,
     String? reasoning,
     String? phase,
     bool? live,
+    SessionActorInfo? actor,
+    bool clearActor = false,
   }) {
     return _LiveAssistantMessageState(
       id: id,
@@ -33,6 +37,7 @@ class _LiveAssistantMessageState {
       seq: seq,
       phase: phase ?? this.phase,
       live: live ?? this.live,
+      actor: clearActor ? null : (actor ?? this.actor),
     );
   }
 
@@ -53,6 +58,7 @@ class _LiveAssistantMessageState {
       createdAt: createdAt,
       seq: seq,
       phase: phase,
+      actor: actor,
     );
   }
 }
@@ -1066,6 +1072,7 @@ class _MessageBubble extends StatelessWidget {
         : live
         ? colors.accent
         : colors.accent.withValues(alpha: 0.28);
+    final actorLabel = isAssistant ? _sessionActorPillLabel(message.actor) : null;
     final phaseLabel = live
         ? 'Writing'
         : message.phase == 'commentary'
@@ -1094,6 +1101,14 @@ class _MessageBubble extends StatelessWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
+                  if (actorLabel != null)
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 8),
+                      child: MeshPill(
+                        label: actorLabel,
+                        tone: _sessionActorPillTone(message.actor),
+                      ),
+                    ),
                   if (phaseLabel != null && hasAnswer)
                     Padding(
                       padding: const EdgeInsets.only(bottom: 6),
@@ -2161,6 +2176,45 @@ class _ActivityCardState extends State<_ActivityCard> {
         );
       }
     }
+    if (activity.isTool) {
+      final actorLabel = _sessionActorPillLabel(activity.actor);
+      if (actorLabel != null) {
+        pills.add(
+          MeshPill(
+            label: actorLabel,
+            tone: _sessionActorPillTone(activity.actor),
+          ),
+        );
+      }
+      final actorModel = activity.actor?.model?.trim();
+      if (actorModel != null && actorModel.isNotEmpty) {
+        pills.add(MeshPill(label: actorModel, mono: true));
+      }
+      if (activity.subAgentRun?.durationMs != null) {
+        pills.add(
+          MeshPill(
+            label: _formatDuration(activity.subAgentRun!.durationMs!),
+            mono: true,
+          ),
+        );
+      }
+      if (activity.subAgentRun?.totalTokens != null) {
+        pills.add(
+          MeshPill(
+            label: '${_formatCompactCount(activity.subAgentRun!.totalTokens!)} tokens',
+            mono: true,
+          ),
+        );
+      }
+      if (activity.subAgentRun?.totalToolCalls != null) {
+        pills.add(
+          MeshPill(
+            label: '${activity.subAgentRun!.totalToolCalls} tools',
+            mono: true,
+          ),
+        );
+      }
+    }
     if (activity.isTool && activity.toolError == true) {
       pills.add(
         const MeshPill(
@@ -3087,6 +3141,9 @@ class _ActivityCardState extends State<_ActivityCard> {
   }
 
   String? _toolActivityLabel(SessionActivity activity) {
+    if (activity.subAgentRun != null) {
+      return 'Sub-agent';
+    }
     if (activity.toolAction == 'mode_change') {
       return 'Mode';
     }
@@ -4678,6 +4735,38 @@ String _formatDuration(int durationMs) {
     return '${seconds.toStringAsFixed(seconds >= 10 ? 0 : 1)}s';
   }
   return '${durationMs}ms';
+}
+
+String? _sessionActorPillLabel(SessionActorInfo? actor) {
+  final label = actor?.displayLabel?.trim();
+  if (label != null && label.isNotEmpty) {
+    return label;
+  }
+  return switch (actor?.kind) {
+    'custom_agent' => 'Custom agent',
+    'subagent' => 'Sub-agent',
+    _ => null,
+  };
+}
+
+MeshPillTone _sessionActorPillTone(SessionActorInfo? actor) {
+  return switch (actor?.kind) {
+    'custom_agent' => MeshPillTone.accent,
+    'subagent' => MeshPillTone.info,
+    _ => MeshPillTone.neutral,
+  };
+}
+
+String _formatCompactCount(int value) {
+  if (value >= 1000000) {
+    final millions = value / 1000000;
+    return '${millions.toStringAsFixed(millions >= 10 ? 0 : 1)}M';
+  }
+  if (value >= 1000) {
+    final thousands = value / 1000;
+    return '${thousands.toStringAsFixed(thousands >= 10 ? 0 : 1)}k';
+  }
+  return '$value';
 }
 
 bool _sameCalendarDay(DateTime a, DateTime b) {

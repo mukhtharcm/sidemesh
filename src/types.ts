@@ -441,6 +441,26 @@ export function normalizeSessionMessageContent(
   return textToBlocks(text);
 }
 
+export type SessionActorKind = "custom_agent" | "subagent";
+
+export interface SessionActorInfo {
+  kind: SessionActorKind;
+  providerKind?: string | null;
+  agentId?: string | null;
+  agentName?: string | null;
+  agentDisplayName?: string | null;
+  agentDescription?: string | null;
+  model?: string | null;
+  parentToolCallId?: string | null;
+}
+
+export interface SessionSubAgentRunInfo {
+  parentToolCallId?: string | null;
+  durationMs?: number | null;
+  totalTokens?: number | null;
+  totalToolCalls?: number | null;
+}
+
 export interface SessionMessage {
   id: string;
   role: "user" | "assistant" | "system";
@@ -450,6 +470,7 @@ export interface SessionMessage {
   createdAt: number;
   seq: number;
   phase?: "commentary" | "final_answer";
+  actor?: SessionActorInfo | null;
 }
 
 export interface SessionMessageAttachment {
@@ -587,6 +608,8 @@ export interface ToolActivity extends SessionActivityBase {
   result: unknown;
   isError: boolean | null;
   semantic: ToolActivitySemantic | null;
+  actor?: SessionActorInfo | null;
+  subAgentRun?: SessionSubAgentRunInfo | null;
 }
 
 export interface FileChangeActivity extends SessionActivityBase {
@@ -875,6 +898,7 @@ export interface LiveEvent {
   level?: ProviderWarningLevel;
   code?: string;
   source?: string;
+  actor?: SessionActorInfo | null;
   action?: PendingAction;
   actionId?: string;
   message?: string;

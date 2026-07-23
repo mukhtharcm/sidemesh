@@ -1524,6 +1524,80 @@ void main() {
     expect(find.text('Tool execution'), findsNothing);
   });
 
+  testWidgets(
+    'session screen renders Copilot sub-agent labels and run details',
+    (tester) async {
+      final session = _session('copilot-subagent-details');
+      final api = _RichEventFakeApi(
+        sessionSummary: session,
+        messages: [
+          _assistantMessage(
+            id: 'subagent-message',
+            text: 'I checked the upstream docs.',
+            content: const [TextBlock('I checked the upstream docs.')],
+            seq: 1,
+            actor: const SessionActorInfo(
+              kind: 'subagent',
+              providerKind: 'copilot',
+              agentId: 'subagent-message-actor',
+              agentDisplayName: 'Research Narrator',
+              model: 'claude-haiku-4.5',
+              parentToolCallId: 'task-1',
+            ),
+          ),
+        ],
+        activities: [
+          _plainToolActivity(
+            id: 'subagent-tool',
+            seq: 2,
+            toolName: 'research-agent',
+            toolTitle: 'Investigate upstream docs',
+            actor: const SessionActorInfo(
+              kind: 'subagent',
+              providerKind: 'copilot',
+              agentId: 'subagent-tool-actor',
+              agentDisplayName: 'Research Worker',
+              model: 'claude-haiku-4.5',
+              parentToolCallId: 'task-1',
+            ),
+            subAgentRun: const SessionSubAgentRunInfo(
+              parentToolCallId: 'task-1',
+              durationMs: 2600,
+              totalTokens: 420,
+              totalToolCalls: 3,
+            ),
+          ),
+        ],
+      );
+      addTearDown(api.dispose);
+
+      await _pumpApp(
+        tester,
+        SessionScreen(
+          host: _host('copilot-subagent-details'),
+          session: session,
+          api: api,
+          desktopMode: true,
+        ),
+        size: const Size(1180, 900),
+      );
+      await _pumpFrames(tester);
+
+      expect(find.text('Research Narrator'), findsOneWidget);
+      expect(find.text('I checked the upstream docs.'), findsOneWidget);
+      expect(find.text('Sub-agent'), findsOneWidget);
+
+      await tester.tap(find.text('Investigate upstream docs'));
+      await _pumpFrames(tester);
+
+      expect(find.text('Research Worker'), findsOneWidget);
+      expect(find.text('claude-haiku-4.5'), findsOneWidget);
+      expect(find.text('2.6s'), findsOneWidget);
+      expect(find.text('420 tokens'), findsOneWidget);
+      expect(find.text('3 tools'), findsOneWidget);
+    },
+  );
+
   testWidgets('session screen renders shell-wrapped command rows', (
     tester,
   ) async {
@@ -1906,6 +1980,7 @@ SessionMessage _assistantMessage({
   required List<ContentBlock> content,
   int seq = 1,
   DateTime? createdAt,
+  SessionActorInfo? actor,
 }) {
   final now = createdAt ?? DateTime(2026, 1, 1, 12);
   return SessionMessage(
@@ -1917,6 +1992,7 @@ SessionMessage _assistantMessage({
     createdAt: now,
     seq: seq,
     phase: 'final_answer',
+    actor: actor,
   );
 }
 
@@ -2106,6 +2182,9 @@ SessionActivity _plainToolActivity({
   required String id,
   required int seq,
   required String toolName,
+  String? toolTitle,
+  SessionActorInfo? actor,
+  SessionSubAgentRunInfo? subAgentRun,
 }) {
   final now = DateTime(2026, 1, 1, 12).add(Duration(minutes: seq));
   return SessionActivity(
@@ -2126,7 +2205,7 @@ SessionActivity _plainToolActivity({
     terminalStatus: null,
     terminalInput: null,
     toolName: toolName,
-    toolTitle: null,
+    toolTitle: toolTitle,
     toolArgs: null,
     toolResult: null,
     toolError: null,
@@ -2139,6 +2218,8 @@ SessionActivity _plainToolActivity({
     pattern: null,
     revisedPrompt: null,
     savedPath: null,
+    actor: actor,
+    subAgentRun: subAgentRun,
   );
 }
 

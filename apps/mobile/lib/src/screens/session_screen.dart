@@ -826,6 +826,7 @@ class _SessionScreenState extends State<SessionScreen>
       SessionTurnConfigStore.instance;
   final StringBuffer _assistantDeltaBuffer = StringBuffer();
   final StringBuffer _reasoningDeltaBuffer = StringBuffer();
+  SessionActorInfo? _pendingLiveAssistantActor;
   final Map<String, SessionActivity> _pendingActivityUpdates =
       <String, SessionActivity>{};
 
@@ -1048,6 +1049,7 @@ class _SessionScreenState extends State<SessionScreen>
   void _clearLiveAssistantMessage() {
     _liveAssistantNotifier.value = null;
     _reasoningDeltaBuffer.clear();
+    _pendingLiveAssistantActor = null;
   }
 
   String get _screenAwakeSourceKey =>
@@ -3071,6 +3073,7 @@ class _SessionScreenState extends State<SessionScreen>
           return;
         }
         _assistantDeltaBuffer.write(delta);
+        _pendingLiveAssistantActor = event.actor ?? _pendingLiveAssistantActor;
         _scheduleLiveFlush();
       case 'assistant_message_completed':
         _flushPendingLiveUpdates();
@@ -3102,6 +3105,7 @@ class _SessionScreenState extends State<SessionScreen>
                   createdAt: message.createdAt,
                   seq: message.seq,
                   phase: message.phase,
+                  actor: message.actor ?? committedLive.actor,
                 ),
               );
             } else {
@@ -3421,6 +3425,7 @@ class _SessionScreenState extends State<SessionScreen>
     if (!mounted) {
       _assistantDeltaBuffer.clear();
       _reasoningDeltaBuffer.clear();
+      _pendingLiveAssistantActor = null;
       _pendingActivityUpdates.clear();
       return;
     }
@@ -3443,7 +3448,12 @@ class _SessionScreenState extends State<SessionScreen>
     final currentLive = _liveAssistantMessage;
     var updatedLive = currentLive;
     if (hasDelta) {
-      updatedLive = _appendLiveAssistantDelta(updatedLive, delta);
+      updatedLive = _appendLiveAssistantDelta(
+        updatedLive,
+        delta,
+        actor: _pendingLiveAssistantActor,
+      );
+      _pendingLiveAssistantActor = null;
     }
     if (hasReasoning) {
       updatedLive = _appendLiveAssistantReasoning(updatedLive, reasoningDelta);
@@ -6112,6 +6122,7 @@ class _SessionScreenState extends State<SessionScreen>
   _LiveAssistantMessageState _appendLiveAssistantDelta(
     _LiveAssistantMessageState? current,
     String delta,
+    {SessionActorInfo? actor}
   ) {
     if (current == null) {
       return _LiveAssistantMessageState(
@@ -6120,9 +6131,13 @@ class _SessionScreenState extends State<SessionScreen>
         createdAt: DateTime.now(),
         seq: _nextTimelineSeq(),
         phase: 'commentary',
+        actor: actor,
       );
     }
-    return current.copyWith(text: '${current.text}$delta');
+    return current.copyWith(
+      text: '${current.text}$delta',
+      actor: actor,
+    );
   }
 
   _LiveAssistantMessageState _appendLiveAssistantReasoning(
