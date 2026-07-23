@@ -25,6 +25,7 @@ class ApiClient {
 
   static const Duration _quickReadTimeout = Duration(seconds: 6);
   static const Duration _standardReadTimeout = Duration(seconds: 12);
+  static const Duration _agentRunsReadTimeout = Duration(seconds: 30);
   static const Duration _transcriptReadTimeout = Duration(seconds: 25);
   static const Duration _diffReadTimeout = Duration(seconds: 25);
   static const Duration _turnWriteTimeout = Duration(seconds: 45);
@@ -200,7 +201,7 @@ class ApiClient {
       host,
       '/api/sessions/${Uri.encodeComponent(parentSessionId)}/agent-runs',
       queryParameters: limit == null ? null : {'limit': '$limit'},
-      timeout: _standardReadTimeout,
+      timeout: _agentRunsReadTimeout,
       operation: 'load agents',
     );
     return _decodeList(response).map(AgentRunSummary.fromJson).toList();
