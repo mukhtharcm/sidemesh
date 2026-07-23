@@ -184,10 +184,11 @@ public async health(): Promise<boolean> {
     options: AgentSessionListOptions,
   ): Promise<ThreadRecord[]> {
     const threads: ThreadRecord[] = [];
+    const pageLimit = options.subAgentParentId ? 200 : options.limit;
     let cursor: string | null = null;
     do {
       const result = (await this.bridge.request("thread/list", {
-        limit: options.limit,
+        limit: pageLimit,
         ...(cursor ? { cursor } : {}),
         sortKey: "updated_at",
         sortDirection: "desc",
