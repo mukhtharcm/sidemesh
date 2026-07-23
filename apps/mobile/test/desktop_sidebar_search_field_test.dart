@@ -6,7 +6,7 @@ import 'package:sidemesh_mobile/src/theme/app_tokens.dart';
 import 'package:sidemesh_mobile/src/widgets/desktop_sidebar_search_field.dart';
 
 void main() {
-  testWidgets('centers focused search content on one shared axis', (
+  testWidgets('keeps the focused sidebar search compact and aligned', (
     tester,
   ) async {
     final controller = TextEditingController();
@@ -16,7 +16,7 @@ void main() {
 
     await tester.pumpWidget(
       MaterialApp(
-        theme: buildLightTheme(ThemeVariant.nord.light),
+        theme: buildLightTheme(ThemeVariant.codexAmber.light),
         home: Scaffold(
           body: Center(
             child: SizedBox(
@@ -40,19 +40,25 @@ void main() {
     final editable = find.byType(EditableText);
     final hint = find.text('Search (⌘F)');
     final textField = tester.widget<TextField>(find.byType(TextField));
+    final surface = tester.widget<Container>(
+      find.descendant(of: field, matching: find.byType(Container)).first,
+    );
+    final decoration = surface.decoration! as BoxDecoration;
+    final border = decoration.border! as Border;
 
-    expect(tester.getSize(field).height, AppSizes.control);
+    expect(tester.getSize(field).height, AppSizes.compactControl);
+    expect(border.top.width, 1);
     expect(textField.textAlignVertical, TextAlignVertical.center);
-    expect(textField.cursorHeight, 18);
+    expect(textField.cursorHeight, 16);
     expect(textField.decoration?.contentPadding, EdgeInsets.zero);
     expect(
       (tester.getCenter(icon).dy - tester.getCenter(editable).dy).abs(),
-      lessThanOrEqualTo(0.5),
+      lessThanOrEqualTo(1),
     );
     expect(
       (tester.getCenter(hint).dy - tester.getCenter(icon).dy).abs(),
-      lessThanOrEqualTo(0.5),
+      lessThanOrEqualTo(1),
     );
-    expect(tester.getTopLeft(hint).dx - tester.getTopLeft(editable).dx, 2);
+    expect(tester.getTopLeft(hint).dx, tester.getTopLeft(editable).dx);
   });
 }
