@@ -2,48 +2,66 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:sidemesh_mobile/src/recent_session_view_store.dart';
-import 'package:sidemesh_mobile/src/screens/home_screen.dart';
 import 'package:sidemesh_mobile/src/theme/app_palettes.dart';
 import 'package:sidemesh_mobile/src/theme/app_theme.dart';
+import 'package:sidemesh_mobile/src/widgets/recent_session_controls_menu.dart';
 
 void main() {
   setUp(() {
     SharedPreferences.setMockInitialValues(<String, Object>{});
   });
 
-  testWidgets('picker switches between project grouping and a single list', (
-    tester,
-  ) async {
+  testWidgets('menu exposes grouping and filters directly', (tester) async {
     final store = RecentSessionViewStore.forTesting();
     await store.ensureLoaded();
     final palette = ThemeVariant.codexAmber;
+    var filters = const RecentSessionFilters();
     await tester.pumpWidget(
       MaterialApp(
         theme: buildLightTheme(palette.light),
-        home: Scaffold(body: RecentSessionGroupingControl(store: store)),
+        home: StatefulBuilder(
+          builder: (context, setState) => Scaffold(
+            body: Align(
+              alignment: Alignment.topRight,
+              child: RecentSessionControlsMenu(
+                store: store,
+                filters: filters,
+                onFavoritesOnlyChanged: (value) => setState(
+                  () => filters = filters.copyWith(favoritesOnly: value),
+                ),
+                onRunningOnlyChanged: (value) => setState(
+                  () => filters = filters.copyWith(runningOnly: value),
+                ),
+                onUnreadOnlyChanged: (value) => setState(
+                  () => filters = filters.copyWith(unreadOnly: value),
+                ),
+              ),
+            ),
+          ),
+        ),
       ),
     );
 
-    expect(find.text('By project'), findsOneWidget);
-
-    await tester.tap(find.text('By project'));
+    await tester.tap(find.byTooltip('View and filter'));
     await tester.pumpAndSettle();
 
-    final items = tester
-        .widgetList<CheckedPopupMenuItem<RecentSessionGrouping>>(
-          find.byType(CheckedPopupMenuItem<RecentSessionGrouping>),
-        )
-        .toList();
-    expect(items, hasLength(2));
-    expect(items[0].checked, isTrue);
-    expect(items[1].checked, isFalse);
-
-    await tester.tap(
-      find.byType(CheckedPopupMenuItem<RecentSessionGrouping>).at(1),
-    );
-    await tester.pumpAndSettle();
-
-    expect(store.grouping, RecentSessionGrouping.singleList);
+    expect(find.text('Group by'), findsOneWidget);
+    expect(find.text('Project'), findsOneWidget);
     expect(find.text('Single list'), findsOneWidget);
+    expect(find.text('Filter'), findsOneWidget);
+    expect(find.text('Favorites'), findsOneWidget);
+    expect(find.text('Running'), findsOneWidget);
+    expect(find.text('Unread'), findsOneWidget);
+
+    await tester.tap(find.text('Single list'));
+    await tester.pumpAndSettle();
+    expect(store.grouping, RecentSessionGrouping.singleList);
+
+    await tester.tap(find.text('Favorites'));
+    await tester.pumpAndSettle();
+
+    expect(filters.favoritesOnly, isTrue);
+    expect(find.text('Filter'), findsOneWidget);
+    expect(find.byTooltip('View and filter, filters active'), findsOneWidget);
   });
 }

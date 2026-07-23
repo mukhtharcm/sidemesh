@@ -36,6 +36,7 @@ import '../widgets/app_snackbar.dart';
 import '../widgets/mesh_widgets.dart';
 import '../widgets/session_row_card.dart';
 import '../widgets/notification_permission_banner.dart';
+import '../widgets/recent_session_controls_menu.dart';
 import 'create_session_sheet.dart';
 import 'host_detail_screen.dart';
 import 'pair_scanner_sheet.dart';
@@ -290,10 +291,8 @@ class _SidemeshHomeScreenState extends State<SidemeshHomeScreen>
   Future<void> _showHostEditor({HostProfile? initialHost}) async {
     final result = await Navigator.of(context).push<HostProfile>(
       MaterialPageRoute<HostProfile>(
-        builder: (context) => HostEditorSheet(
-          initialHost: initialHost,
-          fullPage: true,
-        ),
+        builder: (context) =>
+            HostEditorSheet(initialHost: initialHost, fullPage: true),
       ),
     );
     if (result == null) {
@@ -369,7 +368,7 @@ class _SidemeshHomeScreenState extends State<SidemeshHomeScreen>
           },
           onActiveCountChanged: (_) {},
           dense: false,
-          showGroupingControl: true,
+          showGroupingMenu: true,
           hasSavedHosts: _hosts.isNotEmpty,
         ),
       ),
@@ -607,8 +606,7 @@ class _SidemeshHomeScreenState extends State<SidemeshHomeScreen>
               primaryAction: primaryAction,
               searchController: _searchController,
               searchVisible: _searchVisibleForTab(tab, enabledHosts.length),
-              searchExpanded:
-                  _searchExpanded || _query.isNotEmpty,
+              searchExpanded: _searchExpanded || _query.isNotEmpty,
               onToggleSearch: () => setState(() {
                 _searchExpanded = !_searchExpanded;
                 if (!_searchExpanded && _query.isEmpty) {
@@ -732,127 +730,6 @@ class _SidemeshHomeScreenState extends State<SidemeshHomeScreen>
   }
 }
 
-enum _HomeHeaderMenuAction { refresh, settings }
-
-class RecentSessionFilters {
-  const RecentSessionFilters({
-    this.runningOnly = false,
-    this.unreadOnly = false,
-    this.favoritesOnly = false,
-  });
-
-  final bool runningOnly;
-  final bool unreadOnly;
-  final bool favoritesOnly;
-
-  bool get isAnyActive => runningOnly || unreadOnly || favoritesOnly;
-
-  RecentSessionFilters copyWith({
-    bool? runningOnly,
-    bool? unreadOnly,
-    bool? favoritesOnly,
-  }) {
-    return RecentSessionFilters(
-      runningOnly: runningOnly ?? this.runningOnly,
-      unreadOnly: unreadOnly ?? this.unreadOnly,
-      favoritesOnly: favoritesOnly ?? this.favoritesOnly,
-    );
-  }
-}
-
-class RecentSessionGroupingControl extends StatelessWidget {
-  const RecentSessionGroupingControl({
-    super.key,
-    this.store,
-    this.compact = false,
-  });
-
-  final RecentSessionViewStore? store;
-  final bool compact;
-
-  String _label(RecentSessionGrouping grouping) {
-    return switch (grouping) {
-      RecentSessionGrouping.project => 'By project',
-      RecentSessionGrouping.singleList => 'Single list',
-    };
-  }
-
-  IconData _icon(RecentSessionGrouping grouping) {
-    return switch (grouping) {
-      RecentSessionGrouping.project => Icons.folder_rounded,
-      RecentSessionGrouping.singleList => Icons.view_list_rounded,
-    };
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final viewStore = store ?? RecentSessionViewStore.instance;
-    return ListenableBuilder(
-      listenable: viewStore,
-      builder: (context, _) {
-        final colors = context.colors;
-        final grouping = viewStore.grouping;
-        return PopupMenuButton<RecentSessionGrouping>(
-          tooltip: 'Group sessions',
-          onSelected: (value) => viewStore.setGrouping(value),
-          itemBuilder: (context) => [
-            for (final option in RecentSessionGrouping.values)
-              CheckedPopupMenuItem(
-                value: option,
-                checked: option == grouping,
-                child: Row(
-                  children: [
-                    Icon(_icon(option), size: 18),
-                    const SizedBox(width: 10),
-                    Expanded(child: Text(_label(option))),
-                  ],
-                ),
-              ),
-          ],
-          child: ConstrainedBox(
-            constraints: BoxConstraints(minHeight: compact ? 32 : 44),
-            child: Container(
-              padding: EdgeInsets.symmetric(
-                horizontal: compact ? 9 : 10,
-                vertical: compact ? 7 : 6,
-              ),
-              decoration: BoxDecoration(
-                color: colors.accentMuted.withValues(alpha: 0.72),
-                borderRadius: AppShapes.badge,
-                border: Border.all(color: colors.accent.withValues(alpha: 0.3)),
-              ),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(
-                    _icon(grouping),
-                    size: compact ? 14 : 15,
-                    color: colors.accent,
-                  ),
-                  const SizedBox(width: 6),
-                  Text(
-                    _label(grouping),
-                    style: Theme.of(context).textTheme.labelMedium?.copyWith(
-                      color: colors.textPrimary,
-                      fontWeight: AppWeights.emphasis,
-                    ),
-                  ),
-                  const SizedBox(width: 4),
-                  Icon(
-                    Icons.expand_more_rounded,
-                    size: 15,
-                    color: colors.textSecondary,
-                  ),
-                ],
-              ),
-            ),
-          ),
-        );
-      },
-    );
-  }
-}
-
 class _TabDef {
   const _TabDef({
     required this.title,
@@ -944,9 +821,6 @@ class _HomeStickyHeader extends StatelessWidget {
                     searchExpanded
                         ? Icons.search_off_rounded
                         : Icons.search_rounded,
-                    color: recentFilters?.isAnyActive == true
-                        ? colors.accent
-                        : null,
                   ),
                 ),
               if (primaryAction != null) ...[
@@ -965,39 +839,15 @@ class _HomeStickyHeader extends StatelessWidget {
                 ),
               ],
               const SizedBox(width: AppSpacing.xs),
-              PopupMenuButton<_HomeHeaderMenuAction>(
-                tooltip: 'More',
-                onSelected: (action) {
-                  switch (action) {
-                    case _HomeHeaderMenuAction.refresh:
-                      onRefresh();
-                    case _HomeHeaderMenuAction.settings:
-                      onOpenSettings();
-                  }
-                },
-                itemBuilder: (context) => const [
-                  PopupMenuItem(
-                    value: _HomeHeaderMenuAction.refresh,
-                    child: ListTile(
-                      dense: true,
-                      leading: Icon(Icons.refresh_rounded),
-                      title: Text('Refresh'),
-                    ),
-                  ),
-                  PopupMenuItem(
-                    value: _HomeHeaderMenuAction.settings,
-                    child: ListTile(
-                      dense: true,
-                      leading: Icon(Icons.tune_rounded),
-                      title: Text('Settings'),
-                    ),
-                  ),
-                ],
-                icon: Icon(
-                  Icons.more_horiz_rounded,
-                  color: colors.textSecondary,
-                  size: 20,
-                ),
+              RecentSessionControlsMenu(
+                showGrouping:
+                    recentFilters != null && searchController.text.isEmpty,
+                filters: recentFilters,
+                onRunningOnlyChanged: onRunningOnlyChanged,
+                onUnreadOnlyChanged: onUnreadOnlyChanged,
+                onFavoritesOnlyChanged: onFavoritesOnlyChanged,
+                onRefresh: onRefresh,
+                onOpenSettings: onOpenSettings,
               ),
             ],
           ),
@@ -1009,10 +859,6 @@ class _HomeStickyHeader extends StatelessWidget {
                 ? _HomeSearchField(
                     controller: searchController,
                     hintText: 'Search ${tab.title.toLowerCase()}',
-                    recentFilters: recentFilters,
-                    onRunningOnlyChanged: onRunningOnlyChanged,
-                    onUnreadOnlyChanged: onUnreadOnlyChanged,
-                    onFavoritesOnlyChanged: onFavoritesOnlyChanged,
                   )
                 : const SizedBox(key: ValueKey('no-search'), height: 0),
           ),
@@ -1023,21 +869,10 @@ class _HomeStickyHeader extends StatelessWidget {
 }
 
 class _HomeSearchField extends StatelessWidget {
-  const _HomeSearchField({
-    required this.controller,
-    required this.hintText,
-    this.recentFilters,
-    this.onRunningOnlyChanged,
-    this.onUnreadOnlyChanged,
-    this.onFavoritesOnlyChanged,
-  });
+  const _HomeSearchField({required this.controller, required this.hintText});
 
   final TextEditingController controller;
   final String hintText;
-  final RecentSessionFilters? recentFilters;
-  final ValueChanged<bool>? onRunningOnlyChanged;
-  final ValueChanged<bool>? onUnreadOnlyChanged;
-  final ValueChanged<bool>? onFavoritesOnlyChanged;
 
   @override
   Widget build(BuildContext context) {
@@ -1045,157 +880,57 @@ class _HomeSearchField extends StatelessWidget {
     return AnimatedBuilder(
       animation: controller,
       builder: (context, _) {
-        final filters = recentFilters;
-        return Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            TextField(
-              controller: controller,
-              textInputAction: TextInputAction.search,
-              style: TextStyle(color: colors.textPrimary, fontSize: 14),
-              decoration: InputDecoration(
-                isDense: true,
-                filled: true,
-                fillColor: colors.surfaceMuted,
-                hintText: hintText,
-                hintStyle: TextStyle(color: colors.textTertiary, fontSize: 14),
-                prefixIcon: Icon(
-                  Icons.search_rounded,
-                  size: 18,
-                  color: colors.textSecondary,
-                ),
-                prefixIconConstraints: const BoxConstraints(
-                  minWidth: 36,
-                  minHeight: 36,
-                ),
-                suffixIcon: controller.text.isNotEmpty
-                    ? IconButton(
-                        tooltip: 'Clear',
-                        iconSize: 16,
-                        onPressed: controller.clear,
-                        icon: Icon(
-                          Icons.close_rounded,
-                          color: colors.textSecondary,
-                        ),
-                      )
-                    : null,
-                contentPadding: const EdgeInsets.symmetric(
-                  horizontal: 8,
-                  vertical: 10,
-                ),
-                border: OutlineInputBorder(
-                  borderRadius: AppShapes.input,
-                  borderSide: BorderSide(color: colors.border),
-                ),
-                enabledBorder: OutlineInputBorder(
-                  borderRadius: AppShapes.input,
-                  borderSide: BorderSide(
-                    color: colors.border.withValues(alpha: 0.72),
-                  ),
-                ),
-                focusedBorder: OutlineInputBorder(
-                  borderRadius: AppShapes.input,
-                  borderSide: BorderSide(color: colors.accent, width: 1.2),
-                ),
+        return TextField(
+          controller: controller,
+          textInputAction: TextInputAction.search,
+          style: TextStyle(color: colors.textPrimary, fontSize: 14),
+          decoration: InputDecoration(
+            isDense: true,
+            filled: true,
+            fillColor: colors.surfaceMuted,
+            hintText: hintText,
+            hintStyle: TextStyle(color: colors.textTertiary, fontSize: 14),
+            prefixIcon: Icon(
+              Icons.search_rounded,
+              size: 18,
+              color: colors.textSecondary,
+            ),
+            prefixIconConstraints: const BoxConstraints(
+              minWidth: 36,
+              minHeight: 36,
+            ),
+            suffixIcon: controller.text.isNotEmpty
+                ? IconButton(
+                    tooltip: 'Clear',
+                    iconSize: 16,
+                    onPressed: controller.clear,
+                    icon: Icon(
+                      Icons.close_rounded,
+                      color: colors.textSecondary,
+                    ),
+                  )
+                : null,
+            contentPadding: const EdgeInsets.symmetric(
+              horizontal: 8,
+              vertical: 10,
+            ),
+            border: OutlineInputBorder(
+              borderRadius: AppShapes.input,
+              borderSide: BorderSide(color: colors.border),
+            ),
+            enabledBorder: OutlineInputBorder(
+              borderRadius: AppShapes.input,
+              borderSide: BorderSide(
+                color: colors.border.withValues(alpha: 0.72),
               ),
             ),
-            if (filters != null &&
-                (onRunningOnlyChanged != null ||
-                    onUnreadOnlyChanged != null ||
-                    onFavoritesOnlyChanged != null)) ...[
-              const SizedBox(height: AppSpacing.sm),
-              SingleChildScrollView(
-                scrollDirection: Axis.horizontal,
-                child: Row(
-                  children: [
-                    if (controller.text.isEmpty) ...[
-                      const RecentSessionGroupingControl(),
-                      const SizedBox(width: AppSpacing.xs),
-                    ],
-                    _HomeSearchFilterToken(
-                      icon: Icons.star_rounded,
-                      label: 'Favorites',
-                      selected: filters.favoritesOnly,
-                      onSelected: onFavoritesOnlyChanged,
-                    ),
-                    const SizedBox(width: AppSpacing.xs),
-                    _HomeSearchFilterToken(
-                      icon: Icons.play_circle_outline_rounded,
-                      label: 'Running',
-                      selected: filters.runningOnly,
-                      onSelected: onRunningOnlyChanged,
-                    ),
-                    const SizedBox(width: AppSpacing.xs),
-                    _HomeSearchFilterToken(
-                      icon: Icons.mark_chat_unread_rounded,
-                      label: 'Unread',
-                      selected: filters.unreadOnly,
-                      onSelected: onUnreadOnlyChanged,
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ],
+            focusedBorder: OutlineInputBorder(
+              borderRadius: AppShapes.input,
+              borderSide: BorderSide(color: colors.accent, width: 1.2),
+            ),
+          ),
         );
       },
-    );
-  }
-}
-
-class _HomeSearchFilterToken extends StatelessWidget {
-  const _HomeSearchFilterToken({
-    required this.icon,
-    required this.label,
-    required this.selected,
-    required this.onSelected,
-  });
-
-  final IconData icon;
-  final String label;
-  final bool selected;
-  final ValueChanged<bool>? onSelected;
-
-  @override
-  Widget build(BuildContext context) {
-    final colors = context.colors;
-    final enabled = onSelected != null;
-    final foreground = selected ? colors.accent : colors.textSecondary;
-    return Material(
-      color: Colors.transparent,
-      child: InkWell(
-        borderRadius: AppShapes.badge,
-        onTap: enabled ? () => onSelected!(!selected) : null,
-        child: AnimatedContainer(
-          duration: AppMotion.quick,
-          curve: AppMotion.standard,
-          constraints: const BoxConstraints(minHeight: 40),
-          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-          decoration: BoxDecoration(
-            color: selected ? colors.accentMuted : Colors.transparent,
-            borderRadius: AppShapes.badge,
-            border: Border.all(
-              color: selected
-                  ? colors.accent.withValues(alpha: 0.34)
-                  : Colors.transparent,
-            ),
-          ),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(icon, size: 15, color: foreground),
-              const SizedBox(width: 6),
-              Text(
-                label,
-                style: Theme.of(context).textTheme.labelMedium?.copyWith(
-                  color: selected ? colors.textPrimary : colors.textSecondary,
-                  fontWeight: selected ? AppWeights.title : AppWeights.emphasis,
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
     );
   }
 }
@@ -1548,7 +1283,7 @@ class RecentPane extends StatefulWidget {
     this.selectedSessionId,
     this.padding,
     this.dense = false,
-    this.showGroupingControl = false,
+    this.showGroupingMenu = false,
     this.hasSavedHosts = false,
     this.screenAwakeSourceKey,
     this.screenAwakeController,
@@ -1564,7 +1299,7 @@ class RecentPane extends StatefulWidget {
   final String? selectedSessionId;
   final EdgeInsets? padding;
   final bool dense;
-  final bool showGroupingControl;
+  final bool showGroupingMenu;
   final bool hasSavedHosts;
   final String? screenAwakeSourceKey;
   final ScreenAwakeController? screenAwakeController;
@@ -2134,12 +1869,12 @@ class _RecentPaneState extends State<RecentPane> {
         return Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            if (widget.showGroupingControl)
+            if (widget.showGroupingMenu)
               const Padding(
                 padding: EdgeInsets.fromLTRB(16, 0, 16, 4),
                 child: Align(
-                  alignment: Alignment.centerLeft,
-                  child: RecentSessionGroupingControl(),
+                  alignment: Alignment.centerRight,
+                  child: RecentSessionControlsMenu(),
                 ),
               ),
             if (_searchLoading)
@@ -2225,8 +1960,7 @@ class _RecentPaneState extends State<RecentPane> {
           (isRefreshing ? 1 : 0) +
           (hasFailures ? 1 : 0) +
           groups.fold<int>(0, (sum, g) {
-            final collapsed =
-                widget.dense && _collapsedGroups.contains(g.key);
+            final collapsed = widget.dense && _collapsedGroups.contains(g.key);
             return sum + 1 + (collapsed ? 0 : g.entries.length);
           }),
       itemBuilder: (context, index) {
@@ -4024,9 +3758,7 @@ class HostsPane extends StatelessWidget {
               120,
             ),
       itemCount: visibleHosts.length,
-      separatorBuilder: (_, _) => SizedBox(
-        height: dense ? 2 : AppSpacing.xs,
-      ),
+      separatorBuilder: (_, _) => SizedBox(height: dense ? 2 : AppSpacing.xs),
       itemBuilder: (context, index) {
         final host = visibleHosts[index];
         return _HostRowCard(
@@ -4751,7 +4483,10 @@ class _HostEditorSheetState extends State<HostEditorSheet> {
                                   strokeWidth: 1.5,
                                 ),
                               )
-                            : const Icon(Icons.wifi_tethering_rounded, size: 18),
+                            : const Icon(
+                                Icons.wifi_tethering_rounded,
+                                size: 18,
+                              ),
                         label: Text(
                           _testing ? 'Checking...' : 'Check connection',
                         ),
