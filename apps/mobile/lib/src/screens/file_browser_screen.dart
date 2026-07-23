@@ -6,6 +6,7 @@ import '../api_client.dart';
 import '../fs_models.dart';
 import '../models.dart';
 import '../theme/app_colors.dart';
+import '../widgets/mesh_widgets.dart';
 import '../workspace_live_store.dart';
 import 'file_viewer_pane.dart';
 import 'file_viewer_screen.dart';
@@ -117,6 +118,9 @@ class _FileBrowserTreeState extends State<FileBrowserTree> {
           selectedPath: widget.selectedPath,
           onOpenFile: _open,
           onEntryChanged: (p) => setState(() => _changed.remove(p)),
+          onRetry: () {
+            _live?.watch(widget.root).catchError((_) {});
+          },
         ),
       ],
     );
@@ -171,9 +175,9 @@ class FileBrowserScreen extends StatelessWidget {
               'On ${host.label}',
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
-              style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                color: colors.textSecondary,
-              ),
+              style: Theme.of(
+                context,
+              ).textTheme.bodySmall?.copyWith(color: colors.textSecondary),
             ),
           ],
         ),
@@ -205,6 +209,7 @@ class _DirectoryNode extends StatefulWidget {
     required this.onOpenFile,
     required this.changedPaths,
     required this.onEntryChanged,
+    this.onRetry,
     this.initiallyExpanded = false,
     this.selectedPath,
   });
@@ -220,6 +225,7 @@ class _DirectoryNode extends StatefulWidget {
   final String? selectedPath;
   final void Function(String path) onOpenFile;
   final void Function(String path) onEntryChanged;
+  final VoidCallback? onRetry;
 
   @override
   State<_DirectoryNode> createState() => _DirectoryNodeState();
@@ -263,10 +269,18 @@ class _DirectoryNodeState extends State<_DirectoryNode> {
     }
   }
 
+  void _retry() {
+    widget.onRetry?.call();
+    unawaited(_load());
+  }
+
   @override
   Widget build(BuildContext context) {
     final colors = context.colors;
     final indent = widget.depth * 14.0;
+    if (widget.depth == 0 && _error != null && _listing == null) {
+      return _WorkspaceRootError(error: _error!, onRetry: _retry);
+    }
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -297,11 +311,20 @@ class _DirectoryNodeState extends State<_DirectoryNode> {
         if (_expanded && _error != null)
           Padding(
             padding: EdgeInsets.fromLTRB(indent + 22, 4, 8, 8),
-            child: Text(
-              friendlyError(_error!),
-              style: Theme.of(
-                context,
-              ).textTheme.bodySmall?.copyWith(color: colors.danger),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.center,
+              children: [
+                Expanded(
+                  child: Text(
+                    friendlyError(_error!),
+                    style: Theme.of(
+                      context,
+                    ).textTheme.bodySmall?.copyWith(color: colors.danger),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                TextButton(onPressed: _load, child: const Text('Retry')),
+              ],
             ),
           ),
         if (_expanded && _listing != null)
@@ -334,6 +357,39 @@ class _DirectoryNodeState extends State<_DirectoryNode> {
             );
           }),
       ],
+    );
+  }
+}
+
+class _WorkspaceRootError extends StatelessWidget {
+  const _WorkspaceRootError({required this.error, required this.onRetry});
+
+  final Object error;
+  final VoidCallback onRetry;
+
+  bool get _workspaceUnavailable =>
+      error is ApiException &&
+      (error as ApiException).statusCode == 403 &&
+      friendlyError(error) == 'session workspace is unavailable';
+
+  @override
+  Widget build(BuildContext context) {
+    return MeshEmptyState.compact(
+      icon: _workspaceUnavailable
+          ? Icons.folder_off_rounded
+          : Icons.cloud_off_rounded,
+      title: _workspaceUnavailable
+          ? 'Workspace unavailable'
+          : 'Could not load files',
+      body: _workspaceUnavailable
+          ? 'Sidemesh could not resolve this session’s folder on the host. '
+                'It may have moved, been removed, or still be reconnecting.'
+          : friendlyError(error),
+      action: TextButton.icon(
+        onPressed: onRetry,
+        icon: const Icon(Icons.refresh_rounded),
+        label: const Text('Try again'),
+      ),
     );
   }
 }

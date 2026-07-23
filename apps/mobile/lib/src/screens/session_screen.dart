@@ -35,7 +35,6 @@ import 'inspector/inspector_persistence.dart';
 import 'inspector/inspector_pinned.dart';
 import 'inspector/inspector_resources.dart';
 import 'inspector/inspector_search.dart';
-import 'inspector/inspector_session_hub.dart';
 import 'inspector/inspector_terminal.dart';
 import '../session_message_seed_store.dart';
 import '../session_overrides_store.dart';
@@ -1011,7 +1010,6 @@ class _SessionScreenState extends State<SessionScreen>
   InspectorController? _inspectorController;
   bool _inspectorRestoreAttempted = false;
   bool _inspectorSawOurSurface = false;
-  InspectorSurfaceKind? _lastInspectorSurfaceKind;
 
   // Ticks whenever the timeline inputs change so pane-3 surfaces
   // (currently the search panel) can rebuild with fresh records. A
@@ -1341,10 +1339,6 @@ class _SessionScreenState extends State<SessionScreen>
 
     if (kind == null) {
       closeOrphan();
-      // No saved surface — open the hub so pane 3 is immediately useful
-      // rather than blank. The hub itself is never persisted, so next open
-      // will again check for a real saved surface first.
-      _openDefaultInspectorHub(controller, ownerKey);
       return;
     }
     switch (kind) {
@@ -1360,7 +1354,11 @@ class _SessionScreenState extends State<SessionScreen>
         );
         break;
       case InspectorSurfaceKind.resources:
-        if (!_supportsSessionResources) return;
+        if (!_supportsSessionResources) {
+          closeOrphan();
+          unawaited(InspectorPersistence.save(ownerKey, null));
+          return;
+        }
         controller.show(
           buildInspectorResourcesSurface(
             ownerKey: ownerKey,
@@ -1372,7 +1370,11 @@ class _SessionScreenState extends State<SessionScreen>
         );
         break;
       case InspectorSurfaceKind.fileBrowser:
-        if (!_supportsFilesystem) return;
+        if (!_supportsFilesystem) {
+          closeOrphan();
+          unawaited(InspectorPersistence.save(ownerKey, null));
+          return;
+        }
         final session = _session ?? widget.session;
         controller.show(
           buildInspectorWorkspaceBrowserSurface(
@@ -1397,7 +1399,11 @@ class _SessionScreenState extends State<SessionScreen>
         );
         break;
       case InspectorSurfaceKind.terminal:
-        if (!_supportsTerminal) return;
+        if (!_supportsTerminal) {
+          closeOrphan();
+          unawaited(InspectorPersistence.save(ownerKey, null));
+          return;
+        }
         controller.show(
           buildInspectorTerminalSurface(
             ownerKey: ownerKey,
@@ -1408,7 +1414,11 @@ class _SessionScreenState extends State<SessionScreen>
         );
         break;
       case InspectorSurfaceKind.browserTabs:
-        if (!_supportsBrowserPreview) return;
+        if (!_supportsBrowserPreview) {
+          closeOrphan();
+          unawaited(InspectorPersistence.save(ownerKey, null));
+          return;
+        }
         controller.show(
           buildInspectorBrowserTabsSurface(
             ownerKey: ownerKey,
@@ -1425,83 +1435,16 @@ class _SessionScreenState extends State<SessionScreen>
       case InspectorSurfaceKind.debug:
       case InspectorSurfaceKind.gitDetails:
       case InspectorSurfaceKind.sessionDetails:
-        // Not persisted / not owned by the session screen yet.
+        // These surfaces are transient or no longer restorable.
+        closeOrphan();
+        unawaited(InspectorPersistence.save(ownerKey, null));
         break;
       case InspectorSurfaceKind.sessionControls:
         // Controls are transient form state. Never restore a stale draft.
         closeOrphan();
-        _openDefaultInspectorHub(controller, ownerKey);
-        break;
-      case InspectorSurfaceKind.sessionHub:
-        // Hub is the default; treat a persisted hub as if nothing was saved.
-        closeOrphan();
-        _openDefaultInspectorHub(controller, ownerKey);
+        unawaited(InspectorPersistence.save(ownerKey, null));
         break;
     }
-  }
-
-  /// Opens the inspector hub for this session.
-  ///
-  /// Each callback handles its own capability check and shows a snackbar when
-  /// Opens the default inspector surface for this session.
-  ///
-  /// On desktop, we skip the hub launcher and go straight to the workspace
-  /// file browser — it's the most immediately useful surface and avoids the
-  /// "click a menu to open a menu" anti-pattern. The hub is kept as fallback
-  /// when the filesystem capability is absent.
-  void _openDefaultInspectorHub(
-    InspectorController controller,
-    String ownerKey,
-  ) {
-    final session = _session ?? widget.session;
-    // On desktop, prefer jumping straight into the file browser rather than
-    // showing the hub launcher. Fall back to the hub when the host doesn't
-    // expose the filesystem.
-    if (widget.desktopMode && _supportsFilesystem) {
-      controller.show(
-        buildInspectorWorkspaceBrowserSurface(
-          ownerKey: ownerKey,
-          host: widget.host,
-          api: widget.api,
-          root: _workspaceBrowserRootForPath(session.cwd, session.cwd),
-          agentProvider: session.provider,
-          sessionId: session.id,
-        ),
-      );
-      return;
-    }
-    controller.show(
-      buildInspectorSessionHubSurface(
-        ownerKey: ownerKey,
-        onOpenSearch: _toggleSearchPanel,
-        onOpenPinned: _openPinnedPanel,
-        onOpenFiles: () {
-          if (!_supportsFilesystem) {
-            showAppSnackBar(
-              context,
-              'File browser not available on this host.',
-            );
-            return;
-          }
-          _browseWorkspacePath(session.cwd);
-        },
-        onOpenTerminal: () {
-          if (!_supportsTerminal) {
-            showAppSnackBar(context, 'Terminal not available on this host.');
-            return;
-          }
-          unawaited(_openTerminal());
-        },
-        onOpenBrowser: () {
-          if (!_supportsBrowserPreview) {
-            showAppSnackBar(context, 'Browser is not available on this host.');
-            return;
-          }
-          unawaited(_openBrowserTabs());
-        },
-        onOpenResources: _openResourcesPanel,
-      ),
-    );
   }
 
   void _onInspectorChanged() {
@@ -1512,11 +1455,10 @@ class _SessionScreenState extends State<SessionScreen>
     final cur = controller.current;
     if (cur != null && cur.ownerKey == ownerKey) {
       _inspectorSawOurSurface = true;
-      _lastInspectorSurfaceKind = cur.kind;
-      // Don't persist the hub — it's the default, not a deliberate user
-      // choice. A real surface opened next will replace it in persistence.
-      if (cur.kind != InspectorSurfaceKind.sessionHub &&
-          cur.kind != InspectorSurfaceKind.sessionControls) {
+      // Transient controls must never reopen on the next visit. Deliberately
+      // opened tools remain available across session switches until the user
+      // closes them.
+      if (cur.kind != InspectorSurfaceKind.sessionControls) {
         unawaited(InspectorPersistence.save(ownerKey, cur.kind));
       }
       return;
@@ -1528,23 +1470,9 @@ class _SessionScreenState extends State<SessionScreen>
     if (cur == null &&
         _inspectorSawOurSurface &&
         controller.lastCloseWasUserInitiated) {
-      final lastKind = _lastInspectorSurfaceKind;
       unawaited(InspectorPersistence.save(ownerKey, null));
-      if (lastKind != null &&
-          lastKind != InspectorSurfaceKind.sessionHub &&
-          MediaQuery.of(context).size.width >= 900) {
-        WidgetsBinding.instance.addPostFrameCallback((_) {
-          if (!mounted || _disposed) return;
-          final nextController = _inspectorController;
-          if (nextController == null || nextController.current != null) return;
-          _openDefaultInspectorHub(nextController, ownerKey);
-        });
-      }
     }
     _inspectorSawOurSurface = false;
-    if (cur == null) {
-      _lastInspectorSurfaceKind = null;
-    }
   }
 
   @override
