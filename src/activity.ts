@@ -18,6 +18,11 @@ import type {
   TurnDiffActivity,
   WebSearchActivity,
 } from "./types.js";
+import {
+  extractSessionAttachments,
+  mergeSessionAttachments,
+  stripSessionAttachments,
+} from "./session-attachments.js";
 
 const MAX_COMMAND_OUTPUT_CHARS = 12_000;
 const MAX_DIFF_CHARS = 8_000;
@@ -151,6 +156,7 @@ export function buildActivityFromThreadItem(
     item.type === "collabAgentToolCall"
   ) {
     const tool = buildToolActivityFields(item);
+    const attachments = extractSessionAttachments(tool.result);
     return {
       id: item.id,
       type: "tool",
@@ -162,7 +168,11 @@ export function buildActivityFromThreadItem(
       title: tool.title,
       args: tool.args,
       output: tool.output,
-      result: tool.result,
+      result:
+        attachments.length > 0
+          ? stripSessionAttachments(tool.result) ?? null
+          : tool.result,
+      attachments,
       isError: tool.isError,
       semantic: normalizeToolSemantic(item),
     };
@@ -259,6 +269,9 @@ export function mergeActivity(
   existing: SessionActivity | undefined,
   incoming: SessionActivity,
 ): SessionActivity {
+  if (incoming.type === "tool") {
+    incoming = withToolAttachments(incoming);
+  }
   if (!existing || existing.type !== incoming.type) {
     return incoming;
   }
@@ -306,6 +319,10 @@ export function mergeActivity(
       args: incoming.args ?? existingTool.args,
       output: incoming.output ?? existingTool.output,
       result: incoming.result ?? existingTool.result,
+      attachments:
+        incoming.attachments && incoming.attachments.length > 0
+          ? incoming.attachments
+          : existingTool.attachments ?? [],
       isError: incoming.isError ?? existingTool.isError,
       semantic: mergeToolSemantic(existingTool.semantic, incoming.semantic),
     };
@@ -354,6 +371,23 @@ export function mergeActivity(
         ? incoming.changes
         : existingFileChange.changes,
   };
+}
+
+function withToolAttachments(activity: ToolActivity): ToolActivity {
+  const attachments = mergeSessionAttachments(
+    activity.attachments ?? [],
+    extractSessionAttachments(activity.result),
+  );
+  return attachments.length > 0 || activity.attachments
+    ? {
+        ...activity,
+        result:
+          attachments.length > 0
+            ? stripSessionAttachments(activity.result, attachments) ?? null
+            : activity.result,
+        attachments,
+      }
+    : activity;
 }
 
 export function mergeSessionActivities(
