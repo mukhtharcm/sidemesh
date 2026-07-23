@@ -855,7 +855,7 @@ export async function startServer(
       return null;
     }
     const session = await readSession(
-      sessionProvider.provider,
+      providerRuntime.provider,
       sessionId,
       false,
     ).catch(() => null);

@@ -192,6 +192,175 @@ void main() {
     },
   );
 
+  testWidgets(
+    'desktop inspector starts closed and ignores legacy automatic files state',
+    (tester) async {
+      final controller = InspectorController();
+      final host = _host('desktop-contextual-files');
+      final session = _session('desktop-contextual-files-session');
+      final api = _WorkspaceBrowserCapabilityApi(
+        _nodeForCapabilities(_minimalCapabilities),
+        files: const <String, String>{'/repo/README.md': '# Workspace'},
+      );
+      SharedPreferences.setMockInitialValues(<String, Object>{
+        'sidemesh.inspector.surface.${host.id}|${session.id}': 'fileBrowser',
+      });
+      addTearDown(controller.dispose);
+      addTearDown(api.dispose);
+
+      await _pumpApp(
+        tester,
+        _InspectorHarness(
+          controller: controller,
+          child: SessionScreen(
+            host: host,
+            session: session,
+            api: api,
+            desktopMode: true,
+          ),
+        ),
+        size: const Size(1180, 900),
+      );
+      await _pumpFrames(tester);
+
+      expect(controller.current, isNull);
+      expect(find.byType(FileBrowserTree), findsNothing);
+    },
+  );
+
+  testWidgets('closing desktop files keeps the inspector closed', (
+    tester,
+  ) async {
+    final controller = InspectorController();
+    final host = _host('desktop-close-files');
+    final session = _session('desktop-close-files-session');
+    final api = _WorkspaceBrowserCapabilityApi(
+      _nodeForCapabilities(_minimalCapabilities),
+      files: const <String, String>{'/repo/README.md': '# Workspace'},
+    );
+    addTearDown(controller.dispose);
+    addTearDown(api.dispose);
+
+    await _pumpApp(
+      tester,
+      _InspectorHarness(
+        controller: controller,
+        child: SessionScreen(
+          host: host,
+          session: session,
+          api: api,
+          desktopMode: true,
+        ),
+      ),
+      size: const Size(1180, 900),
+    );
+    await _pumpFrames(tester);
+
+    await tester.tap(find.byTooltip('Session actions'));
+    await _pumpFrames(tester);
+    await tester.tap(find.text('Files'));
+    await _pumpFrames(tester);
+    expect(controller.current?.kind, InspectorSurfaceKind.fileBrowser);
+
+    controller.close();
+    await _pumpFrames(tester);
+
+    expect(controller.current, isNull);
+    expect(find.byType(FileBrowserTree), findsNothing);
+    final prefs = await SharedPreferences.getInstance();
+    expect(
+      prefs.containsKey(
+        'sidemesh.inspector.surface.v2.${host.id}|${session.id}',
+      ),
+      isFalse,
+    );
+  });
+
+  testWidgets('desktop restores a deliberately open files inspector', (
+    tester,
+  ) async {
+    final controller = InspectorController();
+    final host = _host('desktop-restore-files');
+    final session = _session('desktop-restore-files-session');
+    final api = _WorkspaceBrowserCapabilityApi(
+      _nodeForCapabilities(_minimalCapabilities),
+      files: const <String, String>{'/repo/README.md': '# Workspace'},
+    );
+    SharedPreferences.setMockInitialValues(<String, Object>{
+      'sidemesh.inspector.surface.v2.${host.id}|${session.id}': 'fileBrowser',
+    });
+    addTearDown(controller.dispose);
+    addTearDown(api.dispose);
+
+    await _pumpApp(
+      tester,
+      _InspectorHarness(
+        controller: controller,
+        child: SessionScreen(
+          host: host,
+          session: session,
+          api: api,
+          desktopMode: true,
+        ),
+      ),
+      size: const Size(1180, 900),
+    );
+    await _pumpFrames(tester);
+
+    expect(controller.current?.kind, InspectorSurfaceKind.fileBrowser);
+    expect(find.byType(FileBrowserTree), findsOneWidget);
+    expect(find.text('README.md'), findsOneWidget);
+  });
+
+  testWidgets('workspace failure uses a recoverable pane state', (
+    tester,
+  ) async {
+    final controller = InspectorController();
+    final api = _FlakyWorkspaceBrowserCapabilityApi(
+      _nodeForCapabilities(_minimalCapabilities),
+      files: const <String, String>{'/repo/README.md': '# Workspace'},
+    );
+    addTearDown(controller.dispose);
+    addTearDown(api.dispose);
+
+    await _pumpApp(
+      tester,
+      _InspectorHarness(
+        controller: controller,
+        child: SessionScreen(
+          host: _host('desktop-files-error'),
+          session: _session('desktop-files-error-session'),
+          api: api,
+          desktopMode: true,
+        ),
+      ),
+      size: const Size(1180, 900),
+    );
+    await _pumpFrames(tester);
+
+    await tester.tap(find.byTooltip('Session actions'));
+    await _pumpFrames(tester);
+    await tester.tap(find.text('Files'));
+    await _pumpFrames(tester);
+
+    expect(find.text('Workspace unavailable'), findsOneWidget);
+    expect(find.text('session workspace is unavailable'), findsNothing);
+    expect(find.text('repo'), findsNothing);
+    expect(find.text('Try again'), findsOneWidget);
+    expect(
+      tester.getTopLeft(find.text('Workspace unavailable')).dy,
+      lessThan(220),
+    );
+
+    api.workspaceAvailable = true;
+    await tester.tap(find.text('Try again'));
+    await _pumpFrames(tester);
+
+    expect(api.listCalls, 2);
+    expect(find.text('Workspace unavailable'), findsNothing);
+    expect(find.text('README.md'), findsOneWidget);
+  });
+
   testWidgets('desktop model picker returns focus to composer after closing', (
     tester,
   ) async {
@@ -2460,6 +2629,36 @@ class _WorkspaceBrowserCapabilityApi extends _CapabilityFakeApi {
   void dispose() {
     _fsChannel.dispose();
     super.dispose();
+  }
+}
+
+class _FlakyWorkspaceBrowserCapabilityApi
+    extends _WorkspaceBrowserCapabilityApi {
+  _FlakyWorkspaceBrowserCapabilityApi(super.node, {required super.files});
+
+  bool workspaceAvailable = false;
+  int listCalls = 0;
+
+  @override
+  Future<FsListing> listDirectory(
+    HostProfile host,
+    String path, {
+    String? agentProvider,
+    String? sessionId,
+  }) {
+    listCalls++;
+    if (!workspaceAvailable) {
+      throw const ApiException(
+        403,
+        '{"error":"session workspace is unavailable"}',
+      );
+    }
+    return super.listDirectory(
+      host,
+      path,
+      agentProvider: agentProvider,
+      sessionId: sessionId,
+    );
   }
 }
 

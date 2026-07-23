@@ -5576,6 +5576,57 @@ describe("GET /api/sessions/:sessionId/status", () => {
   });
 });
 
+describe("session-scoped filesystem routes", () => {
+  it("resolves namespaced multi-provider session workspaces", async () => {
+    const stateDir = await mkdtemp(
+      nodePath.join(tmpdir(), "sidemesh-server-fs-multi-test-"),
+    );
+    const runtime = makeMultiProviderRuntime(
+      { seedSessions: true, workspaceRoot: stateDir, latencyMs: 0 },
+      { seedSessions: true, workspaceRoot: stateDir, latencyMs: 0 },
+    );
+    await withServerRuntime(
+      makeConfig(stateDir),
+      runtime,
+      async (server, config) => {
+        const baseRequest = {
+          hostname: "127.0.0.1",
+          port: server.port,
+          headers: { Authorization: "Bearer " + config.token },
+        };
+        const sessionsResponse = await request({
+          ...baseRequest,
+          path: "/api/sessions?limit=20",
+          method: "GET",
+        });
+        assert.equal(sessionsResponse.statusCode, 200);
+        const sessions = sessionsResponse.body as Array<{
+          id: string;
+          cwd: string;
+        }>;
+        const secondarySession = sessions.find((session) =>
+          session.id.startsWith("codex:"),
+        );
+        assert.ok(secondarySession, "expected a namespaced secondary session");
+
+        const listingResponse = await request({
+          ...baseRequest,
+          path:
+            `/api/fs/list?path=${encodeURIComponent(secondarySession.cwd)}` +
+            `&sessionId=${encodeURIComponent(secondarySession.id)}`,
+          method: "GET",
+        });
+
+        assert.equal(listingResponse.statusCode, 200);
+        assert.equal(
+          (listingResponse.body as { path: string }).path,
+          secondarySession.cwd,
+        );
+      },
+    );
+  });
+});
+
 describe("GET /api/sessions/search", () => {
   it("returns created sessions by keyword", async () => {
     const stateDir = await mkdtemp(nodePath.join(tmpdir(), "sidemesh-server-search-test-"));
