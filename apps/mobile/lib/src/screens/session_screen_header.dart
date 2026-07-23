@@ -1,65 +1,54 @@
 part of 'session_screen.dart';
 
-class _CachedTranscriptStrip extends StatelessWidget {
-  const _CachedTranscriptStrip({
-    required this.mode,
-    required this.refreshing,
-    this.lastConnectedLabel,
-    this.onRetry,
-  });
+class _OfflineTranscriptStrip extends StatelessWidget {
+  const _OfflineTranscriptStrip({this.lastConnectedLabel, this.onRetry});
 
-  final _TranscriptFreshnessMode mode;
-  final bool refreshing;
   final String? lastConnectedLabel;
   final VoidCallback? onRetry;
 
   @override
   Widget build(BuildContext context) {
     final colors = context.colors;
-    final icon = switch (mode) {
-      _TranscriptFreshnessMode.cached => Icons.history_rounded,
-      _TranscriptFreshnessMode.reconnecting => Icons.sync_rounded,
-      _TranscriptFreshnessMode.offline => Icons.wifi_off_rounded,
-    };
-    final text = switch (mode) {
-      _TranscriptFreshnessMode.cached =>
-        refreshing
-            ? 'Cached transcript · syncing latest changes'
-            : 'Cached transcript · waiting for latest host snapshot',
-      _TranscriptFreshnessMode.reconnecting =>
-        lastConnectedLabel == null
-            ? 'Reconnecting · checking latest events'
-            : 'Reconnecting · $_lastConnectedText',
-      _TranscriptFreshnessMode.offline =>
-        lastConnectedLabel == null
-            ? 'Offline · showing last known session state'
-            : 'Offline · $_lastConnectedText',
-    };
-    return MeshStatusRail(
-      label: text,
-      icon: icon,
-      active: refreshing,
-      tone: MeshStatusRailTone.warning,
-      surfaceTone: MeshSurfaceTone.warning,
-      mono: true,
-      padding: const EdgeInsets.fromLTRB(11, 8, 11, 8),
-      trailing: mode == _TranscriptFreshnessMode.offline && onRetry != null
-          ? GestureDetector(
-              onTap: onRetry,
-              behavior: HitTestBehavior.opaque,
-              child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
-                child: Text(
-                  'Retry',
-                  style: monoStyle(
-                    color: colors.warning,
-                    fontSize: 10.5,
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
+    final theme = Theme.of(context);
+    final text = lastConnectedLabel == null
+        ? 'Offline · showing saved transcript'
+        : 'Offline · showing saved transcript · $_lastConnectedText';
+    return MeshSurface(
+      tone: MeshSurfaceTone.warning,
+      radius: AppRadii.control,
+      padding: const EdgeInsets.fromLTRB(11, 5, 5, 5),
+      child: Row(
+        children: [
+          Icon(Icons.wifi_off_rounded, size: 15, color: colors.warning),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              text,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: colors.textSecondary,
+                fontWeight: AppWeights.emphasis,
               ),
-            )
-          : null,
+            ),
+          ),
+          if (onRetry != null) ...[
+            const SizedBox(width: 8),
+            TextButton(
+              onPressed: onRetry,
+              style: TextButton.styleFrom(
+                foregroundColor: colors.warning,
+                minimumSize: const Size(48, 40),
+                padding: const EdgeInsets.symmetric(horizontal: 10),
+                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                visualDensity: VisualDensity.compact,
+                textStyle: const TextStyle(fontWeight: AppWeights.emphasis),
+              ),
+              child: const Text('Retry'),
+            ),
+          ],
+        ],
+      ),
     );
   }
 

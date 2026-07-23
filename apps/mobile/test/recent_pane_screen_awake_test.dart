@@ -135,6 +135,38 @@ void main() {
     expect(find.text('Session favorite'), findsOneWidget);
     expect(find.text('Session recent'), findsNothing);
   });
+
+  testWidgets('keeps cached sessions stable while host refresh is pending', (
+    tester,
+  ) async {
+    final cached = _summary('cached', status: 'idle');
+    await tester.runAsync(
+      () => SessionLocalStore.instance.upsertSessions(host, [cached]),
+    );
+    final refreshReady = Completer<void>();
+    final controller = ScreenAwakeController(
+      settingsStore: ScreenAwakeSettingsStore.forTesting(),
+      binding: _FakeScreenAwakeBinding(),
+    );
+    addTearDown(controller.stop);
+    await controller.start();
+
+    await _pumpRecentPane(
+      tester,
+      api: _FakeApiClient.blocked(refreshReady.future, [cached]),
+      controller: controller,
+      hosts: const [host],
+    );
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 50));
+
+    expect(find.text('Session cached'), findsOneWidget);
+    expect(find.textContaining('Syncing sessions'), findsNothing);
+    expect(find.textContaining('Loading sessions'), findsNothing);
+
+    refreshReady.complete();
+    await tester.pump();
+  });
 }
 
 Future<void> _pumpRecentPane(
@@ -193,27 +225,46 @@ SessionSummary _summary(String id, {required String status}) {
 }
 
 class _FakeApiClient extends ApiClient {
-  _FakeApiClient._(this._sessions, this._error);
+  _FakeApiClient._(this._sessions, this._error, this._fetchBlocker);
 
   factory _FakeApiClient.sessions(List<SessionSummary> sessions) {
-    return _FakeApiClient._(sessions, null);
+    return _FakeApiClient._(sessions, null, null);
   }
 
   factory _FakeApiClient.error() {
-    return _FakeApiClient._(const <SessionSummary>[], StateError('offline'));
+    return _FakeApiClient._(
+      const <SessionSummary>[],
+      StateError('offline'),
+      null,
+    );
+  }
+
+  factory _FakeApiClient.blocked(
+    Future<void> fetchBlocker,
+    List<SessionSummary> sessions,
+  ) {
+    return _FakeApiClient._(sessions, null, fetchBlocker);
   }
 
   final List<SessionSummary> _sessions;
   final Object? _error;
+  final Future<void>? _fetchBlocker;
   final _IdleWebSocketChannel _channel = _IdleWebSocketChannel();
 
   @override
-  Future<List<SessionSummary>> fetchSessions(HostProfile host, {int? limit}) {
+  Future<List<SessionSummary>> fetchSessions(
+    HostProfile host, {
+    int? limit,
+  }) async {
+    final blocker = _fetchBlocker;
+    if (blocker != null) {
+      await blocker;
+    }
     final error = _error;
     if (error != null) {
-      return Future<List<SessionSummary>>.error(error);
+      throw error;
     }
-    return Future<List<SessionSummary>>.value(_sessions);
+    return _sessions;
   }
 
   @override
