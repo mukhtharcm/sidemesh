@@ -1262,6 +1262,7 @@ class MeshEmptyState extends StatelessWidget {
     required this.icon,
     required this.title,
     required this.body,
+    this.action,
   }) : compact = false;
 
   /// In-list / inline variant — smaller icon bubble, tighter padding.
@@ -1272,11 +1273,13 @@ class MeshEmptyState extends StatelessWidget {
     required this.icon,
     required this.title,
     required this.body,
+    this.action,
   }) : compact = true;
 
   final IconData icon;
   final String title;
   final String body;
+  final Widget? action;
   final bool compact;
 
   @override
@@ -1320,6 +1323,10 @@ class MeshEmptyState extends StatelessWidget {
                 height: 1.45,
               ),
             ),
+            if (action != null) ...[
+              const SizedBox(height: AppSpacing.md),
+              action!,
+            ],
           ],
         ),
       ),
