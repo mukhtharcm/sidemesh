@@ -50,6 +50,14 @@ Session history:
 - `readSessionRuntime`
 - `listRecentUnindexedSessionThreads`
 
+`listSessionThreads` treats spawned child sessions as provider-owned agent
+runs, not peer history rows. Normal history calls omit them. Callers that need
+the Agents surface set `includeSubAgents` and `subAgentParentId`; adapters must
+paginate until they satisfy the parent-scoped limit or exhaust history.
+`MultiAgentProvider` unwraps the parent id before dispatch and namespaces both
+the child and parent ids on return. The daemon exposes the normalized result at
+`GET /api/sessions/:sessionId/agent-runs`.
+
 Session lifecycle:
 
 - `createSession`

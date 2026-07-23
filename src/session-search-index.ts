@@ -7,7 +7,7 @@ import { DatabaseSync } from "node:sqlite";
 import { parseJsonLine } from "./codex-history.js";
 import type { SessionActivity, SessionMessage } from "./types.js";
 
-const SCHEMA_VERSION = 3;
+const SCHEMA_VERSION = 4;
 
 export interface SessionSearchResult {
   sessionId: string;
@@ -342,6 +342,17 @@ export class SessionSearchIndex {
             WHEN ABS(updated_at) < 1000000000000 THEN updated_at * 1000
             ELSE updated_at
           END;
+        DELETE FROM session_manifest;
+      `);
+    }
+
+    if (version < 4) {
+      // Child agent sessions used to be indexed as peer sessions. Clear the
+      // index so startup backfill can rebuild it from top-level sessions only.
+      this.db.exec(`
+        DELETE FROM session_fts;
+        DELETE FROM session_search_documents;
+        DELETE FROM manifest;
         DELETE FROM session_manifest;
       `);
     }

@@ -314,7 +314,11 @@ class RecentSessionsStore extends ChangeNotifier {
     final next = Map<String, SessionSummary>.from(
       _sessionsByHostId[host.id] ?? const <String, SessionSummary>{},
     );
-    next[session.id] = session;
+    if (session.isSubAgent) {
+      next.remove(session.id);
+    } else {
+      next[session.id] = session;
+    }
     _sessionsByHostId[host.id] = _toBoundedSessionMap(next.values);
     _hasLoadedOnce = true;
     _publishEntries();
@@ -428,7 +432,9 @@ class RecentSessionsStore extends ChangeNotifier {
   }
 
   List<SessionSummary> _sortedSessionWindow(Iterable<SessionSummary> sessions) {
-    final sorted = sessions.toList(growable: false)
+    final sorted = sessions
+        .where((session) => !session.isSubAgent)
+        .toList(growable: false)
       ..sort((left, right) {
         final updatedCompare = right.updatedAt.compareTo(left.updatedAt);
         if (updatedCompare != 0) {

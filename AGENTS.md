@@ -249,6 +249,11 @@ specific agent provider.
   through provider-neutral `ToolActivity.attachments`, not fabricated assistant
   messages. Shared normalization recognizes common OpenAI, MCP, and ACP content
   blocks and strips promoted inline image data from the raw result.
+- **Spawned agent sessions**: child sessions are not peer rows in Recent or
+  session search. Discover them through the parent-scoped agent-runs path.
+  Provider adapters must filter before applying the requested limit, and
+  multi-provider wrapping must namespace `subAgent.parentSessionId` as well as
+  the child thread id.
 - **Mobile delta parity**: `SessionEventsDelta` does not include a full
   `history` summary. When replaying deltas into a cached session,
   `apps/mobile/lib/src/screens/session_screen.dart` must keep

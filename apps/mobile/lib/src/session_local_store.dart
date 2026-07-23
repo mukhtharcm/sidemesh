@@ -213,7 +213,7 @@ class SessionLocalStore extends ChangeNotifier {
       await _ensureFavoritesLoaded();
       final db = await SidemeshDb.instance;
       final rows = await db.rawQuery(
-        'SELECT * FROM sessions WHERE host_id = ? AND is_favorite = 1 ORDER BY updated_at DESC',
+        'SELECT * FROM sessions WHERE host_id = ? AND is_favorite = 1 AND is_sub_agent = 0 ORDER BY updated_at DESC',
         [host.id],
       );
       return rows.map(_rowToSession).toList(growable: false);
@@ -229,6 +229,7 @@ class SessionLocalStore extends ChangeNotifier {
         """
           SELECT * FROM sessions
           WHERE host_id = ? AND is_favorite = 1 AND source = 'favorite'
+            AND is_sub_agent = 0
           ORDER BY updated_at DESC
         """,
         [host.id],
@@ -394,7 +395,7 @@ class SessionLocalStore extends ChangeNotifier {
       await _ensureMigrated();
       final db = await SidemeshDb.instance;
       final rows = await db.rawQuery(
-        "SELECT * FROM sessions WHERE host_id = ? AND source = 'recent' ORDER BY updated_at DESC LIMIT ?",
+        "SELECT * FROM sessions WHERE host_id = ? AND source = 'recent' AND is_sub_agent = 0 ORDER BY updated_at DESC LIMIT ?",
         [host.id, limit],
       );
       return rows.map(_rowToSession).toList(growable: false);
