@@ -401,6 +401,7 @@ class _SessionAppBarSubtitle extends StatelessWidget {
     required this.gitStatus,
     required this.showGit,
     required this.running,
+    required this.verifying,
     required this.pinnedCount,
     required this.pinnedActive,
     required this.onPinnedTap,
@@ -413,6 +414,7 @@ class _SessionAppBarSubtitle extends StatelessWidget {
   final SessionGitStatus? gitStatus;
   final bool showGit;
   final bool running;
+  final bool verifying;
   final int pinnedCount;
   final bool pinnedActive;
   final VoidCallback onPinnedTap;
@@ -448,8 +450,18 @@ class _SessionAppBarSubtitle extends StatelessWidget {
           ),
           child: Row(
             children: [
-              _HeaderStatusDot(
-                color: running ? colors.success : colors.textTertiary,
+              SizedBox.square(
+                dimension: 12,
+                child: verifying
+                    ? const MeshDelayedActivityIndicator(
+                        key: ValueKey('session-freshness-indicator'),
+                        active: true,
+                      )
+                    : Center(
+                        child: _HeaderStatusDot(
+                          color: running ? colors.success : colors.textTertiary,
+                        ),
+                      ),
               ),
               const SizedBox(width: 6),
               Expanded(

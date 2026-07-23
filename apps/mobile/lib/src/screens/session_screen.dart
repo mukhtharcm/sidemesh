@@ -937,6 +937,10 @@ class _SessionScreenState extends State<SessionScreen>
   int _gitStatusRequestId = 0;
 
   bool get _snapshotInFlight => _snapshotInFlightRequestId != null;
+  bool get _verifyingVisibleSnapshot =>
+      _snapshotInFlight &&
+      !_resumeSyncFailed &&
+      (_showingCachedSnapshot || _showingPossiblyStaleSnapshot);
 
   bool _supportsProviderCapability(String section, String feature) {
     final node = _nodeInfo;
@@ -2374,7 +2378,7 @@ class _SessionScreenState extends State<SessionScreen>
     final resolvedMessageLimit = messageLimit ?? _messageLimit;
     final resolvedActivityLimit = activityLimit ?? _activityLimit;
     final requestId = ++_snapshotRequestId;
-    _snapshotInFlightRequestId = requestId;
+    setState(() => _snapshotInFlightRequestId = requestId);
     try {
       final log = await widget.api.fetchLog(
         widget.host,
@@ -3232,12 +3236,7 @@ class _SessionScreenState extends State<SessionScreen>
 
   bool get _showRuntimeSignalStrip {
     final threadStatus = _latestThreadStatus;
-    final showThreadStatus =
-        threadStatus != null &&
-        (threadStatus.status?.isNotEmpty ?? false) &&
-        ((threadStatus.status ?? '') != 'running' ||
-            (threadStatus.message?.isNotEmpty ?? false) ||
-            (threadStatus.pendingActionKind?.isNotEmpty ?? false));
+    final showThreadStatus = _shouldShowThreadStatusEvent(threadStatus);
     final queueUpdated = _latestQueueUpdate;
     final showQueue =
         queueUpdated != null &&
@@ -6955,6 +6954,7 @@ class _SessionScreenState extends State<SessionScreen>
         gitStatus: _gitStatus,
         showGit: _supportsGitStatus,
         running: _running,
+        verifying: _verifyingVisibleSnapshot,
         pinnedCount: pinnedMessages.length,
         pinnedActive: pinnedActive,
         onPinnedTap: _openPinnedPanel,
