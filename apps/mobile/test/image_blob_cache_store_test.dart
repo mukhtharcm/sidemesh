@@ -119,6 +119,33 @@ void main() {
     );
     expect(prefs.getKeys(), isEmpty);
   });
+
+  test('scopes relative image cache entries and requests by session', () async {
+    final store = ImageBlobCacheStore.instance;
+    final api = _ImageApi(Uint8List.fromList([1, 2, 3]));
+
+    await store.load(
+      host: host,
+      path: './artifacts/result.png',
+      api: api,
+      sessionId: 'session-a',
+    );
+    await store.load(
+      host: host,
+      path: './artifacts/result.png',
+      api: api,
+      sessionId: 'session-b',
+    );
+    await store.load(
+      host: host,
+      path: './artifacts/result.png',
+      api: api,
+      sessionId: 'session-a',
+    );
+
+    expect(api.requestCount, 2);
+    expect(api.sessionIds, ['session-a', 'session-b']);
+  });
 }
 
 class _ImageApi extends ApiClient {
@@ -126,6 +153,7 @@ class _ImageApi extends ApiClient {
 
   final Uint8List bytes;
   var requestCount = 0;
+  final List<String?> sessionIds = <String?>[];
 
   @override
   Future<Uint8List> fetchFsBlob(
@@ -135,6 +163,7 @@ class _ImageApi extends ApiClient {
     String? sessionId,
   }) async {
     requestCount += 1;
+    sessionIds.add(sessionId);
     return bytes;
   }
 }

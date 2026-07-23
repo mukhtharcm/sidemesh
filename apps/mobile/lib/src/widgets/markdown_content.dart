@@ -1,9 +1,15 @@
+import 'dart:convert';
+import 'dart:typed_data';
+
 import 'package:flutter/material.dart';
 import 'package:gpt_markdown/gpt_markdown.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+import '../api_client.dart';
+import '../models.dart';
 import '../theme/app_colors.dart';
 import '../theme/app_theme.dart';
+import '../theme/app_tokens.dart';
 import '../theme/color_contrast.dart';
 import 'app_snackbar.dart';
 import 'syntax_code_block.dart';
@@ -16,6 +22,9 @@ class MarkdownContent extends StatelessWidget {
     this.backgroundColor,
     this.linkStyle,
     this.onOpenFile,
+    this.host,
+    this.api,
+    this.sessionId,
   });
 
   final String text;
@@ -23,6 +32,9 @@ class MarkdownContent extends StatelessWidget {
   final Color? backgroundColor;
   final TextStyle? linkStyle;
   final void Function(String path)? onOpenFile;
+  final HostProfile? host;
+  final ApiClient? api;
+  final String? sessionId;
 
   @override
   Widget build(BuildContext context) {
@@ -49,17 +61,16 @@ class MarkdownContent extends StatelessWidget {
       },
       linkBuilder: (context, linkText, url, style) {
         final linkColor = linkStyle?.color ?? fallbackLinkColor;
-        final effectiveLinkStyle = style.merge(linkStyle).copyWith(
-          color: linkColor,
-          decoration: linkStyle?.decoration ?? TextDecoration.underline,
-          decorationColor: linkStyle?.decorationColor ?? linkColor,
-          decorationThickness: linkStyle?.decorationThickness ?? 1.2,
-        );
+        final effectiveLinkStyle = style
+            .merge(linkStyle)
+            .copyWith(
+              color: linkColor,
+              decoration: linkStyle?.decoration ?? TextDecoration.underline,
+              decorationColor: linkStyle?.decorationColor ?? linkColor,
+              decorationThickness: linkStyle?.decorationThickness ?? 1.2,
+            );
         return Text.rich(
-          TextSpan(
-            children: [linkText],
-            style: effectiveLinkStyle,
-          ),
+          TextSpan(children: [linkText], style: effectiveLinkStyle),
         );
       },
       codeBuilder: (context, name, code, closed) {
@@ -89,8 +100,289 @@ class MarkdownContent extends StatelessWidget {
         }
         return Text(hlText, style: displayStyle);
       },
+      imageBuilder: (context, imageUrl, width, height) {
+        return _MarkdownImage(
+          source: imageUrl,
+          width: width,
+          height: height,
+          host: host,
+          api: api,
+          sessionId: sessionId,
+        );
+      },
     );
   }
+}
+
+class _MarkdownImage extends StatefulWidget {
+  const _MarkdownImage({
+    required this.source,
+    required this.width,
+    required this.height,
+    required this.host,
+    required this.api,
+    required this.sessionId,
+  });
+
+  final String source;
+  final double? width;
+  final double? height;
+  final HostProfile? host;
+  final ApiClient? api;
+  final String? sessionId;
+
+  @override
+  State<_MarkdownImage> createState() => _MarkdownImageState();
+}
+
+class _MarkdownImageState extends State<_MarkdownImage> {
+  ImageProvider<Object>? _provider;
+  Object? _error;
+  int _loadGeneration = 0;
+
+  bool get _isLocal => _localMarkdownImagePath(widget.source) != null;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  @override
+  void didUpdateWidget(covariant _MarkdownImage oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.source != widget.source ||
+        oldWidget.host?.id != widget.host?.id ||
+        oldWidget.host?.baseUrl != widget.host?.baseUrl ||
+        oldWidget.host?.token != widget.host?.token ||
+        oldWidget.api != widget.api ||
+        oldWidget.sessionId != widget.sessionId) {
+      _load();
+    }
+  }
+
+  void _load() {
+    final generation = ++_loadGeneration;
+    _provider = null;
+    _error = null;
+    final source = widget.source.trim();
+    final localPath = _localMarkdownImagePath(source);
+    if (localPath != null) {
+      final host = widget.host;
+      final api = widget.api;
+      if (host == null || api == null || (widget.sessionId ?? '').isEmpty) {
+        _error = StateError('Image is not attached to a session workspace');
+        return;
+      }
+      api
+          .fetchFsBlob(host, localPath, sessionId: widget.sessionId)
+          .then((bytes) {
+            if (!mounted || generation != _loadGeneration) return;
+            setState(() => _provider = MemoryImage(bytes));
+          })
+          .catchError((Object error) {
+            if (!mounted || generation != _loadGeneration) return;
+            setState(() => _error = error);
+          });
+      return;
+    }
+    if (source.startsWith('data:image/')) {
+      try {
+        final comma = source.indexOf(',');
+        if (comma <= 0 || !source.substring(0, comma).contains(';base64')) {
+          throw const FormatException('Unsupported image data URL');
+        }
+        final bytes = base64Decode(source.substring(comma + 1));
+        _provider = MemoryImage(Uint8List.fromList(bytes));
+      } catch (error) {
+        _error = error;
+      }
+      return;
+    }
+    final uri = Uri.tryParse(source);
+    if (uri != null && (uri.scheme == 'http' || uri.scheme == 'https')) {
+      _provider = NetworkImage(source);
+      return;
+    }
+    _error = StateError('Unsupported image source');
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final provider = _provider;
+    if (provider == null) {
+      return _MarkdownImageStatus(
+        source: widget.source,
+        loading: _error == null,
+        onRetry: _error == null ? null : () => setState(_load),
+      );
+    }
+
+    final maxWidth = (widget.width ?? 680).clamp(80, 680).toDouble();
+    final maxHeight = (widget.height ?? 420).clamp(80, 420).toDouble();
+    return Semantics(
+      image: true,
+      label: 'Image: ${_markdownImageLabel(widget.source)}',
+      child: ConstrainedBox(
+        constraints: BoxConstraints(maxWidth: maxWidth, maxHeight: maxHeight),
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(12),
+          child: Image(
+            image: provider,
+            fit: BoxFit.contain,
+            gaplessPlayback: true,
+            loadingBuilder: (context, child, progress) {
+              if (progress == null) return child;
+              return _MarkdownImageStatus(source: widget.source, loading: true);
+            },
+            errorBuilder: (context, error, stackTrace) {
+              return _MarkdownImageStatus(
+                source: widget.source,
+                loading: false,
+                onRetry: _isLocal ? () => setState(_load) : null,
+              );
+            },
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _MarkdownImageStatus extends StatelessWidget {
+  const _MarkdownImageStatus({
+    required this.source,
+    required this.loading,
+    this.onRetry,
+  });
+
+  final String source;
+  final bool loading;
+  final VoidCallback? onRetry;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    final label = _markdownImageLabel(source);
+    return Semantics(
+      label: loading ? 'Loading image $label' : 'Image unavailable: $label',
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(
+          minWidth: 180,
+          maxWidth: 360,
+          minHeight: 58,
+          maxHeight: 72,
+        ),
+        child: DecoratedBox(
+          decoration: BoxDecoration(
+            color: colors.surfaceMuted,
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: colors.border),
+          ),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                if (loading)
+                  SizedBox(
+                    width: 18,
+                    height: 18,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      color: colors.accent,
+                    ),
+                  )
+                else
+                  Icon(
+                    Icons.image_not_supported_outlined,
+                    size: 20,
+                    color: colors.textSecondary,
+                  ),
+                const SizedBox(width: 10),
+                Flexible(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        loading ? 'Loading image...' : 'Image unavailable',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                          color: colors.textPrimary,
+                          fontWeight: AppWeights.emphasis,
+                        ),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        label,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color: colors.textTertiary,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                if (onRetry != null) ...[
+                  const SizedBox(width: 4),
+                  IconButton(
+                    tooltip: 'Retry image',
+                    visualDensity: VisualDensity.compact,
+                    onPressed: onRetry,
+                    icon: const Icon(Icons.refresh_rounded, size: 20),
+                  ),
+                ],
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+String? _localMarkdownImagePath(String raw) {
+  var value = raw.trim();
+  if (value.isEmpty) return null;
+  if (value.startsWith('<') && value.endsWith('>')) {
+    value = value.substring(1, value.length - 1).trim();
+  }
+  final fileUri = Uri.tryParse(value);
+  if (fileUri?.scheme == 'file') {
+    try {
+      return fileUri!.toFilePath();
+    } catch (_) {
+      return null;
+    }
+  }
+  final isLocal =
+      value.startsWith('/') ||
+      value.startsWith('./') ||
+      value.startsWith('../') ||
+      RegExp(r'^[A-Za-z]:[\\/]').hasMatch(value);
+  if (!isLocal) return null;
+  try {
+    return Uri.decodeFull(value);
+  } catch (_) {
+    return value;
+  }
+}
+
+String _markdownImageLabel(String source) {
+  final local = _localMarkdownImagePath(source);
+  if (local != null) {
+    final normalized = local.replaceAll('\\', '/');
+    final segments = normalized.split('/').where((part) => part.isNotEmpty);
+    return segments.isEmpty ? local : segments.last;
+  }
+  final uri = Uri.tryParse(source);
+  if (uri != null && uri.pathSegments.isNotEmpty) {
+    return uri.pathSegments.last;
+  }
+  return 'Image';
 }
 
 Future<void> _openLink(BuildContext context, String href) async {

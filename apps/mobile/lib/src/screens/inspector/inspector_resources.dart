@@ -199,6 +199,7 @@ class _SessionResourcesPanelState extends State<SessionResourcesPanel> {
             host: widget.host,
             path: path!,
             api: widget.api,
+            sessionId: widget.session.id,
           );
         },
       );
@@ -334,6 +335,7 @@ class _SessionResourcesPanelState extends State<SessionResourcesPanel> {
           itemBuilder: (context, index) => _ResourceMediaCard(
             host: widget.host,
             api: widget.api,
+            sessionId: widget.session.id,
             resource: resources[index],
             onTap: () => _openImageGallery(resources[index]),
           ),
@@ -365,6 +367,7 @@ class _SessionResourcesPanelState extends State<SessionResourcesPanel> {
                 child: _ResourceMediaCard(
                   host: widget.host,
                   api: widget.api,
+                  sessionId: widget.session.id,
                   resource: resource,
                   onTap: () => _openImageGallery(resource),
                 ),
@@ -603,12 +606,14 @@ class _ResourceMediaCard extends StatelessWidget {
   const _ResourceMediaCard({
     required this.host,
     required this.api,
+    required this.sessionId,
     required this.resource,
     this.onTap,
   });
 
   final HostProfile host;
   final ApiClient api;
+  final String sessionId;
   final SessionResource resource;
   final VoidCallback? onTap;
 
@@ -630,6 +635,7 @@ class _ResourceMediaCard extends StatelessWidget {
                 child: _ResourceImagePreview(
                   host: host,
                   api: api,
+                  sessionId: sessionId,
                   resource: resource,
                 ),
               ),
@@ -675,17 +681,24 @@ class _ResourceImagePreview extends StatelessWidget {
   const _ResourceImagePreview({
     required this.host,
     required this.api,
+    required this.sessionId,
     required this.resource,
   });
 
   final HostProfile host;
   final ApiClient api;
+  final String sessionId;
   final SessionResource resource;
 
   @override
   Widget build(BuildContext context) {
     if ((resource.path ?? '').isNotEmpty) {
-      return _LocalResourceImage(host: host, api: api, path: resource.path!);
+      return _LocalResourceImage(
+        host: host,
+        api: api,
+        sessionId: sessionId,
+        path: resource.path!,
+      );
     }
     return _RemoteResourceImage(url: resource.url ?? '');
   }
@@ -751,11 +764,13 @@ class _LocalResourceImage extends StatefulWidget {
   const _LocalResourceImage({
     required this.host,
     required this.api,
+    required this.sessionId,
     required this.path,
   });
 
   final HostProfile host;
   final ApiClient api;
+  final String sessionId;
   final String path;
 
   @override
@@ -779,6 +794,7 @@ class _LocalResourceImageState extends State<_LocalResourceImage> {
     if (oldWidget.host.id != widget.host.id ||
         oldWidget.host.baseUrl != widget.host.baseUrl ||
         oldWidget.host.token != widget.host.token ||
+        oldWidget.sessionId != widget.sessionId ||
         oldWidget.path != widget.path) {
       unawaited(_load());
     }
@@ -796,6 +812,7 @@ class _LocalResourceImageState extends State<_LocalResourceImage> {
             host: widget.host,
             path: widget.path,
             api: widget.api,
+            sessionId: widget.sessionId,
           );
       if (!mounted || gen != _loadGeneration) return;
       setState(() => _imageProvider = imageProvider);

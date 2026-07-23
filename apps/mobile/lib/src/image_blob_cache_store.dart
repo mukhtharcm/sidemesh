@@ -32,11 +32,12 @@ class ImageBlobCacheStore {
     required HostProfile host,
     required String path,
     required ApiClient api,
+    String? sessionId,
   }) async {
     if (kIsWeb) {
       throw UnsupportedError('Use loadImageProvider on the web.');
     }
-    final key = _cacheKey(host, path);
+    final key = _cacheKey(host, path, sessionId: sessionId);
     final cached = await _loadCachedFile(key);
     if (cached != null) {
       return cached;
@@ -53,6 +54,7 @@ class ImageBlobCacheStore {
       api: api,
       key: key,
       generation: _clearGeneration,
+      sessionId: sessionId,
     );
     _inFlight[key] = request;
     try {
@@ -68,11 +70,14 @@ class ImageBlobCacheStore {
     required HostProfile host,
     required String path,
     required ApiClient api,
+    String? sessionId,
   }) async {
     if (!kIsWeb) {
-      return FileImage(await load(host: host, path: path, api: api));
+      return FileImage(
+        await load(host: host, path: path, api: api, sessionId: sessionId),
+      );
     }
-    final key = _cacheKey(host, path);
+    final key = _cacheKey(host, path, sessionId: sessionId);
     final cachedBytes = _webCache.remove(key);
     if (cachedBytes != null) {
       _webCache[key] = cachedBytes;
@@ -81,17 +86,17 @@ class ImageBlobCacheStore {
     final existing = _webInFlight[key];
     if (existing != null) return existing;
     final generation = _clearGeneration;
-    final request = api.fetchFsBlob(host, path).then<ImageProvider<Object>>((
-      bytes,
-    ) {
-      if (generation == _clearGeneration) {
-        _webCache[key] = bytes;
-        while (_webCache.length > _maxWebEntries) {
-          _webCache.remove(_webCache.keys.first);
-        }
-      }
-      return MemoryImage(bytes);
-    });
+    final request = api
+        .fetchFsBlob(host, path, sessionId: sessionId)
+        .then<ImageProvider<Object>>((bytes) {
+          if (generation == _clearGeneration) {
+            _webCache[key] = bytes;
+            while (_webCache.length > _maxWebEntries) {
+              _webCache.remove(_webCache.keys.first);
+            }
+          }
+          return MemoryImage(bytes);
+        });
     _webInFlight[key] = request;
     try {
       return await request;
@@ -177,8 +182,9 @@ class ImageBlobCacheStore {
     required ApiClient api,
     required String key,
     required int generation,
+    required String? sessionId,
   }) async {
-    final bytes = await api.fetchFsBlob(host, path);
+    final bytes = await api.fetchFsBlob(host, path, sessionId: sessionId);
     if (generation != _clearGeneration) {
       return _writeTransientFile(key, bytes);
     }
@@ -243,8 +249,8 @@ class ImageBlobCacheStore {
   String _cacheKeyPrefix(HostProfile host) =>
       '${_stableHash('${host.id}\n${_hostFingerprint(host)}')}-';
 
-  String _cacheKey(HostProfile host, String path) =>
-      '${_cacheKeyPrefix(host)}${_stableHash(path)}';
+  String _cacheKey(HostProfile host, String path, {String? sessionId}) =>
+      '${_cacheKeyPrefix(host)}${_stableHash('${sessionId ?? ''}\n$path')}';
 
   String _hostFingerprint(HostProfile host) {
     final endpoint = _normalizedBaseUrl(host.baseUrl);
