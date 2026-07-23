@@ -231,6 +231,41 @@ ThemeData _buildTheme(
         padding: WidgetStateProperty.all(const EdgeInsets.all(4)),
       ),
     ),
+    menuButtonTheme: MenuButtonThemeData(
+      style: ButtonStyle(
+        foregroundColor: WidgetStateProperty.resolveWith((states) {
+          return states.contains(WidgetState.disabled)
+              ? disabledControlForeground
+              : palette.textPrimary;
+        }),
+        iconColor: WidgetStateProperty.resolveWith((states) {
+          return states.contains(WidgetState.disabled)
+              ? disabledControlForeground
+              : palette.textSecondary;
+        }),
+        overlayColor: WidgetStateProperty.resolveWith((states) {
+          if (states.contains(WidgetState.hovered) ||
+              states.contains(WidgetState.focused) ||
+              states.contains(WidgetState.pressed)) {
+            return palette.surfaceMuted;
+          }
+          return Colors.transparent;
+        }),
+        textStyle: WidgetStatePropertyAll(
+          textTheme.bodyMedium?.copyWith(fontWeight: AppWeights.emphasis),
+        ),
+        minimumSize: const WidgetStatePropertyAll(
+          Size(0, AppSizes.menuItem),
+        ),
+        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+        padding: const WidgetStatePropertyAll(
+          EdgeInsets.symmetric(horizontal: AppSpacing.md),
+        ),
+        shape: WidgetStatePropertyAll(
+          RoundedRectangleBorder(borderRadius: AppShapes.input),
+        ),
+      ),
+    ),
     navigationBarTheme: NavigationBarThemeData(
       backgroundColor: palette.surface,
       surfaceTintColor: Colors.transparent,
