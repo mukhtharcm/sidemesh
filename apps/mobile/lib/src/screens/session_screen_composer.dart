@@ -52,7 +52,7 @@ class _Composer extends StatelessWidget {
   final TextEditingController controller;
   final FocusNode focusNode;
 
-  final List<_ComposerImageAttachment> attachments;
+  final List<ComposerImageAttachment> attachments;
   final List<_ComposerSkillMention> skills;
   final List<_ComposerFileMention> files;
 
@@ -229,7 +229,7 @@ class _ComposerContextShelf extends StatelessWidget {
     required this.isDesktop,
   });
 
-  final List<_ComposerImageAttachment> attachments;
+  final List<ComposerImageAttachment> attachments;
   final List<_ComposerSkillMention> skills;
   final List<_ComposerFileMention> files;
   final ValueChanged<String> onRemoveAttachment;
@@ -255,160 +255,59 @@ class _ComposerContextShelf extends StatelessWidget {
       files.map((item) => item.file),
     );
 
-    // Build chip list: images first, then skills, then file mentions.
-    final chips = <Widget>[
-      for (final a in attachments)
-        _ComposerShelfChip(
-          icon: isDesktop
-              ? ClipRRect(
-                  borderRadius: BorderRadius.circular(6),
-                  child: Image.memory(
-                    a.bytes,
-                    width: 20,
-                    height: 20,
-                    fit: BoxFit.cover,
-                    gaplessPlayback: true,
-                  ),
-                )
-              : Icon(Icons.image_rounded, size: 14, color: shelfSecondary),
-          label: a.name,
-          // Show file size as sublabel only on desktop where space allows.
-          sublabel: isDesktop ? _formatByteCount(a.byteLength) : null,
-          onRemove: () => onRemoveAttachment(a.id),
-        ),
-      for (final s in skills)
-        _ComposerShelfChip(
-          icon: Icon(Icons.auto_awesome_rounded, size: 14, color: shelfAccent),
-          label: s.tokenText,
-          onRemove: () => onRemoveSkill(s.skill.path),
-        ),
-      for (final f in files)
-        _ComposerShelfChip(
-          icon: Icon(
-            f.file.isDirectory
-                ? Icons.folder_rounded
-                : Icons.insert_drive_file_rounded,
-            size: 14,
-            color: shelfSecondary,
-          ),
-          label: _fileShelfLabel(
-            f.file,
-            showParent:
-                duplicateFileNames.contains(_fileNameKey(f.file)) && !isDesktop,
-          ),
-          sublabel: isDesktop ? _compactFileParentPath(f.file) : null,
-          onRemove: () => onRemoveFile(f.file.path),
-        ),
-    ];
-
-    return SizedBox(
-      // Slightly taller on desktop to give room for sublabels.
-      height: isDesktop ? 52 : 44,
-      child: ListView.separated(
-        scrollDirection: Axis.horizontal,
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
-        itemCount: chips.length,
-        separatorBuilder: (_, index) => const SizedBox(width: 8),
-        itemBuilder: (ctx, i) => chips[i],
-      ),
-    );
-  }
-}
-
-/// A compact pill-shaped chip for the context shelf.
-/// Replaces the taller, richer desktop-style chips in the old pill interior.
-class _ComposerShelfChip extends StatelessWidget {
-  const _ComposerShelfChip({
-    required this.icon,
-    required this.label,
-    required this.onRemove,
-    this.sublabel,
-  });
-
-  final Widget icon;
-  final String label;
-  final String? sublabel;
-  final VoidCallback onRemove;
-
-  @override
-  Widget build(BuildContext context) {
-    final colors = context.colors;
-    final foreground = readableTextOn(
-      colors,
-      background: colors.surfaceMuted,
-      preferred: colors.textPrimary,
-    );
-    final secondary = readableTextOn(
-      colors,
-      background: colors.surfaceMuted,
-      preferred: colors.textTertiary,
-      additionalFallbacks: <Color>[colors.textSecondary],
-    );
-    final iconForeground = visibleUiColorOn(
-      colors,
-      background: colors.surfaceMuted,
-      preferred: colors.textSecondary,
-    );
-    final borderColor = visibleBorderOn(
-      colors,
-      background: colors.surfaceMuted,
-      preferred: colors.border,
-    );
-    return Container(
-      decoration: BoxDecoration(
-        color: colors.surfaceMuted,
-        borderRadius: AppShapes.pill,
-        border: Border.all(color: borderColor),
-      ),
-      padding: const EdgeInsets.only(left: 8, right: 4, top: 4, bottom: 4),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          icon,
-          const SizedBox(width: 6),
-          ConstrainedBox(
-            constraints: BoxConstraints(maxWidth: sublabel != null ? 170 : 150),
-            child: sublabel != null
-                ? Column(
-                    mainAxisSize: MainAxisSize.min,
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        label,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                          color: foreground,
-                          fontWeight: AppWeights.emphasis,
-                        ),
-                      ),
-                      Text(
-                        sublabel!,
-                        style: monoStyle(color: secondary, fontSize: 10),
-                      ),
-                    ],
-                  )
-                : Text(
-                    label,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                      color: foreground,
-                      fontWeight: AppWeights.emphasis,
+    return AppComposerContextShelf(
+      desktop: isDesktop,
+      items: <AppComposerContextItem>[
+        for (final a in attachments)
+          AppComposerContextItem(
+            id: 'image-${a.id}',
+            icon: isDesktop
+                ? ClipRRect(
+                    borderRadius: BorderRadius.circular(6),
+                    child: Image.memory(
+                      a.bytes,
+                      width: 20,
+                      height: 20,
+                      fit: BoxFit.cover,
+                      gaplessPlayback: true,
                     ),
-                  ),
+                  )
+                : Icon(Icons.image_rounded, size: 14, color: shelfSecondary),
+            label: a.name,
+            sublabel: isDesktop ? _formatByteCount(a.byteLength) : null,
+            onRemove: () => onRemoveAttachment(a.id),
           ),
-          const SizedBox(width: 2),
-          InkWell(
-            onTap: onRemove,
-            borderRadius: AppShapes.pill,
-            child: Padding(
-              padding: const EdgeInsets.all(3),
-              child: Icon(Icons.close_rounded, size: 14, color: iconForeground),
+        for (final s in skills)
+          AppComposerContextItem(
+            id: 'skill-${s.skill.path}',
+            icon: Icon(
+              Icons.auto_awesome_rounded,
+              size: 14,
+              color: shelfAccent,
             ),
+            label: s.tokenText,
+            onRemove: () => onRemoveSkill(s.skill.path),
           ),
-        ],
-      ),
+        for (final f in files)
+          AppComposerContextItem(
+            id: 'file-${f.file.path}',
+            icon: Icon(
+              f.file.isDirectory
+                  ? Icons.folder_rounded
+                  : Icons.insert_drive_file_rounded,
+              size: 14,
+              color: shelfSecondary,
+            ),
+            label: _fileShelfLabel(
+              f.file,
+              showParent:
+                  duplicateFileNames.contains(_fileNameKey(f.file)) &&
+                  !isDesktop,
+            ),
+            sublabel: isDesktop ? _compactFileParentPath(f.file) : null,
+            onRemove: () => onRemoveFile(f.file.path),
+          ),
+      ],
     );
   }
 }
@@ -496,34 +395,9 @@ class _ComposerPlusButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final colors = context.colors;
-    final background = colors.composerBackground;
-    final iconColor = visibleUiColorOn(
-      colors,
-      background: background,
-      preferred: colors.textSecondary,
-    );
-    return Tooltip(
-      message: 'Add',
-      child: Material(
-        color: Colors.transparent,
-        child: InkWell(
-          borderRadius: AppShapes.badge,
-          onTap: enabled ? () => _handleTap(context) : null,
-          child: SizedBox(
-            width: 44,
-            height: 44,
-            child: Center(
-              child: Container(
-                width: 38,
-                height: 38,
-                alignment: Alignment.center,
-                child: Icon(Icons.add_rounded, color: iconColor, size: 20),
-              ),
-            ),
-          ),
-        ),
-      ),
+    return AppComposerAddButton(
+      enabled: enabled,
+      onPressed: () => _handleTap(context),
     );
   }
 }
@@ -537,30 +411,12 @@ class _ComposerAttachButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final colors = context.colors;
-    final iconColor = visibleUiColorOn(
-      colors,
-      background: colors.composerBackground,
-      preferred: enabled ? colors.accent : colors.textSecondary,
-    );
-    return Tooltip(
-      message: 'Attach images',
-      child: Material(
-        color: Colors.transparent,
-        child: InkWell(
-          borderRadius: AppShapes.badge,
-          onTap: enabled ? onPressed : null,
-          child: SizedBox(
-            width: 34,
-            height: 34,
-            child: Icon(
-              Icons.add_photo_alternate_rounded,
-              color: iconColor,
-              size: 20,
-            ),
-          ),
-        ),
-      ),
+    return AppComposerAddButton(
+      enabled: enabled,
+      onPressed: onPressed,
+      tooltip: 'Attach images',
+      icon: Icons.add_photo_alternate_rounded,
+      compact: true,
     );
   }
 }
@@ -1060,26 +916,8 @@ String _fileMentionToken(FsSearchResult file) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Data models (unchanged from original)
+// Composer query and mention state
 // ─────────────────────────────────────────────────────────────────────────────
-
-class _ComposerImageAttachment {
-  const _ComposerImageAttachment({
-    required this.id,
-    required this.name,
-    required this.mimeType,
-    required this.bytes,
-    required this.dataUrl,
-  });
-
-  final String id;
-  final String name;
-  final String mimeType;
-  final Uint8List bytes;
-  final String dataUrl;
-
-  int get byteLength => bytes.length;
-}
 
 class _ComposerSkillMention {
   const _ComposerSkillMention({required this.skill, required this.tokenText});
@@ -1137,61 +975,4 @@ class _ActiveComposerFileQuery {
   final int start;
   final int end;
   final String query;
-}
-
-class _PreparedDraftImage {
-  const _PreparedDraftImage({
-    required this.name,
-    required this.mimeType,
-    required this.bytes,
-  });
-
-  final String name;
-  final String mimeType;
-  final Uint8List bytes;
-}
-
-class _ComposerImagePickerConfig {
-  const _ComposerImagePickerConfig({
-    required this.type,
-    this.allowedExtensions,
-    this.requestPhotoLibraryAccess = false,
-  });
-
-  final FileType type;
-  final List<String>? allowedExtensions;
-  final bool requestPhotoLibraryAccess;
-}
-
-class _DraftImageAppendResult {
-  const _DraftImageAppendResult._({
-    required this.totalBytes,
-    required this.added,
-    required this.shouldStop,
-  });
-
-  const _DraftImageAppendResult.added(int totalBytes)
-    : this._(totalBytes: totalBytes, added: true, shouldStop: false);
-
-  const _DraftImageAppendResult.skipped(int totalBytes)
-    : this._(totalBytes: totalBytes, added: false, shouldStop: false);
-
-  const _DraftImageAppendResult.stop(int totalBytes)
-    : this._(totalBytes: totalBytes, added: false, shouldStop: true);
-
-  final int totalBytes;
-  final bool added;
-  final bool shouldStop;
-}
-
-class _ClipboardImageData {
-  const _ClipboardImageData({
-    required this.name,
-    required this.mimeType,
-    required this.bytes,
-  });
-
-  final String name;
-  final String mimeType;
-  final Uint8List bytes;
 }

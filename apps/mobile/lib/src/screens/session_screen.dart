@@ -1,21 +1,16 @@
 import 'dart:async';
 import 'dart:convert';
-import 'dart:io';
 import 'dart:math' as math;
 
-import 'package:device_info_plus/device_info_plus.dart';
-import 'package:file_picker/file_picker.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:image/image.dart' as img;
-import 'package:permission_handler/permission_handler.dart';
-import 'package:super_clipboard/super_clipboard.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
 
 import '../api_client.dart';
+import '../composer_image_attachments.dart';
 import '../host_status_store.dart';
 import '../image_blob_cache_store.dart';
 import '../live_activity_service.dart';
@@ -802,20 +797,6 @@ class _SessionScreenState extends State<SessionScreen>
   static const _liveUpdateFlushInterval = Duration(milliseconds: 48);
   static const _sessionCacheWriteDebounce = Duration(milliseconds: 900);
   static const _failedSendRetryWindow = Duration(minutes: 10);
-  static const _maxDraftImageCount = 4;
-  static const _maxDraftImageBytes = 5 * 1024 * 1024;
-  static const _maxDraftPayloadBytes = 9 * 1024 * 1024;
-  static const _maxDecodedDraftImageBytes = 18 * 1024 * 1024;
-  static const List<FileFormat> _clipboardImageFormats = <FileFormat>[
-    Formats.png,
-    Formats.jpeg,
-    Formats.webp,
-    Formats.gif,
-    Formats.bmp,
-    Formats.heic,
-    Formats.heif,
-  ];
-
   final _composerController = TextEditingController();
   final _searchController = TextEditingController();
   final _composerFocusNode = FocusNode(debugLabel: 'session_composer');
@@ -832,6 +813,8 @@ class _SessionScreenState extends State<SessionScreen>
   final StringBuffer _reasoningDeltaBuffer = StringBuffer();
   final Map<String, SessionActivity> _pendingActivityUpdates =
       <String, SessionActivity>{};
+  final ComposerImageAttachmentService _imageAttachmentService =
+      const SystemComposerImageAttachmentService();
 
   // Live-streaming state is held in notifiers so that mid-stream deltas only
   // rebuild the tiny widgets that display them, not the whole Scaffold/list.
@@ -843,8 +826,8 @@ class _SessionScreenState extends State<SessionScreen>
   List<SessionMessage> _messages = const [];
   List<SessionMessage> _optimisticMessages = const [];
   List<SessionActivity> _activities = const [];
-  List<_ComposerImageAttachment> _draftAttachments =
-      const <_ComposerImageAttachment>[];
+  List<ComposerImageAttachment> _draftAttachments =
+      const <ComposerImageAttachment>[];
   List<_ComposerSkillMention> _draftSkillMentions =
       const <_ComposerSkillMention>[];
   List<_ComposerFileMention> _draftFileMentions =
@@ -1166,7 +1149,7 @@ class _SessionScreenState extends State<SessionScreen>
 
   void _coerceDraftsForProviderCapabilities() {
     if (!_supportsImageInput) {
-      _draftAttachments = const <_ComposerImageAttachment>[];
+      _draftAttachments = const <ComposerImageAttachment>[];
     }
     if (!_supportsSkillInput) {
       _draftSkillMentions = const <_ComposerSkillMention>[];
@@ -1221,7 +1204,7 @@ class _SessionScreenState extends State<SessionScreen>
   }
 
   void _applyComposerSeed(SessionComposerSeed seed) {
-    final draftAttachments = <_ComposerImageAttachment>[];
+    final draftAttachments = <ComposerImageAttachment>[];
     final draftSkillMentions = <_ComposerSkillMention>[];
     final draftFileMentions = <_ComposerFileMention>[];
     var attachmentIndex = 0;
@@ -1240,10 +1223,10 @@ class _SessionScreenState extends State<SessionScreen>
           }
           final mimeType = _inlineImageMimeType(dataUrl) ?? 'image/png';
           draftAttachments.add(
-            _ComposerImageAttachment(
+            ComposerImageAttachment(
               id: 'seed-image-$attachmentIndex',
               name:
-                  'attachment-${attachmentIndex + 1}${_imageExtensionForMimeType(mimeType)}',
+                  'attachment-${attachmentIndex + 1}${imageExtensionForMimeType(mimeType)}',
               mimeType: mimeType,
               bytes: bytes,
               dataUrl: dataUrl,
@@ -3499,21 +3482,11 @@ class _SessionScreenState extends State<SessionScreen>
     }
 
     try {
-      final pickerConfig = _composerImagePickerConfig();
-      if (pickerConfig.requestPhotoLibraryAccess &&
-          !await _ensureImagePickerAccess()) {
-        return;
-      }
-      final picked = await FilePicker.pickFiles(
-        allowMultiple: true,
-        withData: true,
-        type: pickerConfig.type,
-        allowedExtensions: pickerConfig.allowedExtensions,
+      final update = await _imageAttachmentService.pickImages(
+        current: _draftAttachments,
       );
-      if (!mounted || picked == null || picked.files.isEmpty) {
-        return;
-      }
-      await _addPickedDraftAttachments(picked.files);
+      if (!mounted || update == null) return;
+      _applyImageAttachmentUpdate(update);
     } catch (error) {
       if (!mounted) {
         return;
@@ -3523,134 +3496,6 @@ class _SessionScreenState extends State<SessionScreen>
         'Failed to attach images: ${friendlyError(error)}',
       );
     }
-  }
-
-  _ComposerImagePickerConfig _composerImagePickerConfig() {
-    if (!kIsWeb && Platform.isIOS) {
-      // `FileType.image` routes iOS through the Photos gallery picker instead
-      // of the Files document picker used by `FileType.custom`.
-      return const _ComposerImagePickerConfig(
-        type: FileType.image,
-        requestPhotoLibraryAccess: true,
-      );
-    }
-    return const _ComposerImagePickerConfig(
-      type: FileType.custom,
-      allowedExtensions: <String>[
-        'png',
-        'jpg',
-        'jpeg',
-        'webp',
-        'gif',
-        'bmp',
-        'heic',
-        'heif',
-      ],
-    );
-  }
-
-  Future<bool> _ensureImagePickerAccess() async {
-    if (kIsWeb || !Platform.isIOS) {
-      return true;
-    }
-    final status = await Permission.photos.request();
-    if (status.isGranted || status.isLimited) {
-      return true;
-    }
-    if (await _supportsIosPhotoPickerWithoutLibraryAccess()) {
-      return true;
-    }
-    if (!mounted) {
-      return false;
-    }
-    showAppSnackBar(
-      context,
-      status.isPermanentlyDenied || status.isRestricted
-          ? 'Photo library access is disabled for Sidemesh in iOS Settings.'
-          : 'Photo library access is required to attach images.',
-    );
-    return false;
-  }
-
-  Future<bool> _supportsIosPhotoPickerWithoutLibraryAccess() async {
-    final systemVersion = (await DeviceInfoPlugin().iosInfo).systemVersion;
-    final majorVersion = int.tryParse(systemVersion.split('.').first) ?? 0;
-    return majorVersion >= 14;
-  }
-
-  Future<void> _addPickedDraftAttachments(List<PlatformFile> files) async {
-    final nextAttachments = List<_ComposerImageAttachment>.from(
-      _draftAttachments,
-    );
-    var totalBytes = nextAttachments.fold<int>(
-      0,
-      (sum, item) => sum + item.byteLength,
-    );
-
-    for (final file in files) {
-      if (nextAttachments.length >= _maxDraftImageCount) {
-        if (!mounted) return;
-        showAppSnackBar(
-          context,
-          'You can attach up to $_maxDraftImageCount images per message.',
-        );
-        break;
-      }
-
-      final bytes = await _readPickedFileBytes(file);
-      if (bytes == null || bytes.isEmpty) {
-        if (!mounted) return;
-        showAppSnackBar(
-          context,
-          'Could not read ${file.name.isEmpty ? 'that image' : file.name}.',
-        );
-        continue;
-      }
-      if (bytes.length > _maxDecodedDraftImageBytes) {
-        if (!mounted) return;
-        showAppSnackBar(
-          context,
-          '${file.name.isEmpty ? 'That image' : file.name} is too large to process on-device.',
-        );
-        continue;
-      }
-
-      final mimeType = _mimeTypeForImageName(file.name);
-      if (mimeType == null) {
-        if (!mounted) return;
-        showAppSnackBar(
-          context,
-          '${file.name.isEmpty ? 'That file' : file.name} is not a supported image.',
-        );
-        continue;
-      }
-
-      final result = await _appendDraftImageAttachment(
-        nextAttachments: nextAttachments,
-        totalBytes: totalBytes,
-        name: file.name.isEmpty ? 'image' : file.name,
-        mimeType: mimeType,
-        bytes: bytes,
-      );
-      totalBytes = result.totalBytes;
-      if (result.shouldStop) {
-        break;
-      }
-    }
-
-    if (!mounted) {
-      return;
-    }
-    setState(() {
-      _draftAttachments = nextAttachments;
-    });
-  }
-
-  Future<Uint8List?> _readPickedFileBytes(PlatformFile file) async {
-    if (file.bytes != null) {
-      return file.bytes;
-    }
-    return file.xFile.readAsBytes();
   }
 
   Future<bool> _pasteComposerImage({bool showEmptyFeedback = true}) async {
@@ -3668,60 +3513,13 @@ class _SessionScreenState extends State<SessionScreen>
     }
 
     try {
-      final clipboard = SystemClipboard.instance;
-      if (clipboard == null) {
-        if (!mounted) return false;
-        if (showEmptyFeedback) {
-          showAppSnackBar(
-            context,
-            'Clipboard image paste is not supported here.',
-          );
-        }
-        return false;
-      }
-      final clipboardImage = await _readClipboardImage(clipboard);
-      if (!mounted) {
-        return false;
-      }
-      if (clipboardImage == null) {
-        if (showEmptyFeedback) {
-          showAppSnackBar(context, 'Clipboard does not contain an image.');
-        }
-        return false;
-      }
-
-      final nextAttachments = List<_ComposerImageAttachment>.from(
-        _draftAttachments,
+      final update = await _imageAttachmentService.pasteImage(
+        current: _draftAttachments,
+        reportEmpty: showEmptyFeedback,
       );
-      if (nextAttachments.length >= _maxDraftImageCount) {
-        showAppSnackBar(
-          context,
-          'You can attach up to $_maxDraftImageCount images per message.',
-        );
-        return false;
-      }
-
-      final totalBytes = nextAttachments.fold<int>(
-        0,
-        (sum, item) => sum + item.byteLength,
-      );
-      final result = await _appendDraftImageAttachment(
-        nextAttachments: nextAttachments,
-        totalBytes: totalBytes,
-        name: clipboardImage.name,
-        mimeType: clipboardImage.mimeType,
-        bytes: clipboardImage.bytes,
-      );
-      if (!result.added) {
-        return false;
-      }
-      if (!mounted) {
-        return false;
-      }
-      setState(() {
-        _draftAttachments = nextAttachments;
-      });
-      return true;
+      if (!mounted) return false;
+      _applyImageAttachmentUpdate(update);
+      return update.added;
     } catch (error) {
       if (!mounted) {
         return false;
@@ -3734,138 +3532,13 @@ class _SessionScreenState extends State<SessionScreen>
     }
   }
 
-  Future<_ClipboardImageData?> _readClipboardImage(
-    SystemClipboard clipboard,
-  ) async {
-    final reader = await clipboard.read();
-    for (final format in _clipboardImageFormats) {
-      if (!reader.canProvide(format)) {
-        continue;
-      }
-      final image = await _readClipboardImageForFormat(reader, format);
-      if (image != null) {
-        return image;
-      }
-    }
-    return null;
-  }
-
-  Future<_ClipboardImageData?> _readClipboardImageForFormat(
-    ClipboardReader reader,
-    FileFormat format,
-  ) {
-    final completer = Completer<_ClipboardImageData?>();
-    final progress = reader.getFile(
-      format,
-      (file) async {
-        final bytes = await file.readAll();
-        if (completer.isCompleted) {
-          return;
-        }
-        completer.complete(
-          _ClipboardImageData(
-            name:
-                file.fileName ??
-                'pasted-image${_imageExtensionForMimeType(_mimeTypeForClipboardFormat(format))}',
-            mimeType: _mimeTypeForClipboardFormat(format),
-            bytes: bytes,
-          ),
-        );
-      },
-      onError: (error) {
-        if (!completer.isCompleted) {
-          completer.completeError(error);
-        }
-      },
-    );
-    if (progress == null) {
-      return Future<_ClipboardImageData?>.value(null);
-    }
-    return completer.future.timeout(
-      const Duration(seconds: 10),
-      onTimeout: () => null,
-    );
-  }
-
-  Future<_PreparedDraftImage> _prepareDraftImageAttachment({
-    required String name,
-    required String mimeType,
-    required Uint8List bytes,
-  }) async {
-    final payload = await compute(_compressDraftImagePayload, <String, Object?>{
-      'name': name,
-      'mimeType': mimeType,
-      'bytes': bytes,
+  void _applyImageAttachmentUpdate(ComposerImageAttachmentUpdate update) {
+    setState(() {
+      _draftAttachments = update.attachments;
     });
-
-    return _PreparedDraftImage(
-      name: payload['name'] as String,
-      mimeType: payload['mimeType'] as String,
-      bytes: payload['bytes'] as Uint8List,
-    );
-  }
-
-  Future<_DraftImageAppendResult> _appendDraftImageAttachment({
-    required List<_ComposerImageAttachment> nextAttachments,
-    required int totalBytes,
-    required String name,
-    required String mimeType,
-    required Uint8List bytes,
-  }) async {
-    if (bytes.isEmpty) {
-      if (mounted) {
-        showAppSnackBar(
-          context,
-          'Could not read ${name.isEmpty ? 'that image' : name}.',
-        );
-      }
-      return _DraftImageAppendResult.skipped(totalBytes);
+    for (final message in update.feedback) {
+      showAppSnackBar(context, message);
     }
-    if (bytes.length > _maxDecodedDraftImageBytes) {
-      if (mounted) {
-        showAppSnackBar(
-          context,
-          '${name.isEmpty ? 'That image' : name} is too large to process on-device.',
-        );
-      }
-      return _DraftImageAppendResult.skipped(totalBytes);
-    }
-
-    final prepared = await _prepareDraftImageAttachment(
-      name: name,
-      mimeType: mimeType,
-      bytes: bytes,
-    );
-    if (!mounted) {
-      return _DraftImageAppendResult.skipped(totalBytes);
-    }
-    if (prepared.bytes.length > _maxDraftImageBytes) {
-      showAppSnackBar(
-        context,
-        '${prepared.name} is still larger than 5 MB after compression.',
-      );
-      return _DraftImageAppendResult.skipped(totalBytes);
-    }
-    if (totalBytes + prepared.bytes.length > _maxDraftPayloadBytes) {
-      showAppSnackBar(
-        context,
-        'Attached images are too large for one message. Remove one or pick a smaller file.',
-      );
-      return _DraftImageAppendResult.stop(totalBytes);
-    }
-
-    final dataUrl =
-        'data:${prepared.mimeType};base64,${base64Encode(prepared.bytes)}';
-    nextAttachments.add(
-      _ComposerImageAttachment(
-        id: 'draft-${DateTime.now().microsecondsSinceEpoch}-${nextAttachments.length}',
-        name: prepared.name,
-        mimeType: prepared.mimeType,
-        bytes: prepared.bytes,
-        dataUrl: dataUrl,
-      ),
-    );
-    return _DraftImageAppendResult.added(totalBytes + prepared.bytes.length);
   }
 
   void _removeDraftAttachment(String attachmentId) {
@@ -3876,67 +3549,9 @@ class _SessionScreenState extends State<SessionScreen>
     });
   }
 
-  String? _mimeTypeForImageName(String name) {
-    final lower = name.toLowerCase();
-    if (lower.endsWith('.jpg') || lower.endsWith('.jpeg')) {
-      return 'image/jpeg';
-    }
-    if (lower.endsWith('.png')) {
-      return 'image/png';
-    }
-    if (lower.endsWith('.webp')) {
-      return 'image/webp';
-    }
-    if (lower.endsWith('.gif')) {
-      return 'image/gif';
-    }
-    if (lower.endsWith('.bmp')) {
-      return 'image/bmp';
-    }
-    if (lower.endsWith('.heic')) {
-      return 'image/heic';
-    }
-    if (lower.endsWith('.heif')) {
-      return 'image/heif';
-    }
-    return null;
-  }
-
-  String _mimeTypeForClipboardFormat(FileFormat format) {
-    if (identical(format, Formats.png)) return 'image/png';
-    if (identical(format, Formats.jpeg)) return 'image/jpeg';
-    if (identical(format, Formats.webp)) return 'image/webp';
-    if (identical(format, Formats.gif)) return 'image/gif';
-    if (identical(format, Formats.bmp)) return 'image/bmp';
-    if (identical(format, Formats.heic)) return 'image/heic';
-    if (identical(format, Formats.heif)) return 'image/heif';
-    return 'image/png';
-  }
-
-  String _imageExtensionForMimeType(String mimeType) {
-    switch (mimeType) {
-      case 'image/jpeg':
-        return '.jpg';
-      case 'image/png':
-        return '.png';
-      case 'image/webp':
-        return '.webp';
-      case 'image/gif':
-        return '.gif';
-      case 'image/bmp':
-        return '.bmp';
-      case 'image/heic':
-        return '.heic';
-      case 'image/heif':
-        return '.heif';
-      default:
-        return '.png';
-    }
-  }
-
   List<SessionInputItem> _buildComposerInputItems(
     String text,
-    List<_ComposerImageAttachment> attachments,
+    List<ComposerImageAttachment> attachments,
     List<_ComposerSkillMention> skills,
     List<_ComposerFileMention> files,
   ) {
@@ -3958,7 +3573,7 @@ class _SessionScreenState extends State<SessionScreen>
   }
 
   List<SessionMessageAttachment> _buildDraftMessageAttachments(
-    List<_ComposerImageAttachment> attachments,
+    List<ComposerImageAttachment> attachments,
   ) {
     if (!_supportsImageInput) {
       return const <SessionMessageAttachment>[];
@@ -4456,7 +4071,7 @@ class _SessionScreenState extends State<SessionScreen>
 
   Future<void> _sendInput() async {
     final text = _composerController.text.trim();
-    final draftAttachments = List<_ComposerImageAttachment>.from(
+    final draftAttachments = List<ComposerImageAttachment>.from(
       _draftAttachments,
     );
     final draftSkillMentions = List<_ComposerSkillMention>.from(
@@ -4522,7 +4137,7 @@ class _SessionScreenState extends State<SessionScreen>
       _sending = true;
       _running = true;
       _awaitingAssistantReply = true;
-      _draftAttachments = const <_ComposerImageAttachment>[];
+      _draftAttachments = const <ComposerImageAttachment>[];
       _draftSkillMentions = const <_ComposerSkillMention>[];
       _clearLiveAssistantMessage();
       _upsertOptimisticMessage(optimisticMessage);
@@ -4613,7 +4228,7 @@ class _SessionScreenState extends State<SessionScreen>
         offset: _composerController.text.length,
       );
       final stillHasPending = _pendingAction != null;
-      final restoredAttachments = List<_ComposerImageAttachment>.from(
+      final restoredAttachments = List<ComposerImageAttachment>.from(
         draftAttachments,
       );
       final restoredSkillMentions = List<_ComposerSkillMention>.from(

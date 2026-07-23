@@ -1779,69 +1779,6 @@ String _truncateMiddle(String value, int maxLength) {
   return '${value.substring(0, prefixLength)}…${value.substring(value.length - suffixLength)}';
 }
 
-Map<String, Object?> _compressDraftImagePayload(Map<String, Object?> payload) {
-  final name = payload['name']! as String;
-  final mimeType = payload['mimeType']! as String;
-  final bytes = payload['bytes']! as Uint8List;
-
-  if (mimeType == 'image/gif') {
-    return <String, Object?>{
-      'name': name,
-      'mimeType': mimeType,
-      'bytes': bytes,
-    };
-  }
-
-  final decoded = img.decodeImage(bytes);
-  if (decoded == null) {
-    return <String, Object?>{
-      'name': name,
-      'mimeType': mimeType,
-      'bytes': bytes,
-    };
-  }
-
-  final baked = img.bakeOrientation(decoded);
-  final longestEdge = math.max(baked.width, baked.height);
-  final isPng = mimeType == 'image/png';
-  final shouldKeepOriginal =
-      longestEdge <= 1800 &&
-      bytes.length <= 900 * 1024 &&
-      !mimeType.contains('bmp');
-  if (shouldKeepOriginal) {
-    return <String, Object?>{
-      'name': name,
-      'mimeType': mimeType,
-      'bytes': bytes,
-    };
-  }
-
-  final resized = longestEdge > 1800
-      ? img.copyResize(
-          baked,
-          width: baked.width >= baked.height ? 1800 : null,
-          height: baked.height > baked.width ? 1800 : null,
-          interpolation: img.Interpolation.cubic,
-        )
-      : baked;
-
-  final outputMimeType = isPng ? 'image/png' : 'image/jpeg';
-  final encoded = outputMimeType == 'image/png'
-      ? Uint8List.fromList(img.encodePng(resized, level: 6))
-      : Uint8List.fromList(img.encodeJpg(resized, quality: 84));
-
-  final chosenBytes = encoded.length < bytes.length ? encoded : bytes;
-  final chosenMimeType = identical(chosenBytes, encoded)
-      ? outputMimeType
-      : mimeType;
-
-  return <String, Object?>{
-    'name': name,
-    'mimeType': chosenMimeType,
-    'bytes': chosenBytes,
-  };
-}
-
 class _LinkifiedSelectableText extends StatefulWidget {
   const _LinkifiedSelectableText({
     required this.text,
