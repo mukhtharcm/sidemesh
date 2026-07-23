@@ -61,9 +61,9 @@ import '../theme/app_tokens.dart';
 import '../windowing.dart';
 import '../widgets/app_snackbar.dart';
 import '../widgets/app_dialogs.dart';
+import '../widgets/app_composer.dart';
 import '../widgets/app_primitives.dart';
 import '../widgets/app_sheets.dart';
-import '../widgets/composer_paste_text_action.dart';
 import '../widgets/markdown_content.dart';
 import '../widgets/diff_view.dart';
 import '../widgets/launch_options_form.dart';
@@ -71,6 +71,7 @@ import '../widgets/mesh_widgets.dart';
 import 'package:sidemesh_mobile/src/host_reconnect_scheduler.dart';
 import '../widgets/provider_badge.dart';
 import '../widgets/provider_access_mode_choices.dart';
+import '../widgets/reasoning_choice_list.dart';
 import '../relative_time_ticker.dart';
 import '../widgets/syntax_code_block.dart';
 
@@ -865,7 +866,6 @@ class _SessionScreenState extends State<SessionScreen>
   int _messageLimit = _initialMessageLimit;
   int _activityLimit = _initialActivityLimit;
   bool _running = false;
-  bool _composerFocused = false;
   bool _loading = true;
   bool _loadingOlderHistory = false;
   bool _sending = false;
@@ -2071,14 +2071,10 @@ class _SessionScreenState extends State<SessionScreen>
     }
   }
 
-  /// Tracks composer focus changes → drives the animated pill border.
+  /// Tracks composer blur timing so desktop overlays can restore focus safely.
   void _handleComposerFocusChanged() {
-    final focused = _composerFocusNode.hasFocus;
-    if (!focused) {
+    if (!_composerFocusNode.hasFocus) {
       _lastComposerBlurAt = DateTime.now();
-    }
-    if (focused != _composerFocused) {
-      setState(() => _composerFocused = focused);
     }
   }
 
@@ -5311,11 +5307,11 @@ class _SessionScreenState extends State<SessionScreen>
     final turnConfig = _composerTurnConfig(session);
     final override = _cleanComposerLabel(turnConfig.reasoningEffort);
     if (override != null) {
-      return _reasoningEffortLabel(override);
+      return reasoningEffortLabel(override);
     }
     final runtime = _cleanComposerLabel(session.runtime?.reasoningEffort);
     if (runtime != null) {
-      return _reasoningEffortLabel(runtime);
+      return reasoningEffortLabel(runtime);
     }
     return 'Auto';
   }
@@ -7389,7 +7385,6 @@ class _SessionScreenState extends State<SessionScreen>
             return _Composer(
               controller: _composerController,
               focusNode: _composerFocusNode,
-              isFocused: _composerFocused,
               attachments: _draftAttachments,
               skills: _draftSkillMentions,
               files: _draftFileMentions,

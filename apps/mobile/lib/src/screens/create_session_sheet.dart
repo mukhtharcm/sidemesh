@@ -16,6 +16,7 @@ import '../theme/app_colors.dart';
 import '../theme/color_contrast.dart';
 import '../theme/app_theme.dart';
 import '../theme/app_tokens.dart';
+import '../widgets/app_composer.dart';
 import '../widgets/app_dialogs.dart';
 import '../widgets/app_primitives.dart';
 import '../widgets/app_snackbar.dart';
@@ -24,6 +25,7 @@ import '../widgets/launch_controls.dart';
 import '../widgets/launch_options_form.dart';
 import '../widgets/mesh_widgets.dart';
 import '../widgets/provider_access_mode_choices.dart';
+import '../widgets/reasoning_choice_list.dart';
 
 enum CreateSessionPresentation { sheet, dialog, page }
 
@@ -326,6 +328,7 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
   late final TextEditingController _cwdController;
   late final TextEditingController _promptController;
   late final TextEditingController _profileController;
+  final FocusNode _promptFocusNode = FocusNode();
 
   List<ModelCatalogEntry> _models = const <ModelCatalogEntry>[];
   List<ProviderModeSummary> _providerModes = const <ProviderModeSummary>[];
@@ -409,6 +412,7 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
       ..removeListener(_handlePromptChanged)
       ..dispose();
     _profileController.dispose();
+    _promptFocusNode.dispose();
     super.dispose();
   }
 
@@ -824,7 +828,10 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
       if (_supportsAccessModes) {
         unawaited(_loadAccessModes());
       }
-      if (_showAdvanced && _supportsModels && _supportsModelOverride) {
+      if ((widget.presentation == CreateSessionPresentation.page ||
+              _showAdvanced) &&
+          _supportsModels &&
+          _supportsModelOverride) {
         unawaited(_loadModels());
       }
     } catch (error) {
@@ -1032,7 +1039,8 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
         _modelsLoadedForCwd = null;
         _modelsLoadedForProfile = null;
       });
-      if (_showAdvanced &&
+      if ((_showAdvanced ||
+              widget.presentation == CreateSessionPresentation.page) &&
           _supportsModels &&
           _supportsModelOverride &&
           !_loadingModels) {
@@ -1057,7 +1065,10 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
         _accessMode = null;
         _accessModesLoadedForCwd = null;
       });
-      if (_showAdvanced && _supportsAccessModes && !_loadingAccessModes) {
+      if ((_showAdvanced ||
+              widget.presentation == CreateSessionPresentation.page) &&
+          _supportsAccessModes &&
+          !_loadingAccessModes) {
         unawaited(_loadAccessModes());
       }
     }
@@ -1427,6 +1438,226 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
     }
   }
 
+  void _openDraftModelPicker() {
+    unawaited(_chooseModel());
+  }
+
+  String? _reasoningDescription(String? effort) {
+    if (effort == null) return null;
+    for (final option in _supportedReasoningOptions) {
+      if (option.reasoningEffort == effort) {
+        final description = option.description.trim();
+        return description.isEmpty ? null : description;
+      }
+    }
+    return null;
+  }
+
+  Future<void> _showDraftReasoningPicker() async {
+    final options = _supportedReasoningOptions;
+    final current = _effectiveReasoningEffort;
+    if (options.isEmpty) return;
+    final defaultReasoning =
+        _trimmedOrNull(_controlModel?.defaultReasoningEffort) ??
+        _trimmedOrNull(current) ??
+        options.first.reasoningEffort;
+    final currentReasoning = _trimmedOrNull(current) ?? defaultReasoning;
+    final selected = await showModalBottomSheet<String>(
+      context: context,
+      backgroundColor: Colors.transparent,
+      barrierColor: Colors.black.withValues(alpha: 0.28),
+      showDragHandle: false,
+      useSafeArea: true,
+      isScrollControlled: true,
+      builder: (sheetContext) => MeshBottomSheetScaffold(
+        icon: Icons.psychology_alt_rounded,
+        title: 'Choose thinking level',
+        description: 'Set how much thinking the first reply should use.',
+        maxWidth: 520,
+        maxHeightFactor: 0.72,
+        child: ReasoningChoiceList(
+          options: options,
+          currentReasoning: currentReasoning,
+          defaultReasoning: defaultReasoning,
+          onSelected: (effort) => Navigator.of(sheetContext).pop(effort),
+        ),
+      ),
+    );
+    if (!mounted || selected == null) return;
+    setState(() {
+      _reasoningEffort = selected;
+      _reasoningTouched = true;
+    });
+  }
+
+  Future<T?> _showDraftChoicePicker<T>({
+    required IconData icon,
+    required String title,
+    required String description,
+    required List<_DraftChoice<T>> choices,
+  }) {
+    return showModalBottomSheet<T>(
+      context: context,
+      backgroundColor: Colors.transparent,
+      barrierColor: Colors.black.withValues(alpha: 0.28),
+      showDragHandle: false,
+      useSafeArea: true,
+      isScrollControlled: true,
+      builder: (sheetContext) => MeshBottomSheetScaffold(
+        icon: icon,
+        title: title,
+        description: description,
+        maxWidth: 560,
+        maxHeightFactor: 0.72,
+        child: ListView.separated(
+          itemCount: choices.length,
+          separatorBuilder: (_, _) => const SizedBox(height: AppSpacing.sm),
+          itemBuilder: (context, index) {
+            final choice = choices[index];
+            final colors = context.colors;
+            return AppChoiceRow(
+              title: choice.label,
+              subtitle: choice.description,
+              icon: choice.icon,
+              selected: choice.selected,
+              enabled: choice.enabled,
+              selectedColor: choice.danger ? colors.danger : null,
+              selectedBackground: choice.danger ? colors.dangerMuted : null,
+              onTap: choice.enabled
+                  ? () => Navigator.of(sheetContext).pop(choice.value)
+                  : null,
+            );
+          },
+        ),
+      ),
+    );
+  }
+
+  Future<void> _showDraftModePicker() async {
+    final selected = await _showDraftChoicePicker<String>(
+      icon: Icons.alt_route_rounded,
+      title: 'Choose work style',
+      description: 'Set how the agent should approach this session.',
+      choices: [
+        _DraftChoice<String>(
+          value: '',
+          label: 'Use default',
+          description: 'Use the provider default for this workspace.',
+          icon: Icons.tune_rounded,
+          selected: _modeToSubmit == null,
+        ),
+        for (final mode in _availableModeChoices)
+          _DraftChoice<String>(
+            value: mode.id,
+            label: mode.label,
+            description:
+                mode.description ?? 'Use the ${mode.label} work style.',
+            icon: Icons.alt_route_rounded,
+            selected: _modeToSubmit == mode.id,
+          ),
+      ],
+    );
+    if (!mounted || selected == null) return;
+    setState(() => _mode = selected.isEmpty ? null : selected);
+  }
+
+  Future<void> _showDraftApprovalPicker() async {
+    final selected = await _showDraftChoicePicker<ApprovalPolicy>(
+      icon: Icons.verified_user_rounded,
+      title: 'Choose approval behavior',
+      description: 'Choose when the agent should pause and ask you.',
+      choices: [
+        for (final policy in _approvalOptions)
+          _DraftChoice<ApprovalPolicy>(
+            value: policy,
+            label: policy.label,
+            description: policy.description,
+            icon: Icons.verified_user_rounded,
+            selected: _effectiveApproval == policy,
+            danger: policy == ApprovalPolicy.never,
+          ),
+      ],
+    );
+    if (!mounted || selected == null) return;
+    setState(() {
+      _approval = selected;
+      _approvalTouched = true;
+    });
+  }
+
+  Future<void> _showDraftSandboxPicker() async {
+    final selected = await _showDraftChoicePicker<SandboxMode>(
+      icon: Icons.folder_special_rounded,
+      title: 'Choose file access',
+      description: 'Control which files and commands the agent can use.',
+      choices: [
+        for (final mode in SandboxMode.values)
+          _DraftChoice<SandboxMode>(
+            value: mode,
+            label: mode.label,
+            description: mode.description,
+            icon: Icons.folder_special_rounded,
+            selected: _effectiveSandbox == mode,
+            danger: mode == SandboxMode.dangerFullAccess,
+          ),
+      ],
+    );
+    if (!mounted || selected == null) return;
+    if (selected == SandboxMode.dangerFullAccess) {
+      final confirmed = await showMeshConfirmDialog(
+        context,
+        icon: Icons.gpp_maybe_outlined,
+        title: 'Enable full access?',
+        description: selected.description,
+        confirmLabel: 'Enable full access',
+        danger: true,
+      );
+      if (!mounted || !confirmed) return;
+    }
+    setState(() {
+      _sandbox = selected;
+      _sandboxTouched = true;
+    });
+  }
+
+  Future<void> _showDraftAccessPicker() async {
+    final catalog = _accessModeCatalog;
+    if (catalog == null || catalog.modes.isEmpty) return;
+    final selected = await _showDraftChoicePicker<ProviderAccessModeSummary>(
+      icon: Icons.shield_outlined,
+      title: 'Choose access',
+      description: 'Choose how the agent should handle sensitive actions.',
+      choices: [
+        for (final mode in catalog.modes)
+          _DraftChoice<ProviderAccessModeSummary>(
+            value: mode,
+            label: mode.label,
+            description: mode.disabledReason ?? mode.description,
+            icon: providerAccessModeIcon(mode.icon),
+            selected: mode.id == _accessMode,
+            enabled: mode.enabled,
+            danger: mode.isDangerous,
+          ),
+      ],
+    );
+    if (!mounted || selected == null) return;
+    await _selectAccessMode(selected);
+  }
+
+  Future<void> _saveDraftDefaults() async {
+    await CreateSessionDefaultsStore.instance.setDefaults(
+      CreateSessionDefaults(
+        approval: _effectiveApproval,
+        sandbox: _effectiveSandbox,
+        fastMode: _effectiveFastMode,
+        webSearch: _effectiveWebSearch,
+      ),
+    );
+    if (!mounted) return;
+    showAppSnackBar(context, 'Saved as default session setup.');
+    HapticFeedback.mediumImpact();
+  }
+
   Future<void> _chooseModel() async {
     if (!_supportsModels || !_supportsModelOverride) return;
     if (_loadingModels) return;
@@ -1789,30 +2020,283 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
   }
 
   Widget _buildDraftSettings(BuildContext context) {
-    return SingleChildScrollView(
-      padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
-      child: Center(
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 720),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Text(
-                'These settings apply when you send the first message.',
-                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                  color: context.colors.textSecondary,
-                ),
-              ),
-              const SizedBox(height: 16),
-              _buildPrimaryPanel(context, includeTask: false),
-              const SizedBox(height: 12),
-              _buildAdvancedPanel(
-                context,
-                showHeading: false,
-                showCollapseControl: false,
-              ),
-            ],
+    final colors = context.colors;
+    final width = MediaQuery.sizeOf(context).width;
+    final effectiveReasoning = _effectiveReasoningEffort;
+    final selectedAccess = _selectedAccessMode;
+    final sessionRows = <Widget>[
+      if (_availableProviders.length > 1)
+        AppSettingsRow(
+          key: const ValueKey('create-session-provider-selector'),
+          icon: Icons.smart_toy_rounded,
+          title: 'Agent',
+          subtitle: _providerName,
+          trailing: const Icon(Icons.chevron_right_rounded),
+          onTap: _submitting ? null : _chooseProvider,
+        ),
+      AppSettingsRow(
+        icon: Icons.folder_open_rounded,
+        title: 'Folder',
+        trailing: IconButton(
+          tooltip: 'Browse folders on this machine',
+          onPressed: _submitting || _nodeInfo == null ? null : _browseDirectory,
+          icon: const Icon(Icons.folder_rounded),
+        ),
+        footer: TextField(
+          controller: _cwdController,
+          textInputAction: TextInputAction.done,
+          style: monoStyle(color: colors.textPrimary, fontSize: 13),
+          decoration: const InputDecoration(
+            border: InputBorder.none,
+            enabledBorder: InputBorder.none,
+            focusedBorder: InputBorder.none,
+            filled: false,
+            isDense: true,
+            hintText: '/Users/you/src/project',
+            contentPadding: EdgeInsets.zero,
           ),
+        ),
+      ),
+    ];
+    final agentRows = <Widget>[
+      if (_supportsProfiles)
+        AppSettingsRow(
+          icon: Icons.badge_rounded,
+          title: 'Profile',
+          subtitle: _profileLabel,
+          trailing: const Icon(Icons.chevron_right_rounded),
+          onTap: _submitting ? null : _chooseProfile,
+        ),
+      if (_supportsModels && _supportsModelOverride)
+        AppSettingsRow(
+          key: const ValueKey('new-session-model-selector'),
+          icon: Icons.memory_rounded,
+          title: 'Model',
+          subtitle: _modelLabel,
+          footer: _modelDescription.trim().isEmpty
+              ? null
+              : Text(
+                  _modelDescription,
+                  style: Theme.of(
+                    context,
+                  ).textTheme.bodySmall?.copyWith(color: colors.textSecondary),
+                ),
+          trailing: const Icon(Icons.chevron_right_rounded),
+          onTap: _submitting || _loadingModels ? null : _chooseModel,
+        ),
+      if (_supportsReasoningEffort && _supportsModels && _supportsModelOverride)
+        AppSettingsRow(
+          key: const ValueKey('new-session-thinking-selector'),
+          icon: Icons.psychology_alt_rounded,
+          title: 'Thinking',
+          subtitle: _controlModelIsAuto
+              ? 'Automatic for this model'
+              : effectiveReasoning == null
+              ? 'Use model default'
+              : reasoningEffortLabel(effectiveReasoning),
+          footer: _reasoningDescription(effectiveReasoning) == null
+              ? null
+              : Text(
+                  _reasoningDescription(effectiveReasoning)!,
+                  style: Theme.of(
+                    context,
+                  ).textTheme.bodySmall?.copyWith(color: colors.textSecondary),
+                ),
+          trailing: _controlModelIsAuto || _supportedReasoningOptions.isEmpty
+              ? null
+              : const Icon(Icons.chevron_right_rounded),
+          onTap:
+              _submitting ||
+                  _controlModelIsAuto ||
+                  _supportedReasoningOptions.isEmpty
+              ? null
+              : () => unawaited(_showDraftReasoningPicker()),
+        ),
+      if (_supportsMode)
+        AppSettingsRow(
+          icon: Icons.alt_route_rounded,
+          title: 'Work style',
+          subtitle: _sessionModeChoiceLabel(
+            _modeToSubmit,
+            _availableModeChoices,
+          ),
+          trailing: const Icon(Icons.chevron_right_rounded),
+          onTap: _submitting ? null : () => unawaited(_showDraftModePicker()),
+        ),
+      if (_supportsFastMode)
+        AppSettingsRow(
+          icon: Icons.bolt_rounded,
+          title: 'Fast mode',
+          subtitle: _fastSupported
+              ? 'Prefer the faster service tier.'
+              : 'Unavailable for the selected model.',
+          trailing: Switch.adaptive(
+            value: _effectiveFastMode,
+            onChanged: _submitting || !_fastSupported
+                ? null
+                : (value) => setState(() {
+                    _fastMode = value;
+                    _fastModeTouched = true;
+                  }),
+          ),
+          onTap: _submitting || !_fastSupported
+              ? null
+              : () => setState(() {
+                  _fastMode = !_effectiveFastMode;
+                  _fastModeTouched = true;
+                }),
+        ),
+    ];
+    final permissionRows = <Widget>[
+      if (_supportsAccessModes)
+        AppSettingsRow(
+          key: const ValueKey('new-session-access-selector'),
+          icon: selectedAccess == null
+              ? Icons.shield_outlined
+              : providerAccessModeIcon(selectedAccess.icon),
+          title: 'Access',
+          subtitle: _loadingAccessModes
+              ? 'Loading access options'
+              : selectedAccess?.label ?? 'Choose access',
+          footer: selectedAccess == null
+              ? _accessModesError == null
+                    ? null
+                    : Text(
+                        _accessModesError!,
+                        style: Theme.of(
+                          context,
+                        ).textTheme.bodySmall?.copyWith(color: colors.danger),
+                      )
+              : Text(
+                  selectedAccess.description,
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: selectedAccess.isDangerous
+                        ? colors.danger
+                        : colors.textSecondary,
+                  ),
+                ),
+          trailing: _loadingAccessModes
+              ? const SizedBox.square(
+                  dimension: AppSizes.icon,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                )
+              : const Icon(Icons.chevron_right_rounded),
+          onTap:
+              _submitting ||
+                  _loadingAccessModes ||
+                  _accessModeCatalog?.modes.isEmpty != false
+              ? null
+              : () => unawaited(_showDraftAccessPicker()),
+        ),
+      if (!_supportsAccessModes && _supportsApprovalPolicy)
+        AppSettingsRow(
+          icon: Icons.verified_user_rounded,
+          title: 'Approval',
+          subtitle: _effectiveApproval.label,
+          footer: Text(
+            _effectiveApproval.description,
+            style: Theme.of(
+              context,
+            ).textTheme.bodySmall?.copyWith(color: colors.textSecondary),
+          ),
+          trailing: const Icon(Icons.chevron_right_rounded),
+          onTap: _submitting
+              ? null
+              : () => unawaited(_showDraftApprovalPicker()),
+        ),
+      if (!_supportsAccessModes && _supportsSandboxMode)
+        AppSettingsRow(
+          icon: Icons.folder_special_rounded,
+          title: 'File access',
+          subtitle: _effectiveSandbox.label,
+          footer: Text(
+            _effectiveSandbox.description,
+            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+              color: _effectiveSandbox == SandboxMode.dangerFullAccess
+                  ? colors.danger
+                  : colors.textSecondary,
+            ),
+          ),
+          trailing: const Icon(Icons.chevron_right_rounded),
+          onTap: _submitting
+              ? null
+              : () => unawaited(_showDraftSandboxPicker()),
+        ),
+    ];
+    final networkRows = <Widget>[
+      if (!_supportsAccessModes &&
+          _supportsNetworkAccess &&
+          _effectiveSandbox != SandboxMode.dangerFullAccess)
+        AppSettingsRow(
+          icon: Icons.wifi_rounded,
+          title: 'Network access',
+          subtitle: 'Allow workspace commands to use the network.',
+          trailing: Switch.adaptive(
+            value: _networkAccess,
+            onChanged: _submitting
+                ? null
+                : (value) => setState(() => _networkAccess = value),
+          ),
+          onTap: _submitting
+              ? null
+              : () => setState(() => _networkAccess = !_networkAccess),
+        ),
+      if (_supportsWebSearch)
+        AppSettingsRow(
+          icon: Icons.public_rounded,
+          title: 'Live web search',
+          subtitle: 'Start the session with web search enabled.',
+          trailing: Switch.adaptive(
+            value: _effectiveWebSearch,
+            onChanged: _submitting
+                ? null
+                : (value) => setState(() {
+                    _webSearch = value;
+                    _webSearchTouched = true;
+                  }),
+          ),
+          onTap: _submitting
+              ? null
+              : () => setState(() {
+                  _webSearch = !_effectiveWebSearch;
+                  _webSearchTouched = true;
+                }),
+        ),
+    ];
+
+    return SingleChildScrollView(
+      padding: width >= 800 ? AppPadding.desktopPage : AppPadding.mobilePage,
+      child: AppContentColumn(
+        maxWidth: 720,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            AppListSection(title: 'Session', children: sessionRows),
+            if (agentRows.isNotEmpty) ...[
+              const SizedBox(height: AppSpacing.xl),
+              AppListSection(title: 'Model and behavior', children: agentRows),
+            ],
+            if (permissionRows.isNotEmpty) ...[
+              const SizedBox(height: AppSpacing.xl),
+              AppListSection(title: 'Permissions', children: permissionRows),
+            ],
+            if (networkRows.isNotEmpty) ...[
+              const SizedBox(height: AppSpacing.xl),
+              AppListSection(title: 'Network', children: networkRows),
+            ],
+            const SizedBox(height: AppSpacing.xl),
+            Align(
+              alignment: Alignment.centerLeft,
+              child: TextButton.icon(
+                onPressed: _submitting
+                    ? null
+                    : () => unawaited(_saveDraftDefaults()),
+                icon: const Icon(Icons.save_outlined, size: AppSizes.icon),
+                label: const Text('Use as defaults'),
+              ),
+            ),
+            const SizedBox(height: AppSpacing.lg),
+          ],
         ),
       ),
     );
@@ -1855,89 +2339,55 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
   }
 
   Widget _buildDraftComposer(BuildContext context) {
-    final colors = context.colors;
-    final canSend =
-        !_submitting &&
-        !_configurationIsLoading &&
-        _promptController.text.trim().isNotEmpty &&
-        _currentCwd != null;
-    return SafeArea(
-      top: false,
-      child: Container(
-        key: const ValueKey('new-session-composer'),
-        width: double.infinity,
-        decoration: BoxDecoration(
-          color: colors.canvas,
-          border: Border(top: BorderSide(color: colors.border)),
+    final width = MediaQuery.sizeOf(context).width;
+    final effectiveReasoning = _effectiveReasoningEffort;
+    final controls = <AppComposerControl>[
+      if (_supportsModels && _supportsModelOverride)
+        AppComposerControl(
+          key: const ValueKey('new-session-composer-model'),
+          icon: Icons.memory_rounded,
+          label: _modelLabel,
+          detail: _modelDescription,
+          customized: _selectedModel != null || _inheritedModel != null,
+          tooltip: 'Choose model',
+          enabled: !_submitting,
+          onPressed: _openDraftModelPicker,
         ),
-        padding: const EdgeInsets.fromLTRB(14, 6, 14, 8),
-        child: Center(
-          child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 920),
-            child: Container(
-              decoration: BoxDecoration(
-                color: colors.surface,
-                borderRadius: AppShapes.card,
-                border: Border.all(color: colors.border),
-              ),
-              padding: const EdgeInsets.fromLTRB(14, 5, 6, 5),
-              child: Row(
-                crossAxisAlignment: CrossAxisAlignment.end,
-                children: [
-                  Expanded(
-                    child: TextField(
-                      key: const ValueKey('create-session-prompt-field'),
-                      controller: _promptController,
-                      autofocus: true,
-                      minLines: 1,
-                      maxLines: 5,
-                      textCapitalization: TextCapitalization.sentences,
-                      decoration: const InputDecoration(
-                        border: InputBorder.none,
-                        enabledBorder: InputBorder.none,
-                        focusedBorder: InputBorder.none,
-                        filled: false,
-                        hintText: 'Message the agent',
-                        isDense: true,
-                        contentPadding: EdgeInsets.symmetric(vertical: 10),
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  Semantics(
-                    label: 'Send message and create session',
-                    button: true,
-                    enabled: canSend,
-                    excludeSemantics: true,
-                    child: Tooltip(
-                      message: 'Send',
-                      child: FilledButton(
-                        key: const ValueKey('create-session-send-button'),
-                        onPressed: canSend ? _submit : null,
-                        style: FilledButton.styleFrom(
-                          minimumSize: const Size.square(44),
-                          maximumSize: const Size.square(44),
-                          padding: EdgeInsets.zero,
-                          shape: const CircleBorder(),
-                        ),
-                        child: _submitting
-                            ? const SizedBox(
-                                width: 18,
-                                height: 18,
-                                child: CircularProgressIndicator(
-                                  strokeWidth: 2,
-                                ),
-                              )
-                            : const Icon(Icons.arrow_upward_rounded),
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
+      if (_supportsReasoningEffort &&
+          _supportsModels &&
+          _supportsModelOverride &&
+          !_controlModelIsAuto &&
+          _supportedReasoningOptions.isNotEmpty)
+        AppComposerControl(
+          key: const ValueKey('new-session-composer-thinking'),
+          icon: Icons.psychology_alt_rounded,
+          label: effectiveReasoning == null
+              ? 'Default'
+              : reasoningEffortLabel(effectiveReasoning),
+          detail: _reasoningDescription(effectiveReasoning),
+          customized: _reasoningTouched,
+          tooltip: 'Choose thinking level',
+          enabled: !_submitting,
+          onPressed: () => unawaited(_showDraftReasoningPicker()),
         ),
-      ),
+    ];
+    return AppComposer(
+      key: const ValueKey('new-session-composer'),
+      controller: _promptController,
+      focusNode: _promptFocusNode,
+      sending: _submitting,
+      enabled: !_configurationIsLoading && _currentCwd != null,
+      autofocus: true,
+      hintText: 'Message the agent',
+      desktopHintText:
+          'Message the agent. Press Enter to start, Shift+Enter for a new line',
+      textFieldKey: const ValueKey('create-session-prompt-field'),
+      sendButtonKey: const ValueKey('create-session-send-button'),
+      sendSemanticsLabel: 'Send message and create session',
+      onSend: _submit,
+      submitOnEnter: width >= 800,
+      maxLines: 5,
+      controls: controls,
     );
   }
 
@@ -2460,7 +2910,7 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
             options: _supportedReasoningOptions
                 .map((option) => option.reasoningEffort)
                 .toList(),
-            optionLabel: _reasoningEffortLabel,
+            optionLabel: reasoningEffortLabel,
             isDefault: (value) =>
                 value == _controlModel?.defaultReasoningEffort,
             onChanged: (value) {
@@ -2619,7 +3069,7 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
               ? 'thinking auto'
               : reasoning == null
               ? 'thinking default'
-              : _reasoningEffortLabel(reasoning),
+              : reasoningEffortLabel(reasoning),
           icon: Icons.psychology_alt_rounded,
         ),
       if (_supportsFastMode && _effectiveFastMode)
@@ -2684,6 +3134,26 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
       if (_trimmedOrNull(selected.model) != null) 'model set',
     ];
   }
+}
+
+class _DraftChoice<T> {
+  const _DraftChoice({
+    required this.value,
+    required this.label,
+    required this.description,
+    required this.icon,
+    required this.selected,
+    this.enabled = true,
+    this.danger = false,
+  });
+
+  final T value;
+  final String label;
+  final String description;
+  final IconData icon;
+  final bool selected;
+  final bool enabled;
+  final bool danger;
 }
 
 class _PanelHeading extends StatelessWidget {
@@ -3208,7 +3678,7 @@ class _ModelPickerSheetState extends State<_ModelPickerSheet> {
                             .take(3)
                             .map(
                               (option) =>
-                                  _reasoningEffortLabel(option.reasoningEffort),
+                                  reasoningEffortLabel(option.reasoningEffort),
                             ),
                       ],
                       onTap: () =>
@@ -3314,18 +3784,6 @@ int _modelSortRank(ModelCatalogEntry model) {
   return model.isProfileModel ? 4000 : 10000;
 }
 
-String _reasoningEffortLabel(String value) {
-  return switch (value) {
-    'none' => 'None',
-    'minimal' => 'Minimal',
-    'low' => 'Low',
-    'medium' => 'Medium',
-    'high' => 'High',
-    'xhigh' => 'Extra high',
-    _ => value,
-  };
-}
-
 String _sessionModeChoiceLabel(
   String? value,
   Iterable<ProviderModeSummary> modes,
@@ -3342,7 +3800,7 @@ String _describeProviderProfile(ProviderProfileSummary profile) {
     if ((profile.serviceTier ?? '').isNotEmpty)
       '${_serviceTierLabel(profile.serviceTier!)} speed',
     if ((profile.reasoningEffort ?? '').isNotEmpty)
-      '${_reasoningEffortLabel(profile.reasoningEffort!)} thinking',
+      '${reasoningEffortLabel(profile.reasoningEffort!)} thinking',
     if ((profile.approvalPolicy ?? '').isNotEmpty)
       '${_approvalPolicyLabel(profile.approvalPolicy!)} approvals',
     if ((profile.sandboxMode ?? '').isNotEmpty)
