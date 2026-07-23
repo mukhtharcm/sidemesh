@@ -6,8 +6,6 @@ void main() {
     test('loads updater settings once', () async {
       final service = _FakeAppUpdateSettingsService(
         initial: const AppUpdateSettings(
-          supported: true,
-          loaded: true,
           automaticallyChecksForUpdates: true,
           updateCheckIntervalSeconds: 86400,
           canCheckForUpdates: true,
@@ -29,8 +27,6 @@ void main() {
     test('updates automatic check toggle through the service', () async {
       final service = _FakeAppUpdateSettingsService(
         initial: const AppUpdateSettings(
-          supported: true,
-          loaded: true,
           automaticallyChecksForUpdates: true,
           updateCheckIntervalSeconds: 86400,
           canCheckForUpdates: true,
@@ -48,8 +44,6 @@ void main() {
     test('updates interval through the service', () async {
       final service = _FakeAppUpdateSettingsService(
         initial: const AppUpdateSettings(
-          supported: true,
-          loaded: true,
           automaticallyChecksForUpdates: true,
           updateCheckIntervalSeconds: 86400,
           canCheckForUpdates: true,
@@ -75,15 +69,11 @@ void main() {
     test('manual check refreshes current updater state', () async {
       final service = _FakeAppUpdateSettingsService(
         initial: const AppUpdateSettings(
-          supported: true,
-          loaded: true,
           automaticallyChecksForUpdates: true,
           updateCheckIntervalSeconds: 86400,
           canCheckForUpdates: true,
         ),
         afterCheck: const AppUpdateSettings(
-          supported: true,
-          loaded: true,
           automaticallyChecksForUpdates: true,
           updateCheckIntervalSeconds: 604800,
           canCheckForUpdates: true,
@@ -101,25 +91,31 @@ void main() {
       );
     });
 
-    test('retries after an initial fetch failure', () async {
-      final service = _FakeAppUpdateSettingsService(
-        initial: const AppUpdateSettings(
-          supported: true,
-          loaded: true,
-          automaticallyChecksForUpdates: true,
-          updateCheckIntervalSeconds: 86400,
-          canCheckForUpdates: true,
-        ),
-        failFirstFetch: true,
-      );
-      final store = AppUpdateSettingsStore.forTesting(service: service);
+    test(
+      'exposes a failed state and retries after an initial failure',
+      () async {
+        final service = _FakeAppUpdateSettingsService(
+          initial: const AppUpdateSettings(
+            automaticallyChecksForUpdates: true,
+            updateCheckIntervalSeconds: 86400,
+            canCheckForUpdates: true,
+          ),
+          failFirstFetch: true,
+        );
+        final store = AppUpdateSettingsStore.forTesting(service: service);
 
-      await expectLater(store.ensureLoaded(), throwsA(isA<StateError>()));
-      await store.ensureLoaded();
+        await store.ensureLoaded();
 
-      expect(service.fetchCount, 2);
-      expect(store.settings.supported, isTrue);
-    });
+        expect(store.settings.loaded, isTrue);
+        expect(store.settings.loadFailed, isTrue);
+
+        await store.refresh();
+
+        expect(service.fetchCount, 2);
+        expect(store.settings.supported, isTrue);
+        expect(store.settings.loadFailed, isFalse);
+      },
+    );
   });
 }
 
@@ -165,8 +161,6 @@ class _FakeAppUpdateSettingsService implements AppUpdateSettingsService {
   Future<AppUpdateSettings> setAutomaticallyChecksForUpdates(bool value) async {
     lastAutomaticChecksValue = value;
     _current = AppUpdateSettings(
-      supported: _current.supported,
-      loaded: true,
       automaticallyChecksForUpdates: value,
       updateCheckIntervalSeconds: _current.updateCheckIntervalSeconds,
       canCheckForUpdates: _current.canCheckForUpdates,
@@ -178,8 +172,6 @@ class _FakeAppUpdateSettingsService implements AppUpdateSettingsService {
   Future<AppUpdateSettings> setUpdateCheckIntervalSeconds(int seconds) async {
     lastIntervalSeconds = seconds;
     _current = AppUpdateSettings(
-      supported: _current.supported,
-      loaded: true,
       automaticallyChecksForUpdates: _current.automaticallyChecksForUpdates,
       updateCheckIntervalSeconds: seconds,
       canCheckForUpdates: _current.canCheckForUpdates,

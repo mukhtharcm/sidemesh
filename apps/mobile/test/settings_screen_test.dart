@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:sidemesh_mobile/src/app_update_settings_store.dart';
 import 'package:sidemesh_mobile/src/app_version_store.dart';
 import 'package:sidemesh_mobile/src/create_session_defaults_store.dart';
 import 'package:sidemesh_mobile/src/screen_awake_settings_store.dart';
@@ -13,11 +15,20 @@ import 'package:sidemesh_mobile/src/theme/theme_controller.dart';
 import 'package:sidemesh_mobile/src/widgets/appearance_sheet.dart';
 
 void main() {
+  const updaterChannel = MethodChannel('dev.sidemesh/updater');
+
   setUp(() {
     SharedPreferences.setMockInitialValues(<String, Object>{});
+    AppUpdateSettingsStore.instance.resetForTest();
     AppVersionStore.instance.resetForTest();
     CreateSessionDefaultsStore.instance.resetForTest();
     ScreenAwakeSettingsStore.instance.resetForTest();
+  });
+
+  tearDown(() {
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(updaterChannel, null);
+    debugDefaultTargetPlatformOverride = null;
   });
 
   testWidgets('renders core settings sections', (tester) async {
@@ -124,6 +135,73 @@ void main() {
       expect(find.byType(DropdownButton<ApprovalPolicy>), findsOneWidget);
       expect(find.byType(DropdownButton<SandboxMode>), findsOneWidget);
       expect(find.text('Used when you start a new session.'), findsOneWidget);
+    } finally {
+      debugDefaultTargetPlatformOverride = null;
+      tester.view.resetPhysicalSize();
+      tester.view.resetDevicePixelRatio();
+    }
+  });
+
+  testWidgets('macOS updater failure stays compact and can recover', (
+    tester,
+  ) async {
+    debugDefaultTargetPlatformOverride = TargetPlatform.macOS;
+    tester.view
+      ..devicePixelRatio = 1
+      ..physicalSize = const Size(900, 1200);
+    var failLoading = true;
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(updaterChannel, (call) async {
+          if (failLoading) {
+            throw PlatformException(code: 'unavailable');
+          }
+          return <String, Object>{
+            'supported': true,
+            'automaticallyChecksForUpdates': true,
+            'updateCheckIntervalSeconds': 86400,
+            'canCheckForUpdates': true,
+          };
+        });
+    try {
+      await CreateSessionDefaultsStore.instance.ensureLoaded();
+      final controller = await ThemeController.load();
+      final palette = ThemeVariant.codexAmber;
+
+      await tester.pumpWidget(
+        ThemeScope(
+          notifier: controller,
+          child: MaterialApp(
+            theme: buildLightTheme(
+              palette.light,
+              typography: controller.typography,
+            ),
+            darkTheme: buildDarkTheme(
+              palette.dark,
+              typography: controller.typography,
+            ),
+            home: const SettingsScreen(),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(
+        find.text('Could not load macOS update settings.'),
+        findsOneWidget,
+      );
+      expect(find.widgetWithText(OutlinedButton, 'Retry'), findsOneWidget);
+      expect(find.text('Check automatically'), findsNothing);
+      expect(find.text('How often'), findsNothing);
+
+      failLoading = false;
+      await tester.tap(find.widgetWithText(OutlinedButton, 'Retry'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Daily background checks are on.'), findsOneWidget);
+      expect(find.widgetWithText(OutlinedButton, 'Check now'), findsOneWidget);
+      expect(find.text('Check automatically'), findsOneWidget);
+      expect(find.text('How often'), findsOneWidget);
+      expect(tester.takeException(), isNull);
     } finally {
       debugDefaultTargetPlatformOverride = null;
       tester.view.resetPhysicalSize();
