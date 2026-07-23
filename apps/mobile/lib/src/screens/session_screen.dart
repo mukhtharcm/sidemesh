@@ -76,8 +76,6 @@ part 'session_screen_timeline.dart';
 part 'session_screen_controls.dart';
 part 'session_screen_preview.dart';
 
-enum _TranscriptFreshnessMode { cached, reconnecting, offline }
-
 class SessionScreen extends StatefulWidget {
   const SessionScreen({
     super.key,
@@ -857,9 +855,7 @@ class _SessionScreenState extends State<SessionScreen>
   bool _loadingFileSearch = false;
   bool _loadingNodeInfo = false;
   bool _showingCachedSnapshot = false;
-  bool _snapshotRefreshing = false;
   bool _showingPossiblyStaleSnapshot = false;
-  bool _resumeSyncing = false;
   bool _resumeSyncFailed = false;
   String _searchQuery = '';
   String? _skillsError;
@@ -905,17 +901,9 @@ class _SessionScreenState extends State<SessionScreen>
       _liveAssistantNotifier.value;
 
   String get _liveAssistantText => _liveAssistantMessage?.text ?? '';
-  _TranscriptFreshnessMode? get _transcriptFreshnessMode {
-    if (_showingCachedSnapshot) {
-      return _TranscriptFreshnessMode.cached;
-    }
-    if (!_showingPossiblyStaleSnapshot) {
-      return null;
-    }
-    return _resumeSyncFailed
-        ? _TranscriptFreshnessMode.offline
-        : _TranscriptFreshnessMode.reconnecting;
-  }
+  bool get _showOfflineTranscriptStatus =>
+      _resumeSyncFailed &&
+      (_showingCachedSnapshot || _showingPossiblyStaleSnapshot);
 
   String? get _lastConnectedLabel {
     final status = HostStatusStore.instance.statusFor(widget.host.id);
@@ -2387,7 +2375,6 @@ class _SessionScreenState extends State<SessionScreen>
   void _retryFreshnessSync() {
     setState(() {
       _showingPossiblyStaleSnapshot = true;
-      _resumeSyncing = true;
       _resumeSyncFailed = false;
     });
     unawaited(
@@ -2409,7 +2396,6 @@ class _SessionScreenState extends State<SessionScreen>
     }
     setState(() {
       _showingPossiblyStaleSnapshot = true;
-      _resumeSyncing = false;
       _resumeSyncFailed = false;
     });
   }
@@ -2425,7 +2411,6 @@ class _SessionScreenState extends State<SessionScreen>
     if (_messages.isNotEmpty && !_showingCachedSnapshot) {
       setState(() {
         _showingPossiblyStaleSnapshot = true;
-        _resumeSyncing = true;
         _resumeSyncFailed = false;
       });
     }
@@ -2442,7 +2427,6 @@ class _SessionScreenState extends State<SessionScreen>
     if (applied && !needsSnapshotVerification) {
       setState(() {
         _showingPossiblyStaleSnapshot = false;
-        _resumeSyncing = false;
         _resumeSyncFailed = false;
       });
       return;
@@ -2463,9 +2447,6 @@ class _SessionScreenState extends State<SessionScreen>
     final resolvedActivityLimit = activityLimit ?? _activityLimit;
     final requestId = ++_snapshotRequestId;
     _snapshotInFlightRequestId = requestId;
-    if (_showingCachedSnapshot && mounted) {
-      setState(() => _snapshotRefreshing = true);
-    }
     try {
       final log = await widget.api.fetchLog(
         widget.host,
@@ -2497,9 +2478,7 @@ class _SessionScreenState extends State<SessionScreen>
         _activityLimit = resolvedActivityLimit;
         _historyBannerDismissed = false;
         _showingCachedSnapshot = false;
-        _snapshotRefreshing = false;
         _showingPossiblyStaleSnapshot = false;
-        _resumeSyncing = false;
         _resumeSyncFailed = false;
         // Snapshot responses are authoritative for pending actions. If a live
         // action_opened lands during this fetch, it is buffered and replayed
@@ -2556,11 +2535,11 @@ class _SessionScreenState extends State<SessionScreen>
       if (!mounted || requestId != _snapshotRequestId) {
         return;
       }
+      final canKeepShowingSavedTranscript =
+          _showingCachedSnapshot || _showingPossiblyStaleSnapshot;
       setState(() {
         _loading = false;
-        _snapshotRefreshing = false;
-        if (_showingPossiblyStaleSnapshot) {
-          _resumeSyncing = false;
+        if (canKeepShowingSavedTranscript) {
           _resumeSyncFailed = true;
         }
       });
@@ -2568,10 +2547,12 @@ class _SessionScreenState extends State<SessionScreen>
         widget.host.id,
         error: friendlyError(error),
       );
-      showAppSnackBar(
-        context,
-        "Failed to load session: ${friendlyError(error)}",
-      );
+      if (!canKeepShowingSavedTranscript) {
+        showAppSnackBar(
+          context,
+          "Failed to load session: ${friendlyError(error)}",
+        );
+      }
     } finally {
       if (_snapshotInFlightRequestId == requestId) {
         _snapshotInFlightRequestId = null;
@@ -2602,9 +2583,7 @@ class _SessionScreenState extends State<SessionScreen>
         _loading = false;
         _showingCachedSnapshot = true;
         _showingPossiblyStaleSnapshot = false;
-        _resumeSyncing = false;
         _resumeSyncFailed = false;
-        _snapshotRefreshing = _snapshotInFlight;
         _awaitingAssistantReply =
             log.session.isActive &&
             _liveAssistantText.isEmpty &&
@@ -2663,9 +2642,7 @@ class _SessionScreenState extends State<SessionScreen>
   void _markTranscriptFreshAfterDelta() {
     _showingCachedSnapshot = false;
     _showingPossiblyStaleSnapshot = false;
-    _resumeSyncing = false;
     _resumeSyncFailed = false;
-    _snapshotRefreshing = false;
   }
 
   Future<void> _refreshSessionFreshness({bool scrollToBottom = true}) async {
@@ -2699,7 +2676,6 @@ class _SessionScreenState extends State<SessionScreen>
       }
       setState(() {
         _applyFetchedSessionStatus(status);
-        _snapshotRefreshing = _snapshotInFlight;
         _loading = false;
       });
       HostStatusStore.instance.markOnline(widget.host.id);
@@ -6732,14 +6708,10 @@ class _SessionScreenState extends State<SessionScreen>
     final pinnedActive = _isPinnedInspectorOpen(
       InspectorScope.maybeOf(context),
     );
-    final freshnessMode = _transcriptFreshnessMode;
     final showHistoryBanner =
         (_history?.isTruncated ?? false) && !_historyBannerDismissed;
     final showStopPill = isCompact && _running && _supportsSessionInterrupt;
     final showWaitingState = !_loading && timelineEntries.isEmpty && _running;
-    final freshnessTopPadding = widget.desktopMode && _pendingAction == null
-        ? 8.0
-        : 0.0;
     final bodyContent = Column(
       children: [
         if (_pendingAction != null)
@@ -6750,25 +6722,23 @@ class _SessionScreenState extends State<SessionScreen>
               onRespond: _respondAction,
             ),
           ),
-        if (freshnessMode != null)
-          Padding(
-            padding: EdgeInsets.fromLTRB(16, freshnessTopPadding, 16, 10),
-            child: ListenableBuilder(
-              listenable: RelativeTimeTicker.seconds,
-              builder: (context, _) {
-                return _CachedTranscriptStrip(
-                  mode: freshnessMode,
-                  refreshing:
-                      _snapshotRefreshing ||
-                      (freshnessMode == _TranscriptFreshnessMode.reconnecting &&
-                          _resumeSyncing),
+        if (_showOfflineTranscriptStatus)
+          ListenableBuilder(
+            listenable: RelativeTimeTicker.seconds,
+            builder: (context, _) {
+              return Padding(
+                padding: EdgeInsets.fromLTRB(
+                  16,
+                  widget.desktopMode && _pendingAction == null ? 8 : 0,
+                  16,
+                  10,
+                ),
+                child: _OfflineTranscriptStrip(
                   lastConnectedLabel: _lastConnectedLabel,
-                  onRetry: freshnessMode == _TranscriptFreshnessMode.offline
-                      ? _retryFreshnessSync
-                      : null,
-                );
-              },
-            ),
+                  onRetry: _retryFreshnessSync,
+                ),
+              );
+            },
           ),
         Expanded(
           child: (_loading && timelineEntries.isEmpty)
