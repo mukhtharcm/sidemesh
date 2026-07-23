@@ -245,6 +245,10 @@ specific agent provider.
   stable while replay freshness is tracked separately in `src/server.ts`, so
   delta sync should use the replay cursor rather than assuming updated
   activities get a newer transcript `seq`.
+- **Image-bearing tool results**: expose screenshots and other returned images
+  through provider-neutral `ToolActivity.attachments`, not fabricated assistant
+  messages. Shared normalization recognizes common OpenAI, MCP, and ACP content
+  blocks and strips promoted inline image data from the raw result.
 - **Mobile delta parity**: `SessionEventsDelta` does not include a full
   `history` summary. When replaying deltas into a cached session,
   `apps/mobile/lib/src/screens/session_screen.dart` must keep

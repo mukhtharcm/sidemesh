@@ -28,6 +28,11 @@ import type {
   WebSearchActivity,
   SessionMessageContentBlock,
 } from "./types.js";
+import {
+  extractSessionAttachments,
+  mergeSessionAttachments,
+  stripSessionAttachments,
+} from "./session-attachments.js";
 
 export interface AgentProviderEvents {
   liveEvent: [event: AgentProviderLiveEvent];
@@ -463,9 +468,26 @@ export function materializeAgentActivityDraft(
   draft: AgentSessionActivityDraft,
   context: { createdAt: number; seq: number },
 ): SessionActivity {
-  return {
+  const activity = {
     ...draft,
     createdAt: context.createdAt,
     seq: context.seq,
   } as SessionActivity;
+  if (activity.type !== "tool") {
+    return activity;
+  }
+  const attachments = mergeSessionAttachments(
+    activity.attachments ?? [],
+    extractSessionAttachments(activity.result),
+  );
+  return attachments.length > 0 || activity.attachments
+    ? {
+        ...activity,
+        result:
+          attachments.length > 0
+            ? stripSessionAttachments(activity.result, attachments) ?? null
+            : activity.result,
+        attachments,
+      }
+    : activity;
 }

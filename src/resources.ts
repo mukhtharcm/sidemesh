@@ -154,6 +154,22 @@ function appendActivityResources(
     return;
   }
 
+  if (activity.type === "tool") {
+    for (const [index, attachment] of (
+      activity.attachments ?? []
+    ).entries()) {
+      const next = buildActivityAttachmentResource(
+        activity,
+        attachment,
+        index,
+      );
+      if (next) {
+        pushResource(resources, seen, next);
+      }
+    }
+    return;
+  }
+
   if (activity.type === "image_generation") {
     const savedPath = normalizeLocalPath(activity.savedPath);
     if (!savedPath) {
@@ -172,6 +188,39 @@ function appendActivityResources(
       activityId: activity.id,
     });
   }
+}
+
+function buildActivityAttachmentResource(
+  activity: Extract<SessionActivity, { type: "tool" }>,
+  attachment: SessionMessageAttachment,
+  index: number,
+): SessionResource | null {
+  const source = attachment.url ?? attachment.path;
+  if (!source || (attachment.type !== "image" && attachment.type !== "localImage")) {
+    return null;
+  }
+  return {
+    id: resourceId("tool_attachment", activity.id, source, index),
+    kind: "image",
+    source: "tool_attachment",
+    createdAt: activity.createdAt,
+    title: toolAttachmentTitle(attachment),
+    subtitle: activity.title ?? activity.toolName,
+    url: attachment.type === "image" ? attachment.url ?? null : null,
+    path: attachment.type === "localImage" ? attachment.path ?? null : null,
+    messageId: null,
+    activityId: activity.id,
+  };
+}
+
+function toolAttachmentTitle(attachment: SessionMessageAttachment): string {
+  if (attachment.path) {
+    return basenameOrPath(attachment.path);
+  }
+  if (attachment.url?.startsWith("data:image/")) {
+    return "Tool output image";
+  }
+  return attachment.url ? formatUrlLabel(attachment.url) : "Tool output image";
 }
 
 function pushResource(

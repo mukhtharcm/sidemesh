@@ -76,6 +76,9 @@ type FakeApprovalKind = "command" | "tool" | "file_change" | "permissions";
 type FakeTurnStatus = "completed" | "failed" | "interrupted";
 
 const DEFAULT_FAKE_WORKSPACE = nodePath.resolve(process.cwd());
+const FAKE_TOOL_IMAGE_DATA_URL =
+  "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAAB" +
+  "CAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=";
 
 export const FAKE_PROVIDER_CAPABILITIES: AgentProviderCapabilities = {
   sessions: {
@@ -696,8 +699,8 @@ export class FakeAgentProvider
       text: [
         "This is a deterministic fake provider session.",
         "",
-        "Try prompts containing `tools`, `approval:command`, `approval:tool`, `approval:file`,",
-        "`approval:permissions`, `image`, `rich-events`, `slow`, or `fail` to exercise UI states.",
+        "Try prompts containing `tools`, `tool-attachment`, `approval:command`, `approval:tool`,",
+        "`approval:file`, `approval:permissions`, `image`, `rich-events`, `slow`, or `fail` to exercise UI states.",
       ].join("\n"),
       attachments: [],
       phase: "final_answer",
@@ -793,8 +796,14 @@ export class FakeAgentProvider
     this.emitThreadStatus(session, "running");
 
     const text = inputText(input);
-    if (scenarioRequested(text, "tools") && this.supportsToolingScenario()) {
-      await this.emitToolingScenario(session, turnId);
+    const toolAttachmentRequested = scenarioRequested(text, "tool-attachment");
+    if (
+      (scenarioRequested(text, "tools") || toolAttachmentRequested) &&
+      this.supportsToolingScenario()
+    ) {
+      await this.emitToolingScenario(session, turnId, {
+        includeImageAttachment: toolAttachmentRequested,
+      });
     }
     if (scenarioRequested(text, "rich-events")) {
       await this.emitRichEventScenario(session, turnId);
@@ -859,6 +868,7 @@ export class FakeAgentProvider
   private async emitToolingScenario(
     session: FakeSessionState,
     turnId: string,
+    options: { includeImageAttachment: boolean },
   ): Promise<void> {
     const toolId = `fake-tool-${turnId}`;
     this.upsertAndEmitActivity(session, turnId, {
@@ -891,6 +901,9 @@ export class FakeAgentProvider
       args: { path: session.thread.cwd, depth: 1 },
       output: "Inspecting fake workspace...\nFound fake-provider.md\n",
       result: { files: ["fake-provider.md"], provider: "fake" },
+      attachments: options.includeImageAttachment
+        ? [{ type: "image", url: FAKE_TOOL_IMAGE_DATA_URL }]
+        : [],
       isError: false,
       semantic: {
         category: "filesystem",

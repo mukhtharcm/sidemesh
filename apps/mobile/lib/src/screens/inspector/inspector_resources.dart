@@ -966,6 +966,7 @@ IconData _resourceIcon(
 String _sourceLabel(SessionResource resource) {
   final label = switch (resource.source) {
     'message_attachment' => 'attachment',
+    'tool_attachment' => 'tool output',
     'message_link' => 'link',
     'message_file' => 'file',
     'web_search' => 'web',

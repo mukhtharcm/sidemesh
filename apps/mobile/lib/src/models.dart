@@ -2318,6 +2318,7 @@ class SessionActivity {
     required this.toolTitle,
     required this.toolArgs,
     required this.toolResult,
+    this.toolAttachments = const <SessionMessageAttachment>[],
     required this.toolError,
     required this.toolSemantic,
     required this.changes,
@@ -2350,6 +2351,7 @@ class SessionActivity {
   final String? toolTitle;
   final Object? toolArgs;
   final Object? toolResult;
+  final List<SessionMessageAttachment> toolAttachments;
   final bool? toolError;
   final SessionToolSemantic? toolSemantic;
   final List<SessionActivityChange> changes;
@@ -2424,6 +2426,14 @@ class SessionActivity {
         toolTitle: _stringOrNull(json['title']),
         toolArgs: json['args'],
         toolResult: json['result'],
+        toolAttachments: (json['attachments'] as List<dynamic>? ?? [])
+            .whereType<Map>()
+            .map(
+              (item) => SessionMessageAttachment.fromJson(
+                item.cast<String, dynamic>(),
+              ),
+            )
+            .toList(growable: false),
         toolError: json['isError'] is bool ? json['isError'] as bool : null,
         toolSemantic: _toolSemanticFromActivityJson(json),
         changes: (json['changes'] as List<dynamic>? ?? [])
@@ -2465,6 +2475,7 @@ class SessionActivity {
     'title': toolTitle,
     'args': toolArgs,
     'result': toolResult,
+    'attachments': toolAttachments.map((item) => item.toJson()).toList(),
     'isError': toolError,
     'semantic': toolSemantic?.toJson(),
     'changes': changes.map((item) => item.toJson()).toList(),

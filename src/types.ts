@@ -466,6 +466,7 @@ export interface SessionResource {
     | "message_link"
     | "message_file"
     | "web_search"
+    | "tool_attachment"
     | "image_generation";
   createdAt: number;
   title: string;
@@ -585,6 +586,7 @@ export interface ToolActivity extends SessionActivityBase {
   args: unknown;
   output: string | null;
   result: unknown;
+  attachments?: SessionMessageAttachment[];
   isError: boolean | null;
   semantic: ToolActivitySemantic | null;
 }

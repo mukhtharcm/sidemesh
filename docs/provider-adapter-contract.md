@@ -143,6 +143,11 @@ Providers should emit `liveEvent` events for streaming UI updates:
 
 Provider adapters should translate native agent events into Sidemesh activity
 types instead of leaking provider-specific wire payloads to the Flutter app.
+Image-bearing tool results belong on provider-neutral `ToolActivity.attachments`.
+Adapters may populate those attachments directly; the shared activity
+normalizer also recognizes common OpenAI, MCP, and ACP image content blocks.
+After promotion, inline image data is removed from the raw tool `result` so the
+client does not cache or render the same base64 payload twice.
 
 ## HTTP Behavior
 
@@ -185,6 +190,8 @@ supports all current capability groups and uses prompt keywords to trigger
 repeatable app states:
 
 - `tools`: command output, terminal input, file change, turn diff, and web search.
+- `tool-attachment`: the tooling scenario with a provider-neutral image
+  attachment on its completed tool activity.
 - `approval:command`, `approval:file`, `approval:permissions`: pending actions.
 - `image`: image generation activity.
 - `slow`: delayed streaming.
