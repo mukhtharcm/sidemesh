@@ -28,6 +28,7 @@ abstract final class AppSizes {
   static const double mobileGutter = AppSpacing.lg;
   static const double desktopGutter = AppSpacing.xl;
   static const double control = 48;
+  static const double menuItem = 44;
   static const double compactControl = 36;
   static const double rowMinHeight = 56;
   static const double icon = 20;

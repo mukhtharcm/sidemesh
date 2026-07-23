@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import '../recent_session_view_store.dart';
 import '../theme/app_colors.dart';
 import '../theme/app_tokens.dart';
+import 'app_menu.dart';
 
 class RecentSessionFilters {
   const RecentSessionFilters({
@@ -45,7 +46,6 @@ class RecentSessionControlsMenu extends StatelessWidget {
     this.onRunningOnlyChanged,
     this.onUnreadOnlyChanged,
     this.onFavoritesOnlyChanged,
-    this.onRefresh,
     this.onOpenSettings,
   });
 
@@ -55,12 +55,11 @@ class RecentSessionControlsMenu extends StatelessWidget {
   final ValueChanged<bool>? onRunningOnlyChanged;
   final ValueChanged<bool>? onUnreadOnlyChanged;
   final ValueChanged<bool>? onFavoritesOnlyChanged;
-  final VoidCallback? onRefresh;
   final VoidCallback? onOpenSettings;
 
   bool get _showsFilters => filters != null;
 
-  bool get _showsActions => onRefresh != null || onOpenSettings != null;
+  bool get _showsActions => onOpenSettings != null;
 
   @override
   Widget build(BuildContext context) {
@@ -74,85 +73,70 @@ class RecentSessionControlsMenu extends StatelessWidget {
         final filtersActive = currentFilters?.isAnyActive == true;
         final menuChildren = <Widget>[
           if (showGrouping) ...[
-            const _MenuSectionLabel('Group by'),
-            RadioMenuButton<RecentSessionGrouping>(
-              value: RecentSessionGrouping.project,
-              groupValue: grouping,
+            const AppMenuSectionLabel('Group by'),
+            AppMenuItem(
+              label: 'Project',
+              selected: grouping == RecentSessionGrouping.project,
+              mutuallyExclusive: true,
               closeOnActivate: false,
-              onChanged: (value) {
-                if (value != null) {
-                  unawaited(viewStore.setGrouping(value));
-                }
-              },
-              child: const Text('Project'),
+              onPressed: () => unawaited(
+                viewStore.setGrouping(RecentSessionGrouping.project),
+              ),
             ),
-            RadioMenuButton<RecentSessionGrouping>(
-              value: RecentSessionGrouping.singleList,
-              groupValue: grouping,
+            AppMenuItem(
+              label: 'Single list',
+              selected: grouping == RecentSessionGrouping.singleList,
+              mutuallyExclusive: true,
               closeOnActivate: false,
-              onChanged: (value) {
-                if (value != null) {
-                  unawaited(viewStore.setGrouping(value));
-                }
-              },
-              child: const Text('Single list'),
+              onPressed: () => unawaited(
+                viewStore.setGrouping(RecentSessionGrouping.singleList),
+              ),
             ),
           ],
           if (showGrouping && _showsFilters) const Divider(height: 1),
           if (currentFilters != null) ...[
-            const _MenuSectionLabel('Filter'),
-            CheckboxMenuButton(
-              value: currentFilters.favoritesOnly,
+            const AppMenuSectionLabel('Filter'),
+            AppMenuItem(
+              label: 'Favorites',
+              selected: currentFilters.favoritesOnly,
               closeOnActivate: false,
-              onChanged: onFavoritesOnlyChanged == null
+              onPressed: onFavoritesOnlyChanged == null
                   ? null
-                  : (value) => onFavoritesOnlyChanged!(value ?? false),
-              child: const Text('Favorites'),
+                  : () => onFavoritesOnlyChanged!(
+                      !currentFilters.favoritesOnly,
+                    ),
             ),
-            CheckboxMenuButton(
-              value: currentFilters.runningOnly,
+            AppMenuItem(
+              label: 'Running',
+              selected: currentFilters.runningOnly,
               closeOnActivate: false,
-              onChanged: onRunningOnlyChanged == null
+              onPressed: onRunningOnlyChanged == null
                   ? null
-                  : (value) => onRunningOnlyChanged!(value ?? false),
-              child: const Text('Running'),
+                  : () => onRunningOnlyChanged!(!currentFilters.runningOnly),
             ),
-            CheckboxMenuButton(
-              value: currentFilters.unreadOnly,
+            AppMenuItem(
+              label: 'Unread',
+              selected: currentFilters.unreadOnly,
               closeOnActivate: false,
-              onChanged: onUnreadOnlyChanged == null
+              onPressed: onUnreadOnlyChanged == null
                   ? null
-                  : (value) => onUnreadOnlyChanged!(value ?? false),
-              child: const Text('Unread'),
+                  : () => onUnreadOnlyChanged!(!currentFilters.unreadOnly),
             ),
           ],
           if ((showGrouping || _showsFilters) && _showsActions)
             const Divider(height: 1),
-          if (onRefresh != null)
-            MenuItemButton(
-              leadingIcon: const Icon(Icons.refresh_rounded),
-              onPressed: onRefresh,
-              child: const Text('Refresh'),
-            ),
           if (onOpenSettings != null)
-            MenuItemButton(
-              leadingIcon: const Icon(Icons.tune_rounded),
+            AppMenuItem(
+              label: 'Settings',
+              leadingIcon: Icons.tune_rounded,
               onPressed: onOpenSettings,
-              child: const Text('Settings'),
             ),
         ];
 
         return MenuAnchor(
           animated: true,
           style: MenuStyle(
-            minimumSize: const WidgetStatePropertyAll(Size(220, 0)),
-            backgroundColor: WidgetStatePropertyAll(colors.surfaceElevated),
-            shape: WidgetStatePropertyAll(
-              RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(AppRadii.control),
-                side: BorderSide(color: colors.border),
-              ),
-            ),
+            minimumSize: const WidgetStatePropertyAll(Size(200, 0)),
           ),
           menuChildren: menuChildren,
           builder: (context, controller, _) {
@@ -201,31 +185,6 @@ class RecentSessionControlsMenu extends StatelessWidget {
           },
         );
       },
-    );
-  }
-}
-
-class _MenuSectionLabel extends StatelessWidget {
-  const _MenuSectionLabel(this.label);
-
-  final String label;
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(
-        AppSpacing.lg,
-        AppSpacing.md,
-        AppSpacing.lg,
-        AppSpacing.xs,
-      ),
-      child: Text(
-        label,
-        style: Theme.of(context).textTheme.labelMedium?.copyWith(
-          color: context.colors.textTertiary,
-          fontWeight: AppWeights.emphasis,
-        ),
-      ),
     );
   }
 }

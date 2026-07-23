@@ -623,7 +623,6 @@ class _SidemeshHomeScreenState extends State<SidemeshHomeScreen>
               onFavoritesOnlyChanged: _tabIndex == 0
                   ? _toggleRecentFavoritesOnly
                   : null,
-              onRefresh: _refreshHosts,
               onOpenSettings: _openSettings,
             ),
             const NotificationPermissionBanner(),
@@ -766,7 +765,6 @@ class _HomeStickyHeader extends StatelessWidget {
     required this.onRunningOnlyChanged,
     required this.onUnreadOnlyChanged,
     required this.onFavoritesOnlyChanged,
-    required this.onRefresh,
     required this.onOpenSettings,
   });
 
@@ -780,7 +778,6 @@ class _HomeStickyHeader extends StatelessWidget {
   final ValueChanged<bool>? onRunningOnlyChanged;
   final ValueChanged<bool>? onUnreadOnlyChanged;
   final ValueChanged<bool>? onFavoritesOnlyChanged;
-  final VoidCallback onRefresh;
   final VoidCallback onOpenSettings;
 
   @override
@@ -846,7 +843,6 @@ class _HomeStickyHeader extends StatelessWidget {
                 onRunningOnlyChanged: onRunningOnlyChanged,
                 onUnreadOnlyChanged: onUnreadOnlyChanged,
                 onFavoritesOnlyChanged: onFavoritesOnlyChanged,
-                onRefresh: onRefresh,
                 onOpenSettings: onOpenSettings,
               ),
             ],
