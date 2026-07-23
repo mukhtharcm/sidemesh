@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../api_client.dart';
+import '../composer_image_attachments.dart';
 import '../create_session_defaults_store.dart';
 import '../fs_models.dart';
 import '../models.dart';
@@ -312,6 +313,7 @@ class CreateSessionSheet extends StatefulWidget {
     this.initialCwd,
     this.seed,
     this.presentation = CreateSessionPresentation.sheet,
+    this.imageAttachmentService = const SystemComposerImageAttachmentService(),
   });
 
   final HostProfile host;
@@ -319,6 +321,7 @@ class CreateSessionSheet extends StatefulWidget {
   final String? initialCwd;
   final CreateSessionDraftSeed? seed;
   final CreateSessionPresentation presentation;
+  final ComposerImageAttachmentService imageAttachmentService;
 
   @override
   State<CreateSessionSheet> createState() => _CreateSessionSheetState();
@@ -333,6 +336,8 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
   List<ModelCatalogEntry> _models = const <ModelCatalogEntry>[];
   List<ProviderModeSummary> _providerModes = const <ProviderModeSummary>[];
   List<ProviderProfileSummary> _profiles = const <ProviderProfileSummary>[];
+  List<ComposerImageAttachment> _draftAttachments =
+      const <ComposerImageAttachment>[];
   ModelCatalogEntry? _selectedModel;
   String? _mode;
   String? _reasoningEffort;
@@ -536,6 +541,9 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
 
   bool get _supportsNetworkAccess =>
       _supports('runtimeControls', 'networkAccess');
+
+  bool get _supportsImageInput =>
+      _nodeInfo != null && _supports('input', 'imageUrl');
 
   bool get _supportsAccessModes =>
       _nodeInfo != null &&
@@ -888,6 +896,9 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
   }
 
   void _coerceForProviderCapabilities() {
+    if (!_supportsImageInput) {
+      _draftAttachments = const <ComposerImageAttachment>[];
+    }
     if (!_supportsProfiles) {
       _profileController.clear();
       _profiles = const <ProviderProfileSummary>[];
@@ -1421,9 +1432,16 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
     if (!mounted || result == null) {
       return;
     }
+    final attachmentCount = _draftAttachments.length;
     setState(() {
       _selectProvider(result);
     });
+    if (attachmentCount > 0 && _draftAttachments.isEmpty) {
+      showAppSnackBar(
+        context,
+        'Attachments were removed because $_providerName does not accept images.',
+      );
+    }
     if (_supportsProfiles && _currentCwd != null) {
       unawaited(_loadProfiles(force: true));
     }
@@ -1715,12 +1733,70 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
     });
   }
 
+  Future<void> _pickDraftImages() async {
+    if (_submitting) return;
+    if (!_supportsImageInput) {
+      showAppSnackBar(context, 'This agent does not accept image attachments.');
+      return;
+    }
+    try {
+      final update = await widget.imageAttachmentService.pickImages(
+        current: _draftAttachments,
+      );
+      if (!mounted || update == null) return;
+      _applyDraftImageAttachmentUpdate(update);
+    } catch (error) {
+      if (!mounted) return;
+      showAppSnackBar(
+        context,
+        'Failed to attach images: ${friendlyError(error)}',
+      );
+    }
+  }
+
+  Future<bool> _pasteDraftImage({bool reportEmpty = true}) async {
+    if (_submitting || !_supportsImageInput) return false;
+    try {
+      final update = await widget.imageAttachmentService.pasteImage(
+        current: _draftAttachments,
+        reportEmpty: reportEmpty,
+      );
+      if (!mounted) return false;
+      _applyDraftImageAttachmentUpdate(update);
+      return update.added;
+    } catch (error) {
+      if (!mounted) return false;
+      showAppSnackBar(
+        context,
+        'Failed to paste image: ${friendlyError(error)}',
+      );
+      return false;
+    }
+  }
+
+  void _applyDraftImageAttachmentUpdate(ComposerImageAttachmentUpdate update) {
+    setState(() {
+      _draftAttachments = update.attachments;
+    });
+    for (final message in update.feedback) {
+      showAppSnackBar(context, message);
+    }
+  }
+
+  void _removeDraftImage(String attachmentId) {
+    setState(() {
+      _draftAttachments = _draftAttachments
+          .where((attachment) => attachment.id != attachmentId)
+          .toList(growable: false);
+    });
+  }
+
   Future<void> _submit() async {
     if (_submitting || _configurationIsLoading) return;
     final cwd = _cwdController.text.trim();
     final prompt = _promptController.text.trim();
-    if (cwd.isEmpty || prompt.isEmpty) {
-      setState(() => _error = 'Folder and task are required.');
+    if (cwd.isEmpty || (prompt.isEmpty && _draftAttachments.isEmpty)) {
+      setState(() => _error = 'Folder and a message or image are required.');
       return;
     }
 
@@ -1739,6 +1815,12 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
         widget.host,
         cwd: cwd,
         prompt: prompt,
+        input: <SessionInputItem>[
+          ..._draftAttachments.map(
+            (attachment) => SessionInputItem.image(attachment.dataUrl),
+          ),
+          if (prompt.isNotEmpty) SessionInputItem.text(prompt),
+        ],
         provider: _selectedProviderKindOrDefault,
         model: _supportsModelOverride
             ? _selectedModel?.model ?? _inheritedModel
@@ -1762,7 +1844,14 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
           role: 'user',
           text: prompt,
           content: prompt.trim().isNotEmpty ? [TextBlock(prompt)] : const [],
-          attachments: const <SessionMessageAttachment>[],
+          attachments: _draftAttachments
+              .map(
+                (attachment) => SessionMessageAttachment(
+                  type: 'image',
+                  url: attachment.dataUrl,
+                ),
+              )
+              .toList(growable: false),
           createdAt: submittedAt,
           seq: 0,
         ),
@@ -1840,9 +1929,11 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
 
   Widget _buildDraftPage(BuildContext context) {
     final colors = context.colors;
-    final hasPrompt = _promptController.text.trim().isNotEmpty;
+    final hasDraft =
+        _promptController.text.trim().isNotEmpty ||
+        _draftAttachments.isNotEmpty;
     final canPop =
-        !_showingModelPicker && !_showAdvanced && (_allowPop || !hasPrompt);
+        !_showingModelPicker && !_showAdvanced && (_allowPop || !hasDraft);
     return PopScope<SessionSummary>(
       canPop: canPop,
       onPopInvokedWithResult: (didPop, result) {
@@ -2340,6 +2431,8 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
 
   Widget _buildDraftComposer(BuildContext context) {
     final width = MediaQuery.sizeOf(context).width;
+    final desktop = width >= 800;
+    final colors = context.colors;
     final effectiveReasoning = _effectiveReasoningEffort;
     final controls = <AppComposerControl>[
       if (_supportsModels && _supportsModelOverride)
@@ -2371,6 +2464,30 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
           onPressed: () => unawaited(_showDraftReasoningPicker()),
         ),
     ];
+    final attachmentItems = _draftAttachments
+        .map(
+          (attachment) => AppComposerContextItem(
+            id: 'image-${attachment.id}',
+            icon: ClipRRect(
+              borderRadius: BorderRadius.circular(6),
+              child: Image.memory(
+                attachment.bytes,
+                width: 24,
+                height: 24,
+                fit: BoxFit.cover,
+                gaplessPlayback: true,
+                errorBuilder: (_, _, _) => Icon(
+                  Icons.image_rounded,
+                  size: 16,
+                  color: colors.textSecondary,
+                ),
+              ),
+            ),
+            label: attachment.name,
+            onRemove: () => _removeDraftImage(attachment.id),
+          ),
+        )
+        .toList(growable: false);
     return AppComposer(
       key: const ValueKey('new-session-composer'),
       controller: _promptController,
@@ -2384,10 +2501,29 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
       textFieldKey: const ValueKey('create-session-prompt-field'),
       sendButtonKey: const ValueKey('create-session-send-button'),
       sendSemanticsLabel: 'Send message and create session',
+      hasSendableContext: _draftAttachments.isNotEmpty,
+      leading: _supportsImageInput
+          ? AppComposerAddButton(
+              key: const ValueKey('new-session-attach-images'),
+              enabled: !_submitting,
+              onPressed: () => unawaited(_pickDraftImages()),
+              tooltip: 'Attach images',
+              icon: desktop
+                  ? Icons.add_photo_alternate_rounded
+                  : Icons.add_rounded,
+              compact: desktop,
+            )
+          : null,
       onSend: _submit,
-      submitOnEnter: width >= 800,
+      onNativePaste: _supportsImageInput
+          ? () => _pasteDraftImage(reportEmpty: false)
+          : null,
+      submitOnEnter: desktop,
       maxLines: 5,
       controls: controls,
+      header: attachmentItems.isEmpty
+          ? null
+          : AppComposerContextShelf(items: attachmentItems, desktop: desktop),
     );
   }
 
@@ -2397,7 +2533,7 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
       context,
       icon: Icons.delete_outline_rounded,
       title: 'Discard new session?',
-      description: 'Your unsent message will be lost.',
+      description: 'Your unsent draft will be lost.',
       confirmLabel: 'Discard',
       danger: true,
     );

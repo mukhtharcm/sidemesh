@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:sidemesh_mobile/src/api_client.dart';
+import 'package:sidemesh_mobile/src/composer_image_attachments.dart';
 import 'package:sidemesh_mobile/src/create_session_defaults_store.dart';
 import 'package:sidemesh_mobile/src/db.dart';
 import 'package:sidemesh_mobile/src/fs_models.dart';
@@ -15,6 +16,7 @@ import 'package:sidemesh_mobile/src/screens/host_detail_screen.dart';
 import 'package:sidemesh_mobile/src/screens/inspector/inspector_controller.dart';
 import 'package:sidemesh_mobile/src/screens/session_screen.dart';
 import 'package:sidemesh_mobile/src/session_local_store.dart';
+import 'package:sidemesh_mobile/src/session_message_seed_store.dart';
 import 'package:sidemesh_mobile/src/session_policy_store.dart';
 import 'package:sidemesh_mobile/src/session_turn_config_store.dart';
 import 'package:sidemesh_mobile/src/theme/app_palettes.dart';
@@ -1510,6 +1512,166 @@ void main() {
     },
   );
 
+  testWidgets('new session can start with an image and no text', (
+    tester,
+  ) async {
+    final semanticsHandle = tester.ensureSemantics();
+    final imageService = _FakeImageAttachmentService();
+    final api = _CapabilityFakeApi(
+      _nodeForCapabilities(_fullCapabilities),
+      models: const [_fakeModel],
+    );
+    addTearDown(api.dispose);
+    final host = _host('draft-image-only');
+    Future<SessionSummary?>? launch;
+
+    await _pumpApp(
+      tester,
+      Builder(
+        builder: (context) => FilledButton(
+          onPressed: () {
+            launch = Navigator.of(context).push<SessionSummary>(
+              MaterialPageRoute<SessionSummary>(
+                builder: (_) => CreateSessionSheet(
+                  host: host,
+                  api: api,
+                  initialCwd: '/repo',
+                  presentation: CreateSessionPresentation.page,
+                  imageAttachmentService: imageService,
+                ),
+              ),
+            );
+          },
+          child: const Text('New image session'),
+        ),
+      ),
+      size: const Size(390, 840),
+    );
+
+    await tester.tap(find.text('New image session'));
+    await _pumpFrames(tester);
+    final attachButton = find.byKey(
+      const ValueKey('new-session-attach-images'),
+    );
+    expect(attachButton, findsOneWidget);
+    expect(
+      find.semantics.byLabel('Attach images'),
+      isSemantics(
+        label: 'Attach images',
+        isButton: true,
+        hasEnabledState: true,
+        isEnabled: true,
+        hasTapAction: true,
+      ),
+    );
+
+    await tester.tap(attachButton);
+    await _pumpFrames(tester);
+
+    expect(imageService.pickCount, 1);
+    expect(
+      find.byKey(const ValueKey('composer-context-shelf')),
+      findsOneWidget,
+    );
+    expect(find.text('reference-image.png'), findsOneWidget);
+    final sendButton = find.byKey(const ValueKey('create-session-send-button'));
+    final sendTapTarget = find.descendant(
+      of: sendButton,
+      matching: find.byType(InkWell),
+    );
+    expect(tester.widget<InkWell>(sendTapTarget).onTap, isNotNull);
+
+    await tester.tap(sendButton);
+    await tester.pumpAndSettle();
+
+    expect(api.lastCreateRequest, isNotNull);
+    expect(api.lastCreateRequest!.prompt, isEmpty);
+    expect(api.lastCreateRequest!.input, hasLength(1));
+    expect(api.lastCreateRequest!.input!.single.type, 'image');
+    expect(
+      api.lastCreateRequest!.input!.single.url,
+      startsWith('data:image/png;base64,'),
+    );
+    final seeded = SessionMessageSeedStore.instance.take(
+      host,
+      'created-session',
+    );
+    expect(seeded, hasLength(1));
+    expect(seeded.single.text, isEmpty);
+    expect(seeded.single.attachments, hasLength(1));
+    expect(seeded.single.attachments.single.type, 'image');
+    expect(await launch, isNotNull);
+    semanticsHandle.dispose();
+  });
+
+  testWidgets(
+    'composer keeps long model and thinking controls side by side with context',
+    (tester) async {
+      final controller = TextEditingController(
+        text: List<String>.filled(
+          6,
+          'A long draft that fills the composer without moving its controls.',
+        ).join('\n'),
+      );
+      final focusNode = FocusNode();
+      addTearDown(controller.dispose);
+      addTearDown(focusNode.dispose);
+
+      await _pumpApp(
+        tester,
+        MediaQuery(
+          data: const MediaQueryData(textScaler: TextScaler.linear(1.35)),
+          child: AppComposer(
+            controller: controller,
+            focusNode: focusNode,
+            sending: false,
+            onSend: () {},
+            leading: AppComposerAddButton(enabled: true, onPressed: () {}),
+            controls: [
+              AppComposerControl(
+                key: const ValueKey('stress-model-control'),
+                icon: Icons.memory_rounded,
+                label: 'Extremely long frontier model display name',
+                tooltip: 'Choose model',
+                onPressed: () {},
+              ),
+              AppComposerControl(
+                key: const ValueKey('stress-thinking-control'),
+                icon: Icons.psychology_alt_rounded,
+                label: 'Extraordinarily deep thinking level',
+                tooltip: 'Choose thinking level',
+                onPressed: () {},
+              ),
+            ],
+            header: AppComposerContextShelf(
+              items: List<AppComposerContextItem>.generate(
+                4,
+                (index) => AppComposerContextItem(
+                  id: 'stress-$index',
+                  icon: const Icon(Icons.image_rounded, size: 16),
+                  label: 'long-reference-image-name-$index.png',
+                  onRemove: () {},
+                ),
+              ),
+            ),
+          ),
+        ),
+        size: const Size(320, 700),
+      );
+      await _pumpFrames(tester);
+
+      final model = find.byKey(const ValueKey('stress-model-control'));
+      final thinking = find.byKey(const ValueKey('stress-thinking-control'));
+      expect(model, findsOneWidget);
+      expect(thinking, findsOneWidget);
+      final modelRect = tester.getRect(model);
+      final thinkingRect = tester.getRect(thinking);
+      expect(modelRect.center.dy, closeTo(thinkingRect.center.dy, 0.1));
+      expect(modelRect.right, lessThanOrEqualTo(thinkingRect.left));
+      expect(tester.takeException(), isNull);
+    },
+  );
+
   testWidgets('new session confirms before discarding an unsent message', (
     tester,
   ) async {
@@ -2006,10 +2168,49 @@ const _codexProfile = ProviderProfileSummary(
   webSearch: 'live',
 );
 
+class _FakeImageAttachmentService implements ComposerImageAttachmentService {
+  int pickCount = 0;
+
+  ComposerImageAttachment get _attachment {
+    const encoded =
+        'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=';
+    return ComposerImageAttachment(
+      id: 'fake-image',
+      name: 'reference-image.png',
+      mimeType: 'image/png',
+      bytes: base64Decode(encoded),
+      dataUrl: 'data:image/png;base64,$encoded',
+    );
+  }
+
+  @override
+  Future<ComposerImageAttachmentUpdate?> pickImages({
+    required List<ComposerImageAttachment> current,
+  }) async {
+    pickCount += 1;
+    return ComposerImageAttachmentUpdate(
+      attachments: <ComposerImageAttachment>[...current, _attachment],
+      added: true,
+    );
+  }
+
+  @override
+  Future<ComposerImageAttachmentUpdate> pasteImage({
+    required List<ComposerImageAttachment> current,
+    bool reportEmpty = true,
+  }) async {
+    return ComposerImageAttachmentUpdate(
+      attachments: <ComposerImageAttachment>[...current, _attachment],
+      added: true,
+    );
+  }
+}
+
 class _CapturedCreateSessionRequest {
   const _CapturedCreateSessionRequest({
     required this.cwd,
     required this.prompt,
+    required this.input,
     required this.provider,
     required this.model,
     required this.mode,
@@ -2025,6 +2226,7 @@ class _CapturedCreateSessionRequest {
 
   final String cwd;
   final String prompt;
+  final List<SessionInputItem>? input;
   final String? provider;
   final String? model;
   final String? mode;
@@ -2120,6 +2322,7 @@ class _CapabilityFakeApi extends ApiClient {
     lastCreateRequest = _CapturedCreateSessionRequest(
       cwd: cwd,
       prompt: prompt,
+      input: input,
       provider: provider,
       model: model,
       mode: mode,
