@@ -11,6 +11,7 @@ import {
   buildWebSearchActivityFromRolloutEvent,
   mergeActivity,
 } from "./activity.js";
+import { extractSessionAttachments } from "./session-attachments.js";
 import type {
   CommandActivity,
   SessionLogSnapshot,
@@ -20,6 +21,7 @@ import type {
   SessionSubAgentInfo,
   SessionRuntimeSummary,
   ThreadRecord,
+  ToolActivity,
 } from "./types.js";
 
 const RECENT_ROLLOUT_SCAN_DAYS = 3;
@@ -201,6 +203,7 @@ async function scanRolloutFile(
   const commandFunctionCalls = new Map<string, PendingCommandFunctionCall>();
   const commandSessionCalls = new Map<string, PendingCommandFunctionCall>();
   const stdinFunctionCalls = new Map<string, string>();
+  const toolFunctionCalls = new Map<string, PendingToolFunctionCall>();
   const countedActivityIds = new Set<string>();
   const file = createReadStream(rolloutPath, { encoding: "utf8" });
   const lines = readline.createInterface({ input: file, crlfDelay: Infinity });
@@ -274,6 +277,12 @@ async function scanRolloutFile(
         continue;
       }
 
+      const toolFunctionCall = parseToolFunctionCall(parsed);
+      if (toolFunctionCall) {
+        toolFunctionCalls.set(toolFunctionCall.callId, toolFunctionCall);
+        continue;
+      }
+
       const commandFunctionOutput = parseCommandFunctionOutput(
         parsed,
         commandFunctionCalls,
@@ -292,6 +301,25 @@ async function scanRolloutFile(
           totalActivities += 1;
         }
         if (added && !wasCounted) {
+          seq += 1;
+        }
+        continue;
+      }
+
+      const toolFunctionOutput = parseToolFunctionOutput(
+        parsed,
+        toolFunctionCalls,
+        seq,
+      );
+      if (toolFunctionOutput) {
+        upsertBoundedActivity(
+          activities,
+          toolFunctionOutput,
+          options.activityLimit ?? null,
+        );
+        if (!countedActivityIds.has(toolFunctionOutput.id)) {
+          countedActivityIds.add(toolFunctionOutput.id);
+          totalActivities += 1;
           seq += 1;
         }
         continue;
@@ -803,6 +831,13 @@ type PendingCommandFunctionCall = {
   payload: Record<string, unknown>;
 };
 
+type PendingToolFunctionCall = {
+  callId: string;
+  name: string;
+  args: unknown;
+  createdAt: number;
+};
+
 function parseCommandFunctionCall(
   parsed: any,
   seq: number,
@@ -925,6 +960,118 @@ function parseStdinFunctionCall(
     return null;
   }
   return { callId, sessionId };
+}
+
+function parseToolFunctionCall(parsed: any): PendingToolFunctionCall | null {
+  if (parsed?.type !== "response_item") {
+    return null;
+  }
+  const payload = parsed.payload as Record<string, unknown> | undefined;
+  if (!payload) {
+    return null;
+  }
+  const payloadType = asOptionalString(payload.type);
+  if (payloadType !== "function_call" && payloadType !== "custom_tool_call") {
+    return null;
+  }
+  const name = asOptionalString(payload.name);
+  const callId =
+    asOptionalString(payload.call_id) ?? asOptionalString(payload.callId);
+  if (!name || !callId) {
+    return null;
+  }
+  if (
+    name === "exec_command" ||
+    name === "functions.exec_command" ||
+    name === "write_stdin" ||
+    name === "functions.write_stdin"
+  ) {
+    return null;
+  }
+  return {
+    callId,
+    name,
+    args:
+      payloadType === "custom_tool_call"
+        ? parseFunctionArguments(payload.input)
+        : parseFunctionArguments(payload.arguments),
+    createdAt: parseTimestamp(parsed.timestamp),
+  };
+}
+
+function parseToolFunctionOutput(
+  parsed: any,
+  pendingCalls: Map<string, PendingToolFunctionCall>,
+  seq: number,
+): ToolActivity | null {
+  if (parsed?.type !== "response_item") {
+    return null;
+  }
+  const payload = parsed.payload as Record<string, unknown> | undefined;
+  if (!payload) {
+    return null;
+  }
+  const payloadType = asOptionalString(payload.type);
+  if (
+    payloadType !== "function_call_output" &&
+    payloadType !== "custom_tool_call_output"
+  ) {
+    return null;
+  }
+  const callId =
+    asOptionalString(payload.call_id) ?? asOptionalString(payload.callId);
+  if (!callId) {
+    return null;
+  }
+  const pending = pendingCalls.get(callId);
+  if (!pending) {
+    return null;
+  }
+  pendingCalls.delete(callId);
+  const attachments = extractSessionAttachments(payload.output);
+  if (attachments.length === 0) {
+    return null;
+  }
+  return {
+    id: callId,
+    type: "tool",
+    turnId: null,
+    createdAt: pending.createdAt,
+    seq,
+    status: "completed",
+    toolName: pending.name,
+    title: pending.name,
+    args: pending.args,
+    output: null,
+    result: extractToolOutputText(payload.output),
+    attachments,
+    isError: false,
+    semantic: null,
+  };
+}
+
+function extractToolOutputText(value: unknown): string | null {
+  if (!Array.isArray(value)) {
+    return typeof value === "string" && value.length > 0 ? value : null;
+  }
+  const text = value
+    .flatMap((entry): string[] => {
+      if (!entry || typeof entry !== "object") {
+        return [];
+      }
+      const record = entry as Record<string, unknown>;
+      const type = asOptionalString(record.type)
+        ?.replaceAll("_", "")
+        .toLowerCase();
+      if (type !== "inputtext" && type !== "outputtext" && type !== "text") {
+        return [];
+      }
+      const next = asOptionalString(record.text);
+      return next ? [next] : [];
+    })
+    .join("\n")
+    .trim();
+  return text || null;
 }
 
 function upsertBoundedActivity(

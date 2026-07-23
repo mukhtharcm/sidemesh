@@ -227,7 +227,13 @@ describe("Codex activity compatibility", () => {
         namespace: "functions",
         tool: "exec",
         arguments: { cmd: "pwd" },
-        contentItems: [{ type: "inputText", text: "/repo" }],
+        contentItems: [
+          { type: "inputText", text: "/repo" },
+          {
+            type: "inputImage",
+            imageUrl: "data:image/png;base64,AAAA",
+          },
+        ],
         success: true,
       },
       context,
@@ -249,6 +255,10 @@ describe("Codex activity compatibility", () => {
     assert.equal(mcp?.toolName, "github.search");
     assert.equal(dynamic?.type, "tool");
     assert.equal(dynamic?.toolName, "functions.exec");
+    assert.deepEqual(
+      dynamic?.type === "tool" ? dynamic.attachments : null,
+      [{ type: "image", url: "data:image/png;base64,AAAA" }],
+    );
     assert.equal(collab?.type, "tool");
     assert.equal(collab?.toolName, "collab.spawnAgent");
   });

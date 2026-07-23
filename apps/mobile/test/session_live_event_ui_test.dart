@@ -68,6 +68,47 @@ void main() {
     expect(_composerTextField(tester).focusNode?.hasFocus, isFalse);
   });
 
+  testWidgets('tool output image attachments render in the activity card', (
+    tester,
+  ) async {
+    final api = _RichEventFakeApi(
+      activities: [
+        _plainToolActivity(
+          id: 'image-tool',
+          seq: 1,
+          toolName: 'provider_image_inspector',
+          toolAttachments: const [
+            SessionMessageAttachment(
+              type: 'image',
+              url:
+                  'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAAB'
+                  'CAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=',
+            ),
+          ],
+        ),
+      ],
+    );
+    addTearDown(api.dispose);
+
+    await _pumpApp(
+      tester,
+      SessionScreen(
+        host: _host('tool-output-image'),
+        session: _session('tool-output-image'),
+        api: api,
+        desktopMode: true,
+      ),
+      size: const Size(1180, 900),
+    );
+    await _pumpFrames(tester);
+
+    expect(find.byType(Image), findsNothing);
+    await tester.tap(find.text('provider_image_inspector').first);
+    await _pumpFrames(tester);
+
+    expect(find.byType(Image), findsOneWidget);
+  });
+
   testWidgets('desktop session does not steal focus from another text field', (
     tester,
   ) async {
@@ -2104,6 +2145,7 @@ SessionActivity _plainToolActivity({
   required String id,
   required int seq,
   required String toolName,
+  List<SessionMessageAttachment> toolAttachments = const [],
 }) {
   final now = DateTime(2026, 1, 1, 12).add(Duration(minutes: seq));
   return SessionActivity(
@@ -2127,6 +2169,7 @@ SessionActivity _plainToolActivity({
     toolTitle: null,
     toolArgs: null,
     toolResult: null,
+    toolAttachments: toolAttachments,
     toolError: null,
     toolSemantic: null,
     changes: const [],

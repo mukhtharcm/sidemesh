@@ -543,4 +543,50 @@ describe("loadSessionRuntime", () => {
     assert.equal(activity.durationMs, 1235);
     assert.match(activity.output ?? "", /tests passed/);
   });
+
+  it("reconstructs image-bearing tool outputs without matching tool names", async () => {
+    const imageUrl = "data:image/png;base64,AAAA";
+    const lines = [
+      JSON.stringify({
+        timestamp: "2026-04-29T00:00:00.000Z",
+        type: "session_meta",
+        payload: { id: "thread-1", cwd: "/repo" },
+      }),
+      JSON.stringify({
+        timestamp: "2026-04-29T00:00:01.000Z",
+        type: "response_item",
+        payload: {
+          type: "function_call",
+          name: "provider_image_inspector",
+          arguments: JSON.stringify({ path: "/repo/screenshot.png" }),
+          call_id: "call-image-1",
+        },
+      }),
+      JSON.stringify({
+        timestamp: "2026-04-29T00:00:02.000Z",
+        type: "response_item",
+        payload: {
+          type: "function_call_output",
+          call_id: "call-image-1",
+          output: [
+            { type: "input_text", text: "Captured screenshot" },
+            { type: "input_image", image_url: imageUrl },
+          ],
+        },
+      }),
+    ];
+
+    await writeFile(rolloutPath, `${lines.join("\n")}\n`, "utf8");
+
+    const log = await loadRolloutLog("thread-1", rolloutPath, null);
+
+    assert.equal(log.totalActivities, 1);
+    const activity = log.activities[0];
+    assert(activity && activity.type === "tool");
+    assert.equal(activity.toolName, "provider_image_inspector");
+    assert.equal(activity.result, "Captured screenshot");
+    assert.deepEqual(activity.attachments, [
+      { type: "image", url: imageUrl },
+    ]);
+  });
 });
