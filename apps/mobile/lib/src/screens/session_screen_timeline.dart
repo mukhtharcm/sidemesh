@@ -44,10 +44,8 @@ class _LiveAssistantMessageState {
       role: 'assistant',
       text: text,
       content: <ContentBlock>[
-        if (visibleReasoning.trim().isNotEmpty)
-          ThinkingBlock(visibleReasoning),
-        if (visibleText.trim().isNotEmpty)
-          TextBlock(visibleText),
+        if (visibleReasoning.trim().isNotEmpty) ThinkingBlock(visibleReasoning),
+        if (visibleText.trim().isNotEmpty) TextBlock(visibleText),
       ],
       attachments: const <SessionMessageAttachment>[],
       createdAt: createdAt,
@@ -146,12 +144,14 @@ class _LiveAssistantBubble extends StatelessWidget {
   const _LiveAssistantBubble({
     required this.host,
     required this.api,
+    required this.sessionId,
     required this.message,
     this.onOpenFile,
   });
 
   final HostProfile host;
   final ApiClient api;
+  final String sessionId;
   final ValueListenable<_LiveAssistantMessageState?> message;
   final void Function(String path)? onOpenFile;
 
@@ -168,6 +168,7 @@ class _LiveAssistantBubble extends StatelessWidget {
           child: _MessageBubble(
             host: host,
             api: api,
+            sessionId: sessionId,
             message: liveMessage.toMessage(),
             live: liveMessage.live,
             onOpenFile: onOpenFile,
@@ -187,8 +188,10 @@ class _ReasoningBlock extends StatefulWidget {
   });
 
   final String reasoning;
+
   /// Whether the assistant turn is still streaming.
   final bool live;
+
   /// True when the message already has answer text, so reasoning should shrink
   /// back to a disclosure row by default.
   final bool collapsedByDefault;
@@ -208,11 +211,15 @@ class _ReasoningBlockState extends State<_ReasoningBlock> {
     if (_userOverrode) {
       return;
     }
-    if (!oldWidget.collapsedByDefault && widget.collapsedByDefault && _expanded) {
+    if (!oldWidget.collapsedByDefault &&
+        widget.collapsedByDefault &&
+        _expanded) {
       setState(() => _expanded = false);
       return;
     }
-    if (oldWidget.collapsedByDefault && !widget.collapsedByDefault && !_expanded) {
+    if (oldWidget.collapsedByDefault &&
+        !widget.collapsedByDefault &&
+        !_expanded) {
       setState(() => _expanded = true);
     }
   }
@@ -539,9 +546,11 @@ class _PlanUpdateCardState extends State<_PlanUpdateCard> {
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          for (var index = 0;
-                              index < steps.length;
-                              index += 1) ...[
+                          for (
+                            var index = 0;
+                            index < steps.length;
+                            index += 1
+                          ) ...[
                             if (index > 0) const SizedBox(height: 8),
                             Row(
                               crossAxisAlignment: CrossAxisAlignment.start,
@@ -801,7 +810,9 @@ class _RuntimeSignalStrip extends StatelessWidget {
   String _formatDelay(int delayMs) {
     final seconds = delayMs / 1000;
     final whole = delayMs % 1000 == 0;
-    return whole ? '${seconds.toStringAsFixed(0)}s' : '${seconds.toStringAsFixed(1)}s';
+    return whole
+        ? '${seconds.toStringAsFixed(0)}s'
+        : '${seconds.toStringAsFixed(1)}s';
   }
 }
 
@@ -990,6 +1001,7 @@ class _MessageBubble extends StatelessWidget {
   const _MessageBubble({
     required this.host,
     required this.api,
+    required this.sessionId,
     required this.message,
     this.live = false,
     this.pinned = false,
@@ -999,6 +1011,7 @@ class _MessageBubble extends StatelessWidget {
 
   final HostProfile host;
   final ApiClient api;
+  final String sessionId;
   final SessionMessage message;
   final bool live;
   final bool pinned;
@@ -1039,10 +1052,9 @@ class _MessageBubble extends StatelessWidget {
       ),
       selectionHandleColor: selectionForeground,
     );
-    final bodyStyle = Theme.of(context).textTheme.bodyMedium?.copyWith(
-      color: textColor,
-      height: 1.45,
-    );
+    final bodyStyle = Theme.of(
+      context,
+    ).textTheme.bodyMedium?.copyWith(color: textColor, height: 1.45);
     final linkStyle = messageLinkStyle(
       colors,
       userBubble: isUser,
@@ -1051,10 +1063,9 @@ class _MessageBubble extends StatelessWidget {
     final assistantLinkStyle = messageLinkStyle(
       colors,
       userBubble: false,
-      baseStyle: Theme.of(context).textTheme.bodyMedium?.copyWith(
-        color: colors.textPrimary,
-        height: 1.5,
-      ),
+      baseStyle: Theme.of(
+        context,
+      ).textTheme.bodyMedium?.copyWith(color: colors.textPrimary, height: 1.5),
     );
     final messagePadding = isAssistant
         ? const EdgeInsets.fromLTRB(16, 13, 16, 14)
@@ -1094,117 +1105,125 @@ class _MessageBubble extends StatelessWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                  if (phaseLabel != null && hasAnswer)
-                    Padding(
-                      padding: const EdgeInsets.only(bottom: 6),
-                      child: Row(
-                        children: [
-                          if (live) ...[
-                            const LivePulse(),
-                            const SizedBox(width: 6),
-                          ],
-                          Text(
-                            phaseLabel,
-                            style: Theme.of(context).textTheme.labelSmall
-                                ?.copyWith(
-                                  color: isAssistant
-                                      ? assistantMetaColor
-                                      : metaColor,
-                                  fontWeight: AppWeights.title,
-                                  letterSpacing: 0.2,
-                                ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  for (final block in message.content)
-                    if (block is ThinkingBlock)
+                    if (phaseLabel != null && hasAnswer)
                       Padding(
-                        padding: EdgeInsets.only(bottom: hasAnswer ? 10 : 0),
-                        child: _ReasoningBlock(
-                          reasoning: block.thinking,
-                          live: live,
-                          collapsedByDefault: hasAnswer,
-                          onOpenFile: onOpenFile,
+                        padding: const EdgeInsets.only(bottom: 6),
+                        child: Row(
+                          children: [
+                            if (live) ...[
+                              const LivePulse(),
+                              const SizedBox(width: 6),
+                            ],
+                            Text(
+                              phaseLabel,
+                              style: Theme.of(context).textTheme.labelSmall
+                                  ?.copyWith(
+                                    color: isAssistant
+                                        ? assistantMetaColor
+                                        : metaColor,
+                                    fontWeight: AppWeights.title,
+                                    letterSpacing: 0.2,
+                                  ),
+                            ),
+                          ],
                         ),
-                      )
-                    else if (block is TextBlock)
+                      ),
+                    for (final block in message.content)
+                      if (block is ThinkingBlock)
+                        Padding(
+                          padding: EdgeInsets.only(bottom: hasAnswer ? 10 : 0),
+                          child: _ReasoningBlock(
+                            reasoning: block.thinking,
+                            live: live,
+                            collapsedByDefault: hasAnswer,
+                            onOpenFile: onOpenFile,
+                          ),
+                        )
+                      else if (block is TextBlock)
+                        if (isAssistant)
+                          _MarkdownMessageBody(
+                            text: block.text,
+                            textColor: textColor,
+                            linkStyle: assistantLinkStyle,
+                            onOpenFile: onOpenFile,
+                            host: host,
+                            api: api,
+                            sessionId: sessionId,
+                          )
+                        else
+                          _LinkifiedSelectableText(
+                            text: block.text,
+                            style: bodyStyle,
+                            linkStyle: linkStyle,
+                          ),
+                    if (message.attachments.isNotEmpty) ...[
+                      _MessageAttachmentsSection(
+                        host: host,
+                        api: api,
+                        sessionId: sessionId,
+                        attachments: message.attachments,
+                      ),
+                      if (!hasTextBlocks && hasText) const SizedBox(height: 10),
+                    ],
+                    if (!hasTextBlocks && hasText)
                       if (isAssistant)
                         _MarkdownMessageBody(
-                          text: block.text,
+                          text: message.text,
                           textColor: textColor,
                           linkStyle: assistantLinkStyle,
                           onOpenFile: onOpenFile,
+                          host: host,
+                          api: api,
+                          sessionId: sessionId,
                         )
                       else
                         _LinkifiedSelectableText(
-                          text: block.text,
+                          text: message.text,
                           style: bodyStyle,
                           linkStyle: linkStyle,
                         ),
-                  if (message.attachments.isNotEmpty) ...[
-                    _MessageAttachmentsSection(
-                      host: host,
-                      api: api,
-                      attachments: message.attachments,
-                    ),
-                    if (!hasTextBlocks && hasText)
-                      const SizedBox(height: 10),
-                  ],
-                  if (!hasTextBlocks && hasText)
-                    if (isAssistant)
-                      _MarkdownMessageBody(
-                        text: message.text,
-                        textColor: textColor,
-                        linkStyle: assistantLinkStyle,
-                        onOpenFile: onOpenFile,
-                      )
-                    else
-                      _LinkifiedSelectableText(
-                        text: message.text,
-                        style: bodyStyle,
-                        linkStyle: linkStyle,
-                      ),
-                  if (canPin || hasText)
-                    Padding(
-                      padding: const EdgeInsets.only(top: 6),
-                      child: Align(
-                        alignment: Alignment.centerRight,
-                        child: Wrap(
-                          spacing: 8,
-                          runSpacing: 4,
-                          crossAxisAlignment: WrapCrossAlignment.center,
-                          children: [
-                            Text(
-                              _formatMessageTime(message.createdAt),
-                              style: Theme.of(context).textTheme.labelSmall
-                                  ?.copyWith(
-                                    color: isUser
-                                        ? metaColor
-                                        : assistantMetaColor,
-                                    fontSize: 10.5,
-                                    fontFeatures: const [
-                                      FontFeature.tabularFigures(),
-                                    ],
-                                  ),
-                            ),
-                            if (canPin)
-                              _MessagePinButton(
-                                pinned: pinned,
-                                tone: isUser ? metaColor : colors.textSecondary,
-                                accent: colors.warning,
-                                onTap: onTogglePin!,
+                    if (canPin || hasText)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 6),
+                        child: Align(
+                          alignment: Alignment.centerRight,
+                          child: Wrap(
+                            spacing: 8,
+                            runSpacing: 4,
+                            crossAxisAlignment: WrapCrossAlignment.center,
+                            children: [
+                              Text(
+                                _formatMessageTime(message.createdAt),
+                                style: Theme.of(context).textTheme.labelSmall
+                                    ?.copyWith(
+                                      color: isUser
+                                          ? metaColor
+                                          : assistantMetaColor,
+                                      fontSize: 10.5,
+                                      fontFeatures: const [
+                                        FontFeature.tabularFigures(),
+                                      ],
+                                    ),
                               ),
-                            if (!isUser && hasText)
-                              _MessageCopyButton(
-                                text: message.text,
-                                tone: colors.textSecondary,
-                                accent: colors.accent,
-                              ),
-                          ],
+                              if (canPin)
+                                _MessagePinButton(
+                                  pinned: pinned,
+                                  tone: isUser
+                                      ? metaColor
+                                      : colors.textSecondary,
+                                  accent: colors.warning,
+                                  onTap: onTogglePin!,
+                                ),
+                              if (!isUser && hasText)
+                                _MessageCopyButton(
+                                  text: message.text,
+                                  tone: colors.textSecondary,
+                                  accent: colors.accent,
+                                ),
+                            ],
+                          ),
                         ),
                       ),
-                    ),
                   ],
                 ),
               ),
@@ -1220,11 +1239,13 @@ class _MessageAttachmentsSection extends StatelessWidget {
   const _MessageAttachmentsSection({
     required this.host,
     required this.api,
+    required this.sessionId,
     required this.attachments,
   });
 
   final HostProfile host;
   final ApiClient api;
+  final String sessionId;
   final List<SessionMessageAttachment> attachments;
 
   @override
@@ -1248,6 +1269,7 @@ class _MessageAttachmentsSection extends StatelessWidget {
                   child: _MessageAttachmentTile(
                     host: host,
                     api: api,
+                    sessionId: sessionId,
                     attachment: attachment,
                   ),
                 );
@@ -1263,11 +1285,13 @@ class _MessageAttachmentTile extends StatelessWidget {
   const _MessageAttachmentTile({
     required this.host,
     required this.api,
+    required this.sessionId,
     required this.attachment,
   });
 
   final HostProfile host;
   final ApiClient api;
+  final String sessionId;
   final SessionMessageAttachment attachment;
 
   @override
@@ -1279,6 +1303,7 @@ class _MessageAttachmentTile extends StatelessWidget {
       return _LocalImageAttachmentTile(
         host: host,
         api: api,
+        sessionId: sessionId,
         path: attachment.path!,
       );
     }
@@ -1361,11 +1386,13 @@ class _LocalImageAttachmentTile extends StatefulWidget {
   const _LocalImageAttachmentTile({
     required this.host,
     required this.api,
+    required this.sessionId,
     required this.path,
   });
 
   final HostProfile host;
   final ApiClient api;
+  final String sessionId;
   final String path;
 
   @override
@@ -1390,6 +1417,7 @@ class _LocalImageAttachmentTileState extends State<_LocalImageAttachmentTile> {
     if (oldWidget.host.id != widget.host.id ||
         oldWidget.host.baseUrl != widget.host.baseUrl ||
         oldWidget.host.token != widget.host.token ||
+        oldWidget.sessionId != widget.sessionId ||
         oldWidget.path != widget.path) {
       _load();
     }
@@ -1402,11 +1430,13 @@ class _LocalImageAttachmentTileState extends State<_LocalImageAttachmentTile> {
       _error = null;
     });
     try {
-      final imageProvider = await ImageBlobCacheStore.instance.loadImageProvider(
-        host: widget.host,
-        path: widget.path,
-        api: widget.api,
-      );
+      final imageProvider = await ImageBlobCacheStore.instance
+          .loadImageProvider(
+            host: widget.host,
+            path: widget.path,
+            api: widget.api,
+            sessionId: widget.sessionId,
+          );
       if (!mounted || gen != _loadGeneration) {
         return;
       }
@@ -1531,9 +1561,9 @@ class _LocalImageFallback extends StatelessWidget {
                   loading ? 'Loading image...' : _basename(path),
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
-                  style: Theme.of(
-                    context,
-                  ).textTheme.labelLarge?.copyWith(fontWeight: AppWeights.emphasis),
+                  style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                    fontWeight: AppWeights.emphasis,
+                  ),
                 ),
                 const SizedBox(height: 2),
                 Text(
@@ -1682,12 +1712,18 @@ class _MarkdownMessageBody extends StatelessWidget {
     required this.textColor,
     this.linkStyle,
     this.onOpenFile,
+    this.host,
+    this.api,
+    this.sessionId,
   });
 
   final String text;
   final Color textColor;
   final TextStyle? linkStyle;
   final void Function(String path)? onOpenFile;
+  final HostProfile? host;
+  final ApiClient? api;
+  final String? sessionId;
 
   @override
   Widget build(BuildContext context) {
@@ -1696,15 +1732,15 @@ class _MarkdownMessageBody extends StatelessWidget {
       textColor: textColor,
       linkStyle: linkStyle,
       onOpenFile: onOpenFile,
+      host: host,
+      api: api,
+      sessionId: sessionId,
     );
   }
 }
 
 class _ReasoningTextBody extends StatelessWidget {
-  const _ReasoningTextBody({
-    required this.text,
-    required this.textColor,
-  });
+  const _ReasoningTextBody({required this.text, required this.textColor});
 
   final String text;
   final Color textColor;
@@ -1712,21 +1748,16 @@ class _ReasoningTextBody extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colors = context.colors;
-    final style = Theme.of(context).textTheme.bodyMedium?.copyWith(
-      color: textColor,
-      height: 1.5,
-    );
+    final style = Theme.of(
+      context,
+    ).textTheme.bodyMedium?.copyWith(color: textColor, height: 1.5);
     return _LinkifiedSelectableText(
       text: text,
       style: style,
       linkStyle: linkTextStyleForBackground(
         background: colors.assistantBubble,
         preferred: colors.accent,
-        fallbacks: [
-          colors.info,
-          colors.textPrimary,
-          colors.textSecondary,
-        ],
+        fallbacks: [colors.info, colors.textPrimary, colors.textSecondary],
         baseStyle: style,
       ),
     );
@@ -1830,11 +1861,7 @@ class _LinkifiedSelectableTextState extends State<_LinkifiedSelectableText> {
         ..onTap = () => _openLink(context, href);
       _recognizers.add(recognizer);
       spans.add(
-        TextSpan(
-          text: raw,
-          style: widget.linkStyle,
-          recognizer: recognizer,
-        ),
+        TextSpan(text: raw, style: widget.linkStyle, recognizer: recognizer),
       );
       if (trailing.isNotEmpty) {
         spans.add(TextSpan(text: trailing));
@@ -1867,6 +1894,7 @@ class _ActivityCard extends StatefulWidget {
   const _ActivityCard({
     required this.host,
     required this.api,
+    required this.sessionId,
     required this.activity,
     required this.sessionCwd,
     this.defaultCollapsed = true,
@@ -1879,12 +1907,14 @@ class _ActivityCard extends StatefulWidget {
 
   final HostProfile host;
   final ApiClient api;
+  final String sessionId;
   final SessionActivity activity;
   final String sessionCwd;
   final bool defaultCollapsed;
   final void Function(String path)? onOpenFile;
   final void Function(String path)? onBrowsePath;
-  final void Function(BrowserPreviewTargetCandidate target)? onOpenBrowserPreview;
+  final void Function(BrowserPreviewTargetCandidate target)?
+  onOpenBrowserPreview;
   final void Function(String? cwd)? onOpenTerminal;
   final bool opensFilesInInspector;
 
@@ -2081,11 +2111,7 @@ class _ActivityCardState extends State<_ActivityCard> {
       }
       if (activity.terminalStatus == 'input') {
         pills.add(
-          const MeshPill(
-            label: 'stdin',
-            tone: MeshPillTone.info,
-            mono: true,
-          ),
+          const MeshPill(label: 'stdin', tone: MeshPillTone.info, mono: true),
         );
       }
       if (activity.terminalStatus == 'waiting') {
@@ -2511,12 +2537,11 @@ class _ActivityCardState extends State<_ActivityCard> {
                                   subtitle,
                                   maxLines: 1,
                                   overflow: TextOverflow.ellipsis,
-                                  style:
-                                      monoStyle(
-                                        color: colors.textSecondary,
-                                        fontSize: 12,
-                                        fontWeight: AppWeights.body,
-                                      ).copyWith(height: 1.3),
+                                  style: monoStyle(
+                                    color: colors.textSecondary,
+                                    fontSize: 12,
+                                    fontWeight: AppWeights.body,
+                                  ).copyWith(height: 1.3),
                                 ),
                               ],
                             ],
@@ -2683,6 +2708,7 @@ class _ActivityCardState extends State<_ActivityCard> {
         _MessageAttachmentsSection(
           host: widget.host,
           api: widget.api,
+          sessionId: widget.sessionId,
           attachments: activity.toolAttachments,
         ),
       );
@@ -2795,10 +2821,9 @@ class _ActivityCardState extends State<_ActivityCard> {
     bool linkify = false,
   }) {
     final colors = context.colors;
-    final bodyStyle = Theme.of(context).textTheme.bodySmall?.copyWith(
-      color: colors.textPrimary,
-      height: 1.4,
-    );
+    final bodyStyle = Theme.of(
+      context,
+    ).textTheme.bodySmall?.copyWith(color: colors.textPrimary, height: 1.4);
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
@@ -2834,10 +2859,7 @@ class _ActivityCardState extends State<_ActivityCard> {
                     baseStyle: bodyStyle,
                   ),
                 )
-              : SelectableText(
-                  text,
-                  style: bodyStyle,
-                ),
+              : SelectableText(text, style: bodyStyle),
         ],
       ),
     );
@@ -2886,6 +2908,7 @@ class _ActivityCardState extends State<_ActivityCard> {
           _LocalImageAttachmentTile(
             host: widget.host,
             api: widget.api,
+            sessionId: widget.sessionId,
             path: savedPath,
           ),
           const SizedBox(height: 8),
@@ -2899,14 +2922,11 @@ class _ActivityCardState extends State<_ActivityCard> {
             'Image completed, but no saved file was reported.',
           ),
         ] else ...[
-          _waitingText(
-            context,
-            switch (activity.status) {
-              'failed' => 'Image generation failed.',
-              'declined' => 'Image generation was declined.',
-              _ => 'Generating image...',
-            },
-          ),
+          _waitingText(context, switch (activity.status) {
+            'failed' => 'Image generation failed.',
+            'declined' => 'Image generation was declined.',
+            _ => 'Generating image...',
+          }),
         ],
       ],
     );
@@ -2924,9 +2944,7 @@ class _ActivityCardState extends State<_ActivityCard> {
       'declined' => 'Context compaction was declined.',
       _ => 'The agent is compacting older history to free context.',
     };
-    return [
-      _activityInfoBlock(context, 'What happened', message),
-    ];
+    return [_activityInfoBlock(context, 'What happened', message)];
   }
 
   String _toolActivityTitle(SessionActivity activity, String sessionCwd) {
@@ -3348,10 +3366,7 @@ class _ActivityCardState extends State<_ActivityCard> {
 }
 
 class _CommandTitleChip extends StatelessWidget {
-  const _CommandTitleChip({
-    required this.parts,
-    required this.collapsed,
-  });
+  const _CommandTitleChip({required this.parts, required this.collapsed});
 
   final _CommandTitleParts parts;
   final bool collapsed;
@@ -3511,9 +3526,7 @@ class _DiffToggle extends StatelessWidget {
             decoration: BoxDecoration(
               color: colors.surfaceElevated.withValues(alpha: 0.78),
               borderRadius: AppShapes.badge,
-              border: Border.all(
-                color: colors.border.withValues(alpha: 0.72),
-              ),
+              border: Border.all(color: colors.border.withValues(alpha: 0.72)),
             ),
             child: Row(
               mainAxisSize: MainAxisSize.min,
@@ -3698,11 +3711,7 @@ class _InlineFileChangeRow extends StatelessWidget {
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.center,
         children: [
-          Icon(
-            Icons.description_rounded,
-            size: 15,
-            color: colors.textTertiary,
-          ),
+          Icon(Icons.description_rounded, size: 15, color: colors.textTertiary),
           const SizedBox(width: 8),
           Expanded(
             child: Text(
@@ -4122,8 +4131,10 @@ String _activityFileSummary(
 }
 
 String _commandActivityTitle(SessionActivity activity) {
-  return _commandTitleParts(activity.command ?? '', activity.status)
-          ?.plainText ??
+  return _commandTitleParts(
+        activity.command ?? '',
+        activity.status,
+      )?.plainText ??
       _commandStatusTitle(activity.status, '');
 }
 
@@ -4138,8 +4149,7 @@ String _contextCompactionTitle(SessionActivity activity) {
 
 String _contextCompactionSubtitle(SessionActivity activity) {
   return switch (activity.status) {
-    'completed' =>
-      'Older conversation history was summarized to free context.',
+    'completed' => 'Older conversation history was summarized to free context.',
     'failed' => 'Older conversation history could not be summarized.',
     'declined' => 'Context compaction did not run.',
     _ => 'Summarizing older conversation history to free context.',
@@ -4175,10 +4185,7 @@ _CommandTitleParts? _commandTitleParts(String rawCommand, String status) {
     return null;
   }
   return _friendlyCommandTitleParts(command, status) ??
-      _CommandTitleParts(
-        verb: _commandStatusVerb(status),
-        command: command,
-      );
+      _CommandTitleParts(verb: _commandStatusVerb(status), command: command);
 }
 
 String _commandStatusVerb(String status) {
@@ -4772,9 +4779,7 @@ class _SessionBubbleSkeleton extends StatelessWidget {
         widthFactor: widthFactor,
         alignment: rightAligned ? Alignment.centerRight : Alignment.centerLeft,
         child: MeshSurface(
-          tone: rightAligned
-              ? MeshSurfaceTone.accent
-              : MeshSurfaceTone.surface,
+          tone: rightAligned ? MeshSurfaceTone.accent : MeshSurfaceTone.surface,
           radius: AppRadii.surface,
           padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
           child: Column(
@@ -4790,10 +4795,7 @@ class _SessionBubbleSkeleton extends StatelessWidget {
                 FractionallySizedBox(
                   widthFactor: lineWidths[index],
                   alignment: Alignment.centerLeft,
-                  child: const MeshSkeleton(
-                    height: 12,
-                    radius: AppRadii.badge,
-                  ),
+                  child: const MeshSkeleton(height: 12, radius: AppRadii.badge),
                 ),
                 if (index != lineWidths.length - 1) const SizedBox(height: 8),
               ],
@@ -4834,9 +4836,9 @@ class _SessionWaitingState extends StatelessWidget {
           const SizedBox(height: AppSpacing.xs),
           Text(
             'Your message was sent. The agent is starting.',
-            style: Theme.of(context).textTheme.bodySmall?.copyWith(
-              color: colors.textTertiary,
-            ),
+            style: Theme.of(
+              context,
+            ).textTheme.bodySmall?.copyWith(color: colors.textTertiary),
           ),
           if (onStop != null) ...[
             const SizedBox(height: AppSpacing.lg),
@@ -4846,9 +4848,7 @@ class _SessionWaitingState extends StatelessWidget {
               label: const Text('Stop agent'),
               style: OutlinedButton.styleFrom(
                 foregroundColor: colors.danger,
-                side: BorderSide(
-                  color: colors.danger.withValues(alpha: 0.4),
-                ),
+                side: BorderSide(color: colors.danger.withValues(alpha: 0.4)),
               ),
             ),
           ],

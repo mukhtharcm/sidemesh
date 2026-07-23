@@ -6734,6 +6734,7 @@ class _SessionScreenState extends State<SessionScreen>
                                   _TimelineEntryKind.message => _MessageBubble(
                                     host: widget.host,
                                     api: widget.api,
+                                    sessionId: session.id,
                                     message: entry.message!,
                                     pinned: _pinsStore.isPinned(
                                       widget.host,
@@ -6747,6 +6748,7 @@ class _SessionScreenState extends State<SessionScreen>
                                   _TimelineEntryKind.activity => _ActivityCard(
                                     host: widget.host,
                                     api: widget.api,
+                                    sessionId: session.id,
                                     activity: entry.activity!,
                                     sessionCwd: session.cwd,
                                     defaultCollapsed:
@@ -6783,6 +6785,7 @@ class _SessionScreenState extends State<SessionScreen>
                                     _LiveAssistantBubble(
                                       host: widget.host,
                                       api: widget.api,
+                                      sessionId: session.id,
                                       message: _liveAssistantNotifier,
                                       onOpenFile: _openWorkspaceFile,
                                     ),

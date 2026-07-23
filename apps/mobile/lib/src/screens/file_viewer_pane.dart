@@ -508,6 +508,7 @@ class FileViewerPaneState extends State<FileViewerPane> {
                 host: widget.host,
                 path: widget.path,
                 api: widget.api,
+                sessionId: widget.sessionId,
               );
             },
           ),
@@ -698,6 +699,9 @@ class FileViewerPaneState extends State<FileViewerPane> {
               child: MarkdownContent(
                 text: file.contents,
                 textColor: colors.textPrimary,
+                host: widget.host,
+                api: widget.api,
+                sessionId: widget.sessionId,
               ),
             )
           else if (supportsStructuredPreview &&

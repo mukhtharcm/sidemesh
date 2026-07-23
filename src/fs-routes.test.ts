@@ -1,5 +1,13 @@
 import assert from "node:assert/strict";
-import { access, chmod, mkdtemp, rm, stat, writeFile } from "node:fs/promises";
+import {
+  access,
+  chmod,
+  mkdir,
+  mkdtemp,
+  rm,
+  stat,
+  writeFile,
+} from "node:fs/promises";
 import { createServer, type Server } from "node:http";
 import { tmpdir } from "node:os";
 import nodePath from "node:path";
@@ -69,6 +77,49 @@ describe("filesystem routes", () => {
       assert.equal(response.headers.get("content-range"), "bytes 2-5/11");
       assert.equal(response.headers.get("content-length"), "4");
       assert.equal(await response.text(), "llo ");
+    } finally {
+      await close(server);
+    }
+  });
+
+  it("normalizes relative blob paths against a session workspace", async () => {
+    const root = await tempRoot(tempRoots);
+    const imageDir = nodePath.join(root, "artifacts");
+    const filePath = nodePath.join(imageDir, "result.png");
+    await mkdir(imageDir, { recursive: true });
+    await writeFile(filePath, Buffer.from("image payload", "utf8"));
+    const app = testApp(root, {
+      getSessionCwd: async (sessionId) =>
+        sessionId === "session-1" ? root : null,
+    });
+    const server = await listen(app);
+    try {
+      const response = await fetch(
+        `${baseUrl(server)}/api/fs/blob?path=${encodeURIComponent("./artifacts/../artifacts/result.png")}&sessionId=session-1`,
+      );
+      assert.equal(response.status, 200);
+      assert.equal(await response.text(), "image payload");
+    } finally {
+      await close(server);
+    }
+  });
+
+  it("rejects relative paths that escape a session workspace", async () => {
+    const root = await tempRoot(tempRoots);
+    const outsideRoot = await tempRoot(tempRoots);
+    await writeFile(
+      nodePath.join(outsideRoot, "secret.png"),
+      Buffer.from("secret", "utf8"),
+    );
+    const app = testApp(root, {
+      getSessionCwd: async () => root,
+    });
+    const server = await listen(app);
+    try {
+      const response = await fetch(
+        `${baseUrl(server)}/api/fs/blob?path=${encodeURIComponent(`../${nodePath.basename(outsideRoot)}/secret.png`)}&sessionId=session-1`,
+      );
+      assert.equal(response.status, 403);
     } finally {
       await close(server);
     }
@@ -255,10 +306,16 @@ describe("filesystem routes", () => {
   });
 });
 
-function testApp(root: string): Hono<HonoServerEnv> {
+function testApp(
+  root: string,
+  options: {
+    getSessionCwd?: (sessionId: string) => Promise<string | null>;
+  } = {},
+): Hono<HonoServerEnv> {
   const app = new Hono<HonoServerEnv>();
   registerFsRoutes(app, {
     listSessions: async () => [sessionForRoot(root)],
+    getSessionCwd: options.getSessionCwd,
   });
   return app;
 }

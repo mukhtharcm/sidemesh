@@ -396,7 +396,21 @@ async function resolveIncomingPath(
   if (typeof raw !== "string") {
     throw new WorkspaceAccessError("path is required", 400);
   }
-  return resolveWorkspacePath(raw, await roots(), options);
+  const workspaceRoots = await roots();
+  let normalized = raw;
+  if (!normalized.trim()) {
+    throw new WorkspaceAccessError("path is required", 400);
+  }
+  if (!path.isAbsolute(normalized)) {
+    if (workspaceRoots.length !== 1) {
+      throw new WorkspaceAccessError(
+        "relative paths require a session workspace",
+        400,
+      );
+    }
+    normalized = path.resolve(workspaceRoots[0]!, normalized);
+  }
+  return resolveWorkspacePath(normalized, workspaceRoots, options);
 }
 
 async function resolveIncomingBlobPath(
