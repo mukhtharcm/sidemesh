@@ -514,7 +514,7 @@ void main() {
     expect(find.text('Clear stale visible plan'), findsNothing);
   });
 
-  testWidgets('cached-transcript strip clears after delta sync succeeds', (
+  testWidgets('cached transcript refreshes without a transient status rail', (
     tester,
   ) async {
     final host = _host('cached-strip-clear');
@@ -579,10 +579,8 @@ void main() {
     await _pumpFrames(tester);
 
     expect(find.text('Cached transcript item.'), findsOneWidget);
-    expect(
-      find.text('Cached transcript · waiting for latest host snapshot'),
-      findsNothing,
-    );
+    expect(find.textContaining('Cached transcript ·'), findsNothing);
+    expect(find.textContaining('Reconnecting ·'), findsNothing);
   });
 
   testWidgets(
@@ -1192,22 +1190,67 @@ void main() {
 
       expect(find.text('Cached transcript item.'), findsOneWidget);
       expect(find.text('Fresh snapshot item.'), findsNothing);
-      expect(
-        find.text('Cached transcript · syncing latest changes'),
-        findsOneWidget,
-      );
+      expect(find.textContaining('Cached transcript ·'), findsNothing);
+      expect(find.textContaining('Reconnecting ·'), findsNothing);
 
       snapshotReady.complete();
       await _pumpFrames(tester);
 
       expect(find.text('Fresh snapshot item.'), findsOneWidget);
       expect(find.text('Cached transcript item.'), findsNothing);
-      expect(
-        find.text('Cached transcript · waiting for latest host snapshot'),
-        findsNothing,
-      );
+      expect(find.textContaining('Cached transcript ·'), findsNothing);
     },
   );
+
+  testWidgets('cached transcript shows an actionable rail only after failure', (
+    tester,
+  ) async {
+    final host = _host('cached-offline-status');
+    final session = _session('cached-offline-status');
+    final api = _RichEventFakeApi(
+      eventsError: StateError('offline'),
+      fetchLogError: StateError('offline'),
+    );
+    addTearDown(api.dispose);
+
+    await SessionLocalStore.instance.saveSessionLog(
+      host,
+      SessionLog(
+        session: session,
+        messages: [
+          _assistantMessage(
+            id: 'cached-msg',
+            text: 'Saved transcript remains readable.',
+            content: const [TextBlock('Saved transcript remains readable.')],
+          ),
+        ],
+        activities: const [],
+        pendingAction: null,
+        history: const SessionLogHistorySummary(
+          isTruncated: false,
+          totalMessages: 1,
+          returnedMessages: 1,
+          totalActivities: 0,
+          returnedActivities: 0,
+        ),
+      ),
+    );
+
+    await _pumpApp(
+      tester,
+      SessionScreen(host: host, session: session, api: api, desktopMode: true),
+      size: const Size(1180, 900),
+    );
+    await _pumpFrames(tester);
+
+    expect(find.text('Saved transcript remains readable.'), findsOneWidget);
+    expect(
+      find.textContaining('Offline · showing saved transcript'),
+      findsOneWidget,
+    );
+    expect(find.text('Retry'), findsOneWidget);
+    expect(find.textContaining('Cached transcript ·'), findsNothing);
+  });
 
   testWidgets('completed assistant message keeps collapsed reasoning visible', (
     tester,
@@ -2207,6 +2250,7 @@ class _RichEventFakeApi extends ApiClient {
     this.eventsDelta,
     this.eventsError,
     this.fetchLogBlocker,
+    this.fetchLogError,
     this.nodeInfo,
     this.sessionSummary,
     this.sessionStatus,
@@ -2222,6 +2266,7 @@ class _RichEventFakeApi extends ApiClient {
   final SessionEventsDelta? eventsDelta;
   final Object? eventsError;
   Future<void>? fetchLogBlocker;
+  final Object? fetchLogError;
   final NodeInfo? nodeInfo;
   final SessionSummary? sessionSummary;
   final SessionStatus? sessionStatus;
@@ -2243,6 +2288,9 @@ class _RichEventFakeApi extends ApiClient {
     final blocker = fetchLogBlocker;
     if (blocker != null) {
       await blocker;
+    }
+    if (fetchLogError != null) {
+      throw fetchLogError!;
     }
     return SessionLog(
       session: sessionSummary ?? _session(sessionId),
