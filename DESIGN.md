@@ -18,8 +18,9 @@ disappear while someone is monitoring or steering real work.
 
 ## Navigation and adaptive behavior
 
-- On phones, substantial setup and selection flows are full pages. Bottom
-  sheets are for short choices and confirmations.
+- On phones, substantial setup flows are full pages. Contextual single-choice
+  selectors may use an edge-to-edge sheet, including searchable model lists,
+  when preserving the current task matters more than exposing new navigation.
 - On desktop, use the rail, list pane, detail pane, and inspector as the main
   hierarchy. Dialogs are appropriate for compact global preferences.
 - Responsive behavior changes structure, not merely padding. Dense desktop
@@ -45,6 +46,8 @@ disappear while someone is monitoring or steering real work.
 - `MeshSurface` and `MeshCard` may be borderless when fill and spacing already
   establish grouping. Reserve `bordered: true` for inputs, selection, errors,
   warnings, and independently actionable objects.
+- Adjacent composer controls share one stable visual shell. Inherited and
+  overridden values must not look like different kinds of control.
 - Pills are metadata or status, not general-purpose buttons.
 - Use platform controls such as `Switch`, text fields, and standard buttons
   unless the product requires behavior they cannot express.

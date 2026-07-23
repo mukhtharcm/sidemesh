@@ -17,7 +17,6 @@ class AppComposerControl {
     required this.tooltip,
     required this.onPressed,
     this.detail,
-    this.customized = false,
     this.enabled = true,
   });
 
@@ -26,7 +25,6 @@ class AppComposerControl {
   final String label;
   final String tooltip;
   final String? detail;
-  final bool customized;
   final bool enabled;
   final VoidCallback onPressed;
 }
@@ -358,13 +356,11 @@ class _AppComposerControlButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colors = context.colors;
-    final background = control.customized
-        ? colors.accentMuted
-        : colors.composerBackground;
+    final background = colors.surfaceMuted;
     final iconColor = visibleUiColorOn(
       colors,
       background: background,
-      preferred: control.customized ? colors.accent : colors.textSecondary,
+      preferred: colors.textSecondary,
     );
     final labelColor = readableTextOn(
       colors,
@@ -402,9 +398,7 @@ class _AppComposerControlButton extends StatelessWidget {
                   vertical: compact ? 7 : 6,
                 ),
                 decoration: BoxDecoration(
-                  color: control.customized
-                      ? colors.accentMuted
-                      : Colors.transparent,
+                  color: background,
                   borderRadius: AppShapes.badge,
                 ),
                 child: Row(

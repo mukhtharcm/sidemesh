@@ -287,15 +287,15 @@ void main() {
     expect(find.text('Choose a model'), findsOneWidget);
     expect(find.text('Model and thinking'), findsNothing);
     expect(find.text('Approvals'), findsNothing);
-    expect(find.byType(BottomSheet), findsNothing);
-    expect(find.byTooltip('Back to session controls'), findsOneWidget);
+    expect(find.byType(BottomSheet), findsOneWidget);
+    expect(find.byTooltip('Close'), findsOneWidget);
 
     await tester.pumpWidget(const SizedBox.shrink());
     await tester.pump();
   });
 
   testWidgets(
-    'mobile session controls use a page and keep model choice inline',
+    'mobile session controls use a page and open model choices in a sheet',
     (tester) async {
       final api = _CapabilityFakeApi(
         _nodeForCapabilities(_fullCapabilities),
@@ -325,8 +325,8 @@ void main() {
       await _pumpFrames(tester);
 
       expect(find.text('Choose a model'), findsOneWidget);
-      expect(find.byTooltip('Back to session controls'), findsOneWidget);
-      expect(find.byType(BottomSheet), findsNothing);
+      expect(find.byTooltip('Close'), findsOneWidget);
+      expect(find.byType(BottomSheet), findsOneWidget);
     },
   );
 
@@ -1421,10 +1421,10 @@ void main() {
     await tester.tap(find.byKey(const ValueKey('new-session-model-selector')));
     await _pumpFrames(tester);
     expect(find.text('Choose a model'), findsOneWidget);
-    expect(find.byType(BottomSheet), findsNothing);
+    expect(find.byType(BottomSheet), findsOneWidget);
     expect(find.text('Fake Balanced'), findsOneWidget);
 
-    await tester.tap(find.byTooltip('Back to session settings'));
+    await tester.tap(find.byTooltip('Close'));
     await _pumpFrames(tester);
     expect(find.text('Session settings'), findsOneWidget);
 
@@ -1668,6 +1668,16 @@ void main() {
       final thinkingRect = tester.getRect(thinking);
       expect(modelRect.center.dy, closeTo(thinkingRect.center.dy, 0.1));
       expect(modelRect.right, lessThanOrEqualTo(thinkingRect.left));
+      final modelContainer = tester.widget<Container>(
+        find.descendant(of: model, matching: find.byType(Container)),
+      );
+      final thinkingContainer = tester.widget<Container>(
+        find.descendant(of: thinking, matching: find.byType(Container)),
+      );
+      expect(
+        (modelContainer.decoration! as BoxDecoration).color,
+        (thinkingContainer.decoration! as BoxDecoration).color,
+      );
       expect(tester.takeException(), isNull);
     },
   );
@@ -1721,7 +1731,7 @@ void main() {
     expect(find.text('What should the agent work on?'), findsNothing);
   });
 
-  testWidgets('new session loads the model page before a folder is chosen', (
+  testWidgets('new session opens the model sheet before a folder is chosen', (
     tester,
   ) async {
     final api = _CapabilityFakeApi(
@@ -1757,7 +1767,7 @@ void main() {
 
     expect(find.text('Choose a model'), findsOneWidget);
     expect(find.text('Fake Balanced'), findsOneWidget);
-    expect(find.byType(BottomSheet), findsNothing);
+    expect(find.byType(BottomSheet), findsOneWidget);
   });
 
   testWidgets('host detail exposes provider contract metadata', (tester) async {

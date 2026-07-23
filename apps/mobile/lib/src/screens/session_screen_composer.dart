@@ -40,11 +40,9 @@ class _Composer extends StatelessWidget {
     this.onAddFileTrigger,
     this.modelLabel,
     this.modelDetail,
-    this.modelCustomized = false,
     this.onModelTap,
     this.thinkingLabel,
     this.thinkingDetail,
-    this.thinkingCustomized = false,
     this.onThinkingTap,
     this.submitOnEnter = false,
   });
@@ -91,11 +89,9 @@ class _Composer extends StatelessWidget {
 
   final String? modelLabel;
   final String? modelDetail;
-  final bool modelCustomized;
   final VoidCallback? onModelTap;
   final String? thinkingLabel;
   final String? thinkingDetail;
-  final bool thinkingCustomized;
   final VoidCallback? onThinkingTap;
 
   final bool submitOnEnter;
@@ -115,7 +111,6 @@ class _Composer extends StatelessWidget {
           icon: Icons.memory_rounded,
           label: modelLabel!,
           detail: modelDetail,
-          customized: modelCustomized,
           tooltip: 'Choose model',
           onPressed: onModelTap!,
         ),
@@ -124,7 +119,6 @@ class _Composer extends StatelessWidget {
           icon: Icons.psychology_alt_rounded,
           label: thinkingLabel!,
           detail: thinkingDetail,
-          customized: thinkingCustomized,
           tooltip: 'Choose thinking level',
           onPressed: onThinkingTap!,
         ),

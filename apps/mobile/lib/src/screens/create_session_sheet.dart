@@ -363,7 +363,6 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
   bool _sandboxTouched = false;
   bool _webSearchTouched = false;
   bool _showAdvanced = false;
-  bool _showingModelPicker = false;
   bool _submitting = false;
   bool _allowPop = false;
   bool _loadingNode = false;
@@ -1686,14 +1685,10 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
       if (!mounted || _models.isEmpty) return;
     }
 
-    if (widget.presentation == CreateSessionPresentation.page) {
-      setState(() => _showingModelPicker = true);
-      return;
-    }
-
     final result = await showModalBottomSheet<_ModelPickerResult>(
       context: context,
       backgroundColor: Colors.transparent,
+      barrierColor: Colors.black.withValues(alpha: 0.28),
       showDragHandle: false,
       useSafeArea: true,
       isScrollControlled: true,
@@ -1717,7 +1712,6 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
     setState(() {
       _selectedModel = result.model;
       _inheritedModel = result.model?.model;
-      _showingModelPicker = false;
       final model = _controlModel;
       if (model == null || model.isAutoModel) {
         _reasoningEffort = null;
@@ -1932,16 +1926,11 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
     final hasDraft =
         _promptController.text.trim().isNotEmpty ||
         _draftAttachments.isNotEmpty;
-    final canPop =
-        !_showingModelPicker && !_showAdvanced && (_allowPop || !hasDraft);
+    final canPop = !_showAdvanced && (_allowPop || !hasDraft);
     return PopScope<SessionSummary>(
       canPop: canPop,
       onPopInvokedWithResult: (didPop, result) {
         if (didPop) return;
-        if (_showingModelPicker) {
-          setState(() => _showingModelPicker = false);
-          return;
-        }
         if (_showAdvanced) {
           _toggleAdvanced();
           return;
@@ -1951,28 +1940,16 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
       child: Scaffold(
         backgroundColor: colors.canvas,
         appBar: AppBar(
-          leading: _showingModelPicker
-              ? IconButton(
-                  tooltip: 'Back to session settings',
-                  onPressed: () => setState(() => _showingModelPicker = false),
-                  icon: const Icon(Icons.arrow_back_rounded),
-                )
-              : _showAdvanced
+          leading: _showAdvanced
               ? IconButton(
                   tooltip: 'Back to new session',
                   onPressed: _submitting ? null : _toggleAdvanced,
                   icon: const Icon(Icons.arrow_back_rounded),
                 )
               : null,
-          title: Text(
-            _showingModelPicker
-                ? 'Choose a model'
-                : _showAdvanced
-                ? 'Session settings'
-                : 'New session',
-          ),
+          title: Text(_showAdvanced ? 'Session settings' : 'New session'),
           actions: [
-            if (!_showAdvanced && !_showingModelPicker)
+            if (!_showAdvanced)
               IconButton(
                 key: const ValueKey('new-session-settings-button'),
                 tooltip: 'Session settings',
@@ -1984,20 +1961,7 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
         ),
         body: SafeArea(
           top: false,
-          child: _showingModelPicker
-              ? _ModelPickerSheet(
-                  models: _models,
-                  currentModel: _selectedModel?.model,
-                  profile: _selectedProfile,
-                  profileName: _profileToSubmit,
-                  inheritedModel: _profileToSubmit == null
-                      ? _defaultModelEntry
-                      : _profileModelEntry,
-                  providerName: _providerName,
-                  embedded: true,
-                  onSelected: _applyModelPickerResult,
-                )
-              : _showAdvanced
+          child: _showAdvanced
               ? _buildDraftSettings(context)
               : _buildDraftConversation(context),
         ),
@@ -2441,7 +2405,6 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
           icon: Icons.memory_rounded,
           label: _modelLabel,
           detail: _modelDescription,
-          customized: _selectedModel != null || _inheritedModel != null,
           tooltip: 'Choose model',
           enabled: !_submitting,
           onPressed: _openDraftModelPicker,
@@ -2458,7 +2421,6 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
               ? 'Default'
               : reasoningEffortLabel(effectiveReasoning),
           detail: _reasoningDescription(effectiveReasoning),
-          customized: _reasoningTouched,
           tooltip: 'Choose thinking level',
           enabled: !_submitting,
           onPressed: () => unawaited(_showDraftReasoningPicker()),
@@ -3688,8 +3650,6 @@ class _ModelPickerSheet extends StatefulWidget {
     required this.profileName,
     required this.inheritedModel,
     required this.providerName,
-    this.embedded = false,
-    this.onSelected,
   });
 
   final List<ModelCatalogEntry> models;
@@ -3698,8 +3658,6 @@ class _ModelPickerSheet extends StatefulWidget {
   final String? profileName;
   final ModelCatalogEntry? inheritedModel;
   final String providerName;
-  final bool embedded;
-  final ValueChanged<_ModelPickerResult>? onSelected;
 
   @override
   State<_ModelPickerSheet> createState() => _ModelPickerSheetState();
@@ -3745,16 +3703,11 @@ class _ModelPickerSheetState extends State<_ModelPickerSheet> {
     final content = Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Padding(
-          padding: widget.embedded
-              ? const EdgeInsets.fromLTRB(16, 8, 16, 0)
-              : EdgeInsets.zero,
-          child: TextField(
-            controller: _queryController,
-            decoration: const InputDecoration(
-              prefixIcon: Icon(Icons.search_rounded),
-              hintText: 'Search models',
-            ),
+        TextField(
+          controller: _queryController,
+          decoration: const InputDecoration(
+            prefixIcon: Icon(Icons.search_rounded),
+            hintText: 'Search models',
           ),
         ),
         const SizedBox(height: 14),
@@ -3769,9 +3722,7 @@ class _ModelPickerSheetState extends State<_ModelPickerSheet> {
                   ),
                 )
               : ListView.separated(
-                  padding: widget.embedded
-                      ? const EdgeInsets.fromLTRB(8, 0, 8, 24)
-                      : EdgeInsets.zero,
+                  padding: EdgeInsets.zero,
                   itemCount: filtered.length + (query.isEmpty ? 1 : 0),
                   separatorBuilder: (_, _) =>
                       Divider(height: 1, indent: 20, color: colors.border),
@@ -3825,7 +3776,6 @@ class _ModelPickerSheetState extends State<_ModelPickerSheet> {
         ),
       ],
     );
-    if (widget.embedded) return content;
     return MeshBottomSheetScaffold(
       icon: Icons.memory_rounded,
       title: 'Choose a model',
@@ -3838,12 +3788,7 @@ class _ModelPickerSheetState extends State<_ModelPickerSheet> {
   }
 
   void _select(BuildContext context, _ModelPickerResult result) {
-    final onSelected = widget.onSelected;
-    if (onSelected != null) {
-      onSelected(result);
-    } else {
-      Navigator.of(context).pop(result);
-    }
+    Navigator.of(context).pop(result);
   }
 }
 
