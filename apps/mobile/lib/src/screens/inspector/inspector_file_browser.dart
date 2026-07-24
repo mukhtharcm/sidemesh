@@ -219,6 +219,9 @@ class _WorkspaceBrowserPaneState extends State<WorkspaceBrowserPane> {
                       observable: _viewerObservable,
                       dense: true,
                       liveStream: _liveStream,
+                      onOpenFile: (path) {
+                        setState(() => _selected = path);
+                      },
                     ),
                   ),
                 ],

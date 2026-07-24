@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:sidemesh_mobile/src/api_client.dart';
+import 'package:sidemesh_mobile/src/fs_models.dart';
 import 'package:sidemesh_mobile/src/image_blob_cache_store.dart';
 import 'package:sidemesh_mobile/src/models.dart';
 
@@ -119,6 +120,91 @@ void main() {
     );
     expect(prefs.getKeys(), isEmpty);
   });
+
+  test('scopes relative image cache entries and requests by session', () async {
+    final store = ImageBlobCacheStore.instance;
+    final api = _ImageApi(Uint8List.fromList([1, 2, 3]));
+
+    await store.load(
+      host: host,
+      path: './artifacts/result.png',
+      api: api,
+      sessionId: 'session-a',
+    );
+    await store.load(
+      host: host,
+      path: './artifacts/result.png',
+      api: api,
+      sessionId: 'session-b',
+    );
+    await store.load(
+      host: host,
+      path: './artifacts/result.png',
+      api: api,
+      sessionId: 'session-a',
+    );
+
+    expect(api.requestCount, 2);
+    expect(api.sessionIds, ['session-a', 'session-b']);
+  });
+
+  test('refetches an image when the host file version changes', () async {
+    final store = ImageBlobCacheStore.instance;
+    final api = _ImageApi(Uint8List.fromList([1, 2, 3]));
+
+    final first = await store.load(
+      host: host,
+      path: '/workspace/result.png',
+      api: api,
+      sessionId: 'session-a',
+    );
+    expect(await first.readAsBytes(), [1, 2, 3]);
+
+    api.bytes[0] = 9;
+    api.modifiedAtMs = 2;
+    final second = await store.load(
+      host: host,
+      path: '/workspace/result.png',
+      api: api,
+      sessionId: 'session-a',
+    );
+
+    expect(api.requestCount, 2);
+    expect(await second.readAsBytes(), [9, 2, 3]);
+    expect(second.path, isNot(first.path));
+  });
+
+  test('does not reuse stale bytes when metadata is unavailable', () async {
+    final store = ImageBlobCacheStore.instance;
+    final api = _MetadataFailureImageApi(Uint8List.fromList([1, 2, 3]));
+
+    final first = await store.load(
+      host: host,
+      path: '/workspace/result.png',
+      api: api,
+      sessionId: 'session-a',
+    );
+    api.bytes[0] = 9;
+    final second = await store.load(
+      host: host,
+      path: '/workspace/result.png',
+      api: api,
+      sessionId: 'session-a',
+    );
+    addTearDown(() async {
+      for (final parent in {first.parent.path, second.parent.path}) {
+        final directory = Directory(parent);
+        if (await directory.exists()) {
+          await directory.delete(recursive: true);
+        }
+      }
+    });
+
+    expect(api.requestCount, 2);
+    expect(await first.readAsBytes(), [1, 2, 3]);
+    expect(await second.readAsBytes(), [9, 2, 3]);
+    expect(first.path, isNot(second.path));
+  });
 }
 
 class _ImageApi extends ApiClient {
@@ -126,6 +212,27 @@ class _ImageApi extends ApiClient {
 
   final Uint8List bytes;
   var requestCount = 0;
+  final List<String?> sessionIds = <String?>[];
+  var modifiedAtMs = 1;
+
+  @override
+  Future<FsMetadata> fetchMetadata(
+    HostProfile host,
+    String path, {
+    String? agentProvider,
+    String? sessionId,
+    String? basePath,
+  }) async {
+    return FsMetadata(
+      path: path,
+      size: bytes.length,
+      isDirectory: false,
+      isFile: true,
+      isSymlink: false,
+      createdAtMs: 0,
+      modifiedAtMs: modifiedAtMs,
+    );
+  }
 
   @override
   Future<Uint8List> fetchFsBlob(
@@ -133,8 +240,10 @@ class _ImageApi extends ApiClient {
     String path, {
     String? agentProvider,
     String? sessionId,
+    String? basePath,
   }) async {
     requestCount += 1;
+    sessionIds.add(sessionId);
     return bytes;
   }
 }
@@ -154,11 +263,31 @@ class _DelayedImageApi extends ApiClient {
   }
 
   @override
+  Future<FsMetadata> fetchMetadata(
+    HostProfile host,
+    String path, {
+    String? agentProvider,
+    String? sessionId,
+    String? basePath,
+  }) async {
+    return FsMetadata(
+      path: path,
+      size: bytes.length,
+      isDirectory: false,
+      isFile: true,
+      isSymlink: false,
+      createdAtMs: 0,
+      modifiedAtMs: 1,
+    );
+  }
+
+  @override
   Future<Uint8List> fetchFsBlob(
     HostProfile host,
     String path, {
     String? agentProvider,
     String? sessionId,
+    String? basePath,
   }) async {
     requestCount += 1;
     if (!started.isCompleted) {
@@ -166,5 +295,20 @@ class _DelayedImageApi extends ApiClient {
     }
     await release.future;
     return Uint8List.fromList(bytes);
+  }
+}
+
+class _MetadataFailureImageApi extends _ImageApi {
+  _MetadataFailureImageApi(super.bytes);
+
+  @override
+  Future<FsMetadata> fetchMetadata(
+    HostProfile host,
+    String path, {
+    String? agentProvider,
+    String? sessionId,
+    String? basePath,
+  }) {
+    throw StateError('metadata unavailable');
   }
 }

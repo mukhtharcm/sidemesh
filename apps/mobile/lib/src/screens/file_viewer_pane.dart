@@ -8,6 +8,7 @@ import '../fs_languages.dart';
 import '../fs_models.dart';
 import '../image_blob_cache_store.dart';
 import '../models.dart';
+import '../resource_reference.dart';
 import '../theme/app_colors.dart';
 import '../theme/app_theme.dart';
 import '../theme/app_tokens.dart';
@@ -38,6 +39,7 @@ class FileViewerPane extends StatefulWidget {
     this.dense = false,
     this.observable,
     this.pdfViewerBuilder,
+    this.onOpenFile,
   });
 
   final HostProfile host;
@@ -55,6 +57,7 @@ class FileViewerPane extends StatefulWidget {
   /// changes, so external UI (app bar, dialog header) can rebuild.
   final ValueNotifier<int>? observable;
   final PdfViewerPanePreviewBuilder? pdfViewerBuilder;
+  final void Function(String path)? onOpenFile;
 
   @override
   State<FileViewerPane> createState() => FileViewerPaneState();
@@ -66,6 +69,7 @@ class FileViewerPaneState extends State<FileViewerPane> {
   bool _loading = true;
   bool _editing = false;
   bool _saving = false;
+  bool _changedRemotely = false;
   bool _markdownPreview = false;
   bool _tablePreview = false;
   bool _structuredPreview = false;
@@ -113,8 +117,13 @@ class FileViewerPaneState extends State<FileViewerPane> {
       if (!mounted) return;
       final matches =
           event.changedPaths.contains(widget.path) || event.path == widget.path;
-      if (matches && !_editing) {
-        _load(silent: true);
+      if (matches) {
+        if (_editing) {
+          setState(() => _changedRemotely = true);
+          _bump();
+        } else {
+          _load(silent: true);
+        }
       }
     });
   }
@@ -157,6 +166,7 @@ class FileViewerPaneState extends State<FileViewerPane> {
         _autoEnterPreview = false;
         if (!_editing) {
           _editController.text = file.contents;
+          _changedRemotely = false;
         }
       });
       _bump();
@@ -212,11 +222,14 @@ class FileViewerPaneState extends State<FileViewerPane> {
         contents: _editController.text,
         agentProvider: widget.agentProvider,
         sessionId: widget.sessionId,
+        expectedModifiedAtMs: file.modifiedAtMs,
+        expectedSize: file.size,
       );
       if (!mounted) return;
       setState(() {
         _saving = false;
         _editing = false;
+        _changedRemotely = false;
       });
       _bump();
       showAppSnackBar(context, 'Saved changes');
@@ -241,6 +254,7 @@ class FileViewerPaneState extends State<FileViewerPane> {
       }
       if (_editing) {
         _editController.text = _file!.contents;
+        _changedRemotely = false;
       }
     });
     _bump();
@@ -506,8 +520,11 @@ class FileViewerPaneState extends State<FileViewerPane> {
             imageProviderLoader: () async {
               return ImageBlobCacheStore.instance.loadImageProvider(
                 host: widget.host,
-                path: widget.path,
+                path: file.path,
                 api: widget.api,
+                sessionId: widget.sessionId,
+                versionHint: file.modifiedAtMs,
+                sizeHint: file.size,
               );
             },
           ),
@@ -635,23 +652,44 @@ class FileViewerPaneState extends State<FileViewerPane> {
     if (_editing) {
       return Padding(
         padding: outerPadding,
-        child: Container(
-          decoration: BoxDecoration(
-            color: colors.surface,
-            borderRadius: BorderRadius.circular(12),
-            border: Border.all(color: colors.border),
-          ),
-          padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
-          child: TextField(
-            controller: _editController,
-            maxLines: null,
-            expands: true,
-            style: monoStyle(color: colors.textPrimary, fontSize: 13),
-            decoration: const InputDecoration(
-              border: InputBorder.none,
-              isCollapsed: true,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            if (_changedRemotely) ...[
+              MeshCard(
+                tone: MeshCardTone.muted,
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 10,
+                ),
+                child: Text(
+                  'This file changed on the host. Reload it before saving to avoid overwriting newer work.',
+                  style: Theme.of(context).textTheme.bodySmall,
+                ),
+              ),
+              const SizedBox(height: 8),
+            ],
+            Expanded(
+              child: Container(
+                decoration: BoxDecoration(
+                  color: colors.surface,
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: colors.border),
+                ),
+                padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
+                child: TextField(
+                  controller: _editController,
+                  maxLines: null,
+                  expands: true,
+                  style: monoStyle(color: colors.textPrimary, fontSize: 13),
+                  decoration: const InputDecoration(
+                    border: InputBorder.none,
+                    isCollapsed: true,
+                  ),
+                ),
+              ),
             ),
-          ),
+          ],
         ),
       );
     }
@@ -698,6 +736,11 @@ class FileViewerPaneState extends State<FileViewerPane> {
               child: MarkdownContent(
                 text: file.contents,
                 textColor: colors.textPrimary,
+                host: widget.host,
+                api: widget.api,
+                sessionId: widget.sessionId,
+                basePath: hostPathDirectory(file.path),
+                onOpenFile: widget.onOpenFile,
               ),
             )
           else if (supportsStructuredPreview &&

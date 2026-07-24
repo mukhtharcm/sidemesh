@@ -496,6 +496,7 @@ class _FakeFileViewerApi extends ApiClient {
     String path, {
     String? agentProvider,
     String? sessionId,
+    String? basePath,
   }) async {
     return file;
   }
@@ -506,6 +507,7 @@ class _FakeFileViewerApi extends ApiClient {
     String path, {
     String? agentProvider,
     String? sessionId,
+    String? basePath,
   }) {
     return Uri.http('localhost:3000', '/api/fs/blob', <String, String>{
       'path': path,
@@ -518,6 +520,7 @@ class _FakeFileViewerApi extends ApiClient {
     String path, {
     String? agentProvider,
     String? sessionId,
+    String? basePath,
   }) async {
     fetchFsBlobCalls += 1;
     lastFetchFsBlobPath = path;

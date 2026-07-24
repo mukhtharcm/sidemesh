@@ -2604,6 +2604,7 @@ class _WorkspaceBrowserCapabilityApi extends _CapabilityFakeApi {
     String path, {
     String? agentProvider,
     String? sessionId,
+    String? basePath,
   }) async {
     final contents = files[path] ?? '';
     return FsFile(

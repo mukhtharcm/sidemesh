@@ -26,6 +26,7 @@ describe("launchd service rendering", () => {
       updateChannel: "stable",
       stateDir: "/Users/example/.sidemesh",
       workspaceRoots: [],
+      allowedBrowserOrigins: ["https://self-hosted.example"],
       terminal: { enabled: true, shell: "/bin/zsh", requirePty: false },
       browserPreview: {
         enabled: true,
@@ -66,6 +67,10 @@ describe("launchd service rendering", () => {
 
     const env = renderLaunchdEnv(config);
     assert.match(env, /SIDEMESH_TOKEN=test-token/);
+    assert.match(
+      env,
+      /SIDEMESH_ALLOWED_BROWSER_ORIGINS=https:\/\/self-hosted\.example/,
+    );
     assert.match(env, /SIDEMESH_TERMINAL=1/);
     assert.match(env, /SIDEMESH_BROWSER_PREVIEW=1/);
     assert.match(env, /SIDEMESH_BROWSER_PREVIEW_MAX_PREVIEWS=2/);

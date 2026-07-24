@@ -89,6 +89,36 @@ describe("loadConfig", () => {
       quality: 55,
     });
     assert.equal(config.updateChannel, "stable");
+    assert.deepEqual(config.allowedBrowserOrigins, []);
+  });
+
+  it("loads exact browser origins from config and environment", async () => {
+    await writeFile(
+      configPath,
+      JSON.stringify({
+        version: 1,
+        token: "file-token",
+        allowedBrowserOrigins: ["https://mesh.example"],
+        providers: [{ kind: "codex", bin: "codex" }],
+      }),
+    );
+
+    const persisted = await loadConfig({ configPath, env: {} });
+    assert.deepEqual(persisted.allowedBrowserOrigins, [
+      "https://mesh.example",
+    ]);
+
+    const overridden = await loadConfig({
+      configPath,
+      env: {
+        SIDEMESH_ALLOWED_BROWSER_ORIGINS:
+          "https://one.example, https://two.example",
+      },
+    });
+    assert.deepEqual(overridden.allowedBrowserOrigins, [
+      "https://one.example",
+      "https://two.example",
+    ]);
   });
 
   it("loads update channel from persisted config and env overrides", async () => {

@@ -4,13 +4,16 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../host_store.dart';
+import '../api_client.dart';
 import '../models.dart';
 import '../onboarding_store.dart';
 import '../pairing.dart';
+import '../pairing_probe.dart';
 import '../theme/app_colors.dart';
 import '../theme/app_theme.dart';
 import '../theme/app_tokens.dart';
 import '../widgets/mesh_widgets.dart';
+import '../widgets/app_snackbar.dart';
 import 'home_screen.dart';
 import 'pair_scanner_sheet.dart';
 
@@ -73,18 +76,33 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
   }
 
   Future<void> _onPairingResult(PairingPayload payload) async {
+    final probe = await probePairingAddresses(ApiClient(), payload);
+    if (!mounted) return;
+    if (probe == null) {
+      showAppSnackBar(
+        context,
+        'Could not reach this machine from this device. Check its network address and try again.',
+      );
+      return;
+    }
+    final reachablePayload = PairingPayload(
+      label: payload.label,
+      baseUrl: probe.baseUrl,
+      token: payload.token,
+      addresses: payload.addresses,
+    );
     final store = HostStore();
     final hosts = await store.loadHosts();
     final host = HostProfile(
       id: _randomId(),
-      label: payload.label,
-      baseUrl: payload.baseUrl,
-      token: payload.token,
+      label: reachablePayload.label,
+      baseUrl: reachablePayload.baseUrl,
+      token: reachablePayload.token,
       enabled: true,
     );
     await store.saveHosts([...hosts, host]);
     HapticFeedback.heavyImpact();
-    if (mounted) setState(() => _pairingSuccess = payload);
+    if (mounted) setState(() => _pairingSuccess = reachablePayload);
     await Future<void>.delayed(const Duration(milliseconds: 1600));
     await _complete();
   }

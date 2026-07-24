@@ -123,6 +123,11 @@ Example URLs:
 - LAN: http://192.168.1.50:8787
 - Localhost: http://localhost:8787
 
+Pairing codes can advertise multiple Tailscale, LAN, IPv6, hostname, and
+loopback addresses. The app tests them from the client device and saves a
+reachable address instead of assuming the host's first choice works on every
+network.
+
 ## In-App Restart and Update
 
 From the host details screen, you can choose an update channel, restart the

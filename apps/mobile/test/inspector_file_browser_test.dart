@@ -103,6 +103,7 @@ class _FakeWorkspaceApi extends ApiClient {
     String path, {
     String? agentProvider,
     String? sessionId,
+    String? basePath,
   }) async {
     readPaths.add(path);
     final contents = files[path];
