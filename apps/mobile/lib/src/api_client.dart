@@ -812,12 +812,17 @@ class ApiClient {
     String path, {
     String? agentProvider,
     String? sessionId,
+    String? basePath,
   }) {
     _ensureHostEnabled(host);
     return _uri(
       host,
       '/api/fs/blob',
-      queryParameters: _fsQuery(path: path, sessionId: sessionId),
+      queryParameters: _fsQuery(
+        path: path,
+        sessionId: sessionId,
+        basePath: basePath,
+      ),
     );
   }
 
@@ -826,13 +831,61 @@ class ApiClient {
     String path, {
     String? agentProvider,
     String? sessionId,
+    String? basePath,
   }) async {
     final response = await _get(
       host,
       '/api/fs/blob',
-      queryParameters: _fsQuery(path: path, sessionId: sessionId),
+      queryParameters: _fsQuery(
+        path: path,
+        sessionId: sessionId,
+        basePath: basePath,
+      ),
       timeout: _transcriptReadTimeout,
       operation: 'load image',
+    );
+    _throwIfBadStatus(response);
+    return response.bodyBytes;
+  }
+
+  Future<Uint8List> fetchHostResource(
+    HostProfile host,
+    String url,
+  ) async {
+    final response = await _get(
+      host,
+      '/api/host-resource',
+      queryParameters: <String, String>{'url': url},
+      timeout: _transcriptReadTimeout,
+      operation: 'load host image',
+    );
+    _throwIfBadStatus(response);
+    return response.bodyBytes;
+  }
+
+  Future<SessionArtifact> publishSessionArtifact(
+    HostProfile host, {
+    required String sessionId,
+    required String source,
+  }) async {
+    final response = await _post(
+      host,
+      '/api/sessions/$sessionId/artifacts',
+      body: {'source': source},
+      operation: 'publish session artifact',
+    );
+    return SessionArtifact.fromJson(_decodeObject(response));
+  }
+
+  Future<Uint8List> fetchSessionArtifact(
+    HostProfile host,
+    String artifactId,
+  ) async {
+    final response = await _get(
+      host,
+      '/api/session-artifacts/${Uri.encodeComponent(artifactId)}',
+      timeout: _transcriptReadTimeout,
+      operation: 'load session artifact',
     );
     _throwIfBadStatus(response);
     return response.bodyBytes;
@@ -901,11 +954,16 @@ class ApiClient {
     String path, {
     String? agentProvider,
     String? sessionId,
+    String? basePath,
   }) async {
     final response = await _get(
       host,
       '/api/fs/metadata',
-      queryParameters: _fsQuery(path: path, sessionId: sessionId),
+      queryParameters: _fsQuery(
+        path: path,
+        sessionId: sessionId,
+        basePath: basePath,
+      ),
       operation: 'load file metadata',
     );
     return FsMetadata.fromJson(_decodeObject(response));
@@ -916,11 +974,16 @@ class ApiClient {
     String path, {
     String? agentProvider,
     String? sessionId,
+    String? basePath,
   }) async {
     final response = await _get(
       host,
       '/api/fs/read',
-      queryParameters: _fsQuery(path: path, sessionId: sessionId),
+      queryParameters: _fsQuery(
+        path: path,
+        sessionId: sessionId,
+        basePath: basePath,
+      ),
       timeout: _transcriptReadTimeout,
       operation: 'read file',
     );
@@ -933,6 +996,9 @@ class ApiClient {
     required String contents,
     String? agentProvider,
     String? sessionId,
+    String? basePath,
+    int? expectedModifiedAtMs,
+    int? expectedSize,
   }) async {
     await _post(
       host,
@@ -941,6 +1007,15 @@ class ApiClient {
         'path': path,
         'contents': contents,
         if ((sessionId ?? '').isNotEmpty) 'sessionId': sessionId,
+        if ((basePath ?? '').isNotEmpty) 'basePath': basePath,
+        ...?expectedModifiedAtMs == null
+            ? null
+            : <String, dynamic>{
+                'expectedModifiedAtMs': expectedModifiedAtMs,
+              },
+        ...?expectedSize == null
+            ? null
+            : <String, dynamic>{'expectedSize': expectedSize},
       },
       operation: 'write file',
     );
@@ -1051,10 +1126,15 @@ class ApiClient {
     );
   }
 
-  Map<String, String>? _fsQuery({String? path, String? sessionId}) {
+  Map<String, String>? _fsQuery({
+    String? path,
+    String? sessionId,
+    String? basePath,
+  }) {
     final query = <String, String>{
       if ((path ?? '').isNotEmpty) 'path': path!,
       if ((sessionId ?? '').isNotEmpty) 'sessionId': sessionId!,
+      if ((basePath ?? '').isNotEmpty) 'basePath': basePath!,
     };
     return query.isEmpty ? null : query;
   }
@@ -1190,6 +1270,26 @@ class ApiException implements Exception {
 
   @override
   String toString() => 'ApiException($statusCode): $body';
+}
+
+class SessionArtifact {
+  const SessionArtifact({
+    required this.id,
+    required this.contentType,
+    required this.size,
+  });
+
+  factory SessionArtifact.fromJson(Map<String, dynamic> json) {
+    return SessionArtifact(
+      id: json['artifactId']?.toString() ?? '',
+      contentType: json['contentType']?.toString() ?? '',
+      size: (json['size'] as num?)?.toInt() ?? 0,
+    );
+  }
+
+  final String id;
+  final String contentType;
+  final int size;
 }
 
 class ApiTimeoutException implements Exception {

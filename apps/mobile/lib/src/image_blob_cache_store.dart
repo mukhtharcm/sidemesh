@@ -33,14 +33,28 @@ class ImageBlobCacheStore {
     required String path,
     required ApiClient api,
     String? sessionId,
+    String? basePath,
+    int? versionHint,
+    int? sizeHint,
   }) async {
     if (kIsWeb) {
       throw UnsupportedError('Use loadImageProvider on the web.');
     }
-    final key = _cacheKey(host, path, sessionId: sessionId);
-    final cached = await _loadCachedFile(key);
-    if (cached != null) {
-      return cached;
+    final identity = await _resolveIdentity(
+      host: host,
+      path: path,
+      api: api,
+      sessionId: sessionId,
+      basePath: basePath,
+      versionHint: versionHint,
+      sizeHint: sizeHint,
+    );
+    final key = _cacheKey(host, identity.value, sessionId: sessionId);
+    if (identity.cacheable) {
+      final cached = await _loadCachedFile(key);
+      if (cached != null) {
+        return cached;
+      }
     }
 
     final existing = _inFlight[key];
@@ -48,14 +62,24 @@ class ImageBlobCacheStore {
       return existing;
     }
 
-    final request = _fetchAndStore(
-      host: host,
-      path: path,
-      api: api,
-      key: key,
-      generation: _clearGeneration,
-      sessionId: sessionId,
-    );
+    final request = identity.cacheable
+        ? _fetchAndStore(
+            host: host,
+            path: path,
+            api: api,
+            key: key,
+            generation: _clearGeneration,
+            sessionId: sessionId,
+            basePath: basePath,
+          )
+        : _fetchTransient(
+            host: host,
+            path: path,
+            api: api,
+            key: key,
+            sessionId: sessionId,
+            basePath: basePath,
+          );
     _inFlight[key] = request;
     try {
       return await request;
@@ -71,25 +95,52 @@ class ImageBlobCacheStore {
     required String path,
     required ApiClient api,
     String? sessionId,
+    String? basePath,
+    int? versionHint,
+    int? sizeHint,
   }) async {
     if (!kIsWeb) {
       return FileImage(
-        await load(host: host, path: path, api: api, sessionId: sessionId),
+        await load(
+          host: host,
+          path: path,
+          api: api,
+          sessionId: sessionId,
+          basePath: basePath,
+          versionHint: versionHint,
+          sizeHint: sizeHint,
+        ),
       );
     }
-    final key = _cacheKey(host, path, sessionId: sessionId);
-    final cachedBytes = _webCache.remove(key);
-    if (cachedBytes != null) {
-      _webCache[key] = cachedBytes;
-      return MemoryImage(cachedBytes);
+    final identity = await _resolveIdentity(
+      host: host,
+      path: path,
+      api: api,
+      sessionId: sessionId,
+      basePath: basePath,
+      versionHint: versionHint,
+      sizeHint: sizeHint,
+    );
+    final key = _cacheKey(host, identity.value, sessionId: sessionId);
+    if (identity.cacheable) {
+      final cachedBytes = _webCache.remove(key);
+      if (cachedBytes != null) {
+        _webCache[key] = cachedBytes;
+        return MemoryImage(cachedBytes);
+      }
     }
     final existing = _webInFlight[key];
     if (existing != null) return existing;
     final generation = _clearGeneration;
     final request = api
-        .fetchFsBlob(host, path, sessionId: sessionId)
+        .fetchFsBlob(
+          host,
+          path,
+          sessionId: sessionId,
+          basePath: basePath,
+        )
         .then<ImageProvider<Object>>((bytes) {
-          if (generation == _clearGeneration) {
+          if (identity.cacheable && generation == _clearGeneration) {
             _webCache[key] = bytes;
             while (_webCache.length > _maxWebEntries) {
               _webCache.remove(_webCache.keys.first);
@@ -183,8 +234,14 @@ class ImageBlobCacheStore {
     required String key,
     required int generation,
     required String? sessionId,
+    required String? basePath,
   }) async {
-    final bytes = await api.fetchFsBlob(host, path, sessionId: sessionId);
+    final bytes = await api.fetchFsBlob(
+      host,
+      path,
+      sessionId: sessionId,
+      basePath: basePath,
+    );
     if (generation != _clearGeneration) {
       return _writeTransientFile(key, bytes);
     }
@@ -228,6 +285,23 @@ class ImageBlobCacheStore {
     return file;
   }
 
+  Future<File> _fetchTransient({
+    required HostProfile host,
+    required String path,
+    required ApiClient api,
+    required String key,
+    required String? sessionId,
+    required String? basePath,
+  }) async {
+    final bytes = await api.fetchFsBlob(
+      host,
+      path,
+      sessionId: sessionId,
+      basePath: basePath,
+    );
+    return _writeTransientFile(key, bytes);
+  }
+
   Future<File> _writeTransientFile(String key, List<int> bytes) async {
     final dir = await Directory.systemTemp.createTemp('sidemesh_image_blob_');
     final file = File('${dir.path}/$key.blob');
@@ -249,8 +323,45 @@ class ImageBlobCacheStore {
   String _cacheKeyPrefix(HostProfile host) =>
       '${_stableHash('${host.id}\n${_hostFingerprint(host)}')}-';
 
-  String _cacheKey(HostProfile host, String path, {String? sessionId}) =>
-      '${_cacheKeyPrefix(host)}${_stableHash('${sessionId ?? ''}\n$path')}';
+  String _cacheKey(
+    HostProfile host,
+    String identity, {
+    String? sessionId,
+  }) =>
+      '${_cacheKeyPrefix(host)}${_stableHash('${sessionId ?? ''}\n$identity')}';
+
+  Future<({String value, bool cacheable})> _resolveIdentity({
+    required HostProfile host,
+    required String path,
+    required ApiClient api,
+    required String? sessionId,
+    required String? basePath,
+    required int? versionHint,
+    required int? sizeHint,
+  }) async {
+    if (versionHint != null) {
+      return (
+        value: '$path\n$versionHint\n${sizeHint ?? ''}',
+        cacheable: true,
+      );
+    }
+    try {
+      final metadata = await api.fetchMetadata(
+        host,
+        path,
+        sessionId: sessionId,
+        basePath: basePath,
+      );
+      return (
+        value: '${metadata.path}\n${metadata.modifiedAtMs}\n${metadata.size}',
+        cacheable: true,
+      );
+    } catch (_) {
+      // Without a host version we cannot prove an older cached image is still
+      // current. Deduplicate the active fetch, but do not reuse or persist it.
+      return (value: '$path\nunversioned', cacheable: false);
+    }
+  }
 
   String _hostFingerprint(HostProfile host) {
     final endpoint = _normalizedBaseUrl(host.baseUrl);

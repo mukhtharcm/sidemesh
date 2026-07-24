@@ -4,6 +4,7 @@ import {
   chmod,
   mkdir,
   mkdtemp,
+  readFile,
   rm,
   stat,
   writeFile,
@@ -104,6 +105,53 @@ describe("filesystem routes", () => {
     }
   });
 
+  it("normalizes bare relative and file URL blob paths on the host", async () => {
+    const root = await tempRoot(tempRoots);
+    const imageDir = nodePath.join(root, "artifacts");
+    const filePath = nodePath.join(imageDir, "result.png");
+    await mkdir(imageDir, { recursive: true });
+    await writeFile(filePath, Buffer.from("image payload", "utf8"));
+    const app = testApp(root, {
+      getSessionCwd: async () => root,
+    });
+    const server = await listen(app);
+    try {
+      for (const candidate of [
+        "artifacts/result.png",
+        new URL(`file://${filePath}`).toString(),
+      ]) {
+        const response = await fetch(
+          `${baseUrl(server)}/api/fs/blob?path=${encodeURIComponent(candidate)}&sessionId=session-1`,
+        );
+        assert.equal(response.status, 200);
+        assert.equal(await response.text(), "image payload");
+      }
+    } finally {
+      await close(server);
+    }
+  });
+
+  it("resolves document-relative blob paths from an authorized base directory", async () => {
+    const root = await tempRoot(tempRoots);
+    const docs = nodePath.join(root, "docs");
+    const filePath = nodePath.join(docs, "result.png");
+    await mkdir(docs, { recursive: true });
+    await writeFile(filePath, Buffer.from("nested image", "utf8"));
+    const app = testApp(root, {
+      getSessionCwd: async () => root,
+    });
+    const server = await listen(app);
+    try {
+      const response = await fetch(
+        `${baseUrl(server)}/api/fs/blob?path=${encodeURIComponent("./result.png")}&basePath=${encodeURIComponent(docs)}&sessionId=session-1`,
+      );
+      assert.equal(response.status, 200);
+      assert.equal(await response.text(), "nested image");
+    } finally {
+      await close(server);
+    }
+  });
+
   it("rejects relative paths that escape a session workspace", async () => {
     const root = await tempRoot(tempRoots);
     const outsideRoot = await tempRoot(tempRoots);
@@ -138,6 +186,35 @@ describe("filesystem routes", () => {
       assert.equal(response.status, 200);
       assert.equal(response.headers.get("content-type"), "audio/mpeg");
       assert.equal(await response.text(), "mp3 payload");
+    } finally {
+      await close(server);
+    }
+  });
+
+  it("returns validators and honors If-None-Match for blob reads", async () => {
+    const root = await tempRoot(tempRoots);
+    const filePath = nodePath.join(root, "result.png");
+    await writeFile(filePath, Buffer.from("image payload", "utf8"));
+    const app = testApp(root);
+    const server = await listen(app);
+    try {
+      const first = await fetch(
+        `${baseUrl(server)}/api/fs/blob?path=${encodeURIComponent(filePath)}`,
+      );
+      assert.equal(first.status, 200);
+      const etag = first.headers.get("etag");
+      assert.ok(etag);
+      assert.ok(first.headers.get("last-modified"));
+      assert.equal(
+        first.headers.get("cache-control"),
+        "private, max-age=0, must-revalidate",
+      );
+
+      const second = await fetch(
+        `${baseUrl(server)}/api/fs/blob?path=${encodeURIComponent(filePath)}`,
+        { headers: { "If-None-Match": etag } },
+      );
+      assert.equal(second.status, 304);
     } finally {
       await close(server);
     }
@@ -220,6 +297,35 @@ describe("filesystem routes", () => {
       });
       assert.equal(response.status, 200);
       assert.equal((await stat(filePath)).mode & 0o777, 0o755);
+    } finally {
+      await close(server);
+    }
+  });
+
+  it("rejects stale writes instead of overwriting a newer host version", async () => {
+    const root = await tempRoot(tempRoots);
+    const filePath = nodePath.join(root, "notes.txt");
+    await writeFile(filePath, "first", "utf8");
+    const original = await stat(filePath);
+    await writeFile(filePath, "newer host contents", "utf8");
+    const app = testApp(root);
+    const server = await listen(app);
+    try {
+      const response = await fetch(`${baseUrl(server)}/api/fs/write`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          path: filePath,
+          contents: "stale device contents",
+          expectedModifiedAtMs: original.mtimeMs,
+          expectedSize: original.size,
+        }),
+      });
+      assert.equal(response.status, 409);
+      assert.deepEqual(await response.json(), {
+        error: "file changed on the host; reload before saving",
+      });
+      assert.equal(await readFile(filePath, "utf8"), "newer host contents");
     } finally {
       await close(server);
     }

@@ -16,6 +16,7 @@ import '../ios_push_notification_service.dart';
 import '../mobile_client_version_policy.dart';
 import '../models.dart';
 import '../pending_send_recovery.dart';
+import '../pairing_probe.dart';
 import '../recent_session_view_store.dart';
 import '../recent_sessions_live_store.dart';
 import '../recent_session_filter.dart';
@@ -4268,6 +4269,7 @@ class _HostEditorSheetState extends State<HostEditorSheet> {
   String? _testResult;
   bool _testSuccess = false;
   bool _tokenVisible = false;
+  String? _lastSuccessfulConnectionKey;
 
   @override
   void initState() {
@@ -4295,18 +4297,38 @@ class _HostEditorSheetState extends State<HostEditorSheet> {
   Future<void> _scanPairingQr() async {
     final payload = await showPairScannerSheet(context);
     if (!mounted || payload == null) return;
+    setState(() {
+      _testing = true;
+      _testResult = 'Checking available addresses...';
+      _testSuccess = false;
+    });
+    final probe = await probePairingAddresses(ApiClient(), payload);
+    if (!mounted) return;
     HapticFeedback.mediumImpact();
     setState(() {
       _labelController.text = payload.label;
-      _baseUrlController.text = payload.baseUrl;
+      _baseUrlController.text = probe?.baseUrl ?? payload.baseUrl;
       _tokenController.text = payload.token;
       _enabled = true;
       _error = null;
+      _testing = false;
+      _testSuccess = probe != null;
+      _testResult = probe == null
+          ? 'No advertised address was reachable from this device.'
+          : 'Connected to ${probe.node.hostname} · ${probe.node.platform}';
+      _lastSuccessfulConnectionKey = probe == null
+          ? null
+          : _connectionKey(probe.baseUrl, payload.token);
     });
-    showAppSnackBar(context, 'QR scanned — ${payload.label}');
+    showAppSnackBar(
+      context,
+      probe == null
+          ? 'QR scanned, but this device could not reach the host.'
+          : 'Connected to ${payload.label}',
+    );
   }
 
-  Future<void> _testConnection() async {
+  Future<bool> _testConnection() async {
     final label = _labelController.text.trim();
     final baseUrl = normalizeBaseUrl(_baseUrlController.text);
     final token = _tokenController.text.trim();
@@ -4315,7 +4337,7 @@ class _HostEditorSheetState extends State<HostEditorSheet> {
         _testResult = 'Enter an address and token first.';
         _testSuccess = false;
       });
-      return;
+      return false;
     }
     final browserIssue = browserHostUrlIssue(baseUrl);
     if (browserIssue != null) {
@@ -4323,7 +4345,7 @@ class _HostEditorSheetState extends State<HostEditorSheet> {
         _testResult = browserIssue;
         _testSuccess = false;
       });
-      return;
+      return false;
     }
     setState(() {
       _testing = true;
@@ -4337,7 +4359,7 @@ class _HostEditorSheetState extends State<HostEditorSheet> {
         token: token,
       );
       final node = await ApiClient().fetchNode(probe);
-      if (!mounted) return;
+      if (!mounted) return false;
       // Auto-fill label if empty
       if (_labelController.text.trim().isEmpty) {
         _labelController.text = node.hostname;
@@ -4346,19 +4368,22 @@ class _HostEditorSheetState extends State<HostEditorSheet> {
         _testing = false;
         _testSuccess = true;
         _testResult = 'Connected to ${node.hostname} \u00b7 ${node.platform}';
+        _lastSuccessfulConnectionKey = _connectionKey(baseUrl, token);
       });
       HapticFeedback.mediumImpact();
+      return true;
     } catch (e) {
-      if (!mounted) return;
+      if (!mounted) return false;
       setState(() {
         _testing = false;
         _testSuccess = false;
         _testResult = 'Could not reach this machine. ${friendlyError(e)}';
       });
+      return false;
     }
   }
 
-  void _submit() {
+  Future<void> _submit() async {
     final label = _labelController.text.trim();
     final baseUrl = normalizeBaseUrl(_baseUrlController.text);
     final token = _tokenController.text.trim();
@@ -4373,6 +4398,17 @@ class _HostEditorSheetState extends State<HostEditorSheet> {
       setState(() => _error = browserIssue);
       return;
     }
+    final initial = widget.initialHost;
+    final connectionChanged =
+        initial == null ||
+        normalizeBaseUrl(initial.baseUrl) != baseUrl ||
+        initial.token != token;
+    if (connectionChanged &&
+        _lastSuccessfulConnectionKey != _connectionKey(baseUrl, token) &&
+        !await _testConnection()) {
+      return;
+    }
+    if (!mounted) return;
     Navigator.of(context).pop(
       HostProfile(
         id: widget.initialHost?.id ?? _randomId(),
@@ -4383,6 +4419,8 @@ class _HostEditorSheetState extends State<HostEditorSheet> {
       ),
     );
   }
+
+  String _connectionKey(String baseUrl, String token) => '$baseUrl\n$token';
 
   @override
   Widget build(BuildContext context) {

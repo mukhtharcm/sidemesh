@@ -131,6 +131,14 @@ export function renderServiceEnv(config: NodeConfig): string {
     envLine("SIDEMESH_PORT", String(config.port)),
     envLine("SIDEMESH_TOKEN", config.token),
     envLine("SIDEMESH_STATE_DIR", config.stateDir),
+    ...(config.allowedBrowserOrigins?.length
+      ? [
+          envLine(
+            "SIDEMESH_ALLOWED_BROWSER_ORIGINS",
+            config.allowedBrowserOrigins.join(","),
+          ),
+        ]
+      : []),
     envLine("SIDEMESH_TERMINAL", config.terminal.enabled ? "1" : "0"),
     envLine(
       "SIDEMESH_BROWSER_PREVIEW",

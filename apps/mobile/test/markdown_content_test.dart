@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
@@ -65,7 +66,7 @@ void main() {
       findsOneWidget,
     );
     await _waitForRequest(tester, api);
-    await tester.pump();
+    await tester.pumpAndSettle();
 
     expect(api.paths, ['./artifacts/result.png']);
     expect(api.sessionIds, ['session-1']);
@@ -130,7 +131,7 @@ void main() {
     expect(compactBox.constraints.maxHeight, 72);
   });
 
-  testWidgets('rejects unsupported image sources without a large placeholder', (
+  testWidgets('loads bare relative image sources through the host workspace', (
     tester,
   ) async {
     final api = _MarkdownImageApi(_onePixelPng);
@@ -138,13 +139,79 @@ void main() {
     await _pumpMarkdown(
       tester,
       api: api,
-      text: '![bad](asset-without-a-scheme.png)',
+      text: '![result](asset-without-a-scheme.png)',
     );
+    await _waitForRequest(tester, api);
+    await tester.pumpAndSettle();
+
+    expect(api.paths, ['asset-without-a-scheme.png']);
+    expect(find.byType(Image), findsOneWidget);
+    expect(find.text('Image unavailable'), findsNothing);
+  });
+
+  testWidgets('passes a Markdown document directory to the host resolver', (
+    tester,
+  ) async {
+    final api = _MarkdownImageApi(_onePixelPng);
+
+    await _pumpMarkdown(
+      tester,
+      api: api,
+      text: '![result](./result.png)',
+      basePath: '/repo/docs',
+    );
+    await _waitForRequest(tester, api);
+
+    expect(api.paths, ['./result.png']);
+    expect(api.basePaths, ['/repo/docs']);
+  });
+
+  testWidgets('loads loopback images through the connected host', (
+    tester,
+  ) async {
+    final api = _MarkdownImageApi(_onePixelPng);
+
+    await _pumpMarkdown(
+      tester,
+      api: api,
+      text: '![preview](http://localhost:3000/result.png)',
+    );
+    await tester.runAsync(() async {
+      for (var attempt = 0;
+          attempt < 100 && api.hostUrls.isEmpty;
+          attempt += 1) {
+        await Future<void>.delayed(const Duration(milliseconds: 10));
+      }
+    });
     await tester.pump();
 
-    expect(api.paths, isEmpty);
-    expect(find.text('Image unavailable'), findsOneWidget);
-    expect(find.text('asset-without-a-scheme.png'), findsOneWidget);
+    expect(api.hostUrls, ['http://localhost:3000/result.png']);
+    expect(find.byType(Image), findsOneWidget);
+  });
+
+  testWidgets('publishes a referenced temporary image after workspace denial', (
+    tester,
+  ) async {
+    final api = _MarkdownImageApi.temporary(_onePixelPng);
+
+    await _pumpMarkdown(
+      tester,
+      api: api,
+      text: '![validation](/tmp/validation.png)',
+    );
+    await _waitForRequest(tester, api);
+    await tester.runAsync(() async {
+      for (var attempt = 0;
+          attempt < 100 && api.artifactSources.isEmpty;
+          attempt += 1) {
+        await Future<void>.delayed(const Duration(milliseconds: 10));
+      }
+    });
+    await tester.pumpAndSettle();
+
+    expect(api.artifactSources, ['/tmp/validation.png']);
+    expect(find.byType(Image), findsOneWidget);
+    expect(find.text('Image unavailable'), findsNothing);
   });
 }
 
@@ -153,6 +220,7 @@ Future<void> _pumpMarkdown(
   required _MarkdownImageApi api,
   required String text,
   void Function(String path)? onOpenFile,
+  String? basePath,
 }) {
   final palette = ThemeVariant.codexAmber.light;
   return tester.pumpWidget(
@@ -169,6 +237,7 @@ Future<void> _pumpMarkdown(
               api: api,
               sessionId: 'session-1',
               onOpenFile: onOpenFile,
+              basePath: basePath,
             ),
           ),
         ),
@@ -192,10 +261,16 @@ class _MarkdownImageApi extends ApiClient {
     : bytes = Uint8List(0),
       error = StateError('path is outside any workspace');
 
+  _MarkdownImageApi.temporary(this.bytes)
+    : error = const ApiException(403, '{"error":"outside workspace"}');
+
   final Uint8List bytes;
   final Object? error;
   final List<String> paths = <String>[];
   final List<String?> sessionIds = <String?>[];
+  final List<String?> basePaths = <String?>[];
+  final List<String> hostUrls = <String>[];
+  final List<String> artifactSources = <String>[];
 
   @override
   Future<Uint8List> fetchFsBlob(
@@ -203,84 +278,45 @@ class _MarkdownImageApi extends ApiClient {
     String path, {
     String? agentProvider,
     String? sessionId,
+    String? basePath,
   }) async {
     paths.add(path);
     sessionIds.add(sessionId);
+    basePaths.add(basePath);
     final failure = error;
     if (failure != null) throw failure;
     return bytes;
   }
+
+  @override
+  Future<Uint8List> fetchHostResource(HostProfile host, String url) async {
+    hostUrls.add(url);
+    return bytes;
+  }
+
+  @override
+  Future<SessionArtifact> publishSessionArtifact(
+    HostProfile host, {
+    required String sessionId,
+    required String source,
+  }) async {
+    artifactSources.add(source);
+    return SessionArtifact(
+      id: 'artifact.png',
+      contentType: 'image/png',
+      size: bytes.length,
+    );
+  }
+
+  @override
+  Future<Uint8List> fetchSessionArtifact(
+    HostProfile host,
+    String artifactId,
+  ) async {
+    return bytes;
+  }
 }
 
-final Uint8List _onePixelPng = Uint8List.fromList(<int>[
-  137,
-  80,
-  78,
-  71,
-  13,
-  10,
-  26,
-  10,
-  0,
-  0,
-  0,
-  13,
-  73,
-  72,
-  68,
-  82,
-  0,
-  0,
-  0,
-  1,
-  0,
-  0,
-  0,
-  1,
-  8,
-  6,
-  0,
-  0,
-  0,
-  31,
-  21,
-  196,
-  137,
-  0,
-  0,
-  0,
-  13,
-  73,
-  68,
-  65,
-  84,
-  8,
-  215,
-  99,
-  248,
-  207,
-  192,
-  240,
-  31,
-  0,
-  5,
-  0,
-  1,
-  255,
-  137,
-  153,
-  61,
-  29,
-  0,
-  0,
-  0,
-  0,
-  73,
-  69,
-  78,
-  68,
-  174,
-  66,
-  96,
-  130,
-]);
+final Uint8List _onePixelPng = base64Decode(
+  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=',
+);

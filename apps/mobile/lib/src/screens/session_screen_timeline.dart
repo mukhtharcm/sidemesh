@@ -147,6 +147,7 @@ class _LiveAssistantBubble extends StatelessWidget {
     required this.sessionId,
     required this.message,
     this.onOpenFile,
+    this.onOpenHostUrl,
   });
 
   final HostProfile host;
@@ -154,6 +155,7 @@ class _LiveAssistantBubble extends StatelessWidget {
   final String sessionId;
   final ValueListenable<_LiveAssistantMessageState?> message;
   final void Function(String path)? onOpenFile;
+  final void Function(String url)? onOpenHostUrl;
 
   @override
   Widget build(BuildContext context) {
@@ -172,6 +174,7 @@ class _LiveAssistantBubble extends StatelessWidget {
             message: liveMessage.toMessage(),
             live: liveMessage.live,
             onOpenFile: onOpenFile,
+            onOpenHostUrl: onOpenHostUrl,
           ),
         );
       },
@@ -185,6 +188,7 @@ class _ReasoningBlock extends StatefulWidget {
     this.live = false,
     this.collapsedByDefault = false,
     this.onOpenFile,
+    this.onOpenHostUrl,
   });
 
   final String reasoning;
@@ -196,6 +200,7 @@ class _ReasoningBlock extends StatefulWidget {
   /// back to a disclosure row by default.
   final bool collapsedByDefault;
   final void Function(String path)? onOpenFile;
+  final void Function(String url)? onOpenHostUrl;
 
   @override
   State<_ReasoningBlock> createState() => _ReasoningBlockState();
@@ -291,6 +296,7 @@ class _ReasoningBlockState extends State<_ReasoningBlock> {
               child: _ReasoningTextBody(
                 text: widget.reasoning.trimRight(),
                 textColor: colors.textPrimary,
+                onOpenHostUrl: widget.onOpenHostUrl,
               ),
             ),
         ],
@@ -1007,6 +1013,7 @@ class _MessageBubble extends StatelessWidget {
     this.pinned = false,
     this.onTogglePin,
     this.onOpenFile,
+    this.onOpenHostUrl,
   });
 
   final HostProfile host;
@@ -1017,6 +1024,7 @@ class _MessageBubble extends StatelessWidget {
   final bool pinned;
   final VoidCallback? onTogglePin;
   final void Function(String path)? onOpenFile;
+  final void Function(String url)? onOpenHostUrl;
 
   @override
   Widget build(BuildContext context) {
@@ -1137,6 +1145,7 @@ class _MessageBubble extends StatelessWidget {
                             live: live,
                             collapsedByDefault: hasAnswer,
                             onOpenFile: onOpenFile,
+                            onOpenHostUrl: onOpenHostUrl,
                           ),
                         )
                       else if (block is TextBlock)
@@ -1146,6 +1155,7 @@ class _MessageBubble extends StatelessWidget {
                             textColor: textColor,
                             linkStyle: assistantLinkStyle,
                             onOpenFile: onOpenFile,
+                            onOpenHostUrl: onOpenHostUrl,
                             host: host,
                             api: api,
                             sessionId: sessionId,
@@ -1155,6 +1165,7 @@ class _MessageBubble extends StatelessWidget {
                             text: block.text,
                             style: bodyStyle,
                             linkStyle: linkStyle,
+                            onOpenHostUrl: onOpenHostUrl,
                           ),
                     if (message.attachments.isNotEmpty) ...[
                       _MessageAttachmentsSection(
@@ -1172,6 +1183,7 @@ class _MessageBubble extends StatelessWidget {
                           textColor: textColor,
                           linkStyle: assistantLinkStyle,
                           onOpenFile: onOpenFile,
+                          onOpenHostUrl: onOpenHostUrl,
                           host: host,
                           api: api,
                           sessionId: sessionId,
@@ -1181,6 +1193,7 @@ class _MessageBubble extends StatelessWidget {
                           text: message.text,
                           style: bodyStyle,
                           linkStyle: linkStyle,
+                          onOpenHostUrl: onOpenHostUrl,
                         ),
                     if (canPin || hasText)
                       Padding(
@@ -1297,7 +1310,11 @@ class _MessageAttachmentTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     if (attachment.isImage && attachment.url != null) {
-      return _MessageImageAttachmentTile(url: attachment.url!);
+      return _MessageImageAttachmentTile(
+        host: host,
+        api: api,
+        url: attachment.url!,
+      );
     }
     if (attachment.isLocalImage && attachment.path != null) {
       return _LocalImageAttachmentTile(
@@ -1312,8 +1329,14 @@ class _MessageAttachmentTile extends StatelessWidget {
 }
 
 class _MessageImageAttachmentTile extends StatefulWidget {
-  const _MessageImageAttachmentTile({required this.url});
+  const _MessageImageAttachmentTile({
+    required this.host,
+    required this.api,
+    required this.url,
+  });
 
+  final HostProfile host;
+  final ApiClient api;
   final String url;
 
   @override
@@ -1324,18 +1347,51 @@ class _MessageImageAttachmentTile extends StatefulWidget {
 class _MessageImageAttachmentTileState
     extends State<_MessageImageAttachmentTile> {
   Uint8List? _dataUrlBytes;
+  Uint8List? _hostUrlBytes;
+  Object? _hostUrlError;
+  int _loadGeneration = 0;
 
   @override
   void initState() {
     super.initState();
     _decodeDataUrlIfNeeded();
+    unawaited(_loadHostUrlIfNeeded());
   }
 
   @override
   void didUpdateWidget(covariant _MessageImageAttachmentTile oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (oldWidget.url != widget.url) {
+    if (oldWidget.url != widget.url ||
+        oldWidget.host.id != widget.host.id ||
+        oldWidget.host.baseUrl != widget.host.baseUrl ||
+        oldWidget.host.token != widget.host.token) {
       _decodeDataUrlIfNeeded();
+      unawaited(_loadHostUrlIfNeeded());
+    }
+  }
+
+  Future<void> _loadHostUrlIfNeeded() async {
+    final gen = ++_loadGeneration;
+    if (!isHostLoopbackUrl(widget.url)) {
+      if (mounted) {
+        setState(() {
+          _hostUrlBytes = null;
+          _hostUrlError = null;
+        });
+      }
+      return;
+    }
+    setState(() {
+      _hostUrlBytes = null;
+      _hostUrlError = null;
+    });
+    try {
+      final bytes = await widget.api.fetchHostResource(widget.host, widget.url);
+      if (!mounted || gen != _loadGeneration) return;
+      setState(() => _hostUrlBytes = bytes);
+    } catch (error) {
+      if (!mounted || gen != _loadGeneration) return;
+      setState(() => _hostUrlError = error);
     }
   }
 
@@ -1355,7 +1411,14 @@ class _MessageImageAttachmentTileState
     return _ImageAttachmentCard(
       imageProvider: imageProvider,
       heroTag: heroTag,
-      fallback: _AttachmentLoadError(colors: colors),
+      fallback: isHostLoopbackUrl(widget.url) && _hostUrlError == null
+          ? const Center(
+              child: SizedBox.square(
+                dimension: 22,
+                child: CircularProgressIndicator(strokeWidth: 2),
+              ),
+            )
+          : _AttachmentLoadError(colors: colors),
       onOpen: imageProvider == null
           ? null
           : () {
@@ -1374,6 +1437,12 @@ class _MessageImageAttachmentTileState
   ImageProvider<Object>? _imageProvider() {
     if (_dataUrlBytes != null) {
       return MemoryImage(_dataUrlBytes!);
+    }
+    if (_hostUrlBytes != null) {
+      return MemoryImage(_hostUrlBytes!);
+    }
+    if (isHostLoopbackUrl(widget.url)) {
+      return null;
     }
     if (!_isInlineImageDataUrl(widget.url)) {
       return NetworkImage(widget.url);
@@ -1430,13 +1499,25 @@ class _LocalImageAttachmentTileState extends State<_LocalImageAttachmentTile> {
       _error = null;
     });
     try {
-      final imageProvider = await ImageBlobCacheStore.instance
-          .loadImageProvider(
-            host: widget.host,
-            path: widget.path,
-            api: widget.api,
-            sessionId: widget.sessionId,
-          );
+      ImageProvider<Object> imageProvider;
+      try {
+        imageProvider = await ImageBlobCacheStore.instance.loadImageProvider(
+          host: widget.host,
+          path: widget.path,
+          api: widget.api,
+          sessionId: widget.sessionId,
+        );
+      } on ApiException catch (error) {
+        if (error.statusCode != 403) rethrow;
+        final artifact = await widget.api.publishSessionArtifact(
+          widget.host,
+          sessionId: widget.sessionId,
+          source: widget.path,
+        );
+        imageProvider = MemoryImage(
+          await widget.api.fetchSessionArtifact(widget.host, artifact.id),
+        );
+      }
       if (!mounted || gen != _loadGeneration) {
         return;
       }
@@ -1712,6 +1793,7 @@ class _MarkdownMessageBody extends StatelessWidget {
     required this.textColor,
     this.linkStyle,
     this.onOpenFile,
+    this.onOpenHostUrl,
     this.host,
     this.api,
     this.sessionId,
@@ -1721,6 +1803,7 @@ class _MarkdownMessageBody extends StatelessWidget {
   final Color textColor;
   final TextStyle? linkStyle;
   final void Function(String path)? onOpenFile;
+  final void Function(String url)? onOpenHostUrl;
   final HostProfile? host;
   final ApiClient? api;
   final String? sessionId;
@@ -1732,6 +1815,7 @@ class _MarkdownMessageBody extends StatelessWidget {
       textColor: textColor,
       linkStyle: linkStyle,
       onOpenFile: onOpenFile,
+      onOpenHostUrl: onOpenHostUrl,
       host: host,
       api: api,
       sessionId: sessionId,
@@ -1740,10 +1824,15 @@ class _MarkdownMessageBody extends StatelessWidget {
 }
 
 class _ReasoningTextBody extends StatelessWidget {
-  const _ReasoningTextBody({required this.text, required this.textColor});
+  const _ReasoningTextBody({
+    required this.text,
+    required this.textColor,
+    this.onOpenHostUrl,
+  });
 
   final String text;
   final Color textColor;
+  final void Function(String url)? onOpenHostUrl;
 
   @override
   Widget build(BuildContext context) {
@@ -1760,6 +1849,7 @@ class _ReasoningTextBody extends StatelessWidget {
         fallbacks: [colors.info, colors.textPrimary, colors.textSecondary],
         baseStyle: style,
       ),
+      onOpenHostUrl: onOpenHostUrl,
     );
   }
 }
@@ -1815,11 +1905,13 @@ class _LinkifiedSelectableText extends StatefulWidget {
     required this.text,
     required this.style,
     required this.linkStyle,
+    this.onOpenHostUrl,
   });
 
   final String text;
   final TextStyle? style;
   final TextStyle? linkStyle;
+  final void Function(String url)? onOpenHostUrl;
 
   @override
   State<_LinkifiedSelectableText> createState() =>
@@ -1858,7 +1950,11 @@ class _LinkifiedSelectableTextState extends State<_LinkifiedSelectableText> {
       raw = trimmed;
       final href = raw.startsWith('www.') ? 'https://$raw' : raw;
       final recognizer = TapGestureRecognizer()
-        ..onTap = () => _openLink(context, href);
+        ..onTap = () => _openLink(
+              context,
+              href,
+              onOpenHostUrl: widget.onOpenHostUrl,
+            );
       _recognizers.add(recognizer);
       spans.add(
         TextSpan(text: raw, style: widget.linkStyle, recognizer: recognizer),
@@ -1876,7 +1972,22 @@ class _LinkifiedSelectableTextState extends State<_LinkifiedSelectableText> {
   }
 }
 
-Future<void> _openLink(BuildContext context, String href) async {
+Future<void> _openLink(
+  BuildContext context,
+  String href, {
+  void Function(String url)? onOpenHostUrl,
+}) async {
+  if (isHostLoopbackUrl(href)) {
+    if (onOpenHostUrl != null) {
+      onOpenHostUrl(href);
+    } else if (context.mounted) {
+      showAppSnackBar(
+        context,
+        'This address belongs to the connected host and cannot open directly on this device.',
+      );
+    }
+    return;
+  }
   final uri = Uri.tryParse(href);
   if (uri == null) return;
   final ok = await launchUrl(uri, mode: LaunchMode.externalApplication);
@@ -2858,11 +2969,34 @@ class _ActivityCardState extends State<_ActivityCard> {
                     ],
                     baseStyle: bodyStyle,
                   ),
+                  onOpenHostUrl: _openHostActivityUrl,
                 )
               : SelectableText(text, style: bodyStyle),
         ],
       ),
     );
+  }
+
+  void _openHostActivityUrl(String raw) {
+    final callback = widget.onOpenBrowserPreview;
+    if (callback == null) {
+      showAppSnackBar(
+        context,
+        'This address belongs to the connected host and cannot open directly on this device.',
+      );
+      return;
+    }
+    final parsed = parseBrowserPreviewTargetInput(
+      raw,
+      sourceLabel: 'Activity link',
+      cwd: widget.sessionCwd,
+    );
+    final candidate = parsed.candidate;
+    if (candidate == null) {
+      showAppSnackBar(context, parsed.error ?? 'Could not open host link.');
+      return;
+    }
+    callback(candidate);
   }
 
   Widget _buildImageGenerationBody(

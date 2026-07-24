@@ -8,6 +8,7 @@ import 'package:url_launcher/url_launcher.dart';
 import '../../api_client.dart';
 import '../../image_blob_cache_store.dart';
 import '../../models.dart';
+import '../../resource_reference.dart';
 import '../../theme/app_colors.dart';
 import '../../theme/app_theme.dart';
 import '../../theme/app_tokens.dart';
@@ -23,6 +24,7 @@ InspectorSurface buildInspectorResourcesSurface({
   required SessionSummary session,
   required ApiClient api,
   void Function(String path)? onOpenFile,
+  void Function(String url)? onOpenHostUrl,
 }) {
   return InspectorSurface(
     kind: InspectorSurfaceKind.resources,
@@ -34,6 +36,7 @@ InspectorSurface buildInspectorResourcesSurface({
       session: session,
       api: api,
       onOpenFile: onOpenFile,
+      onOpenHostUrl: onOpenHostUrl,
     ),
   );
 }
@@ -45,6 +48,7 @@ class SessionResourcesPanel extends StatefulWidget {
     required this.session,
     required this.api,
     this.onOpenFile,
+    this.onOpenHostUrl,
     this.onClose,
     this.showDragHandle = false,
   });
@@ -53,6 +57,7 @@ class SessionResourcesPanel extends StatefulWidget {
   final SessionSummary session;
   final ApiClient api;
   final void Function(String path)? onOpenFile;
+  final void Function(String url)? onOpenHostUrl;
   final VoidCallback? onClose;
   final bool showDragHandle;
 
@@ -155,6 +160,11 @@ class _SessionResourcesPanelState extends State<SessionResourcesPanel> {
       _resources.where((item) => item.isImage).toList(growable: false);
 
   Future<void> _openUrl(String raw) async {
+    if (isHostLoopbackUrl(raw) && widget.onOpenHostUrl != null) {
+      widget.onClose?.call();
+      widget.onOpenHostUrl!(raw);
+      return;
+    }
     final uri = Uri.tryParse(raw);
     if (uri == null) {
       if (mounted) showAppSnackBar(context, 'Could not open link');
@@ -195,17 +205,42 @@ class _SessionResourcesPanelState extends State<SessionResourcesPanel> {
         title: resource.title,
         subtitle: _gallerySubtitle(resource),
         imageProviderLoader: () async {
-          return ImageBlobCacheStore.instance.loadImageProvider(
-            host: widget.host,
-            path: path!,
-            api: widget.api,
-            sessionId: widget.session.id,
-          );
+          try {
+            return await ImageBlobCacheStore.instance.loadImageProvider(
+              host: widget.host,
+              path: path!,
+              api: widget.api,
+              sessionId: widget.session.id,
+            );
+          } on ApiException catch (error) {
+            if (error.statusCode != 403) rethrow;
+            final artifact = await widget.api.publishSessionArtifact(
+              widget.host,
+              sessionId: widget.session.id,
+              source: path!,
+            );
+            return MemoryImage(
+              await widget.api.fetchSessionArtifact(
+                widget.host,
+                artifact.id,
+              ),
+            );
+          }
         },
       );
     }
 
     final url = resource.url ?? '';
+    if (isHostLoopbackUrl(url)) {
+      return ImageViewerSource.loader(
+        heroTag: 'session-resource:${widget.host.id}:${resource.id}',
+        title: resource.title,
+        subtitle: _gallerySubtitle(resource),
+        imageProviderLoader: () async => MemoryImage(
+          await widget.api.fetchHostResource(widget.host, url),
+        ),
+      );
+    }
     final provider = _imageProviderForUrl(url);
     if (provider != null) {
       return ImageViewerSource(
@@ -700,13 +735,23 @@ class _ResourceImagePreview extends StatelessWidget {
         path: resource.path!,
       );
     }
-    return _RemoteResourceImage(url: resource.url ?? '');
+    return _RemoteResourceImage(
+      host: host,
+      api: api,
+      url: resource.url ?? '',
+    );
   }
 }
 
 class _RemoteResourceImage extends StatefulWidget {
-  const _RemoteResourceImage({required this.url});
+  const _RemoteResourceImage({
+    required this.host,
+    required this.api,
+    required this.url,
+  });
 
+  final HostProfile host;
+  final ApiClient api;
   final String url;
 
   @override
@@ -715,18 +760,42 @@ class _RemoteResourceImage extends StatefulWidget {
 
 class _RemoteResourceImageState extends State<_RemoteResourceImage> {
   Uint8List? _dataUrlBytes;
+  Uint8List? _hostUrlBytes;
+  int _loadGeneration = 0;
 
   @override
   void initState() {
     super.initState();
     _decodeInlineDataUrl();
+    unawaited(_loadHostUrlIfNeeded());
   }
 
   @override
   void didUpdateWidget(covariant _RemoteResourceImage oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (oldWidget.url != widget.url) {
+    if (oldWidget.url != widget.url ||
+        oldWidget.host.id != widget.host.id ||
+        oldWidget.host.baseUrl != widget.host.baseUrl ||
+        oldWidget.host.token != widget.host.token) {
       _decodeInlineDataUrl();
+      unawaited(_loadHostUrlIfNeeded());
+    }
+  }
+
+  Future<void> _loadHostUrlIfNeeded() async {
+    final gen = ++_loadGeneration;
+    if (!isHostLoopbackUrl(widget.url)) {
+      if (mounted) setState(() => _hostUrlBytes = null);
+      return;
+    }
+    if (mounted) setState(() => _hostUrlBytes = null);
+    try {
+      final bytes = await widget.api.fetchHostResource(widget.host, widget.url);
+      if (!mounted || gen != _loadGeneration) return;
+      setState(() => _hostUrlBytes = bytes);
+    } catch (_) {
+      if (!mounted || gen != _loadGeneration) return;
+      setState(() => _hostUrlBytes = null);
     }
   }
 
@@ -742,6 +811,12 @@ class _RemoteResourceImageState extends State<_RemoteResourceImage> {
   ImageProvider<Object>? _provider() {
     if (_dataUrlBytes != null) {
       return MemoryImage(_dataUrlBytes!);
+    }
+    if (_hostUrlBytes != null) {
+      return MemoryImage(_hostUrlBytes!);
+    }
+    if (isHostLoopbackUrl(widget.url)) {
+      return null;
     }
     if (widget.url.startsWith('http://') || widget.url.startsWith('https://')) {
       return NetworkImage(widget.url);
@@ -807,13 +882,25 @@ class _LocalResourceImageState extends State<_LocalResourceImage> {
       _error = null;
     });
     try {
-      final imageProvider = await ImageBlobCacheStore.instance
-          .loadImageProvider(
-            host: widget.host,
-            path: widget.path,
-            api: widget.api,
-            sessionId: widget.sessionId,
-          );
+      ImageProvider<Object> imageProvider;
+      try {
+        imageProvider = await ImageBlobCacheStore.instance.loadImageProvider(
+          host: widget.host,
+          path: widget.path,
+          api: widget.api,
+          sessionId: widget.sessionId,
+        );
+      } on ApiException catch (error) {
+        if (error.statusCode != 403) rethrow;
+        final artifact = await widget.api.publishSessionArtifact(
+          widget.host,
+          sessionId: widget.sessionId,
+          source: widget.path,
+        );
+        imageProvider = MemoryImage(
+          await widget.api.fetchSessionArtifact(widget.host, artifact.id),
+        );
+      }
       if (!mounted || gen != _loadGeneration) return;
       setState(() => _imageProvider = imageProvider);
     } catch (error) {

@@ -94,6 +94,11 @@ import {
   attachFsLiveSocket,
   registerFsRoutes,
 } from "./fs-routes.js";
+import { registerHostResourceRoutes } from "./host-resource.js";
+import {
+  artifactReferencesMatch,
+  registerSessionArtifactRoutes,
+} from "./session-artifacts.js";
 import {
   TerminalError,
   TerminalRegistry,
@@ -1399,12 +1404,15 @@ export async function startServer(
     xFrameOptions: "DENY",
   }));
   app.use("*", cors({
-    origin: (origin) => (isAllowedBrowserOrigin(origin) ? origin : null),
+    origin: (origin) =>
+      isAllowedBrowserOrigin(origin, config.allowedBrowserOrigins) ? origin : null,
     allowHeaders: ["Authorization", "Content-Type", "Range"],
     exposeHeaders: [
       "Accept-Ranges",
       "Content-Length",
       "Content-Range",
+      "ETag",
+      "Last-Modified",
     ],
   }));
   // Compress large JSON responses while skipping already-compressed content
@@ -1450,6 +1458,7 @@ export async function startServer(
     await next();
   });
   app.use("*", authMiddleware);
+  registerHostResourceRoutes(app);
 
   app.get("/api/node", jsonRoute((_request, response) => {
     const defaultProvider = providerRuntime.defaultProvider;
@@ -1901,6 +1910,31 @@ export async function startServer(
       ),
     getSessionCwd,
     workspaceRoots: config.workspaceRoots,
+  });
+  registerSessionArtifactRoutes(app, {
+    stateDir: config.stateDir,
+    isReferenced: async (sessionId, source) => {
+      const sessionProvider = providerEntryForSessionId(sessionId);
+      if (
+        !sessionProvider ||
+        !hasProviderMethod(sessionProvider.provider, "readSessionThread") ||
+        !hasProviderMethod(sessionProvider.provider, "readSessionLog")
+      ) {
+        return false;
+      }
+      const resources = await readSessionResources(
+        provider,
+        sessionId,
+        liveActivities,
+      );
+      return resources.resources.some(
+        (resource) =>
+          (resource.path != null &&
+            artifactReferencesMatch(resource.path, source)) ||
+          (resource.url != null &&
+            artifactReferencesMatch(resource.url, source)),
+      );
+    },
   });
 
   app.get("/api/terminals", jsonRoute((_request, response) => {
@@ -3375,7 +3409,10 @@ export async function startServer(
     }
 
     const origin = request.headers.origin;
-    if (origin && !isAllowedBrowserOrigin(origin)) {
+    if (
+      origin &&
+      !isAllowedBrowserOrigin(origin, config.allowedBrowserOrigins)
+    ) {
       socket.destroy();
       return;
     }
@@ -3756,7 +3793,10 @@ function tokenFromWebSocketProtocols(header: string | undefined): string {
   }
 }
 
-function isAllowedBrowserOrigin(origin: string): boolean {
+export function isAllowedBrowserOrigin(
+  origin: string,
+  configuredOrigins: readonly string[] = [],
+): boolean {
   try {
     const parsed = new URL(origin);
     const hostname = parsed.hostname.replace(/^\[|\]$/g, "").toLowerCase();
@@ -3768,9 +3808,10 @@ function isAllowedBrowserOrigin(origin: string): boolean {
     const hostedApp =
       parsed.origin === "https://app.sidemesh.com" ||
       parsed.origin === "https://sidemesh-app.pages.dev";
+    const configured = configuredOrigins.includes(parsed.origin);
     return (
       (parsed.protocol === "http:" || parsed.protocol === "https:") &&
-      (loopback || hostedApp)
+      (loopback || hostedApp || configured)
     );
   } catch {
     return false;
