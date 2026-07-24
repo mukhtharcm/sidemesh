@@ -252,11 +252,27 @@ function attachmentFromSource(
   if (
     source.startsWith("/") ||
     source.startsWith("./") ||
-    source.startsWith("../")
+    source.startsWith("../") ||
+    /^[A-Za-z]:[\\/]/.test(source) ||
+    /^file:/i.test(source) ||
+    isBareRelativeImagePath(source)
   ) {
     return { type: "localImage", path: source };
   }
   return null;
+}
+
+function isBareRelativeImagePath(source: string): boolean {
+  if (!source || source.startsWith("#") || source.startsWith("//")) {
+    return false;
+  }
+  if (/^[A-Za-z][A-Za-z0-9+.-]*:/.test(source)) {
+    return false;
+  }
+  const path = source.replace(/[?#].*$/, "");
+  return /\.(?:avif|bmp|gif|heic|heif|jpe?g|png|svg|tiff?|webp)$/i.test(
+    path,
+  );
 }
 
 function normalizeType(value: unknown): string {

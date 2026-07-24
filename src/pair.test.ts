@@ -4,6 +4,7 @@ import { describe, it } from "node:test";
 import {
   buildPairInfo,
   buildPairUrl,
+  isTailscaleV6,
   selectPreferredPairAddress,
 } from "./pair.js";
 import type { NodeConfig } from "./types.js";
@@ -50,18 +51,27 @@ describe("pairing helpers", () => {
       label: "MacBook",
       baseUrl: "http://100.80.10.1:8899",
       token: "secret-token",
+      addresses: [
+        "http://100.80.10.1:8899",
+        "http://192.168.1.5:8899",
+        "http://[fd7a:115c:a1e0::1]:8899",
+      ],
     });
 
     const parsed = new URL(pairUrl);
     assert.equal(parsed.protocol, "sidemesh:");
     assert.equal(parsed.hostname, "pair");
-    assert.equal(parsed.searchParams.get("v"), "1");
+    assert.equal(parsed.searchParams.get("v"), "2");
     assert.equal(parsed.searchParams.get("label"), "MacBook");
     assert.equal(
       parsed.searchParams.get("baseUrl"),
       "http://100.80.10.1:8899",
     );
     assert.equal(parsed.searchParams.get("token"), "secret-token");
+    assert.deepEqual(parsed.searchParams.getAll("address"), [
+      "http://192.168.1.5:8899",
+      "http://[fd7a:115c:a1e0::1]:8899",
+    ]);
   });
 
   it("prefers Tailscale addresses for QR pairing", () => {
@@ -76,5 +86,10 @@ describe("pairing helpers", () => {
     ]);
 
     assert.equal(selected?.kind, "tailscale");
+  });
+
+  it("recognizes the Tailscale IPv6 ULA range", () => {
+    assert.equal(isTailscaleV6("fd7a:115c:a1e0::1234"), true);
+    assert.equal(isTailscaleV6("fd00::1234"), false);
   });
 });

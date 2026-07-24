@@ -64,6 +64,10 @@ export async function loadConfig(
     env.SIDEMESH_WORKSPACE_ROOTS,
     persisted.value?.workspaceRoots ?? [],
   );
+  const allowedBrowserOrigins = resolveAllowedBrowserOrigins(
+    env.SIDEMESH_ALLOWED_BROWSER_ORIGINS,
+    persisted.value?.allowedBrowserOrigins ?? [],
+  );
   const port = parseInteger(
     env.SIDEMESH_PORT,
     persisted.value?.port ?? 8787,
@@ -121,6 +125,7 @@ export async function loadConfig(
     minimumMobileClientVersion,
     stateDir,
     workspaceRoots,
+    allowedBrowserOrigins,
     terminal,
     browserPreview,
     configPath,
@@ -137,6 +142,35 @@ export async function loadConfig(
   }
 
   return config;
+}
+
+function resolveAllowedBrowserOrigins(
+  envValue: string | undefined,
+  persisted: string[],
+): string[] {
+  const candidates =
+    envValue === undefined ? persisted : envValue.split(",").map(String);
+  const origins = new Set<string>();
+  for (const candidate of candidates) {
+    const value = candidate.trim().replace(/\/$/, "");
+    if (!value) continue;
+    let parsed: URL;
+    try {
+      parsed = new URL(value);
+    } catch {
+      throw new Error(`Invalid browser origin: ${candidate}`);
+    }
+    if (
+      (parsed.protocol !== "http:" && parsed.protocol !== "https:") ||
+      parsed.origin !== value
+    ) {
+      throw new Error(
+        `Invalid browser origin "${candidate}": use an HTTP(S) origin without a path`,
+      );
+    }
+    origins.add(parsed.origin);
+  }
+  return [...origins];
 }
 
 function resolveWorkspaceRoots(

@@ -1127,11 +1127,13 @@ class _PinnedMessageSheet extends StatelessWidget {
     required this.pin,
     required this.onUnpin,
     this.onOpenFile,
+    this.onOpenHostUrl,
   });
 
   final PinnedSessionMessage pin;
   final VoidCallback onUnpin;
   final void Function(String path)? onOpenFile;
+  final void Function(String url)? onOpenHostUrl;
 
   @override
   Widget build(BuildContext context) {
@@ -1214,11 +1216,13 @@ class _PinnedMessageSheet extends StatelessWidget {
                               textColor: colors.textPrimary,
                               linkStyle: pinnedLinkStyle,
                               onOpenFile: onOpenFile,
+                              onOpenHostUrl: onOpenHostUrl,
                             )
                           : _LinkifiedSelectableText(
                               text: pin.text,
                               style: textStyle,
                               linkStyle: pinnedLinkStyle,
+                              onOpenHostUrl: onOpenHostUrl,
                             ))
                     : Text(
                         pin.preview,

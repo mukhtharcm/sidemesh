@@ -96,6 +96,13 @@ valid for a daemon running on the same machine. For another machine, publish
 the daemon only through a trusted-network HTTPS endpoint such as Tailscale
 Serve; do not expose it directly to the public internet.
 
+The daemon trusts only the hosted Sidemesh web origins and loopback by default.
+For a self-hosted browser client, add its exact HTTP(S) origin to
+`allowedBrowserOrigins` in `~/.sidemesh/config.json`, or set a comma-separated
+`SIDEMESH_ALLOWED_BROWSER_ORIGINS` value in the daemon environment. This
+allowlist changes browser CORS and WebSocket origin checks; bearer-token
+authentication is still required.
+
 Build the browser app locally with:
 
 ```bash

@@ -1,5 +1,5 @@
 import { Buffer } from "node:buffer";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { createReadStream, watch, type FSWatcher } from "node:fs";
 import type { IncomingMessage } from "node:http";
 import {
@@ -17,6 +17,7 @@ import {
 } from "node:fs/promises";
 import path from "node:path";
 import { Readable, type Duplex } from "node:stream";
+import { fileURLToPath } from "node:url";
 
 import type { Hono } from "hono";
 import type { WebSocket, WebSocketServer } from "ws";
@@ -63,6 +64,9 @@ export function registerFsRoutes(app: Hono<HonoServerEnv>, opts: FsRoutesOptions
       const target = await resolveIncomingPath(
         request.query.path,
         resolveRoots,
+        {
+          basePath: asString(request.query.basePath),
+        },
       );
       const entries = (await readdir(target, { withFileTypes: true }))
         .map((entry) => ({
@@ -90,6 +94,9 @@ export function registerFsRoutes(app: Hono<HonoServerEnv>, opts: FsRoutesOptions
       const target = await resolveIncomingPath(
         request.query.path,
         resolveRoots,
+        {
+          basePath: asString(request.query.basePath),
+        },
       );
       response.json(await buildMetadata(target));
     }),
@@ -106,6 +113,9 @@ export function registerFsRoutes(app: Hono<HonoServerEnv>, opts: FsRoutesOptions
       const target = await resolveIncomingPath(
         request.query.path,
         resolveRoots,
+        {
+          basePath: asString(request.query.basePath),
+        },
       );
       const meta = await buildMetadata(target);
       if (!meta.isFile) {
@@ -153,7 +163,11 @@ export function registerFsRoutes(app: Hono<HonoServerEnv>, opts: FsRoutesOptions
     );
     let target: string;
     try {
-      target = await resolveIncomingBlobPath(request.query.path, resolveRoots);
+      target = await resolveIncomingBlobPath(
+        request.query.path,
+        resolveRoots,
+        asString(request.query.basePath),
+      );
     } catch (error) {
       if (error instanceof WorkspaceAccessError) {
         return c.json(
@@ -165,13 +179,19 @@ export function registerFsRoutes(app: Hono<HonoServerEnv>, opts: FsRoutesOptions
     }
     const info = await stat(target);
     const range = parseByteRangeHeader(c.req.header("range"), info.size);
+    const etag = fileVersionEtag(info.size, info.mtimeMs);
     c.header("Content-Type", guessMime(target));
     c.header("Accept-Ranges", "bytes");
-    c.header("Cache-Control", "private, max-age=60");
+    c.header("Cache-Control", "private, max-age=0, must-revalidate");
+    c.header("ETag", etag);
+    c.header("Last-Modified", info.mtime.toUTCString());
     c.header(
       "Content-Disposition",
       `inline; filename="${path.basename(target).replaceAll('"', "")}"`,
     );
+    if (c.req.header("if-none-match") === etag && !range) {
+      return c.body(null, 304);
+    }
     if (range === "unsatisfiable") {
       c.header("Content-Range", `bytes */${info.size}`);
       return c.body(null, 416);
@@ -209,6 +229,7 @@ export function registerFsRoutes(app: Hono<HonoServerEnv>, opts: FsRoutesOptions
         resolveRoots,
         {
           allowMissing: true,
+          basePath: asString(request.body?.basePath),
         },
       );
       const contents = request.body?.contents;
@@ -221,9 +242,17 @@ export function registerFsRoutes(app: Hono<HonoServerEnv>, opts: FsRoutesOptions
         response.status(413).json({ error: "payload too large" });
         return;
       }
+      await assertExpectedFileVersion(target, {
+        modifiedAtMs: asFiniteNumber(request.body?.expectedModifiedAtMs),
+        size: asFiniteNumber(request.body?.expectedSize),
+      });
       await writeFileAtomically(target, buffer);
       clearFsSearchCache();
-      response.json({ path: target, bytes: buffer.byteLength });
+      response.json({
+        path: target,
+        bytes: buffer.byteLength,
+        modifiedAtMs: (await stat(target)).mtimeMs,
+      });
     }),
   );
 
@@ -391,19 +420,121 @@ function parseByteRangeHeader(
 async function resolveIncomingPath(
   raw: unknown,
   roots: () => Promise<string[]>,
-  options: { allowMissing?: boolean } = {},
+  options: { allowMissing?: boolean; basePath?: string | null } = {},
 ): Promise<string> {
   if (typeof raw !== "string") {
     throw new WorkspaceAccessError("path is required", 400);
   }
-  return resolveWorkspacePath(raw, await roots(), options);
+  const workspaceRoots = await roots();
+  let normalized = normalizeHostFileReference(raw);
+  if (!normalized.trim()) {
+    throw new WorkspaceAccessError("path is required", 400);
+  }
+  if (!path.isAbsolute(normalized)) {
+    const rawBasePath = options.basePath?.trim();
+    if (rawBasePath) {
+      const normalizedBasePath = normalizeHostFileReference(rawBasePath);
+      const basePath = await resolveWorkspacePath(
+        path.isAbsolute(normalizedBasePath)
+          ? normalizedBasePath
+          : workspaceRoots.length === 1
+            ? path.resolve(workspaceRoots[0]!, normalizedBasePath)
+            : normalizedBasePath,
+        workspaceRoots,
+      );
+      const baseInfo = await stat(basePath);
+      if (!baseInfo.isDirectory()) {
+        throw new WorkspaceAccessError("basePath must be a directory", 400);
+      }
+      normalized = path.resolve(basePath, normalized);
+    } else if (workspaceRoots.length !== 1) {
+      throw new WorkspaceAccessError(
+        "relative paths require a session workspace",
+        400,
+      );
+    } else {
+      normalized = path.resolve(workspaceRoots[0]!, normalized);
+    }
+  }
+  return resolveWorkspacePath(normalized, workspaceRoots, options);
 }
 
 async function resolveIncomingBlobPath(
   raw: unknown,
   roots: () => Promise<string[]>,
+  basePath?: string | null,
 ): Promise<string> {
-  return resolveIncomingPath(raw, roots);
+  return resolveIncomingPath(raw, roots, { basePath });
+}
+
+function normalizeHostFileReference(raw: string): string {
+  let normalized = raw.trim();
+  if (normalized.startsWith("<") && normalized.endsWith(">")) {
+    normalized = normalized.slice(1, -1).trim();
+  }
+  if (/^file:/i.test(normalized)) {
+    try {
+      return fileURLToPath(normalized);
+    } catch {
+      throw new WorkspaceAccessError("invalid file URL", 400);
+    }
+  }
+  const fragmentIndex = normalized.indexOf("#");
+  const queryIndex = normalized.indexOf("?");
+  const suffixIndex = [fragmentIndex, queryIndex]
+    .filter((index) => index >= 0)
+    .sort((left, right) => left - right)[0];
+  if (suffixIndex != null) {
+    normalized = normalized.slice(0, suffixIndex);
+  }
+  try {
+    return decodeURIComponent(normalized);
+  } catch {
+    return normalized;
+  }
+}
+
+function fileVersionEtag(size: number, modifiedAtMs: number): string {
+  const digest = createHash("sha256")
+    .update(`${size}:${Math.trunc(modifiedAtMs)}`)
+    .digest("base64url")
+    .slice(0, 22);
+  return `"${digest}"`;
+}
+
+async function assertExpectedFileVersion(
+  target: string,
+  expected: { modifiedAtMs: number | null; size: number | null },
+): Promise<void> {
+  if (expected.modifiedAtMs == null && expected.size == null) {
+    return;
+  }
+  let current;
+  try {
+    current = await stat(target);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      throw new WorkspaceAccessError(
+        "file changed on the host; reload before saving",
+        409,
+      );
+    }
+    throw error;
+  }
+  const modifiedAtMatches =
+    expected.modifiedAtMs == null ||
+    Math.trunc(current.mtimeMs) === Math.trunc(expected.modifiedAtMs);
+  const sizeMatches = expected.size == null || current.size === expected.size;
+  if (!modifiedAtMatches || !sizeMatches) {
+    throw new WorkspaceAccessError(
+      "file changed on the host; reload before saving",
+      409,
+    );
+  }
+}
+
+function asFiniteNumber(value: unknown): number | null {
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
 }
 
 async function assertNotWorkspaceRoot(

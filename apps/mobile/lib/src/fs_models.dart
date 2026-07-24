@@ -72,6 +72,7 @@ class FsFile {
 class FsMetadata {
   const FsMetadata({
     required this.path,
+    required this.size,
     required this.isDirectory,
     required this.isFile,
     required this.isSymlink,
@@ -80,6 +81,7 @@ class FsMetadata {
   });
 
   final String path;
+  final int size;
   final bool isDirectory;
   final bool isFile;
   final bool isSymlink;
@@ -88,6 +90,7 @@ class FsMetadata {
 
   factory FsMetadata.fromJson(Map<String, dynamic> json) => FsMetadata(
         path: (json['path'] ?? '').toString(),
+        size: (json['size'] as num?)?.toInt() ?? 0,
         isDirectory: json['isDirectory'] == true,
         isFile: json['isFile'] == true,
         isSymlink: json['isSymlink'] == true,
