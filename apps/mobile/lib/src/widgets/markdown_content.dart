@@ -57,6 +57,11 @@ class MarkdownContent extends StatelessWidget {
       followLinkColor: false,
       onLinkTap: (href, title) {
         if (href.isEmpty) return;
+        final localPath = _localMarkdownPath(href);
+        if (localPath != null && onOpenFile != null) {
+          onOpenFile!(localPath);
+          return;
+        }
         _openLink(context, href);
       },
       linkBuilder: (context, linkText, url, style) {
@@ -140,7 +145,7 @@ class _MarkdownImageState extends State<_MarkdownImage> {
   Object? _error;
   int _loadGeneration = 0;
 
-  bool get _isLocal => _localMarkdownImagePath(widget.source) != null;
+  bool get _isLocal => _localMarkdownPath(widget.source) != null;
 
   @override
   void initState() {
@@ -166,7 +171,7 @@ class _MarkdownImageState extends State<_MarkdownImage> {
     _provider = null;
     _error = null;
     final source = widget.source.trim();
-    final localPath = _localMarkdownImagePath(source);
+    final localPath = _localMarkdownPath(source);
     if (localPath != null) {
       final host = widget.host;
       final api = widget.api;
@@ -344,7 +349,7 @@ class _MarkdownImageStatus extends StatelessWidget {
   }
 }
 
-String? _localMarkdownImagePath(String raw) {
+String? _localMarkdownPath(String raw) {
   var value = raw.trim();
   if (value.isEmpty) return null;
   if (value.startsWith('<') && value.endsWith('>')) {
@@ -372,7 +377,7 @@ String? _localMarkdownImagePath(String raw) {
 }
 
 String _markdownImageLabel(String source) {
-  final local = _localMarkdownImagePath(source);
+  final local = _localMarkdownPath(source);
   if (local != null) {
     final normalized = local.replaceAll('\\', '/');
     final segments = normalized.split('/').where((part) => part.isNotEmpty);

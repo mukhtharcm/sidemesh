@@ -90,6 +90,22 @@ void main() {
     expect(sources, ['./artifacts/result.png']);
   });
 
+  testWidgets('opens workspace-local links in the file viewer', (tester) async {
+    final api = _MarkdownImageApi(_onePixelPng);
+    String? openedPath;
+
+    await _pumpMarkdown(
+      tester,
+      api: api,
+      text: '[View result](./artifacts/result.png)',
+      onOpenFile: (path) => openedPath = path,
+    );
+    await tester.tap(find.text('View result'));
+    await tester.pump();
+
+    expect(openedPath, './artifacts/result.png');
+  });
+
   testWidgets('uses a compact error card for inaccessible local images', (
     tester,
   ) async {
@@ -136,6 +152,7 @@ Future<void> _pumpMarkdown(
   WidgetTester tester, {
   required _MarkdownImageApi api,
   required String text,
+  void Function(String path)? onOpenFile,
 }) {
   final palette = ThemeVariant.codexAmber.light;
   return tester.pumpWidget(
@@ -151,6 +168,7 @@ Future<void> _pumpMarkdown(
               host: _host,
               api: api,
               sessionId: 'session-1',
+              onOpenFile: onOpenFile,
             ),
           ),
         ),
