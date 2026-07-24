@@ -121,6 +121,21 @@ class _FileViewerScreenState extends State<FileViewerScreen> {
         liveStream: widget.liveStream,
         observable: _observable,
         pdfViewerBuilder: widget.pdfViewerBuilder,
+        onOpenFile: (path) {
+          Navigator.of(context).push(
+            MaterialPageRoute<void>(
+              builder: (_) => FileViewerScreen(
+                host: widget.host,
+                api: widget.api,
+                path: path,
+                agentProvider: widget.agentProvider,
+                sessionId: widget.sessionId,
+                liveStream: widget.liveStream,
+                pdfViewerBuilder: widget.pdfViewerBuilder,
+              ),
+            ),
+          );
+        },
       ),
     );
     final topPadding = widget.topPadding;

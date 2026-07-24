@@ -42,6 +42,21 @@ describe("extractSessionAttachments", () => {
     );
   });
 
+  it("keeps provider-neutral bare, file URL, and Windows local images", () => {
+    assert.deepEqual(
+      extractSessionAttachments([
+        { type: "image", path: "artifacts/result.png" },
+        { type: "localImage", path: "file:///repo/result.png" },
+        { type: "localImage", path: "C:\\repo\\result.png" },
+      ]),
+      [
+        { type: "localImage", path: "artifacts/result.png" },
+        { type: "localImage", path: "file:///repo/result.png" },
+        { type: "localImage", path: "C:\\repo\\result.png" },
+      ],
+    );
+  });
+
   it("deduplicates nested representations and ignores unrelated strings", () => {
     const image = {
       type: "inputImage",

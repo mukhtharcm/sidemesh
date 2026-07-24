@@ -137,6 +137,17 @@ const persistedNodeConfigSchema = z.object({
         }),
     )
     .optional(),
+  allowedBrowserOrigins: z
+    .array(
+      z
+        .string()
+        .trim()
+        .url()
+        .refine(isHttpOrigin, {
+          message: "browser origins must be HTTP(S) origins without a path",
+        }),
+    )
+    .optional(),
   terminal: terminalConfigSchema.optional(),
   browserPreview: browserPreviewConfigSchema.optional(),
   defaultProviderKind: z
@@ -234,6 +245,10 @@ export function persistedConfigFromNodeConfig(
     minimumMobileClientVersion: config.minimumMobileClientVersion,
     stateDir: config.stateDir,
     workspaceRoots: config.workspaceRoots,
+    allowedBrowserOrigins:
+      config.allowedBrowserOrigins?.length
+        ? config.allowedBrowserOrigins
+        : undefined,
     terminal: config.terminal,
     browserPreview: config.browserPreview,
     defaultProviderKind: config.defaultProviderKind,
@@ -241,6 +256,18 @@ export function persistedConfigFromNodeConfig(
       normalizePersistedProviderConfig(provider),
     ),
   };
+}
+
+function isHttpOrigin(value: string): boolean {
+  try {
+    const parsed = new URL(value);
+    return (
+      (parsed.protocol === "http:" || parsed.protocol === "https:") &&
+      parsed.origin === value.replace(/\/$/, "")
+    );
+  } catch {
+    return false;
+  }
 }
 
 export function redactPersistedConfig(

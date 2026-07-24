@@ -1852,6 +1852,29 @@ describe("browser CORS", () => {
     });
   });
 
+  it("allows an explicitly configured browser origin", async () => {
+    const stateDir = await mkdtemp(nodePath.join(tmpdir(), "sidemesh-server-test-"));
+    const config = makeConfig(stateDir);
+    config.allowedBrowserOrigins = ["https://self-hosted.example"];
+    await withServer(config, async (server) => {
+      const res = await request({
+        hostname: "127.0.0.1",
+        port: server.port,
+        path: "/api/node",
+        method: "GET",
+        headers: {
+          Authorization: `Bearer ${config.token}`,
+          Origin: "https://self-hosted.example",
+        },
+      });
+      assert.equal(res.statusCode, 200);
+      assert.equal(
+        res.headers["access-control-allow-origin"],
+        "https://self-hosted.example",
+      );
+    });
+  });
+
   it("accepts browser WebSockets authenticated by subprotocol", async () => {
     const stateDir = await mkdtemp(nodePath.join(tmpdir(), "sidemesh-server-test-"));
     await withServer(makeConfig(stateDir), async (server, config) => {

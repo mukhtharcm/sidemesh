@@ -9,7 +9,7 @@ import type {
 } from "./types.js";
 
 const BARE_URL_PATTERN = /(https?:\/\/[^\s<>]+|www\.[^\s<>]+)/gi;
-const LOCAL_MARKDOWN_LINK_PATTERN = /\]\((<)?((?:\/|\.\.?\/)[^)]+)(>)?\)/g;
+const LOCAL_MARKDOWN_LINK_PATTERN = /\]\((<)?([^)]+?)(>)?\)/g;
 const IMAGE_EXTENSIONS = new Set([
   ".png",
   ".jpg",
@@ -310,7 +310,16 @@ function normalizeLocalPath(raw: string | null | undefined): string | null {
   if (value.startsWith("<") && value.endsWith(">")) {
     value = value.slice(1, -1).trim();
   }
-  if (!value.startsWith("/") && !value.startsWith("./") && !value.startsWith("../")) {
+  if (
+    !value.startsWith("/") &&
+    !value.startsWith("./") &&
+    !value.startsWith("../") &&
+    !/^[A-Za-z]:[\\/]/.test(value) &&
+    !/^file:/i.test(value) &&
+    (/^[A-Za-z][A-Za-z0-9+.-]*:/.test(value) ||
+      value.startsWith("#") ||
+      value.startsWith("//"))
+  ) {
     return null;
   }
   const withLineSuffixRemoved = value.replace(/:\d+(?::\d+)?$/, "");

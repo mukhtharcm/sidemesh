@@ -5,11 +5,13 @@ class PairingPayload {
     required this.label,
     required this.baseUrl,
     required this.token,
+    required this.addresses,
   });
 
   final String label;
   final String baseUrl;
   final String token;
+  final List<String> addresses;
 
   static PairingPayload? tryParse(String raw) {
     final trimmed = raw.trim();
@@ -28,7 +30,12 @@ class PairingPayload {
         uri.queryParameters['url']?.trim() ??
         '';
     final token = uri.queryParameters['token']?.trim() ?? '';
-    return _build(label: label, baseUrl: baseUrl, token: token);
+    return _build(
+      label: label,
+      baseUrl: baseUrl,
+      token: token,
+      addresses: uri.queryParametersAll['address'],
+    );
   }
 
   static PairingPayload? _parseJson(String raw) {
@@ -42,7 +49,12 @@ class PairingPayload {
           _string(decoded['url']) ??
           _preferredAddress(decoded['preferredAddress']) ??
           _firstAddress(decoded['addresses']);
-      return _build(label: label, baseUrl: baseUrl, token: token);
+      return _build(
+        label: label,
+        baseUrl: baseUrl,
+        token: token,
+        addresses: _addresses(decoded['addresses']),
+      );
     } catch (_) {
       return null;
     }
@@ -52,6 +64,7 @@ class PairingPayload {
     required String? label,
     required String? baseUrl,
     required String? token,
+    Iterable<String>? addresses,
   }) {
     final resolvedLabel = label?.trim() ?? '';
     final resolvedBaseUrl = _normalizeBaseUrl(baseUrl ?? '');
@@ -65,6 +78,12 @@ class PairingPayload {
       label: resolvedLabel,
       baseUrl: resolvedBaseUrl,
       token: resolvedToken,
+      addresses: <String>{
+        resolvedBaseUrl,
+        ...?addresses
+            ?.map(_normalizeBaseUrl)
+            .where((address) => address.isNotEmpty),
+      }.toList(growable: false),
     );
   }
 
@@ -88,6 +107,14 @@ class PairingPayload {
       }
     }
     return null;
+  }
+
+  static List<String> _addresses(Object? value) {
+    if (value is! List) return const [];
+    return value
+        .map((item) => item is Map ? _string(item['url']) : _string(item))
+        .whereType<String>()
+        .toList(growable: false);
   }
 
   static String _normalizeBaseUrl(String input) {

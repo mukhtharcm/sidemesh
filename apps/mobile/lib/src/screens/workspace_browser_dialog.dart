@@ -183,6 +183,9 @@ class _WorkspaceBrowserDialogState extends State<_WorkspaceBrowserDialog> {
                                       observable: _viewerObservable,
                                       dense: true,
                                       liveStream: _liveStream,
+                                      onOpenFile: (path) {
+                                        setState(() => _selected = path);
+                                      },
                                     ),
                             ),
                           ],

@@ -17,6 +17,7 @@ import '../live_activity_service.dart';
 import '../message_text_styles.dart';
 import '../models.dart';
 import '../fs_models.dart';
+import '../resource_reference.dart';
 import '../pending_send_recovery.dart';
 import '../provider_labels.dart';
 import '../search_query.dart';
@@ -1369,7 +1370,8 @@ class _SessionScreenState extends State<SessionScreen>
             host: widget.host,
             session: _session ?? widget.session,
             api: widget.api,
-            onOpenFile: _openWorkspaceFile,
+            onOpenFile: (path) => unawaited(_openMessageResource(path)),
+            onOpenHostUrl: _openHostUrl,
           ),
         );
         break;
@@ -1681,7 +1683,8 @@ class _SessionScreenState extends State<SessionScreen>
           host: widget.host,
           session: session,
           api: widget.api,
-          onOpenFile: _openWorkspaceFile,
+          onOpenFile: (path) => unawaited(_openMessageResource(path)),
+          onOpenHostUrl: _openHostUrl,
         ),
       );
       return;
@@ -1708,7 +1711,14 @@ class _SessionScreenState extends State<SessionScreen>
             Navigator.of(sheetContext).maybePop();
             WidgetsBinding.instance.addPostFrameCallback((_) {
               if (!mounted || _disposed) return;
-              _openWorkspaceFile(path);
+              unawaited(_openMessageResource(path));
+            });
+          },
+          onOpenHostUrl: (url) {
+            Navigator.of(sheetContext).maybePop();
+            WidgetsBinding.instance.addPostFrameCallback((_) {
+              if (!mounted || _disposed) return;
+              _openHostUrl(url);
             });
           },
         ),
@@ -4199,7 +4209,9 @@ class _SessionScreenState extends State<SessionScreen>
         DateTime.now().isBefore(retryExpiresAt)) {
       return retryId;
     }
-    return 'local-${DateTime.now().microsecondsSinceEpoch}';
+    final random = math.Random.secure();
+    final bytes = List<int>.generate(18, (_) => random.nextInt(256));
+    return 'local-${base64UrlEncode(bytes).replaceAll('=', '')}';
   }
 
   void _rememberFailedSendRetry(String clientMessageId, String signature) {
@@ -4495,7 +4507,8 @@ class _SessionScreenState extends State<SessionScreen>
           Navigator.of(sheetContext).pop();
           unawaited(_unpinMessage(pin));
         },
-        onOpenFile: _openWorkspaceFile,
+        onOpenFile: (path) => unawaited(_openMessageResource(path)),
+        onOpenHostUrl: _openHostUrl,
       ),
     );
   }
@@ -5412,6 +5425,83 @@ class _SessionScreenState extends State<SessionScreen>
       showAppSnackBar(
         context,
         'Could not open browser: ${friendlyError(error)}',
+      );
+    }
+  }
+
+  void _openHostUrl(String raw) {
+    final session = _session ?? widget.session;
+    final parsed = parseBrowserPreviewTargetInput(
+      raw,
+      sourceLabel: 'Message link',
+      cwd: session.cwd,
+    );
+    final candidate = parsed.candidate;
+    if (candidate == null) {
+      showAppSnackBar(context, parsed.error ?? 'Could not open host link.');
+      return;
+    }
+    unawaited(_openBrowserPreviewTarget(candidate));
+  }
+
+  Future<void> _openMessageResource(String path) async {
+    if (!_supportsFilesystem) {
+      showAppSnackBar(context, 'This host does not expose workspace files.');
+      return;
+    }
+    final session = _session ?? widget.session;
+    try {
+      final metadata = await widget.api.fetchMetadata(
+        widget.host,
+        path,
+        agentProvider: session.provider,
+        sessionId: session.id,
+      );
+      if (!mounted || _disposed) return;
+      _openWorkspaceFile(metadata.path);
+      return;
+    } on ApiException catch (error) {
+      if (error.statusCode != 403) {
+        if (mounted && !_disposed) {
+          showAppSnackBar(
+            context,
+            'Could not open file: ${friendlyError(error)}',
+          );
+        }
+        return;
+      }
+    } catch (error) {
+      if (mounted && !_disposed) {
+        showAppSnackBar(context, 'Could not open file: ${friendlyError(error)}');
+      }
+      return;
+    }
+
+    try {
+      final artifact = await widget.api.publishSessionArtifact(
+        widget.host,
+        sessionId: session.id,
+        source: path,
+      );
+      final bytes = await widget.api.fetchSessionArtifact(
+        widget.host,
+        artifact.id,
+      );
+      if (!mounted || _disposed) return;
+      showImageViewer(
+        context,
+        source: ImageViewerSource(
+          imageProvider: MemoryImage(bytes),
+          heroTag: 'session-artifact:${widget.host.id}:${artifact.id}',
+          title: _basename(path),
+          subtitle: 'Temporary artifact from ${widget.host.label}',
+        ),
+      );
+    } catch (error) {
+      if (!mounted || _disposed) return;
+      showAppSnackBar(
+        context,
+        'Could not open temporary artifact: ${friendlyError(error)}',
       );
     }
   }
@@ -6743,7 +6833,9 @@ class _SessionScreenState extends State<SessionScreen>
                                     ),
                                     onTogglePin: () =>
                                         _toggleMessagePin(entry.message!),
-                                    onOpenFile: _openWorkspaceFile,
+                                    onOpenFile: (path) =>
+                                        unawaited(_openMessageResource(path)),
+                                    onOpenHostUrl: _openHostUrl,
                                   ),
                                   _TimelineEntryKind.activity => _ActivityCard(
                                     host: widget.host,
@@ -6787,7 +6879,9 @@ class _SessionScreenState extends State<SessionScreen>
                                       api: widget.api,
                                       sessionId: session.id,
                                       message: _liveAssistantNotifier,
-                                      onOpenFile: _openWorkspaceFile,
+                                      onOpenFile: (path) =>
+                                          unawaited(_openMessageResource(path)),
+                                      onOpenHostUrl: _openHostUrl,
                                     ),
                                 },
                               );

@@ -38,6 +38,7 @@ export function buildPairInfo(config: NodeConfig): PairInfo {
             label: config.label,
             baseUrl: preferredAddress.url,
             token: config.token,
+            addresses: addresses.map((address) => address.url),
           }),
   };
 }
@@ -46,13 +47,19 @@ export function buildPairUrl(options: {
   label: string;
   baseUrl: string;
   token: string;
+  addresses?: string[];
 }): string {
   const params = new URLSearchParams({
-    v: "1",
+    v: "2",
     label: options.label,
     baseUrl: options.baseUrl,
     token: options.token,
   });
+  for (const address of options.addresses ?? []) {
+    if (address !== options.baseUrl) {
+      params.append("address", address);
+    }
+  }
   return `sidemesh://pair?${params.toString()}`;
 }
 
@@ -89,19 +96,48 @@ export function listPairAddresses(port: number): PairAddress[] {
   const interfaces = networkInterfaces();
   for (const [name, addresses] of Object.entries(interfaces)) {
     for (const address of addresses ?? []) {
-      if (address.internal || address.family !== "IPv4") {
+      if (address.internal) {
         continue;
       }
-      const kind = isTailscaleV4(address.address) ? "tailscale" : "lan";
+      const isV4 = address.family === "IPv4";
+      const isV6 = address.family === "IPv6";
+      if (!isV4 && !isV6) {
+        continue;
+      }
+      if (isV6 && isUnpairableV6(address.address)) {
+        continue;
+      }
+      const kind =
+        (isV4 && isTailscaleV4(address.address)) ||
+        (isV6 && isTailscaleV6(address.address))
+          ? "tailscale"
+          : "lan";
+      const host = isV6 ? `[${address.address}]` : address.address;
       add({
         label: kind === "tailscale" ? `${name} (tailnet)` : name,
-        url: `http://${address.address}:${port}`,
+        url: `http://${host}:${port}`,
         kind,
       });
     }
   }
 
   return [...results.values()];
+}
+
+export function isTailscaleV6(address: string): boolean {
+  return address.toLowerCase().startsWith("fd7a:115c:a1e0:");
+}
+
+function isUnpairableV6(address: string): boolean {
+  const normalized = address.toLowerCase().split("%")[0] ?? "";
+  return (
+    normalized === "::" ||
+    normalized === "::1" ||
+    normalized.startsWith("fe8") ||
+    normalized.startsWith("fe9") ||
+    normalized.startsWith("fea") ||
+    normalized.startsWith("feb")
+  );
 }
 
 function isTailscaleV4(address: string): boolean {

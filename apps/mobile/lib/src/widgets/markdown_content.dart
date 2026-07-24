@@ -7,6 +7,7 @@ import 'package:url_launcher/url_launcher.dart';
 
 import '../api_client.dart';
 import '../models.dart';
+import '../resource_reference.dart';
 import '../theme/app_colors.dart';
 import '../theme/app_theme.dart';
 import '../theme/app_tokens.dart';
@@ -22,9 +23,11 @@ class MarkdownContent extends StatelessWidget {
     this.backgroundColor,
     this.linkStyle,
     this.onOpenFile,
+    this.onOpenHostUrl,
     this.host,
     this.api,
     this.sessionId,
+    this.basePath,
   });
 
   final String text;
@@ -32,9 +35,11 @@ class MarkdownContent extends StatelessWidget {
   final Color? backgroundColor;
   final TextStyle? linkStyle;
   final void Function(String path)? onOpenFile;
+  final void Function(String url)? onOpenHostUrl;
   final HostProfile? host;
   final ApiClient? api;
   final String? sessionId;
+  final String? basePath;
 
   @override
   Widget build(BuildContext context) {
@@ -57,9 +62,22 @@ class MarkdownContent extends StatelessWidget {
       followLinkColor: false,
       onLinkTap: (href, title) {
         if (href.isEmpty) return;
-        final localPath = _localMarkdownPath(href);
-        if (localPath != null && onOpenFile != null) {
-          onOpenFile!(localPath);
+        final reference = parseSessionResourceReference(href);
+        if (reference.isLocalFile && onOpenFile != null) {
+          onOpenFile!(
+            resolveHostPathLexically(reference.value, basePath: basePath),
+          );
+          return;
+        }
+        if (reference.isHostUrl) {
+          if (onOpenHostUrl != null) {
+            onOpenHostUrl!(reference.value);
+          } else {
+            showAppSnackBar(
+              context,
+              'This address belongs to the connected host and cannot open directly on this device.',
+            );
+          }
           return;
         }
         _openLink(context, href);
@@ -113,6 +131,7 @@ class MarkdownContent extends StatelessWidget {
           host: host,
           api: api,
           sessionId: sessionId,
+          basePath: basePath,
         );
       },
     );
@@ -127,6 +146,7 @@ class _MarkdownImage extends StatefulWidget {
     required this.host,
     required this.api,
     required this.sessionId,
+    required this.basePath,
   });
 
   final String source;
@@ -135,6 +155,7 @@ class _MarkdownImage extends StatefulWidget {
   final HostProfile? host;
   final ApiClient? api;
   final String? sessionId;
+  final String? basePath;
 
   @override
   State<_MarkdownImage> createState() => _MarkdownImageState();
@@ -145,7 +166,8 @@ class _MarkdownImageState extends State<_MarkdownImage> {
   Object? _error;
   int _loadGeneration = 0;
 
-  bool get _isLocal => _localMarkdownPath(widget.source) != null;
+  bool get _isLocal =>
+      parseSessionResourceReference(widget.source).isLocalFile;
 
   @override
   void initState() {
@@ -161,7 +183,8 @@ class _MarkdownImageState extends State<_MarkdownImage> {
         oldWidget.host?.baseUrl != widget.host?.baseUrl ||
         oldWidget.host?.token != widget.host?.token ||
         oldWidget.api != widget.api ||
-        oldWidget.sessionId != widget.sessionId) {
+        oldWidget.sessionId != widget.sessionId ||
+        oldWidget.basePath != widget.basePath) {
       _load();
     }
   }
@@ -171,27 +194,24 @@ class _MarkdownImageState extends State<_MarkdownImage> {
     _provider = null;
     _error = null;
     final source = widget.source.trim();
-    final localPath = _localMarkdownPath(source);
-    if (localPath != null) {
+    final reference = parseSessionResourceReference(source);
+    if (reference.isLocalFile) {
       final host = widget.host;
       final api = widget.api;
       if (host == null || api == null || (widget.sessionId ?? '').isEmpty) {
         _error = StateError('Image is not attached to a session workspace');
         return;
       }
-      api
-          .fetchFsBlob(host, localPath, sessionId: widget.sessionId)
-          .then((bytes) {
-            if (!mounted || generation != _loadGeneration) return;
-            setState(() => _provider = MemoryImage(bytes));
-          })
-          .catchError((Object error) {
-            if (!mounted || generation != _loadGeneration) return;
-            setState(() => _error = error);
-          });
+      _loadLocalImage(
+        generation: generation,
+        host: host,
+        api: api,
+        path: reference.value,
+        sessionId: widget.sessionId!,
+      );
       return;
     }
-    if (source.startsWith('data:image/')) {
+    if (reference.kind == SessionResourceReferenceKind.inlineImage) {
       try {
         final comma = source.indexOf(',');
         if (comma <= 0 || !source.substring(0, comma).contains(';base64')) {
@@ -204,12 +224,63 @@ class _MarkdownImageState extends State<_MarkdownImage> {
       }
       return;
     }
-    final uri = Uri.tryParse(source);
-    if (uri != null && (uri.scheme == 'http' || uri.scheme == 'https')) {
-      _provider = NetworkImage(source);
+    if (reference.isHostUrl) {
+      final host = widget.host;
+      final api = widget.api;
+      if (host == null || api == null) {
+        _error = StateError('Host-local image is not attached to a host');
+        return;
+      }
+      api
+          .fetchHostResource(host, reference.value)
+          .then((bytes) {
+            if (!mounted || generation != _loadGeneration) return;
+            setState(() => _provider = MemoryImage(bytes));
+          })
+          .catchError((Object error) {
+            if (!mounted || generation != _loadGeneration) return;
+            setState(() => _error = error);
+          });
+      return;
+    }
+    if (reference.kind == SessionResourceReferenceKind.publicUrl) {
+      _provider = NetworkImage(reference.value);
       return;
     }
     _error = StateError('Unsupported image source');
+  }
+
+  Future<void> _loadLocalImage({
+    required int generation,
+    required HostProfile host,
+    required ApiClient api,
+    required String path,
+    required String sessionId,
+  }) async {
+    try {
+      Uint8List bytes;
+      try {
+        bytes = await api.fetchFsBlob(
+          host,
+          path,
+          sessionId: sessionId,
+          basePath: widget.basePath,
+        );
+      } on ApiException catch (error) {
+        if (error.statusCode != 403) rethrow;
+        final artifact = await api.publishSessionArtifact(
+          host,
+          sessionId: sessionId,
+          source: resolveHostPathLexically(path, basePath: widget.basePath),
+        );
+        bytes = await api.fetchSessionArtifact(host, artifact.id);
+      }
+      if (!mounted || generation != _loadGeneration) return;
+      setState(() => _provider = MemoryImage(bytes));
+    } catch (error) {
+      if (!mounted || generation != _loadGeneration) return;
+      setState(() => _error = error);
+    }
   }
 
   @override
@@ -349,39 +420,12 @@ class _MarkdownImageStatus extends StatelessWidget {
   }
 }
 
-String? _localMarkdownPath(String raw) {
-  var value = raw.trim();
-  if (value.isEmpty) return null;
-  if (value.startsWith('<') && value.endsWith('>')) {
-    value = value.substring(1, value.length - 1).trim();
-  }
-  final fileUri = Uri.tryParse(value);
-  if (fileUri?.scheme == 'file') {
-    try {
-      return fileUri!.toFilePath();
-    } catch (_) {
-      return null;
-    }
-  }
-  final isLocal =
-      value.startsWith('/') ||
-      value.startsWith('./') ||
-      value.startsWith('../') ||
-      RegExp(r'^[A-Za-z]:[\\/]').hasMatch(value);
-  if (!isLocal) return null;
-  try {
-    return Uri.decodeFull(value);
-  } catch (_) {
-    return value;
-  }
-}
-
 String _markdownImageLabel(String source) {
-  final local = _localMarkdownPath(source);
-  if (local != null) {
-    final normalized = local.replaceAll('\\', '/');
+  final reference = parseSessionResourceReference(source);
+  if (reference.isLocalFile) {
+    final normalized = reference.value.replaceAll('\\', '/');
     final segments = normalized.split('/').where((part) => part.isNotEmpty);
-    return segments.isEmpty ? local : segments.last;
+    return segments.isEmpty ? reference.value : segments.last;
   }
   final uri = Uri.tryParse(source);
   if (uri != null && uri.pathSegments.isNotEmpty) {
