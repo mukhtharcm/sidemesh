@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -9,12 +10,15 @@ import 'package:sidemesh_mobile/src/composer_image_attachments.dart';
 import 'package:sidemesh_mobile/src/create_session_defaults_store.dart';
 import 'package:sidemesh_mobile/src/db.dart';
 import 'package:sidemesh_mobile/src/fs_models.dart';
+import 'package:sidemesh_mobile/src/host_store.dart';
 import 'package:sidemesh_mobile/src/models.dart';
 import 'package:sidemesh_mobile/src/screens/create_session_sheet.dart';
+import 'package:sidemesh_mobile/src/screens/desktop_shell.dart';
 import 'package:sidemesh_mobile/src/screens/file_browser_screen.dart';
 import 'package:sidemesh_mobile/src/screens/host_detail_screen.dart';
 import 'package:sidemesh_mobile/src/screens/inspector/inspector_controller.dart';
 import 'package:sidemesh_mobile/src/screens/session_screen.dart';
+import 'package:sidemesh_mobile/src/onboarding_store.dart';
 import 'package:sidemesh_mobile/src/session_local_store.dart';
 import 'package:sidemesh_mobile/src/session_message_seed_store.dart';
 import 'package:sidemesh_mobile/src/session_policy_store.dart';
@@ -1663,6 +1667,127 @@ void main() {
     expect(await launch, isNotNull);
   });
 
+  testWidgets('desktop shell keeps navigation visible for a new session', (
+    tester,
+  ) async {
+    FlutterSecureStorage.setMockInitialValues(<String, String>{});
+    await HostStore().saveHosts([_host('desktop-shell-draft')]);
+    await OnboardingStore.instance.reset();
+    await OnboardingStore.instance.markCompleted();
+    final api = _CapabilityFakeApi(
+      _nodeForCapabilities(_fullCapabilities),
+      models: const [_fakeModel],
+    );
+    addTearDown(api.dispose);
+
+    await _pumpApp(tester, DesktopShell(api: api), size: const Size(1280, 760));
+    await _pumpFrames(tester, count: 20);
+
+    expect(find.text('Sessions'), findsOneWidget);
+    await tester.tap(find.text('New'));
+    await _pumpFrames(tester);
+
+    expect(
+      find.byKey(const ValueKey('desktop-new-session-pane')),
+      findsOneWidget,
+    );
+    expect(find.text('Sessions'), findsOneWidget);
+    expect(find.text('New session'), findsOneWidget);
+    expect(find.byType(AppComposer), findsOneWidget);
+
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pump();
+  });
+
+  testWidgets('desktop new session renders inline and reports creation', (
+    tester,
+  ) async {
+    final api = _CapabilityFakeApi(
+      _nodeForCapabilities(_fullCapabilities),
+      models: const [_fakeModel],
+    );
+    addTearDown(api.dispose);
+    SessionSummary? created;
+
+    await _pumpApp(
+      tester,
+      CreateSessionSheet(
+        host: _host('desktop-draft'),
+        api: api,
+        initialCwd: '/repo',
+        presentation: CreateSessionPresentation.pane,
+        topPadding: 34,
+        onCreated: (session) => created = session,
+        onCancel: () {},
+      ),
+      size: const Size(920, 760),
+    );
+    await _pumpFrames(tester);
+
+    expect(
+      find.byKey(const ValueKey('desktop-new-session-pane')),
+      findsOneWidget,
+    );
+    expect(find.byTooltip('Close new session'), findsOneWidget);
+    expect(find.text('What should the agent work on?'), findsNothing);
+    expect(
+      find.text('Your session starts with the first message.'),
+      findsOneWidget,
+    );
+    expect(find.byType(AppComposer), findsOneWidget);
+
+    await tester.enterText(
+      find.byKey(const ValueKey('create-session-prompt-field')),
+      'Start from the desktop pane.',
+    );
+    await tester.pump();
+    await tester.tap(find.byKey(const ValueKey('create-session-send-button')));
+    await _pumpFrames(tester);
+
+    expect(created, isNotNull);
+    expect(api.lastCreateRequest?.prompt, 'Start from the desktop pane.');
+  });
+
+  testWidgets('desktop new session confirms before discarding a draft', (
+    tester,
+  ) async {
+    final api = _CapabilityFakeApi(
+      _nodeForCapabilities(_fullCapabilities),
+      models: const [_fakeModel],
+    );
+    addTearDown(api.dispose);
+    var cancelCount = 0;
+
+    await _pumpApp(
+      tester,
+      CreateSessionSheet(
+        host: _host('desktop-draft-cancel'),
+        api: api,
+        initialCwd: '/repo',
+        presentation: CreateSessionPresentation.pane,
+        onCreated: (_) {},
+        onCancel: () => cancelCount++,
+      ),
+      size: const Size(920, 760),
+    );
+    await _pumpFrames(tester);
+
+    await tester.enterText(
+      find.byKey(const ValueKey('create-session-prompt-field')),
+      'Keep this draft safe.',
+    );
+    await tester.pump();
+    await tester.tap(find.byTooltip('Close new session'));
+    await _pumpFrames(tester);
+
+    expect(find.text('Discard new session?'), findsOneWidget);
+    expect(cancelCount, 0);
+
+    await tester.tap(find.text('Discard'));
+    await tester.pumpAndSettle();
+    expect(cancelCount, 1);
+  });
+
   testWidgets(
     'new session shares the adaptive model and thinking composer controls',
     (tester) async {
@@ -2064,11 +2189,13 @@ void main() {
   });
 }
 
-Future<void> _pumpFrames(WidgetTester tester) async {
-  await tester.pump();
-  await tester.pump(const Duration(milliseconds: 50));
-  await tester.pump(const Duration(milliseconds: 250));
-  await tester.pump();
+Future<void> _pumpFrames(WidgetTester tester, {int count = 1}) async {
+  for (var index = 0; index < count; index++) {
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 50));
+    await tester.pump(const Duration(milliseconds: 250));
+    await tester.pump();
+  }
 }
 
 TextField _composerTextField(WidgetTester tester) {
@@ -2469,6 +2596,10 @@ class _CapabilityFakeApi extends ApiClient {
   final List<ProviderProfileSummary> profiles;
   final ProviderAccessModeCatalog? accessModeCatalog;
   final _IdleWebSocketChannel _channel = _IdleWebSocketChannel();
+  final _IdleWebSocketChannel _sessionsChannel = _IdleWebSocketChannel()
+    ..addIncoming(jsonEncode({'type': 'snapshot', 'sessions': []}));
+  final _IdleWebSocketChannel _actionsChannel = _IdleWebSocketChannel()
+    ..addIncoming(jsonEncode({'type': 'snapshot', 'actions': []}));
   _CapturedCreateSessionRequest? lastCreateRequest;
 
   @override
@@ -2479,6 +2610,10 @@ class _CapabilityFakeApi extends ApiClient {
     HostProfile host, {
     int? limit,
   }) async => const [];
+
+  @override
+  Future<List<PendingAction>> fetchPendingActions(HostProfile host) async =>
+      const [];
 
   @override
   Future<List<ModelCatalogEntry>> fetchModels(
@@ -2583,7 +2718,17 @@ class _CapabilityFakeApi extends ApiClient {
   @override
   WebSocketChannel openLive(HostProfile host, String sessionId) => _channel;
 
-  void dispose() => _channel.dispose();
+  @override
+  WebSocketChannel openSessionsLive(HostProfile host) => _sessionsChannel;
+
+  @override
+  WebSocketChannel openActionsLive(HostProfile host) => _actionsChannel;
+
+  void dispose() {
+    _channel.dispose();
+    _sessionsChannel.dispose();
+    _actionsChannel.dispose();
+  }
 }
 
 class _WorkspaceBrowserCapabilityApi extends _CapabilityFakeApi {
@@ -2797,6 +2942,8 @@ class _IdleWebSocketChannel extends StreamChannelMixin<dynamic>
 
   @override
   Future<void> get ready async {}
+
+  void addIncoming(dynamic event) => _incoming.add(event);
 
   void dispose() {
     unawaited(_incoming.close());

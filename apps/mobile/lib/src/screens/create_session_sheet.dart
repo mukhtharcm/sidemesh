@@ -28,7 +28,7 @@ import '../widgets/mesh_widgets.dart';
 import '../widgets/provider_access_mode_choices.dart';
 import '../widgets/reasoning_choice_list.dart';
 
-enum CreateSessionPresentation { sheet, dialog, page }
+enum CreateSessionPresentation { sheet, dialog, page, pane }
 
 @immutable
 class CreateSessionDraftSeed {
@@ -314,7 +314,14 @@ class CreateSessionSheet extends StatefulWidget {
     this.seed,
     this.presentation = CreateSessionPresentation.sheet,
     this.imageAttachmentService = const SystemComposerImageAttachmentService(),
-  });
+    this.topPadding = 0,
+    this.onCreated,
+    this.onCancel,
+    this.paneActive = true,
+  }) : assert(
+         presentation != CreateSessionPresentation.pane ||
+             (onCreated != null && onCancel != null),
+       );
 
   final HostProfile host;
   final ApiClient api;
@@ -322,6 +329,10 @@ class CreateSessionSheet extends StatefulWidget {
   final CreateSessionDraftSeed? seed;
   final CreateSessionPresentation presentation;
   final ComposerImageAttachmentService imageAttachmentService;
+  final double topPadding;
+  final ValueChanged<SessionSummary>? onCreated;
+  final VoidCallback? onCancel;
+  final bool paneActive;
 
   @override
   State<CreateSessionSheet> createState() => _CreateSessionSheetState();
@@ -420,8 +431,28 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
     super.dispose();
   }
 
+  @override
+  void didUpdateWidget(covariant CreateSessionSheet oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.presentation != CreateSessionPresentation.pane ||
+        oldWidget.paneActive == widget.paneActive) {
+      return;
+    }
+    if (!widget.paneActive) {
+      _promptFocusNode.unfocus();
+      return;
+    }
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted && widget.paneActive) {
+        _promptFocusNode.requestFocus();
+      }
+    });
+  }
+
   void _handlePromptChanged() {
-    if (mounted && widget.presentation == CreateSessionPresentation.page) {
+    if (mounted &&
+        (widget.presentation == CreateSessionPresentation.page ||
+            widget.presentation == CreateSessionPresentation.pane)) {
       setState(() {});
     }
   }
@@ -1854,6 +1885,10 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
       if (widget.presentation == CreateSessionPresentation.page) {
         setState(() => _allowPop = true);
       }
+      if (widget.presentation == CreateSessionPresentation.pane) {
+        widget.onCreated!(session);
+        return;
+      }
       Navigator.of(context).pop(session);
     } catch (error) {
       if (!mounted) return;
@@ -1868,6 +1903,9 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
   Widget build(BuildContext context) {
     if (widget.presentation == CreateSessionPresentation.page) {
       return _buildDraftPage(context);
+    }
+    if (widget.presentation == CreateSessionPresentation.pane) {
+      return _buildDraftPane(context);
     }
     final isDialog = widget.presentation == CreateSessionPresentation.dialog;
     final bottom = isDialog ? 0.0 : MediaQuery.viewInsetsOf(context).bottom;
@@ -1969,7 +2007,72 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
     );
   }
 
-  Widget _buildDraftConversation(BuildContext context) {
+  Widget _buildDraftPane(BuildContext context) {
+    final colors = context.colors;
+    return Padding(
+      key: const ValueKey('desktop-new-session-pane'),
+      padding: EdgeInsets.only(top: widget.topPadding),
+      child: Scaffold(
+        backgroundColor: colors.canvas,
+        appBar: AppBar(
+          automaticallyImplyLeading: false,
+          backgroundColor: colors.canvas,
+          elevation: 0,
+          scrolledUnderElevation: 0,
+          toolbarHeight: 52,
+          titleSpacing: _showAdvanced ? 0 : 16,
+          leading: _showAdvanced
+              ? IconButton(
+                  tooltip: 'Back to new session',
+                  onPressed: _submitting ? null : _toggleAdvanced,
+                  icon: const Icon(Icons.arrow_back_rounded),
+                )
+              : null,
+          title: Text(_showAdvanced ? 'Session settings' : 'New session'),
+          actions: [
+            if (!_showAdvanced)
+              IgnorePointer(
+                ignoring: _submitting,
+                child: Opacity(
+                  opacity: _submitting ? 0.45 : 1,
+                  child: MeshIconButton(
+                    key: const ValueKey('new-session-settings-button'),
+                    icon: Icons.tune_rounded,
+                    tooltip: 'Session settings',
+                    framed: false,
+                    color: colors.textSecondary,
+                    onTap: _toggleAdvanced,
+                  ),
+                ),
+              ),
+            const SizedBox(width: AppSpacing.xs),
+            IgnorePointer(
+              ignoring: _submitting,
+              child: Opacity(
+                opacity: _submitting ? 0.45 : 1,
+                child: MeshIconButton(
+                  icon: Icons.close_rounded,
+                  tooltip: 'Close new session',
+                  framed: false,
+                  color: colors.textSecondary,
+                  onTap: _requestCancelDraft,
+                ),
+              ),
+            ),
+            const SizedBox(width: AppSpacing.sm),
+          ],
+        ),
+        body: _showAdvanced
+            ? _buildDraftSettings(context)
+            : _buildDraftConversation(context, desktopPane: true),
+      ),
+    );
+  }
+
+  Widget _buildDraftConversation(
+    BuildContext context, {
+    bool desktopPane = false,
+  }) {
     final keyboardVisible = MediaQuery.viewInsetsOf(context).bottom > 0;
     return Column(
       children: [
@@ -1986,7 +2089,10 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
                   Expanded(
                     child: keyboardVisible
                         ? const SizedBox.shrink()
-                        : _buildDraftEmptyState(context),
+                        : _buildDraftEmptyState(
+                            context,
+                            desktopPane: desktopPane,
+                          ),
                   ),
                 ],
               ),
@@ -2066,7 +2172,13 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
                   ),
                 )
               else
-                Icon(Icons.tune_rounded, size: 18, color: colors.textTertiary),
+                Icon(
+                  widget.presentation == CreateSessionPresentation.pane
+                      ? Icons.chevron_right_rounded
+                      : Icons.tune_rounded,
+                  size: 18,
+                  color: colors.textTertiary,
+                ),
             ],
           ),
         ),
@@ -2357,8 +2469,25 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
     );
   }
 
-  Widget _buildDraftEmptyState(BuildContext context) {
+  Widget _buildDraftEmptyState(
+    BuildContext context, {
+    bool desktopPane = false,
+  }) {
     final colors = context.colors;
+    if (desktopPane) {
+      return Center(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(24, 24, 24, 48),
+          child: Text(
+            'Your session starts with the first message.',
+            textAlign: TextAlign.center,
+            style: Theme.of(
+              context,
+            ).textTheme.bodySmall?.copyWith(color: colors.textTertiary),
+          ),
+        ),
+      );
+    }
     return Center(
       child: Padding(
         padding: const EdgeInsets.fromLTRB(24, 32, 24, 56),
@@ -2456,7 +2585,9 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
       focusNode: _promptFocusNode,
       sending: _submitting,
       enabled: !_configurationIsLoading && _currentCwd != null,
-      autofocus: true,
+      autofocus:
+          widget.presentation != CreateSessionPresentation.pane ||
+          widget.paneActive,
       hintText: 'Message the agent',
       desktopHintText:
           'Message the agent. Press Enter to start, Shift+Enter for a new line',
@@ -2502,6 +2633,26 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
     if (!mounted || !confirmed) return;
     setState(() => _allowPop = true);
     Navigator.of(context).pop();
+  }
+
+  Future<void> _requestCancelDraft() async {
+    final hasDraft =
+        _promptController.text.trim().isNotEmpty ||
+        _draftAttachments.isNotEmpty;
+    if (!hasDraft) {
+      widget.onCancel!();
+      return;
+    }
+    final confirmed = await showMeshConfirmDialog(
+      context,
+      icon: Icons.delete_outline_rounded,
+      title: 'Discard new session?',
+      description: 'Your unsent draft will be lost.',
+      confirmLabel: 'Discard',
+      danger: true,
+    );
+    if (!mounted || !confirmed) return;
+    widget.onCancel!();
   }
 
   String _draftContextSummary() {
