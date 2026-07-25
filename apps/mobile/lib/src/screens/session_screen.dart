@@ -972,6 +972,9 @@ class _SessionScreenState extends State<SessionScreen>
   bool get _supportsSessionResources =>
       _supportsProviderCapability('sessions', 'history');
 
+  bool get _supportsAgentRuns =>
+      _supportsProviderCapability('sessions', 'history');
+
   bool get _supportsSessionInterrupt =>
       _supportsProviderCapability('sessions', 'interrupt');
 
@@ -1171,6 +1174,8 @@ class _SessionScreenState extends State<SessionScreen>
     final unsupportedResources =
         current.kind == InspectorSurfaceKind.resources &&
         !_supportsSessionResources;
+    final unsupportedAgents =
+        current.kind == InspectorSurfaceKind.agents && !_supportsAgentRuns;
     final unsupportedFiles =
         current.kind == InspectorSurfaceKind.fileBrowser &&
         !_supportsFilesystem;
@@ -1180,7 +1185,8 @@ class _SessionScreenState extends State<SessionScreen>
         (current.kind == InspectorSurfaceKind.browserTabs ||
             current.kind == InspectorSurfaceKind.browserPreview) &&
         !_supportsBrowserPreview;
-    if (unsupportedResources ||
+    if (unsupportedAgents ||
+        unsupportedResources ||
         unsupportedFiles ||
         unsupportedTerminal ||
         unsupportedBrowser) {
@@ -1350,6 +1356,11 @@ class _SessionScreenState extends State<SessionScreen>
     }
     switch (kind) {
       case InspectorSurfaceKind.agents:
+        if (!_supportsAgentRuns) {
+          closeOrphan();
+          unawaited(InspectorPersistence.save(ownerKey, null));
+          return;
+        }
         controller.show(
           buildInspectorAgentsSurface(
             ownerKey: ownerKey,
@@ -1739,6 +1750,10 @@ class _SessionScreenState extends State<SessionScreen>
   }
 
   void _openAgentsPanel() {
+    if (!_supportsAgentRuns) {
+      showAppSnackBar(context, 'This agent does not expose session history.');
+      return;
+    }
     final width = MediaQuery.of(context).size.width;
     final scope = InspectorScope.maybeOf(context);
     final session = _session ?? widget.session;
@@ -6396,7 +6411,9 @@ class _SessionScreenState extends State<SessionScreen>
         }
         break;
       case 'agents':
-        _openAgentsPanel();
+        if (_supportsAgentRuns) {
+          _openAgentsPanel();
+        }
         break;
       case 'favorite':
         _toggleFavorite();
@@ -6459,12 +6476,13 @@ class _SessionScreenState extends State<SessionScreen>
       _SessionActionGroup(
         label: 'Open',
         actions: [
-          const _SessionActionSpec(
-            value: 'agents',
-            label: 'Agents',
-            detail: 'View agents spawned by this session.',
-            icon: Icons.account_tree_rounded,
-          ),
+          if (_supportsAgentRuns)
+            const _SessionActionSpec(
+              value: 'agents',
+              label: 'Agents',
+              detail: 'View agents spawned by this session.',
+              icon: Icons.account_tree_rounded,
+            ),
           if (_supportsBrowserPreview)
             _SessionActionSpec(
               value: 'preview',

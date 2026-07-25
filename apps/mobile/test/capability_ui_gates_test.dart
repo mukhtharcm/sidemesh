@@ -65,9 +65,44 @@ void main() {
     await _pumpFrames(tester);
 
     expect(find.text('Files'), findsOneWidget);
+    expect(find.text('Agents'), findsOneWidget);
     expect(find.text('Browser'), findsNothing);
     expect(find.text('Rename'), findsNothing);
     expect(find.text('Archive'), findsNothing);
+
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pump();
+  });
+
+  testWidgets('session screen hides agents without session history', (
+    tester,
+  ) async {
+    final capabilities = Map<String, Object?>.from(_minimalCapabilities);
+    capabilities['sessions'] = <String, Object?>{
+      ...Map<String, Object?>.from(
+        _minimalCapabilities['sessions']! as Map<dynamic, dynamic>,
+      ),
+      'history': false,
+    };
+    final api = _CapabilityFakeApi(_nodeForCapabilities(capabilities));
+    addTearDown(api.dispose);
+
+    await _pumpApp(
+      tester,
+      SessionScreen(
+        host: _host('session-no-history'),
+        session: _session('no-history-session'),
+        api: api,
+        desktopMode: true,
+      ),
+      size: const Size(1180, 900),
+    );
+    await _pumpFrames(tester);
+
+    await tester.tap(find.byTooltip('Session actions'));
+    await _pumpFrames(tester);
+
+    expect(find.text('Agents'), findsNothing);
 
     await tester.pumpWidget(const SizedBox.shrink());
     await tester.pump();
