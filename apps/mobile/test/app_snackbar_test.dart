@@ -84,4 +84,55 @@ void main() {
     expect(find.text('second toast'), findsOneWidget);
   });
 
+  testWidgets('dismisses when the timer fires before the overlay builds', (
+    tester,
+  ) async {
+    BuildContext? context;
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Builder(
+          builder: (builderContext) {
+            context = builderContext;
+            return const Scaffold(body: SizedBox.shrink());
+          },
+        ),
+      ),
+    );
+
+    showAppSnackBar(context!, 'racy toast', duration: Duration.zero);
+    await tester.pump(const Duration(milliseconds: 1));
+    await tester.pump();
+
+    expect(find.text('racy toast'), findsNothing);
+  });
+
+  testWidgets('close works while the toast is animating in', (tester) async {
+    BuildContext? context;
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Builder(
+          builder: (builderContext) {
+            context = builderContext;
+            return const Scaffold(body: SizedBox.shrink());
+          },
+        ),
+      ),
+    );
+
+    showAppSnackBar(
+      context!,
+      'early close',
+      duration: const Duration(minutes: 1),
+    );
+    await tester.pump();
+
+    await tester.tap(find.byTooltip('Dismiss'));
+    await tester.pump(const Duration(milliseconds: 180));
+    await tester.pump();
+
+    expect(find.text('early close'), findsNothing);
+  });
+
 }

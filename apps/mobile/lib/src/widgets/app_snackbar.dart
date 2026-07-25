@@ -220,7 +220,19 @@ class _ToastOverlayState extends State<_ToastOverlay>
   void initState() {
     super.initState();
     widget.controller.addListener(_onControllerChanged);
-    _anim.forward();
+    if (widget.controller.dismissed) {
+      // A short-lived toast can be dismissed by its timer before this overlay
+      // gets its first frame. The controller notification is then already
+      // over, so checking the current value is required to avoid leaving an
+      // undismissable overlay behind.
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) {
+          _completeDismiss();
+        }
+      });
+    } else {
+      _anim.forward();
+    }
   }
 
   void _onControllerChanged() {
