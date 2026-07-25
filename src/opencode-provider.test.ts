@@ -629,7 +629,11 @@ sleep 10
     const provider = createProvider(client);
     await provider.start();
 
-    const threads = await provider.listSessionThreads({ limit: 10, archived: false });
+    const threads = await provider.listSessionThreads({
+      limit: 10,
+      archived: false,
+      includeSubAgents: true,
+    });
 
     assert.deepEqual(threads[0]?.subAgent, {
       parentSessionId: "session-parent",

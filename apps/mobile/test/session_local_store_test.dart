@@ -97,7 +97,7 @@ void main() {
     expect(recents.first.title, 'Updated');
   });
 
-  test('upsert and getRecentSessions preserve sub-agent lineage', () async {
+  test('getRecentSessions hides sub-agent rows', () async {
     final store = SessionLocalStore.instance;
     final session = _summary(
       'session-child',
@@ -115,9 +115,7 @@ void main() {
     await store.upsertSessions(host, [session]);
     final recents = await store.getRecentSessions(host);
 
-    expect(recents.single.isSubAgent, isTrue);
-    expect(recents.single.subAgent?.parentSessionId, 'session-parent');
-    expect(recents.single.subAgent?.agentRole, 'explorer');
+    expect(recents, isEmpty);
   });
 
   test('upsertSessions replaces stale recent rows', () async {
@@ -157,7 +155,7 @@ void main() {
     expect(ghosts.map((session) => session.id), ['favorite']);
   });
 
-  test('updateGhost preserves sub-agent lineage for favorites', () async {
+  test('favorite queries hide sub-agent ghosts', () async {
     final store = SessionLocalStore.instance;
     await store.toggleFavorite(host, 'session-child');
 
@@ -176,9 +174,7 @@ void main() {
     await store.updateGhost(host, session);
     final favorites = await store.getFavoriteSessions(host);
 
-    expect(favorites.single.isSubAgent, isTrue);
-    expect(favorites.single.subAgent?.sourceKind, 'child_session');
-    expect(favorites.single.subAgent?.agentDisplayName, 'Explore');
+    expect(favorites, isEmpty);
   });
 
   test('toggleFavorite and isFavorite', () async {
@@ -338,10 +334,7 @@ void main() {
     SessionLocalStore.instance.resetMigrationState();
     final store = SessionLocalStore.instance;
     final recents = await store.getRecentSessions(host);
-    expect(recents.length, 1);
-    expect(recents.first.id, 'old-s1');
-    expect(recents.first.isSubAgent, isTrue);
-    expect(recents.first.subAgent?.parentSessionId, 'old-parent');
+    expect(recents, isEmpty);
 
     final favorites = await store.getFavoriteSessions(host);
     expect(favorites.length, 1);
