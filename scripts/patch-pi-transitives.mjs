@@ -29,7 +29,7 @@ if (piManifest.version !== "0.80.3") {
 // so root-level npm overrides cannot replace them. Keep the replacements as
 // exact root dependencies and copy only those audited packages after install.
 const replacements = [
-  { name: "brace-expansion", version: "5.0.7" },
+  { name: "brace-expansion", version: "5.0.8" },
   { name: "protobufjs", version: "7.6.5" },
 ];
 

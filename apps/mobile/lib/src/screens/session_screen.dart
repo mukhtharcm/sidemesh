@@ -23,12 +23,14 @@ import '../provider_labels.dart';
 import '../search_query.dart';
 import 'browser_preview_screen.dart';
 import 'browser_tabs_screen.dart';
+import 'agent_runs_screen.dart';
 import 'create_session_sheet.dart';
 import 'file_browser_screen.dart';
 import 'file_viewer_screen.dart';
 import 'image_viewer_screen.dart';
 import 'terminal_screen.dart';
 import 'inspector/inspector_browser_tabs.dart';
+import 'inspector/inspector_agents.dart';
 import 'inspector/inspector_browser_preview.dart';
 import 'inspector/inspector_controller.dart';
 import 'inspector/inspector_file_browser.dart';
@@ -970,6 +972,9 @@ class _SessionScreenState extends State<SessionScreen>
   bool get _supportsSessionResources =>
       _supportsProviderCapability('sessions', 'history');
 
+  bool get _supportsAgentRuns =>
+      _supportsProviderCapability('sessions', 'history');
+
   bool get _supportsSessionInterrupt =>
       _supportsProviderCapability('sessions', 'interrupt');
 
@@ -1169,6 +1174,8 @@ class _SessionScreenState extends State<SessionScreen>
     final unsupportedResources =
         current.kind == InspectorSurfaceKind.resources &&
         !_supportsSessionResources;
+    final unsupportedAgents =
+        current.kind == InspectorSurfaceKind.agents && !_supportsAgentRuns;
     final unsupportedFiles =
         current.kind == InspectorSurfaceKind.fileBrowser &&
         !_supportsFilesystem;
@@ -1178,7 +1185,8 @@ class _SessionScreenState extends State<SessionScreen>
         (current.kind == InspectorSurfaceKind.browserTabs ||
             current.kind == InspectorSurfaceKind.browserPreview) &&
         !_supportsBrowserPreview;
-    if (unsupportedResources ||
+    if (unsupportedAgents ||
+        unsupportedResources ||
         unsupportedFiles ||
         unsupportedTerminal ||
         unsupportedBrowser) {
@@ -1347,6 +1355,21 @@ class _SessionScreenState extends State<SessionScreen>
       return;
     }
     switch (kind) {
+      case InspectorSurfaceKind.agents:
+        if (!_supportsAgentRuns) {
+          closeOrphan();
+          unawaited(InspectorPersistence.save(ownerKey, null));
+          return;
+        }
+        controller.show(
+          buildInspectorAgentsSurface(
+            ownerKey: ownerKey,
+            host: widget.host,
+            session: _session ?? widget.session,
+            api: widget.api,
+          ),
+        );
+        break;
       case InspectorSurfaceKind.search:
         controller.show(
           buildInspectorSearchSurface(
@@ -1721,6 +1744,38 @@ class _SessionScreenState extends State<SessionScreen>
               _openHostUrl(url);
             });
           },
+        ),
+      ),
+    );
+  }
+
+  void _openAgentsPanel() {
+    if (!_supportsAgentRuns) {
+      showAppSnackBar(context, 'This agent does not expose session history.');
+      return;
+    }
+    final width = MediaQuery.of(context).size.width;
+    final scope = InspectorScope.maybeOf(context);
+    final session = _session ?? widget.session;
+    if (width >= 900 && scope != null) {
+      scope.toggle(
+        buildInspectorAgentsSurface(
+          ownerKey: _inspectorOwnerKey(),
+          host: widget.host,
+          session: session,
+          api: widget.api,
+        ),
+      );
+      return;
+    }
+    unawaited(
+      Navigator.of(context).push(
+        MaterialPageRoute<void>(
+          builder: (_) => AgentRunsScreen(
+            host: widget.host,
+            session: session,
+            api: widget.api,
+          ),
         ),
       ),
     );
@@ -6355,6 +6410,11 @@ class _SessionScreenState extends State<SessionScreen>
           _openResourcesPanel();
         }
         break;
+      case 'agents':
+        if (_supportsAgentRuns) {
+          _openAgentsPanel();
+        }
+        break;
       case 'favorite':
         _toggleFavorite();
         break;
@@ -6416,6 +6476,13 @@ class _SessionScreenState extends State<SessionScreen>
       _SessionActionGroup(
         label: 'Open',
         actions: [
+          if (_supportsAgentRuns)
+            const _SessionActionSpec(
+              value: 'agents',
+              label: 'Agents',
+              detail: 'View agents spawned by this session.',
+              icon: Icons.account_tree_rounded,
+            ),
           if (_supportsBrowserPreview)
             _SessionActionSpec(
               value: 'preview',

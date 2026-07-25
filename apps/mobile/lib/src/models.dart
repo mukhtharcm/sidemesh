@@ -912,6 +912,78 @@ class SessionSummary {
   };
 }
 
+class AgentRunSummary {
+  const AgentRunSummary({
+    required this.id,
+    required this.parentSessionId,
+    required this.title,
+    required this.preview,
+    required this.cwd,
+    required this.createdAt,
+    required this.updatedAt,
+    required this.provider,
+    required this.status,
+    this.agentName,
+    this.agentDisplayName,
+    this.agentRole,
+    this.agentNickname,
+    this.depth,
+  });
+
+  final String id;
+  final String parentSessionId;
+  final String title;
+  final String preview;
+  final String cwd;
+  final DateTime createdAt;
+  final DateTime updatedAt;
+  final String? provider;
+  final String status;
+  final String? agentName;
+  final String? agentDisplayName;
+  final String? agentRole;
+  final String? agentNickname;
+  final int? depth;
+
+  bool get isActive =>
+      status == 'active' ||
+      status == 'running' ||
+      status == 'waiting_for_input' ||
+      status == 'waiting_for_approval';
+
+  String get label {
+    for (final value in [
+      agentDisplayName,
+      agentName,
+      agentRole,
+      agentNickname,
+      title,
+    ]) {
+      final normalized = value?.trim() ?? '';
+      if (normalized.isNotEmpty) return normalized;
+    }
+    return 'Agent';
+  }
+
+  factory AgentRunSummary.fromJson(Map<String, dynamic> json) =>
+      AgentRunSummary(
+        id: _stringValue(json['id']),
+        parentSessionId: _stringValue(json['parentSessionId']),
+        title: _stringValue(json['title']),
+        preview: _stringValue(json['preview']),
+        cwd: _stringValue(json['cwd']),
+        createdAt: _dateValue(json['createdAt']),
+        updatedAt: _dateValue(json['updatedAt']),
+        provider: _stringOrNull(json['provider']),
+        status: _stringValue(json['status']),
+        agentName: _stringOrNull(json['agentName']),
+        agentDisplayName: _stringOrNull(json['agentDisplayName']),
+        agentRole: _stringOrNull(json['agentRole']),
+        agentNickname: _stringOrNull(json['agentNickname']),
+        depth: _intOrNull(json['depth']),
+      );
+}
+
 class SessionRuntimeSummary {
   const SessionRuntimeSummary({
     this.model,

@@ -602,7 +602,12 @@ export class OpenCodeAgentProvider
     options: AgentSessionListOptions,
   ): Promise<ThreadRecord[]> {
     await this.start();
-    const sessions = await this.listAllSessions(options.limit, options.archived);
+    const sessions = await this.listAllSessions(
+      options.limit,
+      options.archived,
+      options.includeSubAgents === true,
+      options.subAgentParentId,
+    );
     const statusesByDirectory = await this.loadStatusesForDirectories(
       sessions.map((session) => session.directory),
     );
@@ -1297,10 +1302,13 @@ export class OpenCodeAgentProvider
   private async listAllSessions(
     limit: number,
     archived: boolean,
+    includeSubAgents: boolean,
+    subAgentParentId?: string,
   ): Promise<OpenCodeSessionInfo[]> {
     const sessions: OpenCodeSessionInfo[] = [];
     let cursor: number | null = null;
-    while (sessions.length < limit) {
+    let matchingCount = 0;
+    while (matchingCount < limit) {
       const page = await this.requireClient().listGlobalSessions({
         directory: this.defaultDirectory,
         archived,
@@ -1308,6 +1316,13 @@ export class OpenCodeAgentProvider
         cursor,
       });
       sessions.push(...page.sessions);
+      matchingCount = sessions.filter(
+        (session) =>
+          archived === Boolean(session.time.archived) &&
+          (subAgentParentId
+            ? session.parentID === subAgentParentId
+            : includeSubAgents || !session.parentID),
+      ).length;
       if (page.nextCursor == null || page.sessions.length === 0) {
         break;
       }
@@ -1317,7 +1332,13 @@ export class OpenCodeAgentProvider
       this.touchCache(session);
     }
     return sessions
-      .filter((session) => archived === Boolean(session.time.archived))
+      .filter(
+        (session) =>
+          archived === Boolean(session.time.archived) &&
+          (subAgentParentId
+            ? session.parentID === subAgentParentId
+            : includeSubAgents || !session.parentID),
+      )
       .slice(0, limit);
   }
 

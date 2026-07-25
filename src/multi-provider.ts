@@ -148,17 +148,24 @@ export class MultiAgentProvider
   public async listSessionThreads(
     options: AgentSessionListOptions,
   ): Promise<ThreadRecord[]> {
+    const parentOwner = options.subAgentParentId
+      ? this.resolveSessionId(options.subAgentParentId)
+      : null;
     const threads = await Promise.all(
       this.orderedEntries
         .filter(
           (entry) =>
+            (!parentOwner || entry.provider === parentOwner.provider) &&
             hasProviderMethod(entry.provider, "listSessionThreads") &&
             entry.provider.capabilities.sessions.history,
         )
         .map(async (entry) =>
-          (await entry.provider.listSessionThreads!(options)).map((thread) =>
-            this.wrapThread(entry.kind, thread),
-          ),
+          (
+            await entry.provider.listSessionThreads!({
+              ...options,
+              subAgentParentId: parentOwner?.rawId,
+            })
+          ).map((thread) => this.wrapThread(entry.kind, thread)),
         ),
     );
     return threads
@@ -393,6 +400,14 @@ export class MultiAgentProvider
     return {
       ...thread,
       id: wrapProviderScopedId(kind, thread.id),
+      subAgent: thread.subAgent
+        ? {
+            ...thread.subAgent,
+            parentSessionId: thread.subAgent.parentSessionId
+              ? wrapProviderScopedId(kind, thread.subAgent.parentSessionId)
+              : null,
+          }
+        : thread.subAgent,
     };
   }
 

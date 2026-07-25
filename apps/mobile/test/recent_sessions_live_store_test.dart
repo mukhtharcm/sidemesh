@@ -50,6 +50,33 @@ void main() {
     expect(store.confirmedHostIds, contains(host.id));
   });
 
+  test('filters sub-agent rows from HTTP and live session updates', () async {
+    final api = _FakeApiClient()..throwOnOpenSessionsLive = true;
+    const filterHost = HostProfile(
+      id: 'host-filter',
+      label: 'Filter host',
+      baseUrl: 'http://filter.local:8787',
+      token: 'secret',
+    );
+    api.sessionsByHostId[filterHost.id] = [
+      _session('parent', title: 'Parent'),
+      _session('child', title: 'Child', isSubAgent: true),
+    ];
+    final store = RecentSessionsStore(
+      pollInterval: const Duration(hours: 1),
+      initialHttpFallbackDelay: Duration.zero,
+    );
+    addTearDown(store.dispose);
+
+    store.configure(hosts: const [filterHost], api: api);
+    await _settle();
+
+    expect(
+      store.entries.map((entry) => entry.session.id).toList(growable: false),
+      ['parent'],
+    );
+  });
+
   test(
     'hydrates cached sessions before a slower network refresh completes',
     () async {
@@ -558,6 +585,7 @@ SessionSummary _session(
   String id, {
   required String title,
   DateTime? updatedAt,
+  bool isSubAgent = false,
 }) {
   final effectiveUpdatedAt = updatedAt ?? DateTime.now();
   return SessionSummary(
@@ -572,6 +600,13 @@ SessionSummary _session(
     status: 'active',
     runtime: null,
     gitInfo: null,
+    isSubAgent: isSubAgent,
+    subAgent: isSubAgent
+        ? const SessionSubAgentInfo(
+            parentSessionId: 'parent',
+            sourceKind: 'thread_spawn',
+          )
+        : null,
   );
 }
 
