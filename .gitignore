@@ -2,6 +2,9 @@ node_modules/
 dist/
 artifacts/
 .DS_Store
+.env
+.env.*
+!.env.example
 pnpm-lock.yaml
 
 apps/mobile/.dart_tool/

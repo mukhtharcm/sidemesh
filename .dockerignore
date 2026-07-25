@@ -1,0 +1,14 @@
+.git
+.github
+.env
+.env.*
+!.env.example
+.DS_Store
+artifacts
+dist
+node_modules
+worktrees
+apps
+docs
+push-relay
+web

@@ -45,6 +45,41 @@ npm install -g sidemesh @openai/codex
 sidemesh up
 ```
 
+### Docker
+
+The release image contains Node.js, Sidemesh, the Codex CLI, git, SSH, and
+ripgrep. It runs the Sidemesh daemon in the foreground when the container
+starts.
+
+```bash
+cp .env.example .env
+```
+
+Set `SIDEMESH_TOKEN` in `.env` to a strong random value, and set
+`SIDEMESH_WORKSPACE` to the host directory the agent may access. For example:
+
+```bash
+openssl rand -hex 24
+docker compose run --rm sidemesh codex login --device-auth
+docker compose up -d
+docker compose ps
+```
+
+Compose pulls `ghcr.io/mukhtharcm/sidemesh:latest` by default. To build the
+current checkout instead, run `docker compose build`. Sidemesh and Codex state
+are kept in named volumes, while only `SIDEMESH_WORKSPACE` is bind-mounted at
+`/workspace`. GitHub packages are private until their owner changes the package
+visibility; use `docker login ghcr.io` first if this package is private.
+
+Connect with `http://DOCKER_HOST:8787` and the token from `.env`. Pairing output
+inside the container may show the container's private address, so use the
+Docker host's trusted-LAN or Tailscale address from another device. Do not
+publish this port directly to the public internet.
+
+Pushes to the `release` branch run server checks, smoke-test the booting
+container, and publish `linux/amd64` and `linux/arm64` packages to GitHub
+Container Registry with `latest`, `release`, and commit-specific tags.
+
 From the repo instead, for development:
 
 ```bash

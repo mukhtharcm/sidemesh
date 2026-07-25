@@ -1,0 +1,42 @@
+services:
+  sidemesh:
+    image: ${SIDEMESH_IMAGE:-ghcr.io/mukhtharcm/sidemesh:latest}
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        CODEX_VERSION: ${CODEX_VERSION:-0.145.0}
+    init: true
+    restart: unless-stopped
+    stop_grace_period: 10s
+    working_dir: /workspace
+    ports:
+      - "${SIDEMESH_PORT:-8787}:${SIDEMESH_PORT:-8787}"
+    environment:
+      CODEX_HOME: /home/node/.codex
+      HOME: /home/node
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      SIDEMESH_ALLOWED_BROWSER_ORIGINS: ${SIDEMESH_ALLOWED_BROWSER_ORIGINS:-}
+      SIDEMESH_CODEX_BIN: ${SIDEMESH_CODEX_BIN:-codex}
+      SIDEMESH_LABEL: ${SIDEMESH_LABEL:-Sidemesh Docker}
+      SIDEMESH_MINIMUM_MOBILE_CLIENT_VERSION: ${SIDEMESH_MINIMUM_MOBILE_CLIENT_VERSION:-}
+      SIDEMESH_PORT: ${SIDEMESH_PORT:-8787}
+      SIDEMESH_PROVIDER: ${SIDEMESH_PROVIDER:-codex}
+      SIDEMESH_PROVIDERS: ${SIDEMESH_PROVIDERS:-codex}
+      SIDEMESH_RECOMMENDED_MOBILE_CLIENT_VERSION: ${SIDEMESH_RECOMMENDED_MOBILE_CLIENT_VERSION:-}
+      SIDEMESH_STATE_DIR: /home/node/.sidemesh
+      SIDEMESH_TERMINAL: ${SIDEMESH_TERMINAL:-0}
+      SIDEMESH_TERMINAL_REQUIRE_PTY: ${SIDEMESH_TERMINAL_REQUIRE_PTY:-0}
+      SIDEMESH_TERMINAL_SHELL: ${SIDEMESH_TERMINAL_SHELL:-}
+      SIDEMESH_TOKEN: ${SIDEMESH_TOKEN:?Set SIDEMESH_TOKEN in .env before starting Sidemesh}
+      SIDEMESH_WORKSPACE_ROOTS: /workspace
+    volumes:
+      - sidemesh-state:/home/node/.sidemesh
+      - codex-state:/home/node/.codex
+      - type: bind
+        source: ${SIDEMESH_WORKSPACE:-.}
+        target: /workspace
+
+volumes:
+  sidemesh-state:
+  codex-state:
