@@ -2,6 +2,7 @@
 // Landing page — custom layout, not Starlight
 const testFlightUrl = "/testflight";
 const discordUrl = "/discord";
+const githubUrl = "https://github.com/mukhtharcm/sidemesh";
 const homepageOgImageUrl = new URL("/assets/og-card-v1.png", Astro.site);
 ---
 <!doctype html>
@@ -1266,6 +1267,7 @@ const homepageOgImageUrl = new URL("/assets/og-card-v1.png", Astro.site);
         <a href="#install">Install</a>
         <a href="#security">Security</a>
         <a href="/getting-started/">Docs</a>
+        <a href={githubUrl}>GitHub</a>
         <a href={discordUrl}>Discord</a>
       </nav>
       <div class="nav-cta">
@@ -1714,6 +1716,7 @@ const homepageOgImageUrl = new URL("/assets/og-card-v1.png", Astro.site);
       <a href="/getting-started/">Docs</a>
       <a href="/support">Support</a>
       <a href="/privacy">Privacy</a>
+      <a href={githubUrl}>GitHub</a>
       <a href={discordUrl}>Discord</a>
     </nav>
   </footer>
