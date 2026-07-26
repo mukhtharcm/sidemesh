@@ -37,7 +37,9 @@ import 'usage_pane.dart';
 /// Reuses the same panes as the mobile home
 /// screen, so we keep a single source of truth for session data.
 class DesktopShell extends StatefulWidget {
-  const DesktopShell({super.key});
+  const DesktopShell({super.key, this.api});
+
+  final ApiClient? api;
 
   @override
   State<DesktopShell> createState() => _DesktopShellState();
@@ -218,9 +220,16 @@ class _ActiveSession {
   final SessionComposerSeed? composerSeed;
 }
 
+class _DesktopSessionDraft {
+  const _DesktopSessionDraft({required this.host, required this.serial});
+
+  final HostProfile host;
+  final int serial;
+}
+
 class _DesktopShellState extends State<DesktopShell> {
   final HostStore _store = HostStore();
-  final ApiClient _api = ApiClient();
+  late final ApiClient _api;
   final TextEditingController _searchController = TextEditingController();
   final FocusNode _searchFocus = FocusNode(debugLabel: 'sidebar-search');
   final InspectorController _inspector = InspectorController();
@@ -229,12 +238,14 @@ class _DesktopShellState extends State<DesktopShell> {
   bool _loading = true;
   _SidebarSection _section = _SidebarSection.recent;
   _ActiveSession? _active;
+  _DesktopSessionDraft? _draft;
   HostProfile? _activeHost;
   bool _showUsage = false;
   int _activeCount = 0;
   int _inboxCount = 0;
   bool _recentVerificationActive = false;
   int _sessionOpenSerial = 0;
+  int _draftSerial = 0;
   String _query = '';
   RecentSessionFilters _recentFilters = const RecentSessionFilters();
   double _sidebarWidth = _defaultSidebarWidth;
@@ -265,6 +276,7 @@ class _DesktopShellState extends State<DesktopShell> {
   @override
   void initState() {
     super.initState();
+    _api = widget.api ?? ApiClient();
     _checkOnboarding();
     LocalNotificationService.instance.routeIntent.addListener(
       _onNotificationRouteIntent,
@@ -334,6 +346,14 @@ class _DesktopShellState extends State<DesktopShell> {
     setState(() {
       _hosts = hosts;
       _loading = false;
+      final draft = _draft;
+      if (draft != null) {
+        final matchingHosts = hosts.where((host) => host.id == draft.host.id);
+        final updatedHost = matchingHosts.isEmpty ? null : matchingHosts.first;
+        _draft = updatedHost == null || !updatedHost.enabled
+            ? null
+            : _DesktopSessionDraft(host: updatedHost, serial: draft.serial);
+      }
     });
     for (final host in hosts) {
       if (!host.enabled) {
@@ -583,15 +603,28 @@ class _DesktopShellState extends State<DesktopShell> {
       showAppSnackBar(context, 'Enable a host before starting a session.');
       return;
     }
-    final result = await showCreateSessionHostLauncher(
-      context,
-      hosts: _enabledHosts,
-      api: _api,
-    );
-    if (!mounted || result == null) {
+    final existingDraft = _draft;
+    if (existingDraft != null) {
+      _inspector.close();
+      setState(() {
+        _active = null;
+        _activeHost = null;
+        _showUsage = false;
+      });
       return;
     }
-    _openSession(result.host, result.session);
+    final enabledHosts = _enabledHosts;
+    final host = enabledHosts.length == 1
+        ? enabledHosts.first
+        : await showCreateSessionHostPicker(context, hosts: enabledHosts);
+    if (!mounted || host == null) return;
+    _inspector.close();
+    setState(() {
+      _draft = _DesktopSessionDraft(host: host, serial: ++_draftSerial);
+      _active = null;
+      _activeHost = null;
+      _showUsage = false;
+    });
   }
 
   Future<void> _showHostEditor({HostProfile? initial}) async {
@@ -622,6 +655,9 @@ class _DesktopShellState extends State<DesktopShell> {
     if (_activeHost?.id == host.id) {
       setState(() => _activeHost = null);
     }
+    if (_draft?.host.id == host.id) {
+      setState(() => _draft = null);
+    }
     await _loadHosts();
     _bumpRefresh();
   }
@@ -647,6 +683,9 @@ class _DesktopShellState extends State<DesktopShell> {
     if (_activeHost?.id == host.id && disabling) {
       setState(() => _activeHost = null);
     }
+    if (_draft?.host.id == host.id && disabling) {
+      setState(() => _draft = null);
+    }
     await _loadHosts();
     _bumpRefresh();
   }
@@ -667,6 +706,7 @@ class _DesktopShellState extends State<DesktopShell> {
     HostProfile host,
     SessionSummary session, {
     SessionComposerSeed? composerSeed,
+    bool clearDraft = false,
   }) {
     if (!host.enabled) {
       showAppSnackBar(context, 'Enable ${host.label} before opening sessions.');
@@ -684,6 +724,7 @@ class _DesktopShellState extends State<DesktopShell> {
         serial: ++_sessionOpenSerial,
         composerSeed: composerSeed,
       );
+      if (clearDraft) _draft = null;
       _activeHost = null;
       _showUsage = false;
     });
@@ -1100,6 +1141,7 @@ class _DesktopShellState extends State<DesktopShell> {
                                 child: _DetailPane(
                                   titlebarInset: _titlebarInset,
                                   active: _active,
+                                  draft: _draft,
                                   activeHost: _activeHost,
                                   showUsage: _showUsage,
                                   hosts: _hosts,
@@ -1119,6 +1161,16 @@ class _DesktopShellState extends State<DesktopShell> {
                                     });
                                   },
                                   onOpenSession: _openSession,
+                                  onCreatedSession: (host, session) =>
+                                      _openSession(
+                                        host,
+                                        session,
+                                        clearDraft: true,
+                                      ),
+                                  onCancelDraft: () =>
+                                      setState(() => _draft = null),
+                                  onStartSession: () =>
+                                      unawaited(_startSessionFromSidebar()),
                                   onArchived: _handleActiveSessionArchived,
                                   onAddHost: () => _showHostEditor(),
                                   onShowHosts: () => setState(
@@ -1899,6 +1951,7 @@ class _DetailPane extends StatefulWidget {
   const _DetailPane({
     required this.titlebarInset,
     required this.active,
+    required this.draft,
     required this.activeHost,
     required this.showUsage,
     required this.hosts,
@@ -1906,6 +1959,9 @@ class _DetailPane extends StatefulWidget {
     required this.api,
     required this.onClose,
     required this.onOpenSession,
+    required this.onCreatedSession,
+    required this.onCancelDraft,
+    required this.onStartSession,
     required this.onArchived,
     required this.onAddHost,
     required this.onShowHosts,
@@ -1913,6 +1969,7 @@ class _DetailPane extends StatefulWidget {
 
   final double titlebarInset;
   final _ActiveSession? active;
+  final _DesktopSessionDraft? draft;
   final HostProfile? activeHost;
   final bool showUsage;
   final List<HostProfile> hosts;
@@ -1920,6 +1977,9 @@ class _DetailPane extends StatefulWidget {
   final ApiClient api;
   final VoidCallback onClose;
   final void Function(HostProfile, SessionSummary) onOpenSession;
+  final void Function(HostProfile, SessionSummary) onCreatedSession;
+  final VoidCallback onCancelDraft;
+  final VoidCallback onStartSession;
   final void Function(HostProfile, SessionSummary) onArchived;
   final VoidCallback onAddHost;
   final VoidCallback onShowHosts;
@@ -1929,29 +1989,16 @@ class _DetailPane extends StatefulWidget {
 }
 
 class _DetailPaneState extends State<_DetailPane> {
-  Future<void> _startSessionFromEmptyState() async {
-    if (widget.hosts.isEmpty) {
-      widget.onAddHost();
-      return;
-    }
-    if (widget.enabledHosts.isEmpty) {
-      return;
-    }
-    final result = await showCreateSessionHostLauncher(
-      context,
-      hosts: widget.enabledHosts,
-      api: widget.api,
-    );
-    if (!mounted || result == null) {
-      return;
-    }
-    widget.onOpenSession(result.host, result.session);
-  }
-
   @override
   Widget build(BuildContext context) {
     final active = widget.active;
+    final draft = widget.draft;
     final activeHost = widget.activeHost;
+    final draftVisible =
+        draft != null &&
+        !widget.showUsage &&
+        active == null &&
+        activeHost == null;
     Widget child;
     if (widget.showUsage) {
       child = UsagePane(
@@ -1976,13 +2023,42 @@ class _DetailPaneState extends State<_DetailPane> {
     } else {
       child = _buildEmpty(context, key: const ValueKey('empty'));
     }
-    return AnimatedSwitcher(
+    final primary = AnimatedSwitcher(
       duration: const Duration(milliseconds: 180),
       switchInCurve: Curves.easeOutCubic,
       switchOutCurve: Curves.easeInCubic,
       transitionBuilder: (child, animation) =>
           FadeTransition(opacity: animation, child: child),
       child: child,
+    );
+    if (draft == null) return primary;
+    return Stack(
+      fit: StackFit.expand,
+      children: [
+        Offstage(
+          offstage: draftVisible,
+          child: TickerMode(enabled: !draftVisible, child: primary),
+        ),
+        Offstage(
+          offstage: !draftVisible,
+          child: TickerMode(
+            enabled: draftVisible,
+            child: CreateSessionSheet(
+              key: ValueKey(
+                'desktop-new-session-${draft.host.id}-${draft.serial}',
+              ),
+              host: draft.host,
+              api: widget.api,
+              presentation: CreateSessionPresentation.pane,
+              topPadding: widget.titlebarInset + 6,
+              paneActive: draftVisible,
+              onCreated: (session) =>
+                  widget.onCreatedSession(draft.host, session),
+              onCancel: widget.onCancelDraft,
+            ),
+          ),
+        ),
+      ],
     );
   }
 
@@ -2046,7 +2122,7 @@ class _DetailPaneState extends State<_DetailPane> {
                         const SizedBox(height: 18),
                         FilledButton.icon(
                           onPressed: hasEnabledHosts
-                              ? _startSessionFromEmptyState
+                              ? widget.onStartSession
                               : widget.onShowHosts,
                           icon: Icon(
                             hasEnabledHosts
