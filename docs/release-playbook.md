@@ -9,7 +9,8 @@ and distribution because the product exposes powerful host-control surfaces.
 - Repository: public.
 - License: Apache-2.0.
 - npm: published as the `sidemesh` package.
-- Daemon distribution: npm or local clone.
+- Daemon distribution: npm, local clone, or the GitHub Container Registry
+  image.
 - App distribution: local Flutter builds and manual GitHub Actions artifacts.
 - Recommended network: Tailscale or trusted private LAN.
 
@@ -108,6 +109,17 @@ process, update the checkout, rebuild, and start it again manually.
 App-driven restart and self-update are recommended only on service-managed
 hosts.
 
+For Docker Compose:
+
+```bash
+docker compose pull
+docker compose up -d
+docker compose ps
+```
+
+Container installs are updated by pulling and recreating the container, not by
+running Sidemesh self-update inside it.
+
 ### Managed Bleeding Edge Updates
 
 On a service-managed Git install, the Bleeding Edge channel uses atomic release
@@ -180,7 +192,34 @@ Current workflows:
 - `Publish npm Package`: publishes the daemon package to npm on manual dispatch
   or when a GitHub Release with tag `npm-v<package.json version>` is published.
   It uses npm trusted publishing from GitHub Actions.
+- `Publish Docker Image`: on pushes to `release`, repeats the server gates,
+  smoke-tests the booting image, and publishes a provenance- and SBOM-attested
+  `linux/amd64` and `linux/arm64` image to
+  `ghcr.io/mukhtharcm/sidemesh`. It updates the `latest` and `release` tags and
+  adds a commit-specific `release-<short-sha>` tag.
 - `Secret Scan`: manual gitleaks scan over full git history.
+
+## Docker Image Publish
+
+Before advancing `release`, complete the preflight checks above and confirm the
+commit is the exact release candidate. The Dockerfile pins the bundled Codex
+CLI with `CODEX_VERSION`; update and verify that pin deliberately rather than
+silently installing a different CLI during each build.
+
+Publish the verified commit by advancing the release branch:
+
+```bash
+git push origin <verified-commit-sha>:refs/heads/release
+```
+
+The workflow authenticates to GitHub Container Registry with its scoped
+`GITHUB_TOKEN`; it needs only `contents: read` and `packages: write`. BuildKit
+attaches the provenance and SBOM to the image index. No long-lived registry
+credential is required.
+
+GitHub container packages are private by default. After the first publication,
+set the package to public if anonymous `docker compose pull` should work.
+Otherwise, consumers must run `docker login ghcr.io` with package read access.
 
 ## npm Publish Setup
 

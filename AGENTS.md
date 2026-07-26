@@ -206,6 +206,11 @@ specific agent provider.
 
 - **Duplicate daemon guard**: `sidemesh start` checks `healthz` and refuses to
   start if occupied. Use `--allow-duplicate` to skip.
+- **Docker foreground startup**: the image runs
+  `sidemesh daemon --allow-duplicate`. Persisted container state can retain a
+  stale daemon PID after an unclean stop, while the server's port bind still
+  prevents a real duplicate. Keep container startup in foreground mode and
+  recreate the container for updates.
 - **Config persistence**: `sidemesh setup` writes to `~/.sidemesh/config.json`
   (or `SIDEMESH_CONFIG`). Atomic write-then-rename with `0o600` permissions.
   The daemon reads from `SIDEMESH_STATE_DIR` (defaults to `~/.sidemesh`).
