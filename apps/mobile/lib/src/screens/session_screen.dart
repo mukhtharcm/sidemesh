@@ -3666,7 +3666,8 @@ class _SessionScreenState extends State<SessionScreen>
 
   bool get _showRuntimeSignalStrip {
     final threadStatus = _latestThreadStatus;
-    final showThreadStatus = _shouldShowThreadStatusEvent(threadStatus);
+    final showThreadStatus =
+        _pendingAction == null && _shouldShowThreadStatusEvent(threadStatus);
     final queueUpdated = _latestQueueUpdate;
     final showQueue =
         queueUpdated != null &&
@@ -7224,7 +7225,7 @@ class _SessionScreenState extends State<SessionScreen>
       children: [
         if (_pendingAction != null)
           Padding(
-            padding: const EdgeInsets.fromLTRB(16, 4, 16, 12),
+            padding: const EdgeInsets.fromLTRB(0, 4, 0, 12),
             child: _PendingActionCard(
               action: _pendingAction!,
               onRespond: _respondAction,

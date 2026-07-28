@@ -69,6 +69,113 @@ void main() {
     expect(_composerTextField(tester).focusNode?.hasFocus, isFalse);
   });
 
+  testWidgets('assistant messages use the flat transcript surface', (
+    tester,
+  ) async {
+    final session = _session('flat-assistant-surface');
+    final api = _RichEventFakeApi(
+      messages: [
+        SessionMessage(
+          id: 'user-message',
+          role: 'user',
+          text: 'Please inspect this.',
+          content: const [TextBlock('Please inspect this.')],
+          attachments: const [],
+          createdAt: DateTime(2026, 1, 1, 12),
+          seq: 1,
+          phase: null,
+        ),
+        _assistantMessage(
+          id: 'assistant-message',
+          text: 'Here is what I found.',
+          content: const [TextBlock('Here is what I found.')],
+          seq: 2,
+          createdAt: DateTime(2026, 1, 1, 12, 1),
+        ),
+      ],
+    );
+    addTearDown(api.dispose);
+
+    await _pumpApp(
+      tester,
+      SessionScreen(
+        host: _host('flat-assistant-surface'),
+        session: session,
+        api: api,
+      ),
+      size: const Size(390, 844),
+    );
+    await _pumpFrames(tester);
+
+    final assistantSurface = tester.widget<DecoratedBox>(
+      find.byKey(
+        const ValueKey('session-message-surface:assistant-message'),
+      ),
+    );
+    final assistantDecoration =
+        assistantSurface.decoration as BoxDecoration;
+    final assistantBorder = assistantDecoration.border! as Border;
+    expect(assistantDecoration.color, Colors.transparent);
+    expect(assistantDecoration.borderRadius, isNull);
+    expect(assistantBorder.top.style, BorderStyle.none);
+    expect(assistantBorder.left.style, BorderStyle.none);
+    expect(assistantBorder.right.style, BorderStyle.none);
+    expect(assistantBorder.bottom.style, BorderStyle.solid);
+
+    final userSurface = tester.widget<DecoratedBox>(
+      find.byKey(const ValueKey('session-message-surface:user-message')),
+    );
+    final userDecoration = userSurface.decoration as BoxDecoration;
+    expect(userDecoration.borderRadius, isNotNull);
+    expect((userDecoration.border! as Border).isUniform, isTrue);
+  });
+
+  testWidgets('pending approval is a flat section without duplicate status', (
+    tester,
+  ) async {
+    final session = _session(
+      'flat-pending-approval',
+      status: 'waiting_for_approval',
+    );
+    final pending = _pendingAction(session.id);
+    final api = _RichEventFakeApi(pendingAction: pending);
+    addTearDown(api.dispose);
+
+    await _pumpApp(
+      tester,
+      SessionScreen(
+        host: _host('flat-pending-approval'),
+        session: session,
+        api: api,
+      ),
+      size: const Size(390, 844),
+    );
+    await _pumpFrames(tester);
+
+    final surface = tester.widget<DecoratedBox>(
+      find.byKey(ValueKey('pending-action-surface:${pending.id}')),
+    );
+    final decoration = surface.decoration as BoxDecoration;
+    final border = decoration.border! as Border;
+    expect(decoration.borderRadius, isNull);
+    expect(border.left.style, BorderStyle.none);
+    expect(border.right.style, BorderStyle.none);
+    expect(border.top.style, BorderStyle.solid);
+    expect(border.bottom.style, BorderStyle.solid);
+    expect(find.text('Approval needed'), findsOneWidget);
+    expect(find.text('APPROVAL REQUIRED'), findsNothing);
+
+    api.emit({
+      'type': 'thread_status',
+      'sessionId': session.id,
+      'status': 'waiting_for_approval',
+      'pendingActionKind': 'command',
+    });
+    await _pumpFrames(tester);
+
+    expect(find.text('Waiting for command'), findsNothing);
+  });
+
   testWidgets('tool output image attachments render in activity details', (
     tester,
   ) async {
