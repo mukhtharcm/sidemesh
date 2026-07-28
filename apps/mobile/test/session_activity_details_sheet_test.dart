@@ -396,6 +396,22 @@ void main() {
       expect(find.text('View technical actions'), findsNothing);
       expect(find.byType(DiffView), findsNothing);
       final rowTopBefore = tester.getTopLeft(find.text('Edited 1 file')).dy;
+      final rowSurface = tester.widget<DecoratedBox>(
+        find.byKey(
+          ValueKey(
+            'session-activity-row:'
+            '${sessionFileChangeGroupId(api.activities.first)}',
+          ),
+        ),
+      );
+      final rowDecoration = rowSurface.decoration as BoxDecoration;
+      final rowBorder = rowDecoration.border! as Border;
+      expect(rowDecoration.color, isNull);
+      expect(rowDecoration.borderRadius, isNull);
+      expect(rowBorder.top.style, BorderStyle.none);
+      expect(rowBorder.left.style, BorderStyle.none);
+      expect(rowBorder.right.style, BorderStyle.none);
+      expect(rowBorder.bottom.style, BorderStyle.solid);
 
       await tester.tap(find.text('View changes'));
       await _pumpFrames(tester);

@@ -331,15 +331,18 @@ class _ComposerStatusStrip extends StatelessWidget {
         }
         final colors = context.colors;
         return Padding(
-          padding: const EdgeInsets.fromLTRB(16, 0, 16, 10),
+          padding: const EdgeInsets.only(bottom: 10),
           child: DecoratedBox(
             decoration: BoxDecoration(
-              color: colors.surface,
-              borderRadius: AppShapes.input,
-              border: Border.all(color: colors.border),
+              color: colors.surfaceMuted.withValues(alpha: 0.48),
+              border: Border(
+                bottom: BorderSide(
+                  color: colors.border.withValues(alpha: 0.72),
+                ),
+              ),
             ),
             child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
               child: Row(
                 children: [
                   const LivePulse(),
@@ -467,8 +470,12 @@ class _PlanUpdateCardState extends State<_PlanUpdateCard> {
         .where((step) => step.status == 'completed')
         .length;
     final explanation = (event.explanation ?? '').trim();
-    return Padding(
-      padding: const EdgeInsets.only(left: 4, right: 4, bottom: 10),
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        border: Border(
+          bottom: BorderSide(color: colors.border.withValues(alpha: 0.72)),
+        ),
+      ),
       child: ConstrainedBox(
         constraints: const BoxConstraints(maxWidth: 640),
         child: Column(
@@ -493,9 +500,6 @@ class _PlanUpdateCardState extends State<_PlanUpdateCard> {
                         decoration: BoxDecoration(
                           color: colors.surfaceMuted.withValues(alpha: 0.72),
                           borderRadius: AppShapes.iconWell,
-                          border: Border.all(
-                            color: colors.border.withValues(alpha: 0.5),
-                          ),
                         ),
                         alignment: Alignment.center,
                         child: Icon(
@@ -714,24 +718,31 @@ class _RuntimeSignalStrip extends StatelessWidget {
       return const SizedBox.shrink();
     }
 
-    return MeshSurface(
-      radius: AppRadii.control,
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Wrap(spacing: 8, runSpacing: 8, children: pills),
-          if (details.isNotEmpty) ...[
-            const SizedBox(height: 8),
-            Text(
-              details.join(' • '),
-              style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                color: colors.textSecondary,
-                fontWeight: FontWeight.w600,
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: colors.surfaceMuted.withValues(alpha: 0.48),
+        border: Border(
+          bottom: BorderSide(color: colors.border.withValues(alpha: 0.72)),
+        ),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Wrap(spacing: 8, runSpacing: 8, children: pills),
+            if (details.isNotEmpty) ...[
+              const SizedBox(height: 8),
+              Text(
+                details.join(' • '),
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                  color: colors.textSecondary,
+                  fontWeight: FontWeight.w600,
+                ),
               ),
-            ),
+            ],
           ],
-        ],
+        ),
       ),
     );
   }
@@ -1063,16 +1074,17 @@ class _MessageBubble extends StatelessWidget {
     final textColor = messageBodyColor(colors, userBubble: isUser);
     final metaColor = messageMetaColor(colors, userBubble: isUser);
     final assistantMetaColor = messageMetaColor(colors, userBubble: false);
+    final selectionBackground = isAssistant ? colors.canvas : bubbleColor;
     final selectionForeground = readableTextOn(
       colors,
-      background: bubbleColor,
+      background: selectionBackground,
       preferred: textColor,
     );
     final bubbleSelectionTheme = TextSelectionThemeData(
       cursorColor: selectionForeground,
       selectionColor: selectionFillForBackground(
         colors,
-        background: bubbleColor,
+        background: selectionBackground,
         foreground: selectionForeground,
       ),
       selectionHandleColor: selectionForeground,
@@ -1093,13 +1105,9 @@ class _MessageBubble extends StatelessWidget {
       ).textTheme.bodyMedium?.copyWith(color: colors.textPrimary, height: 1.5),
     );
     final messagePadding = isAssistant
-        ? const EdgeInsets.fromLTRB(16, 13, 16, 14)
+        ? const EdgeInsets.fromLTRB(4, 13, 4, 14)
         : const EdgeInsets.fromLTRB(16, 12, 16, 14);
-    final bubbleBorderColor = isAssistant
-        ? live
-              ? colors.accent.withValues(alpha: 0.36)
-              : colors.assistantBubbleBorder
-        : live
+    final bubbleBorderColor = live
         ? colors.accent
         : colors.accent.withValues(alpha: 0.28);
     final phaseLabel = live
@@ -1111,17 +1119,24 @@ class _MessageBubble extends StatelessWidget {
     return Align(
       alignment: isUser ? Alignment.centerRight : Alignment.centerLeft,
       child: Padding(
-        padding: EdgeInsets.only(bottom: isAssistant ? 14 : 10),
+        padding: EdgeInsets.only(bottom: isAssistant ? 0 : 10),
         child: ConstrainedBox(
           constraints: BoxConstraints(maxWidth: isAssistant ? 680 : 560),
           child: DecoratedBox(
+            key: ValueKey('session-message-surface:${message.id}'),
             decoration: BoxDecoration(
-              color: bubbleColor,
-              borderRadius: BorderRadius.circular(isAssistant ? 16 : 20),
-              border: Border.all(
-                color: bubbleBorderColor,
-                width: live ? 1.4 : 1,
-              ),
+              color: isAssistant ? Colors.transparent : bubbleColor,
+              borderRadius: isAssistant ? null : BorderRadius.circular(20),
+              border: isAssistant
+                  ? Border(
+                      bottom: BorderSide(
+                        color: colors.border.withValues(alpha: 0.72),
+                      ),
+                    )
+                  : Border.all(
+                      color: bubbleBorderColor,
+                      width: live ? 1.4 : 1,
+                    ),
             ),
             child: TextSelectionTheme(
               data: bubbleSelectionTheme,
@@ -2717,9 +2732,6 @@ class _ActivityCardState extends State<_ActivityCard>
                     ? colors.surfaceMuted.withValues(alpha: 0.72)
                     : colors.accentMuted.withValues(alpha: 0.68),
                 borderRadius: AppShapes.iconWell,
-                border: Border.all(
-                  color: colors.border.withValues(alpha: 0.5),
-                ),
               ),
               alignment: Alignment.center,
               child: Icon(
@@ -2794,44 +2806,41 @@ class _ActivityCardState extends State<_ActivityCard>
       ),
     );
 
-    final summary = Material(
-      color: commandLikeActivity
-          ? colors.surface.withValues(alpha: 0.76)
-          : colors.surfaceMuted.withValues(alpha: 0.48),
-      shape: RoundedRectangleBorder(
-        borderRadius: AppShapes.input,
-        side: BorderSide(
-          color: commandLikeActivity
-              ? colors.codeBorder.withValues(alpha: 0.76)
-              : colors.border.withValues(alpha: 0.62),
+    final summary = DecoratedBox(
+      key: ValueKey('session-activity-row:${activity.id}'),
+      decoration: BoxDecoration(
+        border: Border(
+          bottom: BorderSide(
+            color: commandLikeActivity
+                ? colors.codeBorder.withValues(alpha: 0.72)
+                : colors.border.withValues(alpha: 0.72),
+          ),
         ),
       ),
-      clipBehavior: Clip.antiAlias,
-      child: actionLabel == null
-          ? row
-          : Semantics(
-              button: true,
-              label: '$actionLabel: $title',
-              child: InkWell(
-                onTap: detailActionLabel != null
-                    ? () => _showActivityDetails(
-                        actionLabel: detailActionLabel,
-                      )
-                    : directAction!.onTap,
-                borderRadius: AppShapes.input,
-                child: ExcludeSemantics(child: row),
+      child: Material(
+        color: Colors.transparent,
+        child: actionLabel == null
+            ? row
+            : Semantics(
+                button: true,
+                label: '$actionLabel: $title',
+                child: InkWell(
+                  onTap: detailActionLabel != null
+                      ? () => _showActivityDetails(
+                          actionLabel: detailActionLabel,
+                        )
+                      : directAction!.onTap,
+                  child: ExcludeSemantics(child: row),
+                ),
               ),
-            ),
+      ),
     );
 
     return Align(
       alignment: Alignment.centerLeft,
-      child: Padding(
-        padding: const EdgeInsets.only(bottom: 10),
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 640),
-          child: summary,
-        ),
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 640),
+        child: summary,
       ),
     );
   }

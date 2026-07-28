@@ -1355,65 +1355,80 @@ class _PendingActionCardState extends State<_PendingActionCard> {
     final mq = MediaQuery.of(context);
     final kindMeta = _kindMeta(action, colors);
     final maxHeight = mq.size.height * 0.5;
-    return MeshCard(
-      tone: MeshCardTone.surface,
-      borderColor: kindMeta.accent.withValues(alpha: 0.7),
-      child: ConstrainedBox(
-        constraints: BoxConstraints(maxHeight: maxHeight),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Row(
-              children: [
-                MeshStatusBadge(
-                  label: kindMeta.kicker,
-                  tone: kindMeta.tone,
-                  icon: kindMeta.icon,
-                  compact: true,
-                ),
-              ],
-            ),
-            const SizedBox(height: 8),
-            Flexible(
-              child: SingleChildScrollView(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Text(
-                      action.title,
-                      style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                        fontWeight: FontWeight.w700,
-                      ),
+    return DecoratedBox(
+      key: ValueKey('pending-action-surface:${action.id}'),
+      decoration: BoxDecoration(
+        color: kindMeta.accent.withValues(alpha: 0.07),
+        border: Border(
+          top: BorderSide(
+            color: kindMeta.accent.withValues(alpha: 0.24),
+          ),
+          bottom: BorderSide(
+            color: kindMeta.accent.withValues(alpha: 0.24),
+          ),
+        ),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(16, 14, 16, 16),
+        child: ConstrainedBox(
+          constraints: BoxConstraints(maxHeight: maxHeight),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Row(
+                children: [
+                  Icon(kindMeta.icon, size: 16, color: kindMeta.accent),
+                  const SizedBox(width: 7),
+                  Text(
+                    kindMeta.kicker,
+                    style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                      color: kindMeta.accent,
+                      fontWeight: AppWeights.title,
                     ),
-                    if (action.detail.isNotEmpty) ...[
-                      const SizedBox(height: 8),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 8),
+              Flexible(
+                child: SingleChildScrollView(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
                       Text(
-                        action.detail,
-                        style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                          color: colors.textSecondary,
+                        action.title,
+                        style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                          fontWeight: FontWeight.w700,
                         ),
                       ),
+                      if (action.detail.isNotEmpty) ...[
+                        const SizedBox(height: 8),
+                        Text(
+                          action.detail,
+                          style: Theme.of(context).textTheme.bodyMedium
+                              ?.copyWith(color: colors.textSecondary),
+                        ),
+                      ],
+                      if (action.isUserInput) ...[
+                        const SizedBox(height: 12),
+                        _buildUserInputBody(context, action.userInput!),
+                      ] else if (action.isElicitation) ...[
+                        const SizedBox(height: 12),
+                        _buildElicitationBody(context, action.elicitation!),
+                      ],
                     ],
-                    if (action.isUserInput) ...[
-                      const SizedBox(height: 12),
-                      _buildUserInputBody(context, action.userInput!),
-                    ] else if (action.isElicitation) ...[
-                      const SizedBox(height: 12),
-                      _buildElicitationBody(context, action.elicitation!),
-                    ],
-                  ],
+                  ),
                 ),
               ),
-            ),
-            const SizedBox(height: 14),
-            Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              children: _buildFooterActions(context),
-            ),
-          ],
+              const SizedBox(height: 14),
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: _buildFooterActions(context),
+              ),
+            ],
+          ),
         ),
       ),
     );
@@ -1949,37 +1964,32 @@ class _PendingActionKindMeta {
     required this.kicker,
     required this.icon,
     required this.accent,
-    required this.tone,
   });
 
   final String kicker;
   final IconData icon;
   final Color accent;
-  final MeshStatusTone tone;
 }
 
 _PendingActionKindMeta _kindMeta(PendingAction action, AppColors colors) {
   if (action.isUserInput) {
     return _PendingActionKindMeta(
-      kicker: 'INPUT NEEDED',
+      kicker: 'Input needed',
       icon: Icons.chat_bubble_outline_rounded,
       accent: colors.accent,
-      tone: MeshStatusTone.waiting,
     );
   }
   if (action.isElicitation) {
     return _PendingActionKindMeta(
-      kicker: 'FORM REQUIRED',
+      kicker: 'Details needed',
       icon: Icons.fact_check_rounded,
       accent: colors.info,
-      tone: MeshStatusTone.queued,
     );
   }
   return _PendingActionKindMeta(
-    kicker: 'APPROVAL REQUIRED',
+    kicker: 'Approval needed',
     icon: Icons.shield_rounded,
     accent: colors.warning,
-    tone: MeshStatusTone.approval,
   );
 }
 
