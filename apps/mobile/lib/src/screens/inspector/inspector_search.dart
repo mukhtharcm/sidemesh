@@ -413,12 +413,12 @@ class _SearchResultRow extends StatelessWidget {
               ? Icons.person_outline_rounded
               : Icons.auto_awesome_rounded)
         : _iconForActivity(record.activity!.type);
-    final snippet = _SnippetText(
-      body: record.kind == SearchRecordKind.message
-          ? record.message!.text
-          : _activityPreviewBody(record.activity!),
-      query: query,
-    );
+    final previewBody = record.kind == SearchRecordKind.message
+        ? record.message!.text
+        : _activityPreviewBody(record.activity!);
+    final snippet = previewBody.trim().isEmpty
+        ? null
+        : _SnippetText(body: previewBody, query: query);
     return InkWell(
       onTap: onToggle,
       child: Padding(
@@ -477,8 +477,10 @@ class _SearchResultRow extends StatelessWidget {
                           ),
                         ],
                       ),
-                      const SizedBox(height: 4),
-                      snippet,
+                      if (snippet != null) ...[
+                        const SizedBox(height: 4),
+                        snippet,
+                      ],
                     ],
                   ),
                 ),
@@ -745,27 +747,33 @@ IconData _iconForActivity(String type) {
 String _friendlyActivityType(String type) {
   return switch (type) {
     'command' => 'Command',
-    'tool' => 'Tool',
+    'tool' => 'Action',
     'file_change' => 'File change',
     'turn_diff' => 'Changes',
     'web_search' => 'Web search',
     'image_generation' => 'Image',
-    _ => type.replaceAll('_', ' '),
+    _ => 'Activity',
   };
 }
 
 String _activityPreviewBody(SessionActivity activity) {
   switch (activity.type) {
     case 'command':
-      final out = (activity.output ?? '').trim();
-      return out.isEmpty ? (activity.command ?? '') : out;
+      return switch (activity.status) {
+        'failed' => 'The command did not finish successfully.',
+        'declined' => 'The command was not run.',
+        'in_progress' => 'The command is still running.',
+        _ => '',
+      };
     case 'tool':
-      final out = (activity.output ?? '').trim();
-      if (out.isNotEmpty) return out;
-      return [
-        if ((activity.toolTitle ?? '').isNotEmpty) activity.toolTitle!,
-        if ((activity.toolName ?? '').isNotEmpty) activity.toolName!,
-      ].join('\n');
+      final query = (activity.toolQuery ?? '').trim();
+      if (query.isNotEmpty) return query;
+      final target = (activity.toolTarget ?? '').trim();
+      if (target.isNotEmpty) return target;
+      if (activity.toolTargets.isNotEmpty) {
+        return activity.toolTargets.join('\n');
+      }
+      return '';
     case 'file_change':
       return activity.changes.map((c) => c.path).join('\n');
     case 'turn_diff':
@@ -779,7 +787,7 @@ String _activityPreviewBody(SessionActivity activity) {
     case 'image_generation':
       return activity.savedPath ?? '';
     default:
-      return (activity.output ?? activity.command ?? '').trim();
+      return '';
   }
 }
 

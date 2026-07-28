@@ -12,6 +12,7 @@ import 'package:sidemesh_mobile/src/screens/session_screen.dart';
 import 'package:sidemesh_mobile/src/session_local_store.dart';
 import 'package:sidemesh_mobile/src/theme/app_palettes.dart';
 import 'package:sidemesh_mobile/src/theme/app_theme.dart';
+import 'package:sidemesh_mobile/src/widgets/diff_view.dart';
 import 'package:stream_channel/stream_channel.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
 
@@ -68,7 +69,7 @@ void main() {
     expect(_composerTextField(tester).focusNode?.hasFocus, isFalse);
   });
 
-  testWidgets('tool output image attachments render in the activity card', (
+  testWidgets('tool output image attachments render in activity details', (
     tester,
   ) async {
     final api = _RichEventFakeApi(
@@ -103,9 +104,12 @@ void main() {
     await _pumpFrames(tester);
 
     expect(find.byType(Image), findsNothing);
-    await tester.tap(find.text('provider_image_inspector').first);
+    expect(find.text('Viewed an image'), findsOneWidget);
+    expect(find.text('provider_image_inspector'), findsNothing);
+    await tester.tap(find.text('View result'));
     await _pumpFrames(tester);
 
+    expect(find.byType(Dialog), findsOneWidget);
     expect(find.byType(Image), findsOneWidget);
   });
 
@@ -1308,7 +1312,7 @@ void main() {
     expect(find.textContaining('Cached transcript ·'), findsNothing);
   });
 
-  testWidgets('completed assistant message keeps collapsed reasoning visible', (
+  testWidgets('completed assistant message keeps live reasoning expanded', (
     tester,
   ) async {
     final session = _session('reasoning-collapse');
@@ -1352,7 +1356,7 @@ void main() {
     });
     await _pumpFrames(tester);
 
-    expect(find.text('Step one.'), findsNothing);
+    expect(find.text('Step one.'), findsOneWidget);
     expect(find.text('Final answer.'), findsOneWidget);
     expect(find.text('Working notes'), findsOneWidget);
 
@@ -1367,7 +1371,7 @@ void main() {
     await tester.tap(find.text('Working notes'));
     await _pumpFrames(tester);
 
-    expect(find.text('Step one.'), findsOneWidget);
+    expect(find.text('Step one.'), findsNothing);
   });
 
   testWidgets(
@@ -1469,13 +1473,17 @@ void main() {
       expect(find.textContaining('/bin/bash'), findsNothing);
       expect(find.text('done'), findsNothing);
 
-      await tester.tap(find.text('npm run dev'));
-      await _pumpFrames(tester);
-      await tester.tap(find.text('apps/web/src/main.dart'));
+      await tester.tap(find.text('View results'));
       await _pumpFrames(tester);
 
       expect(find.text('Browser localhost:3000'), findsOneWidget);
       expect(find.text('Open terminal'), findsOneWidget);
+      await tester.tap(find.byTooltip('Close details'));
+      await _pumpFrames(tester);
+
+      await tester.tap(find.text('View changes'));
+      await _pumpFrames(tester);
+
       expect(find.text('Browse files'), findsOneWidget);
       expect(find.text('Open file'), findsOneWidget);
     },
@@ -1531,15 +1539,23 @@ void main() {
     );
     await _pumpFrames(tester);
 
-    expect(find.text('Compacting context'), findsOneWidget);
-    expect(find.text('Context compacted'), findsNothing);
+    expect(find.text('Making room for more work'), findsOneWidget);
+    expect(find.text('Made room for more work'), findsNothing);
     expect(find.text('Image generation failed'), findsOneWidget);
+    expect(find.text('Image generation failed.'), findsNothing);
+
+    await tester.tap(find.text('Image generation failed'));
+    await _pumpFrames(tester);
     expect(find.text('Image generation failed.'), findsOneWidget);
+    await tester.tap(find.byTooltip('Close details'));
+    await _pumpFrames(tester);
 
     await tester.ensureVisible(find.text('latest Codex types'));
     await tester.tap(find.text('latest Codex types'));
     await _pumpFrames(tester);
     expect(find.text('Web search failed.'), findsOneWidget);
+    await tester.tap(find.byTooltip('Close details'));
+    await _pumpFrames(tester);
 
     await tester.ensureVisible(find.text('true'));
     await tester.tap(find.text('true'));
@@ -1747,7 +1763,13 @@ void main() {
         _turnDiffActivity(
           id: 'turn-diff-1',
           seq: 1,
-          diff: '@@ -1 +1 @@\n-old\n+new',
+          diff:
+              'diff --git a/lib/app.dart b/lib/app.dart\n'
+              '--- a/lib/app.dart\n'
+              '+++ b/lib/app.dart\n'
+              '@@ -1 +1 @@\n'
+              '-old\n'
+              '+new',
         ),
       ],
     );
@@ -1765,9 +1787,15 @@ void main() {
     );
     await _pumpFrames(tester);
 
-    expect(find.text('live diff · 3 lines'), findsOneWidget);
-    expect(find.text('View patch (3 lines)'), findsOneWidget);
+    expect(find.text('2 lines changed'), findsOneWidget);
+    expect(find.text('View changes'), findsOneWidget);
+    expect(find.byType(DiffView), findsNothing);
     expect(find.textContaining('turn diff'), findsNothing);
+
+    await tester.tap(find.text('View changes'));
+    await _pumpFrames(tester);
+
+    expect(find.byType(DiffView), findsOneWidget);
   });
 
   testWidgets('session screen groups adjacent file changes by turn', (
