@@ -354,8 +354,9 @@ String? _gitHeaderLabel(SessionSummary session, SessionGitStatus? status) {
 }
 
 class _JumpToLatestPill extends StatelessWidget {
-  const _JumpToLatestPill({required this.onTap});
+  const _JumpToLatestPill({required this.label, required this.onTap});
 
+  final String label;
   final VoidCallback onTap;
 
   @override
@@ -378,7 +379,7 @@ class _JumpToLatestPill extends StatelessWidget {
               Icon(Icons.arrow_downward_rounded, size: 16, color: foreground),
               const SizedBox(width: 6),
               Text(
-                'Jump to latest',
+                label,
                 style: Theme.of(context).textTheme.labelMedium?.copyWith(
                   color: foreground,
                   fontWeight: FontWeight.w700,
