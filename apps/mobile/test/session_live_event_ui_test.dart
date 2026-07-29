@@ -12,6 +12,7 @@ import 'package:sidemesh_mobile/src/screens/session_screen.dart';
 import 'package:sidemesh_mobile/src/session_local_store.dart';
 import 'package:sidemesh_mobile/src/theme/app_palettes.dart';
 import 'package:sidemesh_mobile/src/theme/app_theme.dart';
+import 'package:sidemesh_mobile/src/widgets/diff_view.dart';
 import 'package:stream_channel/stream_channel.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
 
@@ -68,7 +69,145 @@ void main() {
     expect(_composerTextField(tester).focusNode?.hasFocus, isFalse);
   });
 
-  testWidgets('tool output image attachments render in the activity card', (
+  testWidgets('messages use the flat transcript surface', (
+    tester,
+  ) async {
+    final session = _session('flat-assistant-surface');
+    final api = _RichEventFakeApi(
+      messages: [
+        SessionMessage(
+          id: 'user-message',
+          role: 'user',
+          text: 'Please inspect this.',
+          content: const [TextBlock('Please inspect this.')],
+          attachments: const [],
+          createdAt: DateTime(2026, 1, 1, 12),
+          seq: 1,
+          phase: null,
+        ),
+        _assistantMessage(
+          id: 'assistant-message',
+          text: 'Here is what I found.',
+          content: const [TextBlock('Here is what I found.')],
+          seq: 2,
+          createdAt: DateTime(2026, 1, 1, 12, 1),
+        ),
+      ],
+    );
+    addTearDown(api.dispose);
+
+    await _pumpApp(
+      tester,
+      SessionScreen(
+        host: _host('flat-assistant-surface'),
+        session: session,
+        api: api,
+      ),
+      size: const Size(390, 844),
+    );
+    await _pumpFrames(tester);
+
+    final assistantSurface = tester.widget<DecoratedBox>(
+      find.byKey(
+        const ValueKey('session-message-surface:assistant-message'),
+      ),
+    );
+    final assistantDecoration =
+        assistantSurface.decoration as BoxDecoration;
+    final assistantBorder = assistantDecoration.border! as Border;
+    expect(assistantDecoration.color, Colors.transparent);
+    expect(assistantDecoration.borderRadius, isNull);
+    expect(assistantBorder.top.style, BorderStyle.none);
+    expect(assistantBorder.left.style, BorderStyle.none);
+    expect(assistantBorder.right.style, BorderStyle.none);
+    expect(assistantBorder.bottom.style, BorderStyle.solid);
+
+    final userSurface = tester.widget<DecoratedBox>(
+      find.byKey(const ValueKey('session-message-surface:user-message')),
+    );
+    final userDecoration = userSurface.decoration as BoxDecoration;
+    final userBorder = userDecoration.border! as Border;
+    expect(userDecoration.color, Colors.transparent);
+    expect(userDecoration.borderRadius, isNull);
+    expect(userBorder.top.style, BorderStyle.none);
+    expect(userBorder.left.style, BorderStyle.none);
+    expect(userBorder.right.style, BorderStyle.none);
+    expect(userBorder.bottom.style, BorderStyle.solid);
+    expect(find.text('You'), findsOneWidget);
+  });
+
+  testWidgets('pending approval is a flat section without duplicate status', (
+    tester,
+  ) async {
+    final session = _session(
+      'flat-pending-approval',
+      status: 'waiting_for_approval',
+    );
+    final pending = _pendingAction(session.id);
+    final api = _RichEventFakeApi(
+      pendingAction: pending,
+      messages: [
+        SessionMessage(
+          id: 'approval-request-message',
+          role: 'user',
+          text: 'Run the verification.',
+          content: const [TextBlock('Run the verification.')],
+          attachments: const [],
+          createdAt: DateTime(2026, 1, 1, 11, 59),
+          seq: 1,
+          phase: null,
+        ),
+      ],
+    );
+    addTearDown(api.dispose);
+
+    await _pumpApp(
+      tester,
+      SessionScreen(
+        host: _host('flat-pending-approval'),
+        session: session,
+        api: api,
+      ),
+      size: const Size(390, 844),
+    );
+    await _pumpFrames(tester);
+
+    final surface = tester.widget<DecoratedBox>(
+      find.byKey(ValueKey('pending-action-surface:${pending.id}')),
+    );
+    final decoration = surface.decoration as BoxDecoration;
+    final border = decoration.border! as Border;
+    expect(decoration.borderRadius, isNull);
+    expect(decoration.color, Colors.transparent);
+    expect(border.left.style, BorderStyle.none);
+    expect(border.right.style, BorderStyle.none);
+    expect(border.top.style, BorderStyle.none);
+    expect(border.bottom.style, BorderStyle.solid);
+    expect(find.text('Approval needed'), findsOneWidget);
+    expect(find.text('Run this command?'), findsOneWidget);
+    expect(find.text('Run command'), findsOneWidget);
+    expect(find.text('Allow for this session'), findsOneWidget);
+    expect(find.text('Approve'), findsNothing);
+    expect(find.text('Approve for session'), findsNothing);
+    expect(find.text('APPROVAL REQUIRED'), findsNothing);
+    expect(find.text('Stop agent'), findsNothing);
+    expect(
+      tester.getTopLeft(find.text('Run the verification.')).dy,
+      lessThan(tester.getTopLeft(find.text('Run this command?')).dy),
+    );
+
+    api.emit({
+      'type': 'thread_status',
+      'sessionId': session.id,
+      'status': 'waiting_for_approval',
+      'pendingActionKind': 'command',
+    });
+    await _pumpFrames(tester);
+
+    expect(find.text('Waiting for command'), findsNothing);
+  });
+
+  testWidgets('tool output image attachments render in activity details', (
     tester,
   ) async {
     final api = _RichEventFakeApi(
@@ -103,9 +242,12 @@ void main() {
     await _pumpFrames(tester);
 
     expect(find.byType(Image), findsNothing);
-    await tester.tap(find.text('provider_image_inspector').first);
+    expect(find.text('Viewed an image'), findsOneWidget);
+    expect(find.text('provider_image_inspector'), findsNothing);
+    await tester.tap(find.text('View result'));
     await _pumpFrames(tester);
 
+    expect(find.byType(Dialog), findsOneWidget);
     expect(find.byType(Image), findsOneWidget);
   });
 
@@ -160,7 +302,7 @@ void main() {
     );
     await _pumpFrames(tester);
 
-    expect(find.text('Review command'), findsOneWidget);
+    expect(find.text('Run this command?'), findsOneWidget);
     expect(_composerTextField(tester).focusNode?.hasFocus, isFalse);
   });
 
@@ -678,12 +820,12 @@ void main() {
       });
       await _pumpFrames(tester);
 
-      expect(find.text('Approve file edit'), findsOneWidget);
+      expect(find.text('Allow this access?'), findsOneWidget);
 
       api.emit({'type': 'hello', 'sessionId': session.id, 'nextSeq': 3});
       await _pumpFrames(tester);
 
-      expect(find.text('Approve file edit'), findsNothing);
+      expect(find.text('Allow this access?'), findsNothing);
     },
   );
 
@@ -731,12 +873,12 @@ void main() {
     });
     await _pumpFrames(tester);
 
-    expect(find.text('Approve file edit'), findsOneWidget);
+    expect(find.text('Allow this access?'), findsOneWidget);
 
     await _tapDesktopReload(tester);
     await _pumpFrames(tester);
 
-    expect(find.text('Approve file edit'), findsNothing);
+    expect(find.text('Allow this access?'), findsNothing);
   });
 
   testWidgets(
@@ -787,12 +929,12 @@ void main() {
       });
       await _pumpFrames(tester);
 
-      expect(find.text('Approve file edit'), findsNothing);
+      expect(find.text('Allow this access?'), findsNothing);
 
       snapshotReady.complete();
       await _pumpFrames(tester);
 
-      expect(find.text('Approve file edit'), findsOneWidget);
+      expect(find.text('Allow this access?'), findsOneWidget);
     },
   );
 
@@ -1308,7 +1450,7 @@ void main() {
     expect(find.textContaining('Cached transcript ·'), findsNothing);
   });
 
-  testWidgets('completed assistant message keeps collapsed reasoning visible', (
+  testWidgets('completed assistant message keeps live reasoning expanded', (
     tester,
   ) async {
     final session = _session('reasoning-collapse');
@@ -1352,7 +1494,7 @@ void main() {
     });
     await _pumpFrames(tester);
 
-    expect(find.text('Step one.'), findsNothing);
+    expect(find.text('Step one.'), findsOneWidget);
     expect(find.text('Final answer.'), findsOneWidget);
     expect(find.text('Working notes'), findsOneWidget);
 
@@ -1367,7 +1509,7 @@ void main() {
     await tester.tap(find.text('Working notes'));
     await _pumpFrames(tester);
 
-    expect(find.text('Step one.'), findsOneWidget);
+    expect(find.text('Step one.'), findsNothing);
   });
 
   testWidgets(
@@ -1469,13 +1611,17 @@ void main() {
       expect(find.textContaining('/bin/bash'), findsNothing);
       expect(find.text('done'), findsNothing);
 
-      await tester.tap(find.text('npm run dev'));
-      await _pumpFrames(tester);
-      await tester.tap(find.text('apps/web/src/main.dart'));
+      await tester.tap(find.text('View results'));
       await _pumpFrames(tester);
 
       expect(find.text('Browser localhost:3000'), findsOneWidget);
       expect(find.text('Open terminal'), findsOneWidget);
+      await tester.tap(find.byTooltip('Close details'));
+      await _pumpFrames(tester);
+
+      await tester.tap(find.text('View changes'));
+      await _pumpFrames(tester);
+
       expect(find.text('Browse files'), findsOneWidget);
       expect(find.text('Open file'), findsOneWidget);
     },
@@ -1531,15 +1677,23 @@ void main() {
     );
     await _pumpFrames(tester);
 
-    expect(find.text('Compacting context'), findsOneWidget);
-    expect(find.text('Context compacted'), findsNothing);
+    expect(find.text('Making room for more work'), findsOneWidget);
+    expect(find.text('Made room for more work'), findsNothing);
     expect(find.text('Image generation failed'), findsOneWidget);
+    expect(find.text('Image generation failed.'), findsNothing);
+
+    await tester.tap(find.text('Image generation failed'));
+    await _pumpFrames(tester);
     expect(find.text('Image generation failed.'), findsOneWidget);
+    await tester.tap(find.byTooltip('Close details'));
+    await _pumpFrames(tester);
 
     await tester.ensureVisible(find.text('latest Codex types'));
     await tester.tap(find.text('latest Codex types'));
     await _pumpFrames(tester);
     expect(find.text('Web search failed.'), findsOneWidget);
+    await tester.tap(find.byTooltip('Close details'));
+    await _pumpFrames(tester);
 
     await tester.ensureVisible(find.text('true'));
     await tester.tap(find.text('true'));
@@ -1747,7 +1901,13 @@ void main() {
         _turnDiffActivity(
           id: 'turn-diff-1',
           seq: 1,
-          diff: '@@ -1 +1 @@\n-old\n+new',
+          diff:
+              'diff --git a/lib/app.dart b/lib/app.dart\n'
+              '--- a/lib/app.dart\n'
+              '+++ b/lib/app.dart\n'
+              '@@ -1 +1 @@\n'
+              '-old\n'
+              '+new',
         ),
       ],
     );
@@ -1765,9 +1925,15 @@ void main() {
     );
     await _pumpFrames(tester);
 
-    expect(find.text('live diff · 3 lines'), findsOneWidget);
-    expect(find.text('View patch (3 lines)'), findsOneWidget);
+    expect(find.text('2 lines changed'), findsOneWidget);
+    expect(find.text('View changes'), findsOneWidget);
+    expect(find.byType(DiffView), findsNothing);
     expect(find.textContaining('turn diff'), findsNothing);
+
+    await tester.tap(find.text('View changes'));
+    await _pumpFrames(tester);
+
+    expect(find.byType(DiffView), findsOneWidget);
   });
 
   testWidgets('session screen groups adjacent file changes by turn', (

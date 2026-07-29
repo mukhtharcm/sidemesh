@@ -9,6 +9,7 @@ class _LiveAssistantMessageState {
     required this.phase,
     this.live = true,
     this.reasoning = '',
+    this.reasoningExpandedOverride,
   });
 
   final String id;
@@ -18,21 +19,28 @@ class _LiveAssistantMessageState {
   final int seq;
   final String? phase;
   final bool live;
+  final bool? reasoningExpandedOverride;
 
   _LiveAssistantMessageState copyWith({
+    String? id,
     String? text,
     String? reasoning,
     String? phase,
     bool? live,
+    bool? reasoningExpandedOverride,
+    bool clearReasoningExpandedOverride = false,
   }) {
     return _LiveAssistantMessageState(
-      id: id,
+      id: id ?? this.id,
       text: text ?? this.text,
       reasoning: reasoning ?? this.reasoning,
       createdAt: createdAt,
       seq: seq,
       phase: phase ?? this.phase,
       live: live ?? this.live,
+      reasoningExpandedOverride: clearReasoningExpandedOverride
+          ? null
+          : reasoningExpandedOverride ?? this.reasoningExpandedOverride,
     );
   }
 
@@ -58,6 +66,7 @@ class _LiveAssistantMessageState {
 enum _TimelineEntryKind {
   message,
   activity,
+  pendingAction,
   providerWarning,
   planUpdated,
   liveAssistant,
@@ -91,6 +100,7 @@ class _TimelineEntry {
     required this.keyId,
     this.message,
     this.activity,
+    this.pendingAction,
     this.runtimeEvent,
   });
 
@@ -109,6 +119,15 @@ class _TimelineEntry {
     keyId: 'act:${activity.id}',
     activity: activity,
   );
+
+  factory _TimelineEntry.pendingAction(PendingAction action) =>
+      _TimelineEntry._(
+        kind: _TimelineEntryKind.pendingAction,
+        createdAt: action.requestedAt,
+        seq: 0x7fffffff,
+        keyId: 'pending:${action.id}',
+        pendingAction: action,
+      );
 
   factory _TimelineEntry.runtimeEvent(_TimelineLiveEventRecord event) =>
       _TimelineEntry._(
@@ -137,6 +156,7 @@ class _TimelineEntry {
   final String keyId;
   final SessionMessage? message;
   final SessionActivity? activity;
+  final PendingAction? pendingAction;
   final _TimelineLiveEventRecord? runtimeEvent;
 }
 
@@ -146,6 +166,7 @@ class _LiveAssistantBubble extends StatelessWidget {
     required this.api,
     required this.sessionId,
     required this.message,
+    this.onReasoningExpansionChanged,
     this.onOpenFile,
     this.onOpenHostUrl,
   });
@@ -154,6 +175,7 @@ class _LiveAssistantBubble extends StatelessWidget {
   final ApiClient api;
   final String sessionId;
   final ValueListenable<_LiveAssistantMessageState?> message;
+  final ValueChanged<bool>? onReasoningExpansionChanged;
   final void Function(String path)? onOpenFile;
   final void Function(String url)? onOpenHostUrl;
 
@@ -173,6 +195,9 @@ class _LiveAssistantBubble extends StatelessWidget {
             sessionId: sessionId,
             message: liveMessage.toMessage(),
             live: liveMessage.live,
+            reasoningExpandedOverride:
+                liveMessage.reasoningExpandedOverride,
+            onReasoningExpansionChanged: onReasoningExpansionChanged,
             onOpenFile: onOpenFile,
             onOpenHostUrl: onOpenHostUrl,
           ),
@@ -187,6 +212,7 @@ class _ReasoningBlock extends StatefulWidget {
     required this.reasoning,
     this.live = false,
     this.collapsedByDefault = false,
+    this.onExpandedChanged,
     this.onOpenFile,
     this.onOpenHostUrl,
   });
@@ -196,9 +222,11 @@ class _ReasoningBlock extends StatefulWidget {
   /// Whether the assistant turn is still streaming.
   final bool live;
 
-  /// True when the message already has answer text, so reasoning should shrink
-  /// back to a disclosure row by default.
+  /// True when a completed message is first shown with answer text, so its
+  /// reasoning begins behind a disclosure row. A live block that is already
+  /// visible stays visible when the answer arrives.
   final bool collapsedByDefault;
+  final ValueChanged<bool>? onExpandedChanged;
   final void Function(String path)? onOpenFile;
   final void Function(String url)? onOpenHostUrl;
 
@@ -216,12 +244,6 @@ class _ReasoningBlockState extends State<_ReasoningBlock> {
     if (_userOverrode) {
       return;
     }
-    if (!oldWidget.collapsedByDefault &&
-        widget.collapsedByDefault &&
-        _expanded) {
-      setState(() => _expanded = false);
-      return;
-    }
     if (oldWidget.collapsedByDefault &&
         !widget.collapsedByDefault &&
         !_expanded) {
@@ -234,6 +256,7 @@ class _ReasoningBlockState extends State<_ReasoningBlock> {
       _userOverrode = true;
       _expanded = !_expanded;
     });
+    widget.onExpandedChanged?.call(_expanded);
   }
 
   @override
@@ -320,15 +343,18 @@ class _ComposerStatusStrip extends StatelessWidget {
         }
         final colors = context.colors;
         return Padding(
-          padding: const EdgeInsets.fromLTRB(16, 0, 16, 10),
+          padding: const EdgeInsets.only(bottom: 10),
           child: DecoratedBox(
             decoration: BoxDecoration(
-              color: colors.surface,
-              borderRadius: AppShapes.input,
-              border: Border.all(color: colors.border),
+              color: colors.surfaceMuted.withValues(alpha: 0.48),
+              border: Border(
+                bottom: BorderSide(
+                  color: colors.border.withValues(alpha: 0.72),
+                ),
+              ),
             ),
             child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
               child: Row(
                 children: [
                   const LivePulse(),
@@ -456,8 +482,12 @@ class _PlanUpdateCardState extends State<_PlanUpdateCard> {
         .where((step) => step.status == 'completed')
         .length;
     final explanation = (event.explanation ?? '').trim();
-    return Padding(
-      padding: const EdgeInsets.only(left: 4, right: 4, bottom: 10),
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        border: Border(
+          bottom: BorderSide(color: colors.border.withValues(alpha: 0.72)),
+        ),
+      ),
       child: ConstrainedBox(
         constraints: const BoxConstraints(maxWidth: 640),
         child: Column(
@@ -482,9 +512,6 @@ class _PlanUpdateCardState extends State<_PlanUpdateCard> {
                         decoration: BoxDecoration(
                           color: colors.surfaceMuted.withValues(alpha: 0.72),
                           borderRadius: AppShapes.iconWell,
-                          border: Border.all(
-                            color: colors.border.withValues(alpha: 0.5),
-                          ),
                         ),
                         alignment: Alignment.center,
                         child: Icon(
@@ -703,24 +730,31 @@ class _RuntimeSignalStrip extends StatelessWidget {
       return const SizedBox.shrink();
     }
 
-    return MeshSurface(
-      radius: AppRadii.control,
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Wrap(spacing: 8, runSpacing: 8, children: pills),
-          if (details.isNotEmpty) ...[
-            const SizedBox(height: 8),
-            Text(
-              details.join(' • '),
-              style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                color: colors.textSecondary,
-                fontWeight: FontWeight.w600,
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: colors.surfaceMuted.withValues(alpha: 0.48),
+        border: Border(
+          bottom: BorderSide(color: colors.border.withValues(alpha: 0.72)),
+        ),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Wrap(spacing: 8, runSpacing: 8, children: pills),
+            if (details.isNotEmpty) ...[
+              const SizedBox(height: 8),
+              Text(
+                details.join(' • '),
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                  color: colors.textSecondary,
+                  fontWeight: FontWeight.w600,
+                ),
               ),
-            ),
+            ],
           ],
-        ],
+        ),
       ),
     );
   }
@@ -1010,6 +1044,9 @@ class _MessageBubble extends StatelessWidget {
     required this.sessionId,
     required this.message,
     this.live = false,
+    this.keepReasoningExpanded = false,
+    this.reasoningExpandedOverride,
+    this.onReasoningExpansionChanged,
     this.pinned = false,
     this.onTogglePin,
     this.onOpenFile,
@@ -1021,6 +1058,9 @@ class _MessageBubble extends StatelessWidget {
   final String sessionId;
   final SessionMessage message;
   final bool live;
+  final bool keepReasoningExpanded;
+  final bool? reasoningExpandedOverride;
+  final ValueChanged<bool>? onReasoningExpansionChanged;
   final bool pinned;
   final VoidCallback? onTogglePin;
   final void Function(String path)? onOpenFile;
@@ -1038,24 +1078,34 @@ class _MessageBubble extends StatelessWidget {
     final hasAnswer = hasTextBlocks || hasText;
     final canPin = onTogglePin != null && message.hasVisibleContent;
 
+    final usesPlainTranscriptSurface = isUser || isAssistant;
     final bubbleColor = switch (message.role) {
       'user' => colors.userBubble,
       'assistant' => colors.assistantBubble,
       _ => colors.surfaceMuted,
     };
-    final textColor = messageBodyColor(colors, userBubble: isUser);
-    final metaColor = messageMetaColor(colors, userBubble: isUser);
+    final textColor = messageBodyColor(
+      colors,
+      userBubble: isUser && !usesPlainTranscriptSurface,
+    );
+    final metaColor = messageMetaColor(
+      colors,
+      userBubble: isUser && !usesPlainTranscriptSurface,
+    );
     final assistantMetaColor = messageMetaColor(colors, userBubble: false);
+    final selectionBackground = usesPlainTranscriptSurface
+        ? colors.canvas
+        : bubbleColor;
     final selectionForeground = readableTextOn(
       colors,
-      background: bubbleColor,
+      background: selectionBackground,
       preferred: textColor,
     );
     final bubbleSelectionTheme = TextSelectionThemeData(
       cursorColor: selectionForeground,
       selectionColor: selectionFillForBackground(
         colors,
-        background: bubbleColor,
+        background: selectionBackground,
         foreground: selectionForeground,
       ),
       selectionHandleColor: selectionForeground,
@@ -1065,7 +1115,7 @@ class _MessageBubble extends StatelessWidget {
     ).textTheme.bodyMedium?.copyWith(color: textColor, height: 1.45);
     final linkStyle = messageLinkStyle(
       colors,
-      userBubble: isUser,
+      userBubble: isUser && !usesPlainTranscriptSurface,
       baseStyle: bodyStyle,
     );
     final assistantLinkStyle = messageLinkStyle(
@@ -1075,14 +1125,10 @@ class _MessageBubble extends StatelessWidget {
         context,
       ).textTheme.bodyMedium?.copyWith(color: colors.textPrimary, height: 1.5),
     );
-    final messagePadding = isAssistant
-        ? const EdgeInsets.fromLTRB(16, 13, 16, 14)
+    final messagePadding = usesPlainTranscriptSurface
+        ? const EdgeInsets.fromLTRB(4, 13, 4, 14)
         : const EdgeInsets.fromLTRB(16, 12, 16, 14);
-    final bubbleBorderColor = isAssistant
-        ? live
-              ? colors.accent.withValues(alpha: 0.36)
-              : colors.assistantBubbleBorder
-        : live
+    final bubbleBorderColor = live
         ? colors.accent
         : colors.accent.withValues(alpha: 0.28);
     final phaseLabel = live
@@ -1092,19 +1138,36 @@ class _MessageBubble extends StatelessWidget {
         : null;
 
     return Align(
-      alignment: isUser ? Alignment.centerRight : Alignment.centerLeft,
+      alignment: usesPlainTranscriptSurface
+          ? Alignment.centerLeft
+          : Alignment.centerRight,
       child: Padding(
-        padding: EdgeInsets.only(bottom: isAssistant ? 14 : 10),
+        padding: EdgeInsets.only(
+          bottom: usesPlainTranscriptSurface ? 0 : 10,
+        ),
         child: ConstrainedBox(
-          constraints: BoxConstraints(maxWidth: isAssistant ? 680 : 560),
+          constraints: BoxConstraints(
+            maxWidth: usesPlainTranscriptSurface ? 680 : 560,
+          ),
           child: DecoratedBox(
+            key: ValueKey('session-message-surface:${message.id}'),
             decoration: BoxDecoration(
-              color: bubbleColor,
-              borderRadius: BorderRadius.circular(isAssistant ? 16 : 20),
-              border: Border.all(
-                color: bubbleBorderColor,
-                width: live ? 1.4 : 1,
-              ),
+              color: usesPlainTranscriptSurface
+                  ? Colors.transparent
+                  : bubbleColor,
+              borderRadius: usesPlainTranscriptSurface
+                  ? null
+                  : BorderRadius.circular(20),
+              border: usesPlainTranscriptSurface
+                  ? Border(
+                      bottom: BorderSide(
+                        color: colors.border.withValues(alpha: 0.72),
+                      ),
+                    )
+                  : Border.all(
+                      color: bubbleBorderColor,
+                      width: live ? 1.4 : 1,
+                    ),
             ),
             child: TextSelectionTheme(
               data: bubbleSelectionTheme,
@@ -1113,6 +1176,19 @@ class _MessageBubble extends StatelessWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
+                    if (isUser)
+                      Padding(
+                        padding: const EdgeInsets.only(bottom: 6),
+                        child: Text(
+                          'You',
+                          style: Theme.of(context).textTheme.labelSmall
+                              ?.copyWith(
+                                color: metaColor,
+                                fontWeight: AppWeights.title,
+                                letterSpacing: 0.2,
+                              ),
+                        ),
+                      ),
                     if (phaseLabel != null && hasAnswer)
                       Padding(
                         padding: const EdgeInsets.only(bottom: 6),
@@ -1143,7 +1219,13 @@ class _MessageBubble extends StatelessWidget {
                           child: _ReasoningBlock(
                             reasoning: block.thinking,
                             live: live,
-                            collapsedByDefault: hasAnswer,
+                            collapsedByDefault: reasoningExpandedOverride ==
+                                    null
+                                ? hasAnswer &&
+                                      !live &&
+                                      !keepReasoningExpanded
+                                : !reasoningExpandedOverride!,
+                            onExpandedChanged: onReasoningExpansionChanged,
                             onOpenFile: onOpenFile,
                             onOpenHostUrl: onOpenHostUrl,
                           ),
@@ -1906,12 +1988,14 @@ class _LinkifiedSelectableText extends StatefulWidget {
     required this.style,
     required this.linkStyle,
     this.onOpenHostUrl,
+    this.onOpenLink,
   });
 
   final String text;
   final TextStyle? style;
   final TextStyle? linkStyle;
   final void Function(String url)? onOpenHostUrl;
+  final FutureOr<void> Function(String href)? onOpenLink;
 
   @override
   State<_LinkifiedSelectableText> createState() =>
@@ -1950,11 +2034,7 @@ class _LinkifiedSelectableTextState extends State<_LinkifiedSelectableText> {
       raw = trimmed;
       final href = raw.startsWith('www.') ? 'https://$raw' : raw;
       final recognizer = TapGestureRecognizer()
-        ..onTap = () => _openLink(
-              context,
-              href,
-              onOpenHostUrl: widget.onOpenHostUrl,
-            );
+        ..onTap = () => unawaited(_handleOpenLink(context, href));
       _recognizers.add(recognizer);
       spans.add(
         TextSpan(text: raw, style: widget.linkStyle, recognizer: recognizer),
@@ -1969,6 +2049,19 @@ class _LinkifiedSelectableTextState extends State<_LinkifiedSelectableText> {
     }
 
     return SelectableText.rich(TextSpan(style: widget.style, children: spans));
+  }
+
+  Future<void> _handleOpenLink(BuildContext context, String href) async {
+    final onOpenLink = widget.onOpenLink;
+    if (onOpenLink != null) {
+      await onOpenLink(href);
+      return;
+    }
+    await _openLink(
+      context,
+      href,
+      onOpenHostUrl: widget.onOpenHostUrl,
+    );
   }
 }
 
@@ -2001,6 +2094,252 @@ final RegExp _urlRegExp = RegExp(
   caseSensitive: false,
 );
 
+@visibleForTesting
+String sessionFileChangeGroupId(SessionActivity firstActivity) {
+  final turnId = (firstActivity.turnId ?? '').trim();
+  final scope = turnId.isEmpty ? 'untagged' : turnId;
+  return 'file-change-group:$scope:${firstActivity.id}';
+}
+
+/// Returns the calm, user-facing drill-down label for a session activity.
+///
+/// A null label means the timeline summary already says everything useful.
+/// Raw arguments alone do not earn a disclosure: they remain implementation
+/// detail unless the activity produced a result or represents a trust surface.
+@visibleForTesting
+String? sessionActivityDetailActionLabel(SessionActivity activity) {
+  if (activity.status == 'failed' ||
+      activity.toolError == true ||
+      activity.status == 'declined') {
+    return 'See what happened';
+  }
+  if (activity.isFileChange && activity.changes.isNotEmpty) {
+    return 'View changes';
+  }
+  if (activity.isTurnDiff && (activity.diff ?? '').trim().isNotEmpty) {
+    return 'View changes';
+  }
+  if (activity.isWebSearch) {
+    final hasSourceDetails =
+        (activity.targetUrl ?? '').trim().isNotEmpty ||
+        (activity.pattern ?? '').trim().isNotEmpty ||
+        activity.queries.where((query) => query.trim().isNotEmpty).length > 1;
+    return hasSourceDetails ? 'View sources' : null;
+  }
+  if (activity.isImageGeneration) {
+    final hasResult =
+        (activity.savedPath ?? '').trim().isNotEmpty ||
+        (activity.revisedPrompt ?? '').trim().isNotEmpty;
+    return hasResult ? 'View result' : null;
+  }
+
+  final command = _toolCommandTextForActivity(activity);
+  final commandLike =
+      activity.isCommand ||
+      (activity.isTool &&
+          (activity.toolCategory == 'command' || command.isNotEmpty));
+  if (commandLike) {
+    final hasCommandDetails =
+        (activity.command ?? '').trim().isNotEmpty ||
+        command.isNotEmpty ||
+        (activity.output ?? '').trim().isNotEmpty ||
+        (activity.terminalInput ?? '').trim().isNotEmpty ||
+        activity.exitCode != null ||
+        activity.durationMs != null ||
+        activity.toolAttachments.isNotEmpty;
+    return hasCommandDetails ? 'View results' : null;
+  }
+
+  if (!activity.isTool) {
+    return null;
+  }
+  if (activity.toolCategory == 'network') {
+    final hasSourceDetails =
+        (activity.toolUrl ?? '').trim().isNotEmpty ||
+        _activityValueHasContent(activity.toolResult) ||
+        (activity.output ?? '').trim().isNotEmpty;
+    return hasSourceDetails ? 'View sources' : null;
+  }
+  if (activity.toolCategory == 'filesystem' &&
+      activity.toolAction == 'write' &&
+      (_activityValueHasContent(activity.toolResult) ||
+          (activity.output ?? '').trim().isNotEmpty)) {
+    return 'View changes';
+  }
+  if (_toolNameLooksLikeSearch(activity) &&
+      (_activityValueHasContent(activity.toolResult) ||
+          (activity.output ?? '').trim().isNotEmpty)) {
+    return 'View sources';
+  }
+  if (activity.toolAttachments.isNotEmpty) {
+    return 'View result';
+  }
+  if (_activityValueHasContent(activity.toolResult) ||
+      (activity.output ?? '').trim().isNotEmpty) {
+    return 'View results';
+  }
+  return null;
+}
+
+bool _activityValueHasContent(Object? value) {
+  return switch (value) {
+    null => false,
+    String text => text.trim().isNotEmpty,
+    Map<Object?, Object?> map => map.isNotEmpty,
+    Iterable<Object?> items => items.isNotEmpty,
+    _ => true,
+  };
+}
+
+String _toolCommandTextForActivity(SessionActivity activity) {
+  for (final target in activity.toolSemanticTargets) {
+    final command = (target.command ?? '').trim();
+    if (target.type == 'command' && command.isNotEmpty) {
+      return command;
+    }
+  }
+  final args = activity.toolArgs;
+  if (args is Map<String, dynamic>) {
+    final command =
+        (args['command'] ?? args['cmd'] ?? args['fullCommandText'])
+            ?.toString()
+            .trim();
+    if (command != null && command.isNotEmpty) {
+      return command;
+    }
+  }
+  if (args is Map) {
+    final command =
+        (args['command'] ?? args['cmd'] ?? args['fullCommandText'])
+            ?.toString()
+            .trim();
+    if (command != null && command.isNotEmpty) {
+      return command;
+    }
+  }
+  return '';
+}
+
+@visibleForTesting
+String? sessionToolActivityFallbackTitle(SessionActivity activity) {
+  if (!activity.isTool) {
+    return null;
+  }
+  if (_toolNameLooksLikeImageInspection(activity)) {
+    final rawTarget = _toolImageTargetFromArgs(activity.toolArgs);
+    final target = rawTarget == null || rawTarget.trim().isEmpty
+        ? 'an image'
+        : _friendlyPathLabel(rawTarget);
+    final verb = _activityActionVerb(
+      activity.status,
+      completed: 'Viewed',
+      progress: 'Viewing',
+      infinitive: 'view',
+    );
+    return '$verb $target';
+  }
+  if (_toolNameLooksLikeSearch(activity)) {
+    final query = _toolQueryFromArgs(activity.toolArgs);
+    if (query != null && query.trim().isNotEmpty) {
+      final verb = _activityActionVerb(
+        activity.status,
+        completed: 'Searched',
+        progress: 'Searching',
+        infinitive: 'search',
+      );
+      return '$verb for "${_friendlySnippet(query, 72)}"';
+    }
+  }
+  return switch (activity.status) {
+    'failed' => 'Step failed',
+    'declined' => 'Step declined',
+    'in_progress' => 'Working',
+    _ => 'Completed a step',
+  };
+}
+
+bool _toolNameLooksLikeImageInspection(SessionActivity activity) {
+  if (activity.toolAttachments.isNotEmpty) {
+    return true;
+  }
+  final name = '${activity.toolName ?? ''} ${activity.toolTitle ?? ''}'
+      .toLowerCase()
+      .replaceAll(RegExp(r'[^a-z0-9]+'), '_');
+  return name.contains('view_image') ||
+      name.contains('image_view') ||
+      name.contains('inspect_image') ||
+      name.contains('image_inspect') ||
+      name.contains('read_image');
+}
+
+bool _toolNameLooksLikeSearch(SessionActivity activity) {
+  final name = '${activity.toolName ?? ''} ${activity.toolTitle ?? ''}'
+      .toLowerCase()
+      .replaceAll(RegExp(r'[^a-z0-9]+'), '_');
+  return name.contains('search_tool') ||
+      name.contains('tool_search') ||
+      name.contains('web_search') ||
+      name.contains('search_query') ||
+      name.contains('research_query');
+}
+
+String? _toolImageTargetFromArgs(Object? args) {
+  if (args is! Map) {
+    return null;
+  }
+  for (final key in const [
+    'path',
+    'imagePath',
+    'image_path',
+    'file',
+    'referenced_image_paths',
+  ]) {
+    final value = args[key];
+    if (value is String && value.trim().isNotEmpty) {
+      return value.trim();
+    }
+    if (value is Iterable) {
+      for (final item in value) {
+        if (item is String && item.trim().isNotEmpty) {
+          return item.trim();
+        }
+      }
+    }
+  }
+  return null;
+}
+
+String? _toolQueryFromArgs(Object? args) {
+  if (args is String) {
+    return args.trim().isEmpty ? null : args.trim();
+  }
+  if (args is Iterable) {
+    for (final item in args) {
+      final query = _toolQueryFromArgs(item);
+      if (query != null && query.isNotEmpty) {
+        return query;
+      }
+    }
+    return null;
+  }
+  if (args is! Map) {
+    return null;
+  }
+  for (final key in const [
+    'query',
+    'q',
+    'searchQuery',
+    'search_query',
+    'queries',
+  ]) {
+    final query = _toolQueryFromArgs(args[key]);
+    if (query != null && query.isNotEmpty) {
+      return query;
+    }
+  }
+  return null;
+}
+
 class _ActivityCard extends StatefulWidget {
   const _ActivityCard({
     required this.host,
@@ -2008,7 +2347,6 @@ class _ActivityCard extends StatefulWidget {
     required this.sessionId,
     required this.activity,
     required this.sessionCwd,
-    this.defaultCollapsed = true,
     this.onOpenFile,
     this.onBrowsePath,
     this.onOpenBrowserPreview,
@@ -2021,7 +2359,6 @@ class _ActivityCard extends StatefulWidget {
   final String sessionId;
   final SessionActivity activity;
   final String sessionCwd;
-  final bool defaultCollapsed;
   final void Function(String path)? onOpenFile;
   final void Function(String path)? onBrowsePath;
   final void Function(BrowserPreviewTargetCandidate target)?
@@ -2033,39 +2370,41 @@ class _ActivityCard extends StatefulWidget {
   State<_ActivityCard> createState() => _ActivityCardState();
 }
 
-class _ActivityCardState extends State<_ActivityCard> {
-  static const _collapsedLineLimit = 15;
-  bool _outputExpanded = false;
-  bool _diffExpanded = false;
-  late bool _cardCollapsed = _resolveInitialCollapsed();
-  bool _userOverrode = false;
+class _ActivityCardState extends State<_ActivityCard>
+    with AutomaticKeepAliveClientMixin<_ActivityCard> {
+  late final ValueNotifier<SessionActivity> _detailActivity;
+  bool _detailsOpen = false;
 
-  bool get _activityRunning {
-    const terminal = {'completed', 'failed', 'declined'};
-    return !terminal.contains(widget.activity.status);
-  }
+  @override
+  bool get wantKeepAlive => _detailsOpen;
 
-  bool _resolveInitialCollapsed() {
-    if (widget.activity.type == 'image_generation') {
-      return widget.defaultCollapsed;
-    }
-    if (_activityRunning) return false;
-    return widget.defaultCollapsed;
+  @override
+  void initState() {
+    super.initState();
+    _detailActivity = ValueNotifier(widget.activity);
   }
 
   @override
   void didUpdateWidget(covariant _ActivityCard oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (_userOverrode) return;
-    if (widget.activity.type == 'image_generation') return;
-    const terminal = {'completed', 'failed', 'declined'};
-    final wasRunning = !terminal.contains(oldWidget.activity.status);
-    final isRunning = _activityRunning;
-    if (wasRunning && !isRunning && !_cardCollapsed) {
-      setState(() => _cardCollapsed = true);
-    } else if (!wasRunning && isRunning && _cardCollapsed) {
-      setState(() => _cardCollapsed = false);
+    if (!identical(oldWidget.activity, widget.activity)) {
+      final nextActivity = widget.activity;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted || !identical(widget.activity, nextActivity)) return;
+        _detailActivity.value = nextActivity;
+      });
     }
+  }
+
+  @override
+  void dispose() {
+    _detailActivity.dispose();
+    super.dispose();
+  }
+
+  bool _activityIsRunning(SessionActivity activity) {
+    const terminal = {'completed', 'failed', 'declined'};
+    return !terminal.contains(activity.status);
   }
 
   void _openWorkspaceFile(String path) => widget.onOpenFile?.call(path);
@@ -2110,6 +2449,9 @@ class _ActivityCardState extends State<_ActivityCard> {
       if (target.isNotEmpty &&
           !target.startsWith('http://') &&
           !target.startsWith('https://')) {
+        if (activity.toolAction == 'list' && !target.endsWith('/')) {
+          return '$target/';
+        }
         return target;
       }
     }
@@ -2173,6 +2515,38 @@ class _ActivityCardState extends State<_ActivityCard> {
       );
     }
     return actions;
+  }
+
+  _ActivityActionSpec? _directSummaryAction(
+    SessionActivity activity, {
+    required bool hasDetailsAction,
+  }) {
+    if (hasDetailsAction ||
+        !activity.isTool ||
+        activity.toolCategory != 'filesystem') {
+      return null;
+    }
+    if (activity.toolAction == 'read') {
+      final path = _primaryFilePath;
+      if (path != null && widget.onOpenFile != null) {
+        return _ActivityActionSpec(
+          label: 'Open file',
+          icon: Icons.description_rounded,
+          onTap: () => widget.onOpenFile!(path),
+        );
+      }
+    }
+    if (activity.toolAction == 'list' || activity.toolAction == 'read') {
+      final path = _browsePath;
+      if (path != null && widget.onBrowsePath != null) {
+        return _ActivityActionSpec(
+          label: 'Browse files',
+          icon: Icons.folder_open_rounded,
+          onTap: () => widget.onBrowsePath!(path),
+        );
+      }
+    }
+    return null;
   }
 
   Widget? _activityStatusBadge(SessionActivity activity) {
@@ -2262,24 +2636,24 @@ class _ActivityCardState extends State<_ActivityCard> {
     required String title,
   }) {
     final commandTitle = _activityCommandTitleParts(activity);
+    final friendlyToolTitle =
+        activity.toolSemantic != null ||
+        sessionToolActivityFallbackTitle(activity) != null;
     final child = commandTitle != null
         ? Semantics(
-            key: ValueKey('cmd:${commandTitle.plainText}:$_cardCollapsed'),
+            key: ValueKey('cmd:${commandTitle.plainText}'),
             label: commandTitle.plainText,
             child: ExcludeSemantics(
-              child: _CommandTitleChip(
-                parts: commandTitle,
-                collapsed: _cardCollapsed,
-              ),
+              child: _CommandTitleChip(parts: commandTitle),
             ),
           )
         : Text(
             title,
-            key: ValueKey('title:$title:$_cardCollapsed'),
-            maxLines: _cardCollapsed ? 1 : 3,
+            key: ValueKey('title:$title'),
+            maxLines: 2,
             overflow: TextOverflow.ellipsis,
             style:
-                (activity.isTool
+                (activity.isTool && !friendlyToolTitle
                         ? monoStyle(
                             color: context.colors.textPrimary,
                             fontSize: 13,
@@ -2297,59 +2671,49 @@ class _ActivityCardState extends State<_ActivityCard> {
     );
   }
 
-  Widget _activityDetailsPanel(BuildContext context, Widget child) {
-    final colors = context.colors;
-    return Padding(
-      padding: const EdgeInsets.only(top: 6),
-      child: Container(
-        width: double.infinity,
-        padding: const EdgeInsets.fromLTRB(10, 10, 10, 10),
-        decoration: BoxDecoration(
-          color: colors.surface.withValues(alpha: 0.58),
-          borderRadius: AppShapes.input,
-          border: Border.all(color: colors.border.withValues(alpha: 0.52)),
-        ),
-        child: child,
-      ),
-    );
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final activity = widget.activity;
-    final sessionCwd = widget.sessionCwd;
-    final colors = context.colors;
-    final commandLikeActivity =
-        activity.isCommand ||
-        (activity.isTool && _toolIsCommandActivity(activity));
-    if (activity.isFileChange) {
-      return _buildFileChangeInlineActivity(context, activity);
-    }
-
-    final title = switch (activity.type) {
+  String _activityTitle(SessionActivity activity) {
+    return switch (activity.type) {
       'command' => _commandActivityTitle(activity),
-      'tool' => _toolActivityTitle(activity, sessionCwd),
-      'file_change' =>
-        activity.changes.length == 1
-            ? _relativeSessionPath(activity.changes.first.path, sessionCwd)
-            : 'Edited ${activity.changes.length} files',
+      'tool' => _toolActivityTitle(activity, widget.sessionCwd),
+      'file_change' => _fileChangeActivityTitle(activity),
       'turn_diff' => _turnDiffActivityTitle(activity),
       'web_search' => _webSearchTitle(activity),
       'image_generation' => _imageGenerationTitle(activity),
       'context_compaction' => _contextCompactionTitle(activity),
       _ => 'Activity',
     };
+  }
+
+  IconData _activityIcon(SessionActivity activity) {
+    return switch (activity.type) {
+      'command' => Icons.terminal_rounded,
+      'tool' => _toolActivityIcon(activity),
+      'file_change' => Icons.edit_note_rounded,
+      'turn_diff' => Icons.difference_rounded,
+      'web_search' => Icons.travel_explore_rounded,
+      'image_generation' => Icons.image_rounded,
+      'context_compaction' => Icons.compress_rounded,
+      _ => Icons.bolt_rounded,
+    };
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    super.build(context);
+    final activity = widget.activity;
+    final sessionCwd = widget.sessionCwd;
+    final commandLikeActivity =
+        activity.isCommand ||
+        (activity.isTool && _toolIsCommandActivity(activity));
+    final title = _activityTitle(activity);
 
     final subtitle = switch (activity.type) {
-      'command' => _relativeSessionPath(activity.cwd ?? sessionCwd, sessionCwd),
-      'tool' => _toolActivitySubtitle(activity, sessionCwd),
+      'command' => null,
+      'tool' => null,
       'file_change' => _activityFileSummary(activity.changes, sessionCwd),
       'turn_diff' => null,
       'web_search' => _webSearchSubtitle(activity),
-      'image_generation' =>
-        (activity.savedPath ?? '').isNotEmpty
-            ? _relativeSessionPath(activity.savedPath!, sessionCwd)
-            : 'Image generation output',
+      'image_generation' => null,
       'context_compaction' => _contextCompactionSubtitle(activity),
       _ => null,
     };
@@ -2361,365 +2725,293 @@ class _ActivityCardState extends State<_ActivityCard> {
       'turn_diff' => null,
       'web_search' => 'Web search',
       'image_generation' => 'Image',
-      'context_compaction' => 'Context',
+      'context_compaction' => 'Session',
       _ => 'Activity',
     };
 
-    final activityIcon = switch (activity.type) {
-      'command' => Icons.terminal_rounded,
-      'tool' => _toolActivityIcon(activity),
-      'file_change' => Icons.edit_note_rounded,
-      'turn_diff' => Icons.difference_rounded,
-      'web_search' => Icons.travel_explore_rounded,
-      'image_generation' => Icons.image_rounded,
-      'context_compaction' => Icons.compress_rounded,
-      _ => Icons.bolt_rounded,
-    };
+    final activityIcon = _activityIcon(activity);
 
+    return _buildActivitySummaryRow(
+      context,
+      activity: activity,
+      title: title,
+      subtitle: subtitle,
+      activityLabel: activityLabel,
+      activityIcon: activityIcon,
+      commandLikeActivity: commandLikeActivity,
+    );
+  }
+
+  Widget _buildActivitySummaryRow(
+    BuildContext context, {
+    required SessionActivity activity,
+    required String title,
+    required String? subtitle,
+    required String? activityLabel,
+    required IconData activityIcon,
+    required bool commandLikeActivity,
+  }) {
+    final colors = context.colors;
     final statusBadge = _activityStatusBadge(activity);
-    final contextActions = _buildContextActions();
-    final detailPills = _activityDetailPills(activity);
+    final detailActionLabel = sessionActivityDetailActionLabel(activity);
+    final directAction = _directSummaryAction(
+      activity,
+      hasDetailsAction: detailActionLabel != null,
+    );
+    final actionLabel = detailActionLabel ?? directAction?.label;
+    final row = Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(minHeight: 48),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.center,
+          children: [
+            Container(
+              width: 30,
+              height: 30,
+              decoration: BoxDecoration(
+                color: commandLikeActivity
+                    ? colors.surfaceElevated
+                    : activity.isCommand || activity.isTool
+                    ? colors.surfaceMuted.withValues(alpha: 0.72)
+                    : colors.accentMuted.withValues(alpha: 0.68),
+                borderRadius: AppShapes.iconWell,
+              ),
+              alignment: Alignment.center,
+              child: Icon(
+                activityIcon,
+                size: 16,
+                color: commandLikeActivity
+                    ? colors.codeForeground
+                    : activity.isCommand || activity.isTool
+                    ? colors.textPrimary
+                    : colors.accent,
+              ),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  if (activityLabel != null) ...[
+                    Text(
+                      activityLabel,
+                      style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                        color: colors.textTertiary,
+                        fontWeight: AppWeights.title,
+                        letterSpacing: 0.2,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                  ],
+                  _buildActivityTitle(
+                    context,
+                    activity: activity,
+                    title: title,
+                  ),
+                  if (subtitle != null && subtitle.isNotEmpty) ...[
+                    const SizedBox(height: 3),
+                    Text(
+                      subtitle,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color: colors.textSecondary,
+                      ),
+                    ),
+                  ],
+                  if (statusBadge != null || actionLabel != null) ...[
+                    const SizedBox(height: 7),
+                    Wrap(
+                      spacing: 10,
+                      runSpacing: 6,
+                      crossAxisAlignment: WrapCrossAlignment.center,
+                      children: [
+                        ?statusBadge,
+                        if (actionLabel != null)
+                          Text(
+                            actionLabel,
+                            style: Theme.of(context).textTheme.labelMedium
+                                ?.copyWith(
+                                  color: activity.status == 'failed'
+                                      ? colors.danger
+                                      : colors.accent,
+                                  fontWeight: AppWeights.emphasis,
+                                ),
+                          ),
+                      ],
+                    ),
+                  ],
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+
+    final summary = DecoratedBox(
+      key: ValueKey('session-activity-row:${activity.id}'),
+      decoration: BoxDecoration(
+        border: Border(
+          bottom: BorderSide(
+            color: commandLikeActivity
+                ? colors.codeBorder.withValues(alpha: 0.72)
+                : colors.border.withValues(alpha: 0.72),
+          ),
+        ),
+      ),
+      child: Material(
+        color: Colors.transparent,
+        child: actionLabel == null
+            ? row
+            : Semantics(
+                button: true,
+                label: '$actionLabel: $title',
+                child: InkWell(
+                  onTap: detailActionLabel != null
+                      ? () => _showActivityDetails(
+                          actionLabel: detailActionLabel,
+                        )
+                      : directAction!.onTap,
+                  child: ExcludeSemantics(child: row),
+                ),
+              ),
+      ),
+    );
 
     return Align(
       alignment: Alignment.centerLeft,
-      child: Padding(
-        padding: const EdgeInsets.only(bottom: 10),
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 640),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Material(
-                color: commandLikeActivity
-                    ? colors.surface.withValues(alpha: 0.76)
-                    : colors.surfaceMuted.withValues(alpha: 0.48),
-                shape: RoundedRectangleBorder(
-                  borderRadius: AppShapes.input,
-                  side: BorderSide(
-                    color: commandLikeActivity
-                        ? colors.codeBorder.withValues(alpha: 0.76)
-                        : colors.border.withValues(alpha: 0.62),
-                  ),
-                ),
-                clipBehavior: Clip.antiAlias,
-                child: InkWell(
-                  onTap: () {
-                    setState(() {
-                      _cardCollapsed = !_cardCollapsed;
-                      _userOverrode = true;
-                    });
-                  },
-                  borderRadius: AppShapes.input,
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 10,
-                      vertical: 8,
-                    ),
-                    child: Row(
-                      crossAxisAlignment: CrossAxisAlignment.center,
-                      children: [
-                        Container(
-                          width: 30,
-                          height: 30,
-                          decoration: BoxDecoration(
-                            color: commandLikeActivity
-                                ? colors.surfaceElevated
-                                : activity.isCommand || activity.isTool
-                                ? colors.surfaceMuted.withValues(alpha: 0.72)
-                                : colors.accentMuted.withValues(alpha: 0.68),
-                            borderRadius: AppShapes.iconWell,
-                            border: Border.all(
-                              color: colors.border.withValues(alpha: 0.5),
-                            ),
-                          ),
-                          alignment: Alignment.center,
-                          child: Icon(
-                            activityIcon,
-                            size: 16,
-                            color: commandLikeActivity
-                                ? colors.codeForeground
-                                : activity.isCommand || activity.isTool
-                                ? colors.textPrimary
-                                : colors.accent,
-                          ),
-                        ),
-                        const SizedBox(width: 10),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              if (activityLabel != null) ...[
-                                Text(
-                                  activityLabel,
-                                  style: Theme.of(context).textTheme.labelSmall
-                                      ?.copyWith(
-                                        color: colors.textTertiary,
-                                        fontWeight: AppWeights.title,
-                                        letterSpacing: 0.2,
-                                      ),
-                                ),
-                                const SizedBox(height: 2),
-                              ],
-                              _buildActivityTitle(
-                                context,
-                                activity: activity,
-                                title: title,
-                              ),
-                              if (!_cardCollapsed &&
-                                  subtitle != null &&
-                                  subtitle.isNotEmpty) ...[
-                                const SizedBox(height: 4),
-                                Text(
-                                  subtitle,
-                                  maxLines: 2,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: Theme.of(context).textTheme.bodySmall
-                                      ?.copyWith(color: colors.textSecondary),
-                                ),
-                              ],
-                            ],
-                          ),
-                        ),
-                        if (statusBadge != null) ...[
-                          const SizedBox(width: 8),
-                          statusBadge,
-                        ],
-                        const SizedBox(width: 4),
-                        Icon(
-                          _cardCollapsed
-                              ? Icons.keyboard_arrow_down_rounded
-                              : Icons.keyboard_arrow_up_rounded,
-                          size: 18,
-                          color: colors.textTertiary,
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-              ),
-              AnimatedSize(
-                duration: const Duration(milliseconds: 160),
-                curve: Curves.easeOutCubic,
-                alignment: Alignment.topLeft,
-                child: _cardCollapsed
-                    ? const SizedBox.shrink()
-                    : _activityDetailsPanel(
-                        context,
-                        Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            if (detailPills.isNotEmpty) ...[
-                              Wrap(
-                                spacing: 6,
-                                runSpacing: 6,
-                                children: detailPills,
-                              ),
-                              const SizedBox(height: 12),
-                            ],
-                            if (activity.isCommand)
-                              ..._buildCommandBody(context, activity)
-                            else if (activity.isTool)
-                              ..._buildToolBody(context, activity)
-                            else if (activity.isWebSearch) ...[
-                              _buildWebSearchBody(context, activity),
-                            ] else if (activity.isImageGeneration) ...[
-                              _buildImageGenerationBody(context, activity),
-                            ] else if (activity.isContextCompaction) ...[
-                              ..._buildContextCompactionBody(context, activity),
-                            ] else if (activity.isTurnDiff) ...[
-                              if ((activity.diff ?? '').isNotEmpty)
-                                _buildLazyDiff(
-                                  context,
-                                  label:
-                                      'View patch (${_diffLineCount(activity.diff!)} lines)',
-                                  diff: activity.diff!,
-                                )
-                              else
-                                _waitingText(context, 'Tracking file changes.'),
-                            ] else if (activity.changes.isEmpty) ...[
-                              _waitingText(
-                                context,
-                                'Waiting for file changes.',
-                              ),
-                            ] else ...[
-                              _buildLazyFileChanges(
-                                context,
-                                changes: activity.changes,
-                                sessionCwd: sessionCwd,
-                              ),
-                            ],
-                            if (contextActions.isNotEmpty) ...[
-                              const SizedBox(height: 12),
-                              _ActivityActionRow(actions: contextActions),
-                            ],
-                          ],
-                        ),
-                      ),
-              ),
-            ],
-          ),
-        ),
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 640),
+        child: summary,
       ),
     );
   }
 
-  Widget _buildFileChangeInlineActivity(
+  Future<void> _showActivityDetails({
+    required String actionLabel,
+  }) async {
+    Widget buildSurface(BuildContext surfaceContext, {required bool embedded}) {
+      return ValueListenableBuilder<SessionActivity>(
+        valueListenable: _detailActivity,
+        builder: (context, currentActivity, _) {
+          final currentActionLabel =
+              sessionActivityDetailActionLabel(currentActivity) ?? actionLabel;
+          return _ActivityDetailsSurface(
+            embedded: embedded,
+            title: _activityDetailsHeading(currentActionLabel),
+            summaryTitle: _activityTitle(currentActivity),
+            icon: _activityIcon(currentActivity),
+            child: _buildActivityDetailsBody(context, currentActivity),
+          );
+        },
+      );
+    }
+
+    _detailsOpen = true;
+    updateKeepAlive();
+    try {
+      if (MediaQuery.sizeOf(context).width >= 760) {
+        await showDialog<void>(
+          context: context,
+          builder: (dialogContext) => Dialog(
+            backgroundColor: Colors.transparent,
+            insetPadding: const EdgeInsets.symmetric(
+              horizontal: 24,
+              vertical: 20,
+            ),
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 760, maxHeight: 760),
+              child: buildSurface(dialogContext, embedded: true),
+            ),
+          ),
+        );
+      } else {
+        await showModalBottomSheet<void>(
+          context: context,
+          isScrollControlled: true,
+          useSafeArea: true,
+          showDragHandle: false,
+          backgroundColor: Colors.transparent,
+          builder: (sheetContext) =>
+              buildSurface(sheetContext, embedded: false),
+        );
+      }
+    } finally {
+      if (mounted) {
+        _detailsOpen = false;
+        updateKeepAlive();
+      }
+    }
+  }
+
+  String _activityDetailsHeading(String actionLabel) {
+    return switch (actionLabel) {
+      'View changes' => 'Changes',
+      'View sources' => 'Sources',
+      'View results' || 'View result' => 'Results',
+      'See what happened' => 'What happened',
+      _ => 'Details',
+    };
+  }
+
+  Widget _buildActivityDetailsBody(
     BuildContext context,
     SessionActivity activity,
   ) {
-    final colors = context.colors;
-    final changes = activity.changes;
-    final sessionCwd = widget.sessionCwd;
-    final title = _fileChangeActivityTitle(activity);
-    final subtitle = _activityFileSummary(changes, sessionCwd);
-    final statusBadge = _activityStatusBadge(activity);
+    final detailPills = _activityDetailPills(activity);
     final contextActions = _buildContextActions();
-
-    return Align(
-      alignment: Alignment.centerLeft,
-      child: Padding(
-        padding: const EdgeInsets.only(bottom: 10),
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 640),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Material(
-                color: colors.surfaceMuted.withValues(alpha: 0.48),
-                shape: RoundedRectangleBorder(
-                  borderRadius: AppShapes.input,
-                  side: BorderSide(
-                    color: colors.border.withValues(alpha: 0.62),
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        if (detailPills.isNotEmpty) ...[
+          Wrap(spacing: 6, runSpacing: 6, children: detailPills),
+          const SizedBox(height: 16),
+        ],
+        if (activity.isCommand)
+          ..._buildCommandBody(context, activity)
+        else if (activity.isTool)
+          ..._buildToolBody(context, activity)
+        else if (activity.isWebSearch)
+          _buildWebSearchBody(context, activity)
+        else if (activity.isImageGeneration)
+          _buildImageGenerationBody(context, activity)
+        else if (activity.isContextCompaction)
+          ..._buildContextCompactionBody(context, activity)
+        else if (activity.isTurnDiff)
+          if ((activity.diff ?? '').trim().isNotEmpty)
+            DiffView(diff: activity.diff!)
+          else
+            _waitingText(context, 'No changes were reported.')
+        else if (activity.isFileChange)
+          if (activity.changes.isEmpty)
+            _waitingText(context, 'No file changes were reported.')
+          else
+            for (final change in activity.changes)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 16),
+                child: _FileChangeBlock(
+                  change: change,
+                  sessionCwd: widget.sessionCwd,
+                  onOpen: (path) => _dismissActivityDetailsThen(
+                    context,
+                    () => _openWorkspaceFile(path),
                   ),
                 ),
-                clipBehavior: Clip.antiAlias,
-                child: InkWell(
-                  onTap: () {
-                    setState(() {
-                      _cardCollapsed = !_cardCollapsed;
-                      _userOverrode = true;
-                    });
-                  },
-                  borderRadius: AppShapes.input,
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 10,
-                      vertical: 8,
-                    ),
-                    child: Row(
-                      crossAxisAlignment: CrossAxisAlignment.center,
-                      children: [
-                        Container(
-                          width: 30,
-                          height: 30,
-                          decoration: BoxDecoration(
-                            color: colors.surfaceMuted.withValues(alpha: 0.72),
-                            borderRadius: AppShapes.iconWell,
-                            border: Border.all(
-                              color: colors.border.withValues(alpha: 0.5),
-                            ),
-                          ),
-                          alignment: Alignment.center,
-                          child: Icon(
-                            Icons.edit_note_rounded,
-                            size: 16,
-                            color: colors.textSecondary,
-                          ),
-                        ),
-                        const SizedBox(width: 10),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                title,
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: Theme.of(context).textTheme.titleSmall
-                                    ?.copyWith(
-                                      color: colors.textPrimary,
-                                      fontWeight: AppWeights.emphasis,
-                                      height: 1.25,
-                                    ),
-                              ),
-                              if (subtitle.isNotEmpty) ...[
-                                const SizedBox(height: 2),
-                                Text(
-                                  subtitle,
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: monoStyle(
-                                    color: colors.textSecondary,
-                                    fontSize: 12,
-                                    fontWeight: AppWeights.body,
-                                  ).copyWith(height: 1.3),
-                                ),
-                              ],
-                            ],
-                          ),
-                        ),
-                        if (statusBadge != null) ...[
-                          const SizedBox(width: 8),
-                          statusBadge,
-                        ],
-                        const SizedBox(width: 4),
-                        Icon(
-                          _cardCollapsed
-                              ? Icons.keyboard_arrow_down_rounded
-                              : Icons.keyboard_arrow_up_rounded,
-                          size: 18,
-                          color: colors.textTertiary,
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-              ),
-              AnimatedSize(
-                duration: const Duration(milliseconds: 160),
-                curve: Curves.easeOutCubic,
-                alignment: Alignment.topLeft,
-                child: _cardCollapsed
-                    ? const SizedBox.shrink()
-                    : _activityDetailsPanel(
-                        context,
-                        Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            if (contextActions.isNotEmpty) ...[
-                              _ActivityActionRow(actions: contextActions),
-                              const SizedBox(height: 10),
-                            ],
-                            if (changes.isEmpty)
-                              _waitingText(context, 'Waiting for file changes.')
-                            else if (_diffExpanded)
-                              _buildLazyFileChanges(
-                                context,
-                                changes: changes,
-                                sessionCwd: sessionCwd,
-                              )
-                            else ...[
-                              for (final change in changes)
-                                _InlineFileChangeRow(
-                                  change: change,
-                                  sessionCwd: sessionCwd,
-                                  onOpen: _openWorkspaceFile,
-                                ),
-                              const SizedBox(height: 8),
-                              _buildLazyFileChanges(
-                                context,
-                                changes: changes,
-                                sessionCwd: sessionCwd,
-                              ),
-                            ],
-                          ],
-                        ),
-                      ),
-              ),
-            ],
+              )
+        else
+          _waitingText(
+            context,
+            activity.status == 'failed'
+                ? 'This step failed without additional details.'
+                : 'No additional details were reported.',
           ),
-        ),
-      ),
+        if (contextActions.isNotEmpty) ...[
+          const SizedBox(height: 16),
+          _ActivityActionRow(actions: contextActions),
+        ],
+      ],
     );
   }
 
@@ -2731,7 +3023,7 @@ class _ActivityCardState extends State<_ActivityCard> {
     final widgets = <Widget>[];
     final command = _displayCommandText(activity.command ?? '');
 
-    if (_friendlyCommandTitleParts(command, activity.status) != null) {
+    if (command.isNotEmpty) {
       widgets.add(_activityCodeBlock(context, 'Raw command', command, 'bash'));
       widgets.add(const SizedBox(height: 12));
     }
@@ -2751,32 +3043,24 @@ class _ActivityCardState extends State<_ActivityCard> {
         ),
       );
       widgets.add(
-        SyntaxCodeBlock(text: activity.terminalInput!, language: 'bash'),
+        _activityCodeBlock(
+          context,
+          'Input',
+          activity.terminalInput!,
+          'bash',
+        ),
       );
       widgets.add(const SizedBox(height: 12));
     }
 
     if ((activity.output ?? '').isNotEmpty) {
-      final output = activity.output!;
-      final lines = output.split('\n');
-      final isLong = lines.length > _collapsedLineLimit;
-      final displayText = isLong && !_outputExpanded
-          ? lines.take(_collapsedLineLimit).join('\n')
-          : output;
-      widgets.add(SyntaxCodeBlock(text: displayText, language: 'bash'));
-      if (isLong) {
-        widgets.add(const SizedBox(height: 6));
-        widgets.add(
-          _ExpandToggle(
-            expanded: _outputExpanded,
-            hiddenCount: lines.length - _collapsedLineLimit,
-            onToggle: () => setState(() => _outputExpanded = !_outputExpanded),
-          ),
-        );
-      }
-    } else if (_activityRunning && activity.terminalStatus == 'waiting') {
+      widgets.add(
+        _activityCodeBlock(context, 'Output', activity.output!, 'bash'),
+      );
+    } else if (_activityIsRunning(activity) &&
+        activity.terminalStatus == 'waiting') {
       widgets.add(_waitingText(context, 'Interactive command is running.'));
-    } else if (_activityRunning) {
+    } else if (_activityIsRunning(activity)) {
       widgets.add(_waitingText(context, 'Waiting for command output.'));
     } else if (activity.status == 'failed') {
       widgets.add(_waitingText(context, 'Command failed without output.'));
@@ -2791,12 +3075,24 @@ class _ActivityCardState extends State<_ActivityCard> {
 
   List<Widget> _buildToolBody(BuildContext context, SessionActivity activity) {
     final widgets = <Widget>[];
+    final rawIdentifiers = <String>{
+      if ((activity.toolTitle ?? '').trim().isNotEmpty)
+        activity.toolTitle!.trim(),
+      if ((activity.toolName ?? '').trim().isNotEmpty)
+        activity.toolName!.trim(),
+    }.toList(growable: false);
+    if (rawIdentifiers.isNotEmpty) {
+      widgets.add(
+        _activityInfoBlock(context, 'Tool', rawIdentifiers.join('\n')),
+      );
+      widgets.add(const SizedBox(height: 12));
+    }
     widgets.addAll(_buildToolSemanticBlocks(context, activity));
     if (widgets.isNotEmpty) {
       widgets.add(const SizedBox(height: 12));
     }
     final command = _displayCommandText(_toolCommandText(activity));
-    if (_friendlyCommandTitleParts(command, activity.status) != null) {
+    if (command.isNotEmpty) {
       widgets.add(_activityCodeBlock(context, 'Raw command', command, 'bash'));
       widgets.add(const SizedBox(height: 12));
     }
@@ -2853,6 +3149,7 @@ class _ActivityCardState extends State<_ActivityCard> {
     String language,
   ) {
     final colors = context.colors;
+    final bounded = _boundedActivityDetailText(text);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -2865,9 +3162,38 @@ class _ActivityCardState extends State<_ActivityCard> {
           ).copyWith(letterSpacing: 0.8),
         ),
         const SizedBox(height: 8),
-        SyntaxCodeBlock(text: text, language: language),
+        SyntaxCodeBlock(text: bounded.text, language: language),
+        if (bounded.truncated) ...[
+          const SizedBox(height: 8),
+          Text(
+            'Showing the latest part of this result. Earlier content was omitted.',
+            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+              color: colors.textSecondary,
+            ),
+          ),
+        ],
       ],
     );
+  }
+
+  ({String text, bool truncated}) _boundedActivityDetailText(String raw) {
+    const maxCharacters = 48000;
+    const maxLines = 240;
+    var text = raw;
+    var truncated = false;
+    if (text.length > maxCharacters) {
+      text = text.substring(text.length - maxCharacters);
+      truncated = true;
+    }
+    final lines = text.split('\n');
+    if (lines.length > maxLines) {
+      text = lines.skip(lines.length - maxLines).join('\n');
+      truncated = true;
+    }
+    if (truncated) {
+      text = '…\n$text';
+    }
+    return (text: text, truncated: truncated);
   }
 
   Widget _buildWebSearchBody(BuildContext context, SessionActivity activity) {
@@ -2969,7 +3295,8 @@ class _ActivityCardState extends State<_ActivityCard> {
                     ],
                     baseStyle: bodyStyle,
                   ),
-                  onOpenHostUrl: _openHostActivityUrl,
+                  onOpenLink: (href) =>
+                      _openActivityDetailLink(context, href),
                 )
               : SelectableText(text, style: bodyStyle),
         ],
@@ -2997,6 +3324,23 @@ class _ActivityCardState extends State<_ActivityCard> {
       return;
     }
     callback(candidate);
+  }
+
+  Future<void> _openActivityDetailLink(
+    BuildContext detailContext,
+    String href,
+  ) async {
+    Navigator.of(detailContext).pop();
+    if (!mounted) return;
+    await _openLink(context, href, onOpenHostUrl: _openHostActivityUrl);
+  }
+
+  void _dismissActivityDetailsThen(
+    BuildContext detailContext,
+    VoidCallback action,
+  ) {
+    Navigator.of(detailContext).pop();
+    action();
   }
 
   Widget _buildImageGenerationBody(
@@ -3087,6 +3431,7 @@ class _ActivityCardState extends State<_ActivityCard> {
     final url = (activity.toolUrl ?? '').trim();
     final mode = (activity.toolMode ?? '').trim();
     final command = _toolCommandText(activity);
+    final fallbackTitle = sessionToolActivityFallbackTitle(activity);
 
     if (activity.toolAction == 'mode_change' && mode.isNotEmpty) {
       final verb = _activityActionVerb(
@@ -3096,6 +3441,9 @@ class _ActivityCardState extends State<_ActivityCard> {
         infinitive: 'switch',
       );
       return '$verb to $mode mode';
+    }
+    if (_toolNameLooksLikeImageInspection(activity) && fallbackTitle != null) {
+      return fallbackTitle;
     }
     if (activity.toolCategory == 'filesystem' &&
         activity.toolAction == 'read' &&
@@ -3132,11 +3480,17 @@ class _ActivityCardState extends State<_ActivityCard> {
     }
     if (activity.toolCategory == 'filesystem' &&
         activity.toolAction == 'search') {
+      final verb = _activityActionVerb(
+        activity.status,
+        completed: 'Searched',
+        progress: 'Searching',
+        infinitive: 'search',
+      );
       if (query.isNotEmpty && target.isNotEmpty) {
-        return 'Search "$query" in $target';
+        return '$verb for "$query" in $target';
       }
       if (query.isNotEmpty) {
-        return 'Search "$query"';
+        return '$verb for "$query"';
       }
     }
     if (activity.toolCategory == 'network' &&
@@ -3147,43 +3501,23 @@ class _ActivityCardState extends State<_ActivityCard> {
     if (activity.toolCategory == 'network' &&
         activity.toolAction == 'search' &&
         query.isNotEmpty) {
-      return 'Search web for "$query"';
+      final verb = _activityActionVerb(
+        activity.status,
+        completed: 'Searched',
+        progress: 'Searching',
+        infinitive: 'search',
+      );
+      return '$verb the web for "$query"';
     }
     if (_toolIsCommandActivity(activity) && command.isNotEmpty) {
       return _commandTitleParts(command, activity.status)?.plainText ??
           _commandStatusTitle(activity.status, _displayCommandText(command));
     }
+    if (fallbackTitle != null) {
+      return fallbackTitle;
+    }
 
-    final title = (activity.toolTitle ?? '').trim();
-    if (title.isNotEmpty) return title;
-    final name = (activity.toolName ?? '').trim();
-    if (name.isNotEmpty) return name;
-    return 'Tool execution';
-  }
-
-  String? _toolActivitySubtitle(SessionActivity activity, String sessionCwd) {
-    final target = _toolPrimaryTarget(activity, sessionCwd);
-    final url = (activity.toolUrl ?? '').trim();
-    final query = (activity.toolQuery ?? '').trim();
-    if (activity.toolAction == 'mode_change') {
-      return 'Session runtime control';
-    }
-    if (activity.toolCategory == 'filesystem' &&
-        activity.toolAction == 'search' &&
-        target.isNotEmpty &&
-        query.isNotEmpty) {
-      return target;
-    }
-    if (activity.toolCategory == 'network' && url.isNotEmpty) {
-      return _truncateMiddle(url, 72);
-    }
-    if (target.isNotEmpty &&
-        (activity.toolCategory == 'filesystem' ||
-            activity.toolCategory == 'command')) {
-      return target;
-    }
-    final name = (activity.toolName ?? '').trim();
-    return name.isNotEmpty ? name : null;
+    return fallbackTitle ?? 'Completed a step';
   }
 
   String? _toolActivityLabel(SessionActivity activity) {
@@ -3192,6 +3526,12 @@ class _ActivityCardState extends State<_ActivityCard> {
     }
     if (_toolIsCommandActivity(activity)) {
       return null;
+    }
+    if (_toolNameLooksLikeImageInspection(activity)) {
+      return 'Image';
+    }
+    if (_toolNameLooksLikeSearch(activity)) {
+      return 'Search';
     }
     return switch (activity.toolCategory) {
       'filesystem' => switch (activity.toolAction) {
@@ -3210,7 +3550,7 @@ class _ActivityCardState extends State<_ActivityCard> {
       'session' => 'Session',
       'memory' => 'Memory',
       'task' => 'Task',
-      _ => 'Tool',
+      _ => null,
     };
   }
 
@@ -3307,34 +3647,8 @@ class _ActivityCardState extends State<_ActivityCard> {
         _toolCommandText(activity).isNotEmpty;
   }
 
-  String _toolCommandText(SessionActivity activity) {
-    for (final target in activity.toolSemanticTargets) {
-      final command = (target.command ?? '').trim();
-      if (target.type == 'command' && command.isNotEmpty) {
-        return command;
-      }
-    }
-    final args = activity.toolArgs;
-    if (args is Map<String, dynamic>) {
-      final command =
-          (args['command'] ?? args['cmd'] ?? args['fullCommandText'])
-              ?.toString()
-              .trim();
-      if (command != null && command.isNotEmpty) {
-        return command;
-      }
-    }
-    if (args is Map) {
-      final command =
-          (args['command'] ?? args['cmd'] ?? args['fullCommandText'])
-              ?.toString()
-              .trim();
-      if (command != null && command.isNotEmpty) {
-        return command;
-      }
-    }
-    return '';
-  }
+  String _toolCommandText(SessionActivity activity) =>
+      _toolCommandTextForActivity(activity);
 
   String _formatActivityValue(Object? value) {
     if (value == null) return '';
@@ -3427,83 +3741,127 @@ class _ActivityCardState extends State<_ActivityCard> {
       ),
     );
   }
+}
 
-  Widget _buildLazyDiff(
-    BuildContext context, {
-    required String label,
-    required String diff,
-  }) {
-    if (_diffExpanded) {
-      return Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          DiffView(diff: diff),
-          const SizedBox(height: 6),
-          _DiffToggle(
-            expanded: true,
-            label: label,
-            expandedLabel: 'Hide patch',
-            onToggle: () => setState(() => _diffExpanded = false),
-          ),
-        ],
-      );
-    }
-    return _DiffToggle(
-      expanded: false,
-      label: label,
-      expandedLabel: 'Hide patch',
-      onToggle: () => setState(() => _diffExpanded = true),
-    );
-  }
+class _ActivityDetailsSurface extends StatelessWidget {
+  const _ActivityDetailsSurface({
+    required this.embedded,
+    required this.title,
+    required this.summaryTitle,
+    required this.icon,
+    required this.child,
+  });
 
-  Widget _buildLazyFileChanges(
-    BuildContext context, {
-    required List<SessionActivityChange> changes,
-    required String sessionCwd,
-  }) {
-    final totalLines = changes.fold<int>(
-      0,
-      (sum, c) => sum + _diffLineCount(c.diff),
-    );
-    final label = changes.length == 1
-        ? 'View diff ($totalLines lines)'
-        : 'View ${changes.length} file diffs ($totalLines lines)';
-    if (_diffExpanded) {
-      return Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          for (final change in changes)
-            Padding(
-              padding: const EdgeInsets.only(bottom: 14),
-              child: _FileChangeBlock(
-                change: change,
-                sessionCwd: sessionCwd,
-                onOpen: _openWorkspaceFile,
+  final bool embedded;
+  final String title;
+  final String summaryTitle;
+  final IconData icon;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    final viewportHeight = MediaQuery.sizeOf(context).height;
+    final maxHeight = embedded
+        ? math.min(760.0, math.max(320.0, viewportHeight - 40))
+        : viewportHeight * 0.86;
+    return ConstrainedBox(
+      key: const ValueKey('activity-details-surface'),
+      constraints: BoxConstraints(maxHeight: maxHeight),
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          color: colors.surface,
+          borderRadius: embedded ? AppShapes.dialog : AppShapes.sheetTop,
+          border: Border.all(color: colors.border),
+          boxShadow: embedded ? AppShadows.dialog(colors.textPrimary) : null,
+        ),
+        child: SafeArea(
+          top: false,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              if (!embedded) ...[
+                const SizedBox(height: 10),
+                Align(
+                  alignment: Alignment.center,
+                  child: Container(
+                    width: 36,
+                    height: 4,
+                    decoration: BoxDecoration(
+                      color: colors.borderStrong,
+                      borderRadius: BorderRadius.circular(999),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 6),
+              ],
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 8, 8, 12),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.center,
+                  children: [
+                    Container(
+                      width: 36,
+                      height: 36,
+                      alignment: Alignment.center,
+                      decoration: BoxDecoration(
+                        color: colors.accentMuted,
+                        borderRadius: AppShapes.iconWell,
+                      ),
+                      child: Icon(icon, size: 19, color: colors.accent),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            title,
+                            style: Theme.of(context).textTheme.titleMedium
+                                ?.copyWith(
+                                  color: colors.textPrimary,
+                                  fontWeight: AppWeights.title,
+                                ),
+                          ),
+                          const SizedBox(height: 2),
+                          Text(
+                            summaryTitle,
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                            style: Theme.of(context).textTheme.bodySmall
+                                ?.copyWith(color: colors.textSecondary),
+                          ),
+                        ],
+                      ),
+                    ),
+                    IconButton(
+                      tooltip: 'Close details',
+                      onPressed: () => Navigator.of(context).pop(),
+                      icon: const Icon(Icons.close_rounded),
+                    ),
+                  ],
+                ),
               ),
-            ),
-          _DiffToggle(
-            expanded: true,
-            label: label,
-            expandedLabel: 'Hide diffs',
-            onToggle: () => setState(() => _diffExpanded = false),
+              Divider(height: 1, color: colors.border),
+              Flexible(
+                child: SingleChildScrollView(
+                  padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
+                  child: child,
+                ),
+              ),
+            ],
           ),
-        ],
-      );
-    }
-    return _DiffToggle(
-      expanded: false,
-      label: label,
-      expandedLabel: 'Hide diffs',
-      onToggle: () => setState(() => _diffExpanded = true),
+        ),
+      ),
     );
   }
 }
 
 class _CommandTitleChip extends StatelessWidget {
-  const _CommandTitleChip({required this.parts, required this.collapsed});
+  const _CommandTitleChip({required this.parts});
 
   final _CommandTitleParts parts;
-  final bool collapsed;
 
   @override
   Widget build(BuildContext context) {
@@ -3537,7 +3895,7 @@ class _CommandTitleChip extends StatelessWidget {
                 ),
                 child: Text(
                   parts.command,
-                  maxLines: collapsed ? 1 : 2,
+                  maxLines: 2,
                   overflow: TextOverflow.ellipsis,
                   style: monoStyle(
                     color: colors.codeForeground,
@@ -3601,136 +3959,37 @@ class _ActivityActionChip extends StatelessWidget {
     return Material(
       color: Colors.transparent,
       child: InkWell(
-        onTap: action.onTap,
+        onTap: () {
+          Navigator.of(context).pop();
+          action.onTap();
+        },
         borderRadius: BorderRadius.circular(999),
-        child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-          decoration: BoxDecoration(
-            color: tone.withValues(alpha: 0.08),
-            borderRadius: BorderRadius.circular(999),
-            border: Border.all(color: tone.withValues(alpha: 0.18)),
-          ),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(action.icon, size: 16, color: tone),
-              const SizedBox(width: 6),
-              Text(
-                action.label,
-                style: Theme.of(context).textTheme.labelMedium?.copyWith(
-                  color: action.tone == _ActivityActionTone.accent
-                      ? colors.accent
-                      : colors.textPrimary,
-                  fontWeight: FontWeight.w700,
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class _DiffToggle extends StatelessWidget {
-  const _DiffToggle({
-    required this.expanded,
-    required this.label,
-    required this.expandedLabel,
-    required this.onToggle,
-  });
-
-  final bool expanded;
-  final String label;
-  final String expandedLabel;
-  final VoidCallback onToggle;
-
-  @override
-  Widget build(BuildContext context) {
-    final colors = context.colors;
-    return Align(
-      alignment: Alignment.centerLeft,
-      child: Material(
-        color: Colors.transparent,
-        child: InkWell(
-          onTap: onToggle,
-          borderRadius: AppShapes.badge,
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(minHeight: 48),
           child: Container(
-            padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 7),
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
             decoration: BoxDecoration(
-              color: colors.surfaceElevated.withValues(alpha: 0.78),
-              borderRadius: AppShapes.badge,
-              border: Border.all(color: colors.border.withValues(alpha: 0.72)),
+              color: tone.withValues(alpha: 0.08),
+              borderRadius: BorderRadius.circular(999),
+              border: Border.all(color: tone.withValues(alpha: 0.18)),
             ),
             child: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
-                Icon(
-                  expanded
-                      ? Icons.unfold_less_rounded
-                      : Icons.unfold_more_rounded,
-                  size: 15,
-                  color: colors.textSecondary,
-                ),
+                Icon(action.icon, size: 16, color: tone),
                 const SizedBox(width: 6),
                 Text(
-                  expanded ? expandedLabel : label,
-                  style: monoStyle(
-                    color: colors.textSecondary,
-                    fontSize: 12,
-                    fontWeight: AppWeights.emphasis,
+                  action.label,
+                  style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                    color: action.tone == _ActivityActionTone.accent
+                        ? colors.accent
+                        : colors.textPrimary,
+                    fontWeight: FontWeight.w700,
                   ),
                 ),
               ],
             ),
           ),
-        ),
-      ),
-    );
-  }
-}
-
-class _ExpandToggle extends StatelessWidget {
-  const _ExpandToggle({
-    required this.expanded,
-    required this.hiddenCount,
-    required this.onToggle,
-  });
-
-  final bool expanded;
-  final int hiddenCount;
-  final VoidCallback onToggle;
-
-  @override
-  Widget build(BuildContext context) {
-    final colors = context.colors;
-    return GestureDetector(
-      onTap: onToggle,
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-        decoration: BoxDecoration(
-          color: colors.accentMuted,
-          borderRadius: BorderRadius.circular(8),
-          border: Border.all(color: colors.accent.withValues(alpha: 0.3)),
-        ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(
-              expanded ? Icons.unfold_less_rounded : Icons.unfold_more_rounded,
-              size: 16,
-              color: colors.accent,
-            ),
-            const SizedBox(width: 6),
-            Text(
-              expanded ? 'Show less' : '+$hiddenCount lines',
-              style: monoStyle(
-                color: colors.accent,
-                fontSize: 12,
-                fontWeight: AppWeights.body,
-              ),
-            ),
-          ],
         ),
       ),
     );
@@ -3811,74 +4070,6 @@ class _FileChangeBlock extends StatelessWidget {
           const SizedBox(height: 8),
         DiffView(diff: change.diff),
       ],
-    );
-  }
-}
-
-class _InlineFileChangeRow extends StatelessWidget {
-  const _InlineFileChangeRow({
-    required this.change,
-    required this.sessionCwd,
-    this.onOpen,
-  });
-
-  final SessionActivityChange change;
-  final String sessionCwd;
-  final void Function(String path)? onOpen;
-
-  @override
-  Widget build(BuildContext context) {
-    final colors = context.colors;
-    final tone = switch (change.kind) {
-      'added' || 'add' || 'create' => MeshPillTone.success,
-      'deleted' || 'delete' || 'remove' => MeshPillTone.danger,
-      'moved' || 'move' || 'rename' => MeshPillTone.info,
-      _ => MeshPillTone.neutral,
-    };
-    final isDeleted = switch (change.kind) {
-      'deleted' || 'delete' || 'remove' => true,
-      _ => false,
-    };
-    final canOpen = onOpen != null && !isDeleted;
-    final row = Padding(
-      padding: const EdgeInsets.symmetric(vertical: 4),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.center,
-        children: [
-          Icon(Icons.description_rounded, size: 15, color: colors.textTertiary),
-          const SizedBox(width: 8),
-          Expanded(
-            child: Text(
-              _relativeSessionPath(change.path, sessionCwd),
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style:
-                  monoStyle(
-                    color: canOpen ? colors.accent : colors.textPrimary,
-                    fontSize: 12.5,
-                    fontWeight: AppWeights.body,
-                  ).copyWith(
-                    decoration: canOpen ? TextDecoration.underline : null,
-                    decorationColor: canOpen ? colors.accent : null,
-                  ),
-            ),
-          ),
-          const SizedBox(width: 8),
-          MeshPill(label: change.kind, tone: tone, mono: true),
-        ],
-      ),
-    );
-
-    if (!canOpen) {
-      return row;
-    }
-    return Material(
-      color: Colors.transparent,
-      child: InkWell(
-        onTap: () => onOpen!(change.path),
-        borderRadius: AppShapes.badge,
-        child: row,
-      ),
     );
   }
 }
@@ -4274,19 +4465,19 @@ String _commandActivityTitle(SessionActivity activity) {
 
 String _contextCompactionTitle(SessionActivity activity) {
   return switch (activity.status) {
-    'completed' => 'Context compacted',
-    'failed' => 'Context compaction failed',
-    'declined' => 'Context compaction declined',
-    _ => 'Compacting context',
+    'completed' => 'Made room for more work',
+    'failed' => 'Could not make more room',
+    'declined' => 'Kept the full conversation',
+    _ => 'Making room for more work',
   };
 }
 
 String _contextCompactionSubtitle(SessionActivity activity) {
   return switch (activity.status) {
-    'completed' => 'Older conversation history was summarized to free context.',
-    'failed' => 'Older conversation history could not be summarized.',
-    'declined' => 'Context compaction did not run.',
-    _ => 'Summarizing older conversation history to free context.',
+    'completed' => 'The session is ready to continue.',
+    'failed' => 'The session could not prepare more room.',
+    'declined' => 'The conversation was left as it was.',
+    _ => 'Preparing the session to continue.',
   };
 }
 
@@ -4710,18 +4901,30 @@ List<String> _splitShellWords(String input) {
 String _turnDiffActivityTitle(SessionActivity activity) {
   final diff = (activity.diff ?? '').trim();
   if (diff.isEmpty) {
-    return activity.status == 'completed'
-        ? 'no live diff captured'
-        : 'tracking live diff';
+    return switch (activity.status) {
+      'completed' => 'No changes captured',
+      'failed' => 'Could not track changes',
+      'declined' => 'Changes were not tracked',
+      _ => 'Tracking changes',
+    };
   }
   final lines = _diffLineCount(diff);
+  if (lines == 0) {
+    return 'Changes captured';
+  }
   final noun = lines == 1 ? 'line' : 'lines';
-  return 'live diff · $lines $noun';
+  return '$lines $noun changed';
 }
 
 int _diffLineCount(String diff) {
-  if (diff.isEmpty) return 0;
-  return '\n'.allMatches(diff).length + 1;
+  return const LineSplitter()
+      .convert(diff)
+      .where(
+        (line) =>
+            (line.startsWith('+') && !line.startsWith('+++')) ||
+            (line.startsWith('-') && !line.startsWith('---')),
+      )
+      .length;
 }
 
 String _fileChangeActivityTitle(SessionActivity activity) {

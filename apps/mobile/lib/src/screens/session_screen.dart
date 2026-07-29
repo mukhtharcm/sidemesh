@@ -788,6 +788,32 @@ class _BrowserDockCloseButton extends StatelessWidget {
 
 enum _ActivityMergeMode { incremental, snapshot }
 
+class _TranscriptViewportSnapshot {
+  const _TranscriptViewportSnapshot({
+    required this.pixels,
+    required this.maxScrollExtent,
+    required this.userScrollRevision,
+    this.anchorKey,
+    this.anchorGlobalY,
+  });
+
+  final double pixels;
+  final double maxScrollExtent;
+  final int userScrollRevision;
+  final String? anchorKey;
+  final double? anchorGlobalY;
+}
+
+class _TranscriptViewportAnchor {
+  const _TranscriptViewportAnchor({
+    required this.key,
+    required this.globalY,
+  });
+
+  final String key;
+  final double globalY;
+}
+
 class _SessionScreenState extends State<SessionScreen>
     with WidgetsBindingObserver {
   static const _initialMessageLimit = 120;
@@ -797,6 +823,8 @@ class _SessionScreenState extends State<SessionScreen>
   static const _liveUpdateFlushInterval = Duration(milliseconds: 48);
   static const _sessionCacheWriteDebounce = Duration(milliseconds: 900);
   static const _failedSendRetryWindow = Duration(minutes: 10);
+  static const _latestFollowThreshold = 160.0;
+  static const _userScrollFollowCooldown = Duration(milliseconds: 300);
   final _composerController = TextEditingController();
   final _searchController = TextEditingController();
   final _composerFocusNode = FocusNode(debugLabel: 'session_composer');
@@ -811,8 +839,13 @@ class _SessionScreenState extends State<SessionScreen>
       SessionTurnConfigStore.instance;
   final StringBuffer _assistantDeltaBuffer = StringBuffer();
   final StringBuffer _reasoningDeltaBuffer = StringBuffer();
+  String? _assistantDeltaItemId;
+  String? _reasoningDeltaItemId;
   final Map<String, SessionActivity> _pendingActivityUpdates =
       <String, SessionActivity>{};
+  final Set<String> _keepReasoningExpandedForMessageIds = <String>{};
+  final Map<String, bool> _reasoningExpansionOverridesByMessageId =
+      <String, bool>{};
   final ComposerImageAttachmentService _imageAttachmentService =
       const SystemComposerImageAttachmentService();
 
@@ -896,6 +929,7 @@ class _SessionScreenState extends State<SessionScreen>
   List<SessionMessage>? _entriesOptimisticRef;
   List<SessionActivity>? _entriesActivitiesRef;
   List<_TimelineLiveEventRecord>? _entriesTimelineEventsRef;
+  PendingAction? _entriesPendingActionRef;
   String? _entriesLiveAssistantId;
   List<_TimelineEntry> _cachedEntries = const [];
 
@@ -926,9 +960,16 @@ class _SessionScreenState extends State<SessionScreen>
     return '${elapsed.inHours}h';
   }
 
-  // Surfaces a "↓ New" pill when the user has scrolled away from the
-  // bottom of the transcript so they can jump back to the live area.
-  final ValueNotifier<bool> _showJumpToLatest = ValueNotifier<bool>(false);
+  // A null value means the reader is following the live edge. While they are
+  // reading earlier transcript rows, this becomes a calm return affordance;
+  // final-answer completion upgrades the copy without moving their viewport.
+  final ValueNotifier<String?> _latestTranscriptAffordance =
+      ValueNotifier<String?>(null);
+  _TranscriptViewportSnapshot? _pendingViewportSnapshot;
+  bool _viewportRestoreScheduled = false;
+  bool _followLatestRestoreScheduled = false;
+  int _userScrollRevision = 0;
+  DateTime? _lastUserTranscriptScrollAt;
 
   // Tracks which old-snapshot history banners the user has dismissed
   // this session. Reset whenever a brand-new snapshot arrives so the
@@ -1030,6 +1071,26 @@ class _SessionScreenState extends State<SessionScreen>
   void _clearLiveAssistantMessage() {
     _liveAssistantNotifier.value = null;
     _reasoningDeltaBuffer.clear();
+    _assistantDeltaItemId = null;
+    _reasoningDeltaItemId = null;
+  }
+
+  void _setLiveReasoningExpansionOverride(bool expanded) {
+    final current = _liveAssistantMessage;
+    if (current == null) {
+      return;
+    }
+    _reasoningExpansionOverridesByMessageId[current.id] = expanded;
+    _liveAssistantNotifier.value = current.copyWith(
+      reasoningExpandedOverride: expanded,
+    );
+  }
+
+  void _setMessageReasoningExpansionOverride(
+    String messageId,
+    bool expanded,
+  ) {
+    _reasoningExpansionOverridesByMessageId[messageId] = expanded;
   }
 
   String get _screenAwakeSourceKey =>
@@ -1539,7 +1600,7 @@ class _SessionScreenState extends State<SessionScreen>
     unawaited(_channel?.sink.close() ?? Future<void>.value());
     _liveAssistantNotifier.dispose();
     _thinkingNotifier.dispose();
-    _showJumpToLatest.dispose();
+    _latestTranscriptAffordance.dispose();
     _timelineRevision.dispose();
     super.dispose();
   }
@@ -1789,11 +1850,244 @@ class _SessionScreenState extends State<SessionScreen>
     if (!_scrollController.hasClients) return;
     // Reverse ListView: offset > 0 means the user has scrolled up away
     // from the newest message.
-    final shouldShow = _scrollController.offset > 240;
-    if (shouldShow != _showJumpToLatest.value) {
-      _showJumpToLatest.value = shouldShow;
+    final readingEarlier =
+        _scrollController.offset > _latestFollowThreshold;
+    if (!readingEarlier) {
+      if (_latestTranscriptAffordance.value != null) {
+        _latestTranscriptAffordance.value = null;
+      }
+      return;
+    }
+    if (_latestTranscriptAffordance.value == null) {
+      _latestTranscriptAffordance.value = _pendingAction != null
+          ? 'Approval needed'
+          : 'See latest';
     }
   }
+
+  bool _onTranscriptScrollNotification(ScrollNotification notification) {
+    final userDriven =
+        notification is UserScrollNotification ||
+        (notification is ScrollStartNotification &&
+            notification.dragDetails != null) ||
+        (notification is ScrollUpdateNotification &&
+            notification.dragDetails != null) ||
+        (notification is OverscrollNotification &&
+            notification.dragDetails != null);
+    if (userDriven) {
+      _userScrollRevision++;
+      _lastUserTranscriptScrollAt = DateTime.now();
+    }
+    return false;
+  }
+
+  bool get _isReadingEarlier =>
+      _scrollController.hasClients &&
+      _scrollController.offset > _latestFollowThreshold;
+
+  bool get _hasRecentUserTranscriptScroll {
+    final last = _lastUserTranscriptScrollAt;
+    return last != null &&
+        DateTime.now().difference(last) < _userScrollFollowCooldown;
+  }
+
+  void _prepareForTranscriptLayoutChange({
+    bool announceUpdate = false,
+    bool answerReady = false,
+    bool resetAnswerReady = false,
+    String? attentionLabel,
+  }) {
+    if (!_isReadingEarlier) {
+      if (!_followLatestRestoreScheduled) {
+        final scheduledUserScrollRevision = _userScrollRevision;
+        final scheduledDuringUserScroll =
+            _scrollController.hasClients &&
+            (_scrollController.position.isScrollingNotifier.value ||
+                _hasRecentUserTranscriptScroll);
+        _followLatestRestoreScheduled = true;
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          _followLatestRestoreScheduled = false;
+          if (!mounted ||
+              _disposed ||
+              !_scrollController.hasClients ||
+              scheduledDuringUserScroll ||
+              _userScrollRevision != scheduledUserScrollRevision ||
+              _scrollController.position.isScrollingNotifier.value ||
+              _hasRecentUserTranscriptScroll ||
+              _latestTranscriptAffordance.value != null) {
+            return;
+          }
+          _scrollController.jumpTo(0);
+        });
+      }
+      return;
+    }
+    if (attentionLabel != null) {
+      _latestTranscriptAffordance.value = attentionLabel;
+    } else if (answerReady) {
+      _latestTranscriptAffordance.value = 'Answer ready';
+    } else if (resetAnswerReady) {
+      _latestTranscriptAffordance.value = 'See latest';
+    } else if (announceUpdate &&
+        _latestTranscriptAffordance.value == null) {
+      _latestTranscriptAffordance.value = 'See latest';
+    }
+    final anchor = _visibleTranscriptViewportAnchor();
+    _pendingViewportSnapshot ??= _TranscriptViewportSnapshot(
+      pixels: _scrollController.position.pixels,
+      maxScrollExtent: _scrollController.position.maxScrollExtent,
+      userScrollRevision: _userScrollRevision,
+      anchorKey: anchor?.key,
+      anchorGlobalY: anchor?.globalY,
+    );
+    if (_viewportRestoreScheduled) {
+      return;
+    }
+    _viewportRestoreScheduled = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _viewportRestoreScheduled = false;
+      final snapshot = _pendingViewportSnapshot;
+      _pendingViewportSnapshot = null;
+      if (!mounted ||
+          _disposed ||
+          snapshot == null ||
+          !_scrollController.hasClients) {
+        return;
+      }
+      final position = _scrollController.position;
+      if (_userScrollRevision != snapshot.userScrollRevision ||
+          position.isScrollingNotifier.value) {
+        return;
+      }
+      final currentAnchorY = snapshot.anchorKey == null
+          ? null
+          : _transcriptEntryGlobalY(snapshot.anchorKey!);
+      final anchorDelta =
+          currentAnchorY == null || snapshot.anchorGlobalY == null
+          ? null
+          : currentAnchorY - snapshot.anchorGlobalY!;
+      final extentDelta =
+          position.maxScrollExtent - snapshot.maxScrollExtent;
+      final correction = anchorDelta == null
+          ? extentDelta
+          : switch (position.axisDirection) {
+              AxisDirection.down || AxisDirection.right => anchorDelta,
+              AxisDirection.up || AxisDirection.left => -anchorDelta,
+            };
+      final target = (position.pixels + correction)
+          .clamp(position.minScrollExtent, position.maxScrollExtent)
+          .toDouble();
+      if ((position.pixels - target).abs() > 0.5) {
+        position.jumpTo(target);
+      }
+    });
+  }
+
+  void _syncPendingActionAffordance() {
+    if (!_isReadingEarlier) {
+      return;
+    }
+    if (_pendingAction != null) {
+      _latestTranscriptAffordance.value = 'Approval needed';
+    } else if (_latestTranscriptAffordance.value == 'Approval needed') {
+      _latestTranscriptAffordance.value = 'See latest';
+    }
+  }
+
+  _TranscriptViewportAnchor? _visibleTranscriptViewportAnchor() {
+    if (!_scrollController.hasClients) {
+      return null;
+    }
+    final scrollContext =
+        _scrollController.position.context.notificationContext;
+    final root = scrollContext is Element ? scrollContext : null;
+    final viewportObject = scrollContext?.findRenderObject();
+    if (root == null ||
+        viewportObject is! RenderBox ||
+        !viewportObject.attached ||
+        !viewportObject.hasSize) {
+      return null;
+    }
+    final viewportRect =
+        viewportObject.localToGlobal(Offset.zero) & viewportObject.size;
+    _TranscriptViewportAnchor? best;
+    var bestScore = double.infinity;
+
+    void visit(Element element) {
+      final key = element.widget.key;
+      if (key case ValueKey<String>(value: final value)
+          when _isTimelineEntryKey(value)) {
+        final renderObject = element.findRenderObject();
+        if (renderObject is RenderBox &&
+            renderObject.attached &&
+            renderObject.hasSize) {
+          final rect =
+              renderObject.localToGlobal(Offset.zero) & renderObject.size;
+          final overlapTop = math.max(rect.top, viewportRect.top);
+          final overlapBottom = math.min(rect.bottom, viewportRect.bottom);
+          if (overlapBottom > overlapTop) {
+            final fullyVisible =
+                rect.top >= viewportRect.top &&
+                rect.bottom <= viewportRect.bottom;
+            final score =
+                (fullyVisible ? 0 : viewportRect.height) +
+                (rect.top - viewportRect.top).abs();
+            if (score < bestScore) {
+              bestScore = score;
+              best = _TranscriptViewportAnchor(
+                key: value,
+                globalY: rect.top,
+              );
+            }
+          }
+        }
+      }
+      element.visitChildElements(visit);
+    }
+
+    root.visitChildElements(visit);
+    return best;
+  }
+
+  double? _transcriptEntryGlobalY(String entryKey) {
+    if (!_scrollController.hasClients) {
+      return null;
+    }
+    final scrollContext =
+        _scrollController.position.context.notificationContext;
+    final root = scrollContext is Element ? scrollContext : null;
+    if (root == null) {
+      return null;
+    }
+    double? result;
+
+    void visit(Element element) {
+      if (result != null) {
+        return;
+      }
+      final key = element.widget.key;
+      if (key case ValueKey<String>(value: final value)
+          when value == entryKey) {
+        final renderObject = element.findRenderObject();
+        if (renderObject is RenderBox &&
+            renderObject.attached &&
+            renderObject.hasSize) {
+          result = renderObject.localToGlobal(Offset.zero).dy;
+          return;
+        }
+      }
+      element.visitChildElements(visit);
+    }
+
+    root.visitChildElements(visit);
+    return result;
+  }
+
+  bool _isTimelineEntryKey(String value) =>
+      value.startsWith('msg:') ||
+      value.startsWith('act:') ||
+      value.startsWith('providerWarning:') ||
+      value.startsWith('planUpdated:');
 
   Future<void> _loadSkills({bool forceReload = false}) async {
     if (!_supportsSkillInput) {
@@ -2439,6 +2733,7 @@ class _SessionScreenState extends State<SessionScreen>
     int? messageLimit,
     int? activityLimit,
     bool scrollToBottom = true,
+    bool preserveReaderViewport = true,
   }) async {
     final resolvedMessageLimit = messageLimit ?? _messageLimit;
     final resolvedActivityLimit = activityLimit ?? _activityLimit;
@@ -2455,6 +2750,8 @@ class _SessionScreenState extends State<SessionScreen>
         return;
       }
       final pendingAction = log.pendingAction;
+      final hasNewPendingAction =
+          pendingAction != null && pendingAction.id != _pendingAction?.id;
       final livePersisted = _hasPersistedLiveAssistant(log.messages);
       // Capture any live events delivered while the snapshot was in flight —
       // we'll replay them after the snapshot setState so they aren't clobbered.
@@ -2465,6 +2762,29 @@ class _SessionScreenState extends State<SessionScreen>
         log.activities,
         mode: _ActivityMergeMode.snapshot,
       );
+      if (preserveReaderViewport) {
+        final knownMessageIds = _messages.map((message) => message.id).toSet();
+        final knownActivityIds = _activities
+            .map((activity) => activity.id)
+            .toSet();
+        final hasNewMessages = log.messages.any(
+          (message) => !knownMessageIds.contains(message.id),
+        );
+        final hasNewActivities = snapshotActivities.any(
+          (activity) => !knownActivityIds.contains(activity.id),
+        );
+        final hasNewFinalAnswer = log.messages.any(
+          (message) =>
+              !knownMessageIds.contains(message.id) &&
+              message.role == 'assistant' &&
+              message.phase == 'final_answer',
+        );
+        _prepareForTranscriptLayoutChange(
+          announceUpdate: hasNewMessages || hasNewActivities,
+          answerReady: hasNewFinalAnswer,
+          attentionLabel: hasNewPendingAction ? 'Approval needed' : null,
+        );
+      }
       setState(() {
         _session = log.session;
         _messages = log.messages;
@@ -2510,6 +2830,7 @@ class _SessionScreenState extends State<SessionScreen>
           _lastEventSeq = highestSeq;
         }
       });
+      _syncPendingActionAffordance();
       HostStatusStore.instance.markOnline(widget.host.id);
       unawaited(_dropResolvedPendingSends(log.messages));
       _refreshThinkingState();
@@ -2534,6 +2855,7 @@ class _SessionScreenState extends State<SessionScreen>
       }
       final canKeepShowingSavedTranscript =
           _showingCachedSnapshot || _showingPossiblyStaleSnapshot;
+      _prepareForTranscriptLayoutChange();
       setState(() {
         _loading = false;
         if (canKeepShowingSavedTranscript) {
@@ -2671,10 +2993,17 @@ class _SessionScreenState extends State<SessionScreen>
       if (!mounted || _disposed) {
         return;
       }
+      final hasNewPendingAction =
+          status.pendingAction != null &&
+          status.pendingAction!.id != _pendingAction?.id;
+      _prepareForTranscriptLayoutChange(
+        attentionLabel: hasNewPendingAction ? 'Approval needed' : null,
+      );
       setState(() {
         _applyFetchedSessionStatus(status);
         _loading = false;
       });
+      _syncPendingActionAffordance();
       HostStatusStore.instance.markOnline(widget.host.id);
       _refreshThinkingState();
       _syncSessionLiveActivity();
@@ -2710,6 +3039,20 @@ class _SessionScreenState extends State<SessionScreen>
         HostStatusStore.instance.markOnline(widget.host.id);
         return true;
       }
+      _prepareForTranscriptLayoutChange(
+        announceUpdate:
+            delta.messages.isNotEmpty || delta.activities.isNotEmpty,
+        answerReady: delta.messages.any(
+          (message) =>
+              message.role == 'assistant' &&
+              message.phase == 'final_answer',
+        ),
+        attentionLabel:
+            delta.pendingAction != null &&
+                delta.pendingAction!.id != _pendingAction?.id
+            ? 'Approval needed'
+            : null,
+      );
       setState(() {
         final previousMessages = _messages;
         final previousActivities = _activities;
@@ -2774,6 +3117,7 @@ class _SessionScreenState extends State<SessionScreen>
           _markTranscriptFreshAfterDelta();
         }
       });
+      _syncPendingActionAffordance();
       _refreshThinkingState();
       _syncSessionLiveActivity();
       _markCurrentSessionSeen();
@@ -2878,6 +3222,7 @@ class _SessionScreenState extends State<SessionScreen>
         messageLimit: nextMessageLimit,
         activityLimit: nextActivityLimit,
         scrollToBottom: false,
+        preserveReaderViewport: false,
       );
     } finally {
       if (mounted) {
@@ -3010,6 +3355,10 @@ class _SessionScreenState extends State<SessionScreen>
         if (message == null) {
           return;
         }
+        _prepareForTranscriptLayoutChange(
+          announceUpdate: true,
+          resetAnswerReady: true,
+        );
         setState(() {
           _upsertOptimisticMessage(message);
           _running = true;
@@ -3019,6 +3368,7 @@ class _SessionScreenState extends State<SessionScreen>
         _syncSessionLiveActivity();
         _scrollToBottomFast();
       case 'turn_started':
+        _prepareForTranscriptLayoutChange(resetAnswerReady: true);
         setState(() {
           _running = true;
           _awaitingAssistantReply =
@@ -3032,12 +3382,33 @@ class _SessionScreenState extends State<SessionScreen>
           return;
         }
         _assistantDeltaBuffer.write(delta);
+        final itemId = (event.itemId ?? '').trim();
+        if (itemId.isNotEmpty) {
+          _assistantDeltaItemId = itemId;
+        }
         _scheduleLiveFlush();
       case 'assistant_message_completed':
+        final completedMessage = event.messageItem;
+        _prepareForTranscriptLayoutChange(
+          announceUpdate: true,
+          answerReady: completedMessage?.phase == 'final_answer',
+        );
         _flushPendingLiveUpdates();
-        final message = event.messageItem;
+        final message = completedMessage;
         final committedLive = _liveAssistantMessage;
         setState(() {
+          if (message != null &&
+              committedLive != null &&
+              committedLive.reasoning.trim().isNotEmpty) {
+            final expansionOverride =
+                committedLive.reasoningExpandedOverride;
+            if (expansionOverride == null) {
+              _keepReasoningExpandedForMessageIds.add(message.id);
+            } else {
+              _reasoningExpansionOverridesByMessageId[message.id] =
+                  expansionOverride;
+            }
+          }
           if (message != null) {
             final hasThinkingBlocks = message.content.any(
               (b) => b is ThinkingBlock,
@@ -3084,12 +3455,28 @@ class _SessionScreenState extends State<SessionScreen>
       case 'turn_completed':
         _flushPendingLiveUpdates();
         final committedLive = _liveAssistantMessage;
+        final completedWithAnswer =
+            committedLive != null && committedLive.text.trim().isNotEmpty;
+        _prepareForTranscriptLayoutChange(
+          announceUpdate: completedWithAnswer,
+          answerReady: completedWithAnswer,
+        );
         setState(() {
           _running = false;
           _awaitingAssistantReply = false;
           if (committedLive != null &&
               (committedLive.text.trim().isNotEmpty ||
                   committedLive.reasoning.trim().isNotEmpty)) {
+            if (committedLive.reasoning.trim().isNotEmpty) {
+              final expansionOverride =
+                  committedLive.reasoningExpandedOverride;
+              if (expansionOverride == null) {
+                _keepReasoningExpandedForMessageIds.add(committedLive.id);
+              } else {
+                _reasoningExpansionOverridesByMessageId[committedLive.id] =
+                    expansionOverride;
+              }
+            }
             _upsertOptimisticMessage(committedLive.toMessage());
           }
           _clearLiveAssistantMessage();
@@ -3132,6 +3519,7 @@ class _SessionScreenState extends State<SessionScreen>
         if (message == null || message.isEmpty) {
           return;
         }
+        _prepareForTranscriptLayoutChange(announceUpdate: true);
         setState(() {
           _appendTimelineRuntimeEvent(
             _TimelineLiveEventKind.providerWarning,
@@ -3143,6 +3531,7 @@ class _SessionScreenState extends State<SessionScreen>
         if (status == null || status.isEmpty) {
           return;
         }
+        _prepareForTranscriptLayoutChange();
         setState(() {
           _latestThreadStatus = event;
           switch (status) {
@@ -3168,6 +3557,7 @@ class _SessionScreenState extends State<SessionScreen>
         if (plan == null) {
           return;
         }
+        _prepareForTranscriptLayoutChange(announceUpdate: true);
         setState(() {
           final semanticKey = 'plan:${event.sessionId}';
           if (plan.isEmpty) {
@@ -3187,29 +3577,42 @@ class _SessionScreenState extends State<SessionScreen>
           return;
         }
         _reasoningDeltaBuffer.write(delta);
+        final itemId = (event.itemId ?? '').trim();
+        if (itemId.isNotEmpty) {
+          _reasoningDeltaItemId = itemId;
+        }
         _scheduleLiveFlush();
         break;
       case 'queue_updated':
+        _prepareForTranscriptLayoutChange();
         setState(() {
           _latestQueueUpdate = event;
         });
       case 'auto_retry_updated':
+        _prepareForTranscriptLayoutChange();
         setState(() {
           _latestAutoRetryUpdate = event;
         });
       case 'action_opened':
+        _prepareForTranscriptLayoutChange(
+          announceUpdate: true,
+          attentionLabel: 'Approval needed',
+        );
         setState(() {
           _pendingAction = event.action;
           _awaitingAssistantReply = false;
         });
+        _syncPendingActionAffordance();
         _refreshThinkingState();
         _syncSessionLiveActivity();
         _persistCurrentSessionLog();
       case 'action_resolved':
+        _prepareForTranscriptLayoutChange();
         setState(() {
           _pendingAction = null;
           _awaitingAssistantReply = _running && _liveAssistantText.isEmpty;
         });
+        _syncPendingActionAffordance();
         _refreshThinkingState();
         _syncSessionLiveActivity();
         _persistCurrentSessionLog();
@@ -3301,7 +3704,8 @@ class _SessionScreenState extends State<SessionScreen>
 
   bool get _showRuntimeSignalStrip {
     final threadStatus = _latestThreadStatus;
-    final showThreadStatus = _shouldShowThreadStatusEvent(threadStatus);
+    final showThreadStatus =
+        _pendingAction == null && _shouldShowThreadStatusEvent(threadStatus);
     final queueUpdated = _latestQueueUpdate;
     final showQueue =
         queueUpdated != null &&
@@ -3377,6 +3781,8 @@ class _SessionScreenState extends State<SessionScreen>
     if (!mounted) {
       _assistantDeltaBuffer.clear();
       _reasoningDeltaBuffer.clear();
+      _assistantDeltaItemId = null;
+      _reasoningDeltaItemId = null;
       _pendingActivityUpdates.clear();
       return;
     }
@@ -3384,10 +3790,14 @@ class _SessionScreenState extends State<SessionScreen>
     final hasDelta = _assistantDeltaBuffer.isNotEmpty;
     final delta = hasDelta ? _assistantDeltaBuffer.toString() : '';
     _assistantDeltaBuffer.clear();
+    final assistantItemId = _assistantDeltaItemId;
+    _assistantDeltaItemId = null;
 
     final hasReasoning = _reasoningDeltaBuffer.toString().trim().isNotEmpty;
     final reasoningDelta = hasReasoning ? _reasoningDeltaBuffer.toString() : '';
     _reasoningDeltaBuffer.clear();
+    final reasoningItemId = _reasoningDeltaItemId;
+    _reasoningDeltaItemId = null;
 
     final activities = _pendingActivityUpdates.values.toList();
     _pendingActivityUpdates.clear();
@@ -3396,21 +3806,46 @@ class _SessionScreenState extends State<SessionScreen>
       return;
     }
 
+    _prepareForTranscriptLayoutChange(announceUpdate: true);
     final currentLive = _liveAssistantMessage;
     var updatedLive = currentLive;
     if (hasDelta) {
-      updatedLive = _appendLiveAssistantDelta(updatedLive, delta);
+      updatedLive = _appendLiveAssistantDelta(
+        updatedLive,
+        delta,
+        itemId: assistantItemId,
+      );
     }
     if (hasReasoning) {
-      updatedLive = _appendLiveAssistantReasoning(updatedLive, reasoningDelta);
+      updatedLive = _appendLiveAssistantReasoning(
+        updatedLive,
+        reasoningDelta,
+        itemId: reasoningItemId,
+      );
     }
     final needsLiveInsert = updatedLive != null && currentLive == null;
+    final liveIdentityChanged =
+        updatedLive != null &&
+        currentLive != null &&
+        updatedLive.id != currentLive.id;
 
     if (updatedLive != null) {
-      if (needsLiveInsert || activities.isNotEmpty) {
+      if (needsLiveInsert ||
+          liveIdentityChanged ||
+          activities.isNotEmpty) {
         setState(() {
           _running = true;
           _awaitingAssistantReply = false;
+          if (liveIdentityChanged) {
+            final expansionOverride =
+                _reasoningExpansionOverridesByMessageId.remove(
+                  currentLive.id,
+                );
+            if (expansionOverride != null) {
+              _reasoningExpansionOverridesByMessageId[updatedLive!.id] =
+                  expansionOverride;
+            }
+          }
           _liveAssistantNotifier.value = updatedLive;
           for (final activity in activities) {
             _upsertActivity(activity);
@@ -3702,6 +4137,11 @@ class _SessionScreenState extends State<SessionScreen>
     if (!mounted || _disposed) {
       return;
     }
+    _prepareForTranscriptLayoutChange(
+      announceUpdate: pending.any(
+        (send) => !_pendingSends.any((current) => current.key == send.key),
+      ),
+    );
     setState(() {
       _pendingSends = pending;
       for (final send in pending) {
@@ -4584,9 +5024,11 @@ class _SessionScreenState extends State<SessionScreen>
         return;
       }
       HapticFeedback.selectionClick();
+      _prepareForTranscriptLayoutChange();
       setState(() {
         _pendingAction = null;
       });
+      _syncPendingActionAffordance();
       _syncSessionLiveActivity();
       final providerOptionId = response.payload['providerOptionId'];
       String? providerOptionLabel;
@@ -5805,27 +6247,41 @@ class _SessionScreenState extends State<SessionScreen>
 
   _LiveAssistantMessageState _appendLiveAssistantDelta(
     _LiveAssistantMessageState? current,
-    String delta,
-  ) {
+    String delta, {
+    String? itemId,
+  }) {
     if (current == null) {
+      final resolvedItemId = (itemId ?? '').trim();
       return _LiveAssistantMessageState(
-        id: 'local-stream-${DateTime.now().microsecondsSinceEpoch}',
+        id: resolvedItemId.isNotEmpty
+            ? resolvedItemId
+            : 'local-stream-${DateTime.now().microsecondsSinceEpoch}',
         text: delta,
         createdAt: DateTime.now(),
         seq: _nextTimelineSeq(),
         phase: 'commentary',
       );
     }
-    return current.copyWith(text: '${current.text}$delta');
+    final resolvedItemId = (itemId ?? '').trim();
+    return current.copyWith(
+      id: current.text.isEmpty && resolvedItemId.isNotEmpty
+          ? resolvedItemId
+          : null,
+      text: '${current.text}$delta',
+    );
   }
 
   _LiveAssistantMessageState _appendLiveAssistantReasoning(
     _LiveAssistantMessageState? current,
-    String delta,
-  ) {
+    String delta, {
+    String? itemId,
+  }) {
     if (current == null) {
+      final resolvedItemId = (itemId ?? '').trim();
       return _LiveAssistantMessageState(
-        id: 'local-stream-${DateTime.now().microsecondsSinceEpoch}',
+        id: resolvedItemId.isNotEmpty
+            ? resolvedItemId
+            : 'local-stream-${DateTime.now().microsecondsSinceEpoch}',
         text: '',
         createdAt: DateTime.now(),
         seq: _nextTimelineSeq(),
@@ -5863,14 +6319,25 @@ class _SessionScreenState extends State<SessionScreen>
   void _scrollToBottomFast({bool force = false}) {
     if (!_scrollController.hasClients) return;
     if (_scrollController.offset <= 0.5) return;
-    if (!force && _scrollController.offset > 160) return;
+    if (!force &&
+        (_scrollController.offset > _latestFollowThreshold ||
+            _scrollController.position.isScrollingNotifier.value ||
+            _hasRecentUserTranscriptScroll)) {
+      return;
+    }
     _scrollController.jumpTo(0);
   }
 
-  Future<void> _scrollToBottom() async {
+  Future<void> _scrollToBottom({bool force = false}) async {
     if (!mounted) return;
     await WidgetsBinding.instance.endOfFrame;
     if (!mounted || !_scrollController.hasClients) return;
+    if (!force &&
+        (_scrollController.offset > _latestFollowThreshold ||
+            _scrollController.position.isScrollingNotifier.value ||
+            _hasRecentUserTranscriptScroll)) {
+      return;
+    }
     if (_scrollController.offset > 0.5) {
       _scrollController.jumpTo(0);
     }
@@ -6019,6 +6486,7 @@ class _SessionScreenState extends State<SessionScreen>
         identical(_entriesOptimisticRef, _optimisticMessages) &&
         identical(_entriesActivitiesRef, _activities) &&
         identical(_entriesTimelineEventsRef, _timelineLiveEvents) &&
+        identical(_entriesPendingActionRef, _pendingAction) &&
         _entriesLiveAssistantId == liveAssistant?.id) {
       return _cachedEntries;
     }
@@ -6032,6 +6500,8 @@ class _SessionScreenState extends State<SessionScreen>
           ...optimistic.map(_TimelineEntry.message),
           ...visibleActivities.map(_TimelineEntry.activity),
           ..._timelineLiveEvents.map(_TimelineEntry.runtimeEvent),
+          if (_pendingAction != null)
+            _TimelineEntry.pendingAction(_pendingAction!),
           if (liveAssistant != null)
             _TimelineEntry.liveAssistant(liveAssistant),
         ]..sort((left, right) {
@@ -6044,6 +6514,7 @@ class _SessionScreenState extends State<SessionScreen>
     _entriesOptimisticRef = _optimisticMessages;
     _entriesActivitiesRef = _activities;
     _entriesTimelineEventsRef = _timelineLiveEvents;
+    _entriesPendingActionRef = _pendingAction;
     _entriesLiveAssistantId = liveAssistant?.id;
     _cachedEntries = entries;
     // Notify pane-3 surfaces (search) that records should be rebuilt.
@@ -6092,11 +6563,10 @@ class _SessionScreenState extends State<SessionScreen>
   SessionActivity _aggregateFileChangeActivities(
     List<SessionActivity> activities,
   ) {
-    if (activities.length == 1) return activities.first;
     final first = activities.first;
     final changes = _aggregateFileChangeChanges(activities);
     return SessionActivity(
-      id: 'file-change-group:${first.turnId ?? first.id}:${activities.length}:${activities.last.id}',
+      id: sessionFileChangeGroupId(first),
       type: first.type,
       createdAt: first.createdAt,
       seq: first.seq,
@@ -6116,6 +6586,7 @@ class _SessionScreenState extends State<SessionScreen>
       toolTitle: first.toolTitle,
       toolArgs: first.toolArgs,
       toolResult: first.toolResult,
+      toolAttachments: first.toolAttachments,
       toolError: first.toolError,
       toolSemantic: first.toolSemantic,
       changes: changes,
@@ -6163,6 +6634,7 @@ class _SessionScreenState extends State<SessionScreen>
     final session = _session ?? widget.session;
     for (final entry in entries) {
       if (entry.kind == _TimelineEntryKind.liveAssistant ||
+          entry.kind == _TimelineEntryKind.pendingAction ||
           entry.kind == _TimelineEntryKind.providerWarning ||
           entry.kind == _TimelineEntryKind.planUpdated) {
         continue;
@@ -6258,10 +6730,8 @@ class _SessionScreenState extends State<SessionScreen>
         final cmd = (activity.command ?? '').trim();
         return cmd.isEmpty ? 'Command' : cmd;
       case 'tool':
-        final title = (activity.toolTitle ?? '').trim();
-        if (title.isNotEmpty) return title;
-        final name = (activity.toolName ?? '').trim();
-        return name.isEmpty ? 'Tool execution' : name;
+        final fallbackTitle = sessionToolActivityFallbackTitle(activity);
+        return fallbackTitle ?? 'Completed a step';
       case 'file_change':
         final fileCount = _fileChangeFileCount(activity.changes);
         if (fileCount == 1 && activity.changes.isNotEmpty) {
@@ -6271,10 +6741,10 @@ class _SessionScreenState extends State<SessionScreen>
             ? 'Editing $fileCount files'
             : 'Edited $fileCount files';
       case 'turn_diff':
-        return 'Turn diff';
+        return _turnDiffActivityTitle(activity);
       case 'web_search':
         final q = (activity.query ?? '').trim();
-        return q.isEmpty ? 'Web search' : 'Web: $q';
+        return q.isEmpty ? 'Searched the web' : 'Searched for "$q"';
       case 'image_generation':
         return switch (activity.status) {
           'completed' => 'Generated image',
@@ -6283,14 +6753,14 @@ class _SessionScreenState extends State<SessionScreen>
           _ => 'Generating image',
         };
       case 'context_compaction':
-        return switch (activity.status) {
-          'completed' => 'Context compacted',
-          'failed' => 'Context compaction failed',
-          'declined' => 'Context compaction declined',
-          _ => 'Compacting context',
-        };
+        return _contextCompactionTitle(activity);
       default:
-        return activity.type;
+        return switch (activity.status) {
+          'failed' => 'Step failed',
+          'declined' => 'Step declined',
+          'in_progress' => 'Working',
+          _ => 'Completed a step',
+        };
     }
   }
 
@@ -6794,18 +7264,14 @@ class _SessionScreenState extends State<SessionScreen>
     );
     final showHistoryBanner =
         (_history?.isTruncated ?? false) && !_historyBannerDismissed;
-    final showStopPill = isCompact && _running && _supportsSessionInterrupt;
+    final showStopPill =
+        isCompact &&
+        _running &&
+        _supportsSessionInterrupt &&
+        _pendingAction == null;
     final showWaitingState = !_loading && timelineEntries.isEmpty && _running;
     final bodyContent = Column(
       children: [
-        if (_pendingAction != null)
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 4, 16, 12),
-            child: _PendingActionCard(
-              action: _pendingAction!,
-              onRespond: _respondAction,
-            ),
-          ),
         if (_showOfflineTranscriptStatus)
           ListenableBuilder(
             listenable: RelativeTimeTicker.seconds,
@@ -6813,7 +7279,7 @@ class _SessionScreenState extends State<SessionScreen>
               return Padding(
                 padding: EdgeInsets.fromLTRB(
                   16,
-                  widget.desktopMode && _pendingAction == null ? 8 : 0,
+                  widget.desktopMode ? 8 : 0,
                   16,
                   10,
                 ),
@@ -6842,57 +7308,85 @@ class _SessionScreenState extends State<SessionScreen>
                         onRefresh: () => _loadSnapshot(scrollToBottom: false),
                         edgeOffset: 0,
                         displacement: 28,
-                        child: SelectionArea(
-                          child: ListView.builder(
-                            controller: _scrollController,
-                            reverse: true,
-                            keyboardDismissBehavior:
-                                ScrollViewKeyboardDismissBehavior.onDrag,
-                            padding: const EdgeInsets.fromLTRB(16, 6, 16, 12),
-                            physics: const AlwaysScrollableScrollPhysics(),
-                            itemCount:
-                                visibleTimelineEntries.length +
-                                (showHistoryBanner ? 1 : 0),
-                            itemBuilder: (context, index) {
-                              if (showHistoryBanner &&
-                                  index == visibleTimelineEntries.length) {
-                                return Padding(
-                                  padding: const EdgeInsets.fromLTRB(
-                                    0,
-                                    10,
-                                    0,
-                                    6,
-                                  ),
-                                  child: _HistoryTruncationCard(
-                                    history: _history!,
-                                    loading: _loadingOlderHistory,
-                                    onLoadOlderHistory: _loadOlderTranscript,
-                                    onDismiss: () => setState(
-                                      () => _historyBannerDismissed = true,
+                        child: NotificationListener<ScrollNotification>(
+                          onNotification: _onTranscriptScrollNotification,
+                          child: SelectionArea(
+                            child: ListView.builder(
+                              controller: _scrollController,
+                              reverse: true,
+                              keyboardDismissBehavior:
+                                  ScrollViewKeyboardDismissBehavior.onDrag,
+                              padding: const EdgeInsets.fromLTRB(16, 6, 16, 12),
+                              physics: const AlwaysScrollableScrollPhysics(),
+                              itemCount:
+                                  visibleTimelineEntries.length +
+                                  (showHistoryBanner ? 1 : 0),
+                              findChildIndexCallback: (key) {
+                                if (key is! ValueKey<String>) {
+                                  return null;
+                                }
+                                final chronoIndex = visibleTimelineEntries
+                                    .indexWhere(
+                                      (entry) => entry.keyId == key.value,
+                                    );
+                                if (chronoIndex == -1) {
+                                  return null;
+                                }
+                                return visibleTimelineEntries.length -
+                                    chronoIndex -
+                                    1;
+                              },
+                              itemBuilder: (context, index) {
+                                if (showHistoryBanner &&
+                                    index == visibleTimelineEntries.length) {
+                                  return Padding(
+                                    padding: const EdgeInsets.fromLTRB(
+                                      0,
+                                      10,
+                                      0,
+                                      6,
                                     ),
-                                  ),
-                                );
-                              }
-                              final chronoIndex =
-                                  visibleTimelineEntries.length - index - 1;
-                              final entry = visibleTimelineEntries[chronoIndex];
-                              final prev = chronoIndex > 0
-                                  ? visibleTimelineEntries[chronoIndex - 1]
-                                  : null;
-                              final showDay =
-                                  prev == null ||
-                                  !_sameCalendarDay(
-                                    prev.createdAt,
-                                    entry.createdAt,
+                                    child: _HistoryTruncationCard(
+                                      history: _history!,
+                                      loading: _loadingOlderHistory,
+                                      onLoadOlderHistory:
+                                          _loadOlderTranscript,
+                                      onDismiss: () => setState(
+                                        () => _historyBannerDismissed = true,
+                                      ),
+                                    ),
                                   );
-                              final child = KeyedSubtree(
-                                key: ValueKey(entry.keyId),
-                                child: switch (entry.kind) {
+                                }
+                                final chronoIndex =
+                                    visibleTimelineEntries.length - index - 1;
+                                final entry =
+                                    visibleTimelineEntries[chronoIndex];
+                                final prev = chronoIndex > 0
+                                    ? visibleTimelineEntries[chronoIndex - 1]
+                                    : null;
+                                final showDay =
+                                    prev == null ||
+                                    !_sameCalendarDay(
+                                      prev.createdAt,
+                                      entry.createdAt,
+                                    );
+                                final child = switch (entry.kind) {
                                   _TimelineEntryKind.message => _MessageBubble(
                                     host: widget.host,
                                     api: widget.api,
                                     sessionId: session.id,
                                     message: entry.message!,
+                                    keepReasoningExpanded:
+                                        _keepReasoningExpandedForMessageIds
+                                            .contains(entry.message!.id),
+                                    reasoningExpandedOverride:
+                                        _reasoningExpansionOverridesByMessageId[
+                                            entry.message!.id],
+                                    onReasoningExpansionChanged: (expanded) =>
+                                        _setMessageReasoningExpansionOverride(
+                                          entry.message!.id,
+                                          expanded,
+                                        ),
                                     pinned: _pinsStore.isPinned(
                                       widget.host,
                                       session.id,
@@ -6910,9 +7404,6 @@ class _SessionScreenState extends State<SessionScreen>
                                     sessionId: session.id,
                                     activity: entry.activity!,
                                     sessionCwd: session.cwd,
-                                    defaultCollapsed:
-                                        entry.activity!.type !=
-                                        'image_generation',
                                     onOpenFile: _openWorkspaceFile,
                                     onBrowsePath: _supportsFilesystem
                                         ? _browseWorkspacePath
@@ -6932,6 +7423,11 @@ class _SessionScreenState extends State<SessionScreen>
                                         widget.desktopMode &&
                                         _inspectorController != null,
                                   ),
+                                  _TimelineEntryKind.pendingAction =>
+                                    _PendingActionCard(
+                                      action: entry.pendingAction!,
+                                      onRespond: _respondAction,
+                                    ),
                                   _TimelineEntryKind.providerWarning =>
                                     _ProviderWarningRow(
                                       event: entry.runtimeEvent!.event,
@@ -6946,23 +7442,32 @@ class _SessionScreenState extends State<SessionScreen>
                                       api: widget.api,
                                       sessionId: session.id,
                                       message: _liveAssistantNotifier,
+                                      onReasoningExpansionChanged:
+                                          _setLiveReasoningExpansionOverride,
                                       onOpenFile: (path) =>
                                           unawaited(_openMessageResource(path)),
                                       onOpenHostUrl: _openHostUrl,
                                     ),
-                                },
-                              );
-                              if (!showDay) return child;
-                              return Column(
-                                crossAxisAlignment: CrossAxisAlignment.stretch,
-                                children: [
-                                  _DaySeparator(
-                                    label: _formatDaySeparator(entry.createdAt),
-                                  ),
-                                  child,
-                                ],
-                              );
-                            },
+                                };
+                                return KeyedSubtree(
+                                  key: ValueKey(entry.keyId),
+                                  child: showDay
+                                      ? Column(
+                                          crossAxisAlignment:
+                                              CrossAxisAlignment.stretch,
+                                          children: [
+                                            _DaySeparator(
+                                              label: _formatDaySeparator(
+                                                entry.createdAt,
+                                              ),
+                                            ),
+                                            child,
+                                          ],
+                                        )
+                                      : child,
+                                );
+                              },
+                            ),
                           ),
                         ),
                       ),
@@ -6975,9 +7480,10 @@ class _SessionScreenState extends State<SessionScreen>
                     Positioned(
                       right: 16,
                       bottom: 12,
-                      child: ValueListenableBuilder<bool>(
-                        valueListenable: _showJumpToLatest,
-                        builder: (context, show, _) {
+                      child: ValueListenableBuilder<String?>(
+                        valueListenable: _latestTranscriptAffordance,
+                        builder: (context, label, _) {
+                          final show = label != null;
                           return IgnorePointer(
                             ignoring: !show,
                             child: AnimatedOpacity(
@@ -6985,15 +7491,24 @@ class _SessionScreenState extends State<SessionScreen>
                               duration: const Duration(milliseconds: 160),
                               curve: Curves.easeOut,
                               child: _JumpToLatestPill(
+                                label: label ?? 'See latest',
                                 onTap: () {
                                   if (!_scrollController.hasClients) {
                                     return;
                                   }
-                                  _scrollController.animateTo(
-                                    0,
-                                    duration: const Duration(milliseconds: 240),
-                                    curve: Curves.easeOut,
-                                  );
+                                  _pendingViewportSnapshot = null;
+                                  _scrollController.jumpTo(0);
+                                  WidgetsBinding.instance.addPostFrameCallback((
+                                    _,
+                                  ) {
+                                    if (mounted &&
+                                        !_disposed &&
+                                        _scrollController.hasClients &&
+                                        _latestTranscriptAffordance.value ==
+                                            null) {
+                                      _scrollController.jumpTo(0);
+                                    }
+                                  });
                                 },
                               ),
                             ),
