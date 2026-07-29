@@ -69,7 +69,7 @@ void main() {
     expect(_composerTextField(tester).focusNode?.hasFocus, isFalse);
   });
 
-  testWidgets('assistant messages use the flat transcript surface', (
+  testWidgets('messages use the flat transcript surface', (
     tester,
   ) async {
     final session = _session('flat-assistant-surface');
@@ -126,8 +126,14 @@ void main() {
       find.byKey(const ValueKey('session-message-surface:user-message')),
     );
     final userDecoration = userSurface.decoration as BoxDecoration;
-    expect(userDecoration.borderRadius, isNotNull);
-    expect((userDecoration.border! as Border).isUniform, isTrue);
+    final userBorder = userDecoration.border! as Border;
+    expect(userDecoration.color, Colors.transparent);
+    expect(userDecoration.borderRadius, isNull);
+    expect(userBorder.top.style, BorderStyle.none);
+    expect(userBorder.left.style, BorderStyle.none);
+    expect(userBorder.right.style, BorderStyle.none);
+    expect(userBorder.bottom.style, BorderStyle.solid);
+    expect(find.text('You'), findsOneWidget);
   });
 
   testWidgets('pending approval is a flat section without duplicate status', (
@@ -138,7 +144,21 @@ void main() {
       status: 'waiting_for_approval',
     );
     final pending = _pendingAction(session.id);
-    final api = _RichEventFakeApi(pendingAction: pending);
+    final api = _RichEventFakeApi(
+      pendingAction: pending,
+      messages: [
+        SessionMessage(
+          id: 'approval-request-message',
+          role: 'user',
+          text: 'Run the verification.',
+          content: const [TextBlock('Run the verification.')],
+          attachments: const [],
+          createdAt: DateTime(2026, 1, 1, 11, 59),
+          seq: 1,
+          phase: null,
+        ),
+      ],
+    );
     addTearDown(api.dispose);
 
     await _pumpApp(
@@ -158,12 +178,23 @@ void main() {
     final decoration = surface.decoration as BoxDecoration;
     final border = decoration.border! as Border;
     expect(decoration.borderRadius, isNull);
+    expect(decoration.color, Colors.transparent);
     expect(border.left.style, BorderStyle.none);
     expect(border.right.style, BorderStyle.none);
-    expect(border.top.style, BorderStyle.solid);
+    expect(border.top.style, BorderStyle.none);
     expect(border.bottom.style, BorderStyle.solid);
     expect(find.text('Approval needed'), findsOneWidget);
+    expect(find.text('Run this command?'), findsOneWidget);
+    expect(find.text('Run command'), findsOneWidget);
+    expect(find.text('Allow for this session'), findsOneWidget);
+    expect(find.text('Approve'), findsNothing);
+    expect(find.text('Approve for session'), findsNothing);
     expect(find.text('APPROVAL REQUIRED'), findsNothing);
+    expect(find.text('Stop agent'), findsNothing);
+    expect(
+      tester.getTopLeft(find.text('Run the verification.')).dy,
+      lessThan(tester.getTopLeft(find.text('Run this command?')).dy),
+    );
 
     api.emit({
       'type': 'thread_status',
@@ -271,7 +302,7 @@ void main() {
     );
     await _pumpFrames(tester);
 
-    expect(find.text('Review command'), findsOneWidget);
+    expect(find.text('Run this command?'), findsOneWidget);
     expect(_composerTextField(tester).focusNode?.hasFocus, isFalse);
   });
 
@@ -789,12 +820,12 @@ void main() {
       });
       await _pumpFrames(tester);
 
-      expect(find.text('Approve file edit'), findsOneWidget);
+      expect(find.text('Allow this access?'), findsOneWidget);
 
       api.emit({'type': 'hello', 'sessionId': session.id, 'nextSeq': 3});
       await _pumpFrames(tester);
 
-      expect(find.text('Approve file edit'), findsNothing);
+      expect(find.text('Allow this access?'), findsNothing);
     },
   );
 
@@ -842,12 +873,12 @@ void main() {
     });
     await _pumpFrames(tester);
 
-    expect(find.text('Approve file edit'), findsOneWidget);
+    expect(find.text('Allow this access?'), findsOneWidget);
 
     await _tapDesktopReload(tester);
     await _pumpFrames(tester);
 
-    expect(find.text('Approve file edit'), findsNothing);
+    expect(find.text('Allow this access?'), findsNothing);
   });
 
   testWidgets(
@@ -898,12 +929,12 @@ void main() {
       });
       await _pumpFrames(tester);
 
-      expect(find.text('Approve file edit'), findsNothing);
+      expect(find.text('Allow this access?'), findsNothing);
 
       snapshotReady.complete();
       await _pumpFrames(tester);
 
-      expect(find.text('Approve file edit'), findsOneWidget);
+      expect(find.text('Allow this access?'), findsOneWidget);
     },
   );
 

@@ -364,6 +364,7 @@ class _JumpToLatestPill extends StatelessWidget {
     final colors = context.colors;
     final foreground = readableActionForeground(colors, colors.accent);
     return Material(
+      key: const ValueKey('latest-transcript-affordance'),
       color: colors.accent,
       shape: const StadiumBorder(),
       elevation: 4,
@@ -1354,84 +1355,129 @@ class _PendingActionCardState extends State<_PendingActionCard> {
     final colors = context.colors;
     final mq = MediaQuery.of(context);
     final kindMeta = _kindMeta(action, colors);
-    final maxHeight = mq.size.height * 0.5;
-    return DecoratedBox(
-      key: ValueKey('pending-action-surface:${action.id}'),
-      decoration: BoxDecoration(
-        color: kindMeta.accent.withValues(alpha: 0.07),
-        border: Border(
-          top: BorderSide(
-            color: kindMeta.accent.withValues(alpha: 0.24),
+    final maxHeight = mq.size.height * 0.58;
+    final supportingDetails = _supportingDetails();
+    return Align(
+      alignment: Alignment.centerLeft,
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 680),
+        child: DecoratedBox(
+          key: ValueKey('pending-action-surface:${action.id}'),
+          decoration: BoxDecoration(
+            color: Colors.transparent,
+            border: Border(
+              bottom: BorderSide(
+                color: colors.border.withValues(alpha: 0.72),
+              ),
+            ),
           ),
-          bottom: BorderSide(
-            color: kindMeta.accent.withValues(alpha: 0.24),
-          ),
-        ),
-      ),
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(16, 14, 16, 16),
-        child: ConstrainedBox(
-          constraints: BoxConstraints(maxHeight: maxHeight),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Row(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(4, 13, 4, 14),
+            child: ConstrainedBox(
+              constraints: BoxConstraints(maxHeight: maxHeight),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
                 children: [
-                  Icon(kindMeta.icon, size: 16, color: kindMeta.accent),
-                  const SizedBox(width: 7),
-                  Text(
-                    kindMeta.kicker,
-                    style: Theme.of(context).textTheme.labelMedium?.copyWith(
-                      color: kindMeta.accent,
-                      fontWeight: AppWeights.title,
+                  Row(
+                    children: [
+                      Icon(kindMeta.icon, size: 15, color: kindMeta.accent),
+                      const SizedBox(width: 7),
+                      Text(
+                        kindMeta.kicker,
+                        style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                          color: kindMeta.accent,
+                          fontWeight: AppWeights.title,
+                          letterSpacing: 0.2,
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 7),
+                  Flexible(
+                    child: SingleChildScrollView(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(
+                            _promptTitle(),
+                            style: Theme.of(context).textTheme.titleMedium
+                                ?.copyWith(fontWeight: FontWeight.w700),
+                          ),
+                          for (final detail in supportingDetails) ...[
+                            const SizedBox(height: 7),
+                            Text(
+                              detail,
+                              style: Theme.of(context).textTheme.bodyMedium
+                                  ?.copyWith(color: colors.textSecondary),
+                            ),
+                          ],
+                          if (action.isUserInput) ...[
+                            const SizedBox(height: 12),
+                            _buildUserInputBody(context, action.userInput!),
+                          ] else if (action.isElicitation) ...[
+                            const SizedBox(height: 12),
+                            _buildElicitationBody(
+                              context,
+                              action.elicitation!,
+                            ),
+                          ],
+                        ],
+                      ),
                     ),
+                  ),
+                  const SizedBox(height: 14),
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: _buildFooterActions(context),
                   ),
                 ],
               ),
-              const SizedBox(height: 8),
-              Flexible(
-                child: SingleChildScrollView(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Text(
-                        action.title,
-                        style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                          fontWeight: FontWeight.w700,
-                        ),
-                      ),
-                      if (action.detail.isNotEmpty) ...[
-                        const SizedBox(height: 8),
-                        Text(
-                          action.detail,
-                          style: Theme.of(context).textTheme.bodyMedium
-                              ?.copyWith(color: colors.textSecondary),
-                        ),
-                      ],
-                      if (action.isUserInput) ...[
-                        const SizedBox(height: 12),
-                        _buildUserInputBody(context, action.userInput!),
-                      ] else if (action.isElicitation) ...[
-                        const SizedBox(height: 12),
-                        _buildElicitationBody(context, action.elicitation!),
-                      ],
-                    ],
-                  ),
-                ),
-              ),
-              const SizedBox(height: 14),
-              Wrap(
-                spacing: 8,
-                runSpacing: 8,
-                children: _buildFooterActions(context),
-              ),
-            ],
+            ),
           ),
         ),
       ),
     );
+  }
+
+  String _promptTitle() {
+    if (action.isUserInput) {
+      final question = action.userInput?.question.trim() ?? '';
+      if (question.isNotEmpty) {
+        return question;
+      }
+    }
+    return switch (action.kind) {
+      'command' => 'Run this command?',
+      'file_change' => 'Apply these changes?',
+      'permissions' => 'Allow this access?',
+      'tool' => 'Continue with this action?',
+      _ => action.title,
+    };
+  }
+
+  List<String> _supportingDetails() {
+    final prompt = _promptTitle().trim();
+    final cwd = (action.approval?.cwd ?? action.cwd ?? '').trim();
+    final candidates = <String>[
+      action.approval?.summary ?? '',
+      action.approval?.detail ?? '',
+      action.detail,
+    ];
+    final details = <String>[];
+    for (final candidate in candidates) {
+      final value = candidate.trim();
+      if (value.isEmpty || value == prompt || details.contains(value)) {
+        continue;
+      }
+      details.add(value);
+    }
+    if (cwd.isNotEmpty && !details.any((detail) => detail.contains(cwd))) {
+      details.add('In $cwd');
+    }
+    return details;
   }
 
   Widget _buildUserInputBody(
@@ -1830,15 +1876,17 @@ class _PendingActionCardState extends State<_PendingActionCard> {
                   );
                 },
           icon: const Icon(Icons.check_rounded, size: 18),
-          label: const Text('Approve'),
+          label: Text(_primaryApprovalLabel()),
         ),
       if (action.canApproveForSession)
-        OutlinedButton.icon(
-          onPressed: () => widget.onRespond(
-            PendingActionResponseDraft.approval('acceptForSession'),
-          ),
+        TextButton.icon(
+          onPressed: _responding
+              ? null
+              : () => widget.onRespond(
+                  PendingActionResponseDraft.approval('acceptForSession'),
+                ),
           icon: const Icon(Icons.all_inclusive_rounded, size: 18),
-          label: const Text('Approve for session'),
+          label: const Text('Allow for this session'),
         ),
       if (action.canDecline)
         MeshDangerAction(
@@ -1854,6 +1902,16 @@ class _PendingActionCardState extends State<_PendingActionCard> {
           label: 'Decline',
         ),
     ];
+  }
+
+  String _primaryApprovalLabel() {
+    return switch (action.kind) {
+      'command' => 'Run command',
+      'file_change' => 'Apply changes',
+      'permissions' => 'Allow access',
+      'tool' => 'Continue',
+      _ => 'Allow',
+    };
   }
 
   void _submitUserInput() {

@@ -929,6 +929,7 @@ class _SessionScreenState extends State<SessionScreen>
   List<SessionMessage>? _entriesOptimisticRef;
   List<SessionActivity>? _entriesActivitiesRef;
   List<_TimelineLiveEventRecord>? _entriesTimelineEventsRef;
+  PendingAction? _entriesPendingActionRef;
   String? _entriesLiveAssistantId;
   List<_TimelineEntry> _cachedEntries = const [];
 
@@ -1858,7 +1859,9 @@ class _SessionScreenState extends State<SessionScreen>
       return;
     }
     if (_latestTranscriptAffordance.value == null) {
-      _latestTranscriptAffordance.value = 'See latest';
+      _latestTranscriptAffordance.value = _pendingAction != null
+          ? 'Approval needed'
+          : 'See latest';
     }
   }
 
@@ -1892,6 +1895,7 @@ class _SessionScreenState extends State<SessionScreen>
     bool announceUpdate = false,
     bool answerReady = false,
     bool resetAnswerReady = false,
+    String? attentionLabel,
   }) {
     if (!_isReadingEarlier) {
       if (!_followLatestRestoreScheduled) {
@@ -1918,7 +1922,9 @@ class _SessionScreenState extends State<SessionScreen>
       }
       return;
     }
-    if (answerReady) {
+    if (attentionLabel != null) {
+      _latestTranscriptAffordance.value = attentionLabel;
+    } else if (answerReady) {
       _latestTranscriptAffordance.value = 'Answer ready';
     } else if (resetAnswerReady) {
       _latestTranscriptAffordance.value = 'See latest';
@@ -1975,6 +1981,17 @@ class _SessionScreenState extends State<SessionScreen>
         position.jumpTo(target);
       }
     });
+  }
+
+  void _syncPendingActionAffordance() {
+    if (!_isReadingEarlier) {
+      return;
+    }
+    if (_pendingAction != null) {
+      _latestTranscriptAffordance.value = 'Approval needed';
+    } else if (_latestTranscriptAffordance.value == 'Approval needed') {
+      _latestTranscriptAffordance.value = 'See latest';
+    }
   }
 
   _TranscriptViewportAnchor? _visibleTranscriptViewportAnchor() {
@@ -2733,6 +2750,8 @@ class _SessionScreenState extends State<SessionScreen>
         return;
       }
       final pendingAction = log.pendingAction;
+      final hasNewPendingAction =
+          pendingAction != null && pendingAction.id != _pendingAction?.id;
       final livePersisted = _hasPersistedLiveAssistant(log.messages);
       // Capture any live events delivered while the snapshot was in flight —
       // we'll replay them after the snapshot setState so they aren't clobbered.
@@ -2763,6 +2782,7 @@ class _SessionScreenState extends State<SessionScreen>
         _prepareForTranscriptLayoutChange(
           announceUpdate: hasNewMessages || hasNewActivities,
           answerReady: hasNewFinalAnswer,
+          attentionLabel: hasNewPendingAction ? 'Approval needed' : null,
         );
       }
       setState(() {
@@ -2810,6 +2830,7 @@ class _SessionScreenState extends State<SessionScreen>
           _lastEventSeq = highestSeq;
         }
       });
+      _syncPendingActionAffordance();
       HostStatusStore.instance.markOnline(widget.host.id);
       unawaited(_dropResolvedPendingSends(log.messages));
       _refreshThinkingState();
@@ -2972,11 +2993,17 @@ class _SessionScreenState extends State<SessionScreen>
       if (!mounted || _disposed) {
         return;
       }
-      _prepareForTranscriptLayoutChange();
+      final hasNewPendingAction =
+          status.pendingAction != null &&
+          status.pendingAction!.id != _pendingAction?.id;
+      _prepareForTranscriptLayoutChange(
+        attentionLabel: hasNewPendingAction ? 'Approval needed' : null,
+      );
       setState(() {
         _applyFetchedSessionStatus(status);
         _loading = false;
       });
+      _syncPendingActionAffordance();
       HostStatusStore.instance.markOnline(widget.host.id);
       _refreshThinkingState();
       _syncSessionLiveActivity();
@@ -3020,6 +3047,11 @@ class _SessionScreenState extends State<SessionScreen>
               message.role == 'assistant' &&
               message.phase == 'final_answer',
         ),
+        attentionLabel:
+            delta.pendingAction != null &&
+                delta.pendingAction!.id != _pendingAction?.id
+            ? 'Approval needed'
+            : null,
       );
       setState(() {
         final previousMessages = _messages;
@@ -3085,6 +3117,7 @@ class _SessionScreenState extends State<SessionScreen>
           _markTranscriptFreshAfterDelta();
         }
       });
+      _syncPendingActionAffordance();
       _refreshThinkingState();
       _syncSessionLiveActivity();
       _markCurrentSessionSeen();
@@ -3561,11 +3594,15 @@ class _SessionScreenState extends State<SessionScreen>
           _latestAutoRetryUpdate = event;
         });
       case 'action_opened':
-        _prepareForTranscriptLayoutChange(announceUpdate: true);
+        _prepareForTranscriptLayoutChange(
+          announceUpdate: true,
+          attentionLabel: 'Approval needed',
+        );
         setState(() {
           _pendingAction = event.action;
           _awaitingAssistantReply = false;
         });
+        _syncPendingActionAffordance();
         _refreshThinkingState();
         _syncSessionLiveActivity();
         _persistCurrentSessionLog();
@@ -3575,6 +3612,7 @@ class _SessionScreenState extends State<SessionScreen>
           _pendingAction = null;
           _awaitingAssistantReply = _running && _liveAssistantText.isEmpty;
         });
+        _syncPendingActionAffordance();
         _refreshThinkingState();
         _syncSessionLiveActivity();
         _persistCurrentSessionLog();
@@ -4986,9 +5024,11 @@ class _SessionScreenState extends State<SessionScreen>
         return;
       }
       HapticFeedback.selectionClick();
+      _prepareForTranscriptLayoutChange();
       setState(() {
         _pendingAction = null;
       });
+      _syncPendingActionAffordance();
       _syncSessionLiveActivity();
       final providerOptionId = response.payload['providerOptionId'];
       String? providerOptionLabel;
@@ -6446,6 +6486,7 @@ class _SessionScreenState extends State<SessionScreen>
         identical(_entriesOptimisticRef, _optimisticMessages) &&
         identical(_entriesActivitiesRef, _activities) &&
         identical(_entriesTimelineEventsRef, _timelineLiveEvents) &&
+        identical(_entriesPendingActionRef, _pendingAction) &&
         _entriesLiveAssistantId == liveAssistant?.id) {
       return _cachedEntries;
     }
@@ -6459,6 +6500,8 @@ class _SessionScreenState extends State<SessionScreen>
           ...optimistic.map(_TimelineEntry.message),
           ...visibleActivities.map(_TimelineEntry.activity),
           ..._timelineLiveEvents.map(_TimelineEntry.runtimeEvent),
+          if (_pendingAction != null)
+            _TimelineEntry.pendingAction(_pendingAction!),
           if (liveAssistant != null)
             _TimelineEntry.liveAssistant(liveAssistant),
         ]..sort((left, right) {
@@ -6471,6 +6514,7 @@ class _SessionScreenState extends State<SessionScreen>
     _entriesOptimisticRef = _optimisticMessages;
     _entriesActivitiesRef = _activities;
     _entriesTimelineEventsRef = _timelineLiveEvents;
+    _entriesPendingActionRef = _pendingAction;
     _entriesLiveAssistantId = liveAssistant?.id;
     _cachedEntries = entries;
     // Notify pane-3 surfaces (search) that records should be rebuilt.
@@ -6590,6 +6634,7 @@ class _SessionScreenState extends State<SessionScreen>
     final session = _session ?? widget.session;
     for (final entry in entries) {
       if (entry.kind == _TimelineEntryKind.liveAssistant ||
+          entry.kind == _TimelineEntryKind.pendingAction ||
           entry.kind == _TimelineEntryKind.providerWarning ||
           entry.kind == _TimelineEntryKind.planUpdated) {
         continue;
@@ -7219,18 +7264,14 @@ class _SessionScreenState extends State<SessionScreen>
     );
     final showHistoryBanner =
         (_history?.isTruncated ?? false) && !_historyBannerDismissed;
-    final showStopPill = isCompact && _running && _supportsSessionInterrupt;
+    final showStopPill =
+        isCompact &&
+        _running &&
+        _supportsSessionInterrupt &&
+        _pendingAction == null;
     final showWaitingState = !_loading && timelineEntries.isEmpty && _running;
     final bodyContent = Column(
       children: [
-        if (_pendingAction != null)
-          Padding(
-            padding: const EdgeInsets.fromLTRB(0, 4, 0, 12),
-            child: _PendingActionCard(
-              action: _pendingAction!,
-              onRespond: _respondAction,
-            ),
-          ),
         if (_showOfflineTranscriptStatus)
           ListenableBuilder(
             listenable: RelativeTimeTicker.seconds,
@@ -7238,7 +7279,7 @@ class _SessionScreenState extends State<SessionScreen>
               return Padding(
                 padding: EdgeInsets.fromLTRB(
                   16,
-                  widget.desktopMode && _pendingAction == null ? 8 : 0,
+                  widget.desktopMode ? 8 : 0,
                   16,
                   10,
                 ),
@@ -7382,6 +7423,11 @@ class _SessionScreenState extends State<SessionScreen>
                                         widget.desktopMode &&
                                         _inspectorController != null,
                                   ),
+                                  _TimelineEntryKind.pendingAction =>
+                                    _PendingActionCard(
+                                      action: entry.pendingAction!,
+                                      onRespond: _respondAction,
+                                    ),
                                   _TimelineEntryKind.providerWarning =>
                                     _ProviderWarningRow(
                                       event: entry.runtimeEvent!.event,

@@ -126,6 +126,67 @@ void main() {
   );
 
   testWidgets(
+    'an off-screen approval uses the latest affordance without moving the reader',
+    (tester) async {
+      final session = _session('offscreen-approval', status: 'running');
+      final api = _ScrollFakeApi(
+        session: session,
+        messages: _transcriptMessages(36),
+      );
+      addTearDown(api.dispose);
+
+      await _pumpSession(tester, session: session, api: api);
+      final position = _transcriptPosition(tester);
+      position.jumpTo(900);
+      await tester.pump();
+
+      final anchor = _visibleTranscriptAnchor(tester);
+      final anchorY = tester.getTopLeft(find.text(anchor)).dy;
+
+      api.emit({
+        'type': 'action_opened',
+        'sessionId': session.id,
+        'action': {
+          'id': 'approval-1',
+          'sessionId': session.id,
+          'kind': 'command',
+          'title': 'Approve command',
+          'detail': 'Run flutter analyze in the workspace.',
+          'requestedAt': DateTime(
+            2026,
+            1,
+            1,
+            14,
+          ).millisecondsSinceEpoch,
+          'canApprove': true,
+          'canApproveForSession': true,
+          'canDecline': true,
+        },
+      });
+      await _pumpLiveUpdate(tester);
+
+      expect(find.text('Approval needed').hitTestable(), findsOneWidget);
+      expect(
+        tester.getTopLeft(find.text(anchor)).dy,
+        closeTo(anchorY, 1),
+      );
+
+      await tester.tap(find.text('Approval needed').hitTestable());
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 300));
+
+      expect(position.pixels, closeTo(0, 1));
+      expect(find.text('Run this command?'), findsOneWidget);
+      expect(
+        find
+            .byKey(const ValueKey('latest-transcript-affordance'))
+            .hitTestable(),
+        findsNothing,
+      );
+    },
+  );
+
+  testWidgets(
     'turn completion without a message event still announces the answer',
     (tester) async {
       final session = _session('turn-completed-fallback', status: 'running');

@@ -66,6 +66,7 @@ class _LiveAssistantMessageState {
 enum _TimelineEntryKind {
   message,
   activity,
+  pendingAction,
   providerWarning,
   planUpdated,
   liveAssistant,
@@ -99,6 +100,7 @@ class _TimelineEntry {
     required this.keyId,
     this.message,
     this.activity,
+    this.pendingAction,
     this.runtimeEvent,
   });
 
@@ -117,6 +119,15 @@ class _TimelineEntry {
     keyId: 'act:${activity.id}',
     activity: activity,
   );
+
+  factory _TimelineEntry.pendingAction(PendingAction action) =>
+      _TimelineEntry._(
+        kind: _TimelineEntryKind.pendingAction,
+        createdAt: action.requestedAt,
+        seq: 0x7fffffff,
+        keyId: 'pending:${action.id}',
+        pendingAction: action,
+      );
 
   factory _TimelineEntry.runtimeEvent(_TimelineLiveEventRecord event) =>
       _TimelineEntry._(
@@ -145,6 +156,7 @@ class _TimelineEntry {
   final String keyId;
   final SessionMessage? message;
   final SessionActivity? activity;
+  final PendingAction? pendingAction;
   final _TimelineLiveEventRecord? runtimeEvent;
 }
 
@@ -1066,15 +1078,24 @@ class _MessageBubble extends StatelessWidget {
     final hasAnswer = hasTextBlocks || hasText;
     final canPin = onTogglePin != null && message.hasVisibleContent;
 
+    final usesPlainTranscriptSurface = isUser || isAssistant;
     final bubbleColor = switch (message.role) {
       'user' => colors.userBubble,
       'assistant' => colors.assistantBubble,
       _ => colors.surfaceMuted,
     };
-    final textColor = messageBodyColor(colors, userBubble: isUser);
-    final metaColor = messageMetaColor(colors, userBubble: isUser);
+    final textColor = messageBodyColor(
+      colors,
+      userBubble: isUser && !usesPlainTranscriptSurface,
+    );
+    final metaColor = messageMetaColor(
+      colors,
+      userBubble: isUser && !usesPlainTranscriptSurface,
+    );
     final assistantMetaColor = messageMetaColor(colors, userBubble: false);
-    final selectionBackground = isAssistant ? colors.canvas : bubbleColor;
+    final selectionBackground = usesPlainTranscriptSurface
+        ? colors.canvas
+        : bubbleColor;
     final selectionForeground = readableTextOn(
       colors,
       background: selectionBackground,
@@ -1094,7 +1115,7 @@ class _MessageBubble extends StatelessWidget {
     ).textTheme.bodyMedium?.copyWith(color: textColor, height: 1.45);
     final linkStyle = messageLinkStyle(
       colors,
-      userBubble: isUser,
+      userBubble: isUser && !usesPlainTranscriptSurface,
       baseStyle: bodyStyle,
     );
     final assistantLinkStyle = messageLinkStyle(
@@ -1104,7 +1125,7 @@ class _MessageBubble extends StatelessWidget {
         context,
       ).textTheme.bodyMedium?.copyWith(color: colors.textPrimary, height: 1.5),
     );
-    final messagePadding = isAssistant
+    final messagePadding = usesPlainTranscriptSurface
         ? const EdgeInsets.fromLTRB(4, 13, 4, 14)
         : const EdgeInsets.fromLTRB(16, 12, 16, 14);
     final bubbleBorderColor = live
@@ -1117,17 +1138,27 @@ class _MessageBubble extends StatelessWidget {
         : null;
 
     return Align(
-      alignment: isUser ? Alignment.centerRight : Alignment.centerLeft,
+      alignment: usesPlainTranscriptSurface
+          ? Alignment.centerLeft
+          : Alignment.centerRight,
       child: Padding(
-        padding: EdgeInsets.only(bottom: isAssistant ? 0 : 10),
+        padding: EdgeInsets.only(
+          bottom: usesPlainTranscriptSurface ? 0 : 10,
+        ),
         child: ConstrainedBox(
-          constraints: BoxConstraints(maxWidth: isAssistant ? 680 : 560),
+          constraints: BoxConstraints(
+            maxWidth: usesPlainTranscriptSurface ? 680 : 560,
+          ),
           child: DecoratedBox(
             key: ValueKey('session-message-surface:${message.id}'),
             decoration: BoxDecoration(
-              color: isAssistant ? Colors.transparent : bubbleColor,
-              borderRadius: isAssistant ? null : BorderRadius.circular(20),
-              border: isAssistant
+              color: usesPlainTranscriptSurface
+                  ? Colors.transparent
+                  : bubbleColor,
+              borderRadius: usesPlainTranscriptSurface
+                  ? null
+                  : BorderRadius.circular(20),
+              border: usesPlainTranscriptSurface
                   ? Border(
                       bottom: BorderSide(
                         color: colors.border.withValues(alpha: 0.72),
@@ -1145,6 +1176,19 @@ class _MessageBubble extends StatelessWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
+                    if (isUser)
+                      Padding(
+                        padding: const EdgeInsets.only(bottom: 6),
+                        child: Text(
+                          'You',
+                          style: Theme.of(context).textTheme.labelSmall
+                              ?.copyWith(
+                                color: metaColor,
+                                fontWeight: AppWeights.title,
+                                letterSpacing: 0.2,
+                              ),
+                        ),
+                      ),
                     if (phaseLabel != null && hasAnswer)
                       Padding(
                         padding: const EdgeInsets.only(bottom: 6),
