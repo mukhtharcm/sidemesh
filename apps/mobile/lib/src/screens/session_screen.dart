@@ -292,26 +292,16 @@ class _DesktopSessionCommandBar extends StatelessWidget {
 }
 
 /// A compact grouped button bar for the desktop session AppBar.
-/// Renders children in a rounded container with a subtle border — gives
-/// ⋯ and ✕ a shared visual frame rather than two floating icon buttons.
+/// Keeps the actions aligned without adding another container to the toolbar.
 class _DesktopButtonGroup extends StatelessWidget {
   const _DesktopButtonGroup({required this.children});
   final List<Widget> children;
 
   @override
   Widget build(BuildContext context) {
-    final colors = context.colors;
-    return Container(
-      height: 28,
-      decoration: BoxDecoration(
-        color: colors.surface,
-        borderRadius: AppShapes.input,
-        border: Border.all(color: colors.border),
-      ),
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(AppRadii.control - 1),
-        child: Row(mainAxisSize: MainAxisSize.min, children: children),
-      ),
+    return SizedBox(
+      height: AppSizes.compactControl,
+      child: Row(mainAxisSize: MainAxisSize.min, children: children),
     );
   }
 }

@@ -50,3 +50,22 @@ corresponding navigation/layout implementation must not be mistaken for that
 runtime evidence. Windows/Linux modifier selection is implemented, but no native
 Windows build was run. Screenshots contain private session data and are shared
 through Taildrop rather than committed.
+
+## Reading and management surfaces
+
+Session detail, Inbox, Machines, and machine detail share the same restrained
+structure. Collapsed activity disclosures are plain rows; expanded output keeps
+its boundary. User messages retain their fill without an accent outline. The
+composer has a short prompt and no full-width separator, and Jump to latest is a
+neutral arrow control.
+
+Machine rows expose one status word, a quiet endpoint, and the existing action
+menu. Machine detail uses connection text, the shared agent settings row, plain
+folder shortcuts, and unframed operational rows. Inbox requests and queued sends
+lose their outer cards while retaining the existing response and recovery
+callbacks. Action kind moves into the supporting line so it cannot crowd out the
+request title. Typography explicitly applies the declared zero letter spacing
+instead of inheriting Material's tracking.
+
+These changes were inspected with a real Linux transcript, an isolated fake
+approval, and Android machine list/detail screens. All 387 Flutter tests pass.

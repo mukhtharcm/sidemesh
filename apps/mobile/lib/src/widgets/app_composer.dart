@@ -110,7 +110,6 @@ class AppComposer extends StatelessWidget {
       child: Container(
         decoration: BoxDecoration(
           color: colors.canvas,
-          border: Border(top: BorderSide(color: colors.border)),
         ),
         child: Column(
           mainAxisSize: MainAxisSize.min,

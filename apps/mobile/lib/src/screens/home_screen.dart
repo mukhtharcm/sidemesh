@@ -8,7 +8,6 @@ import '../api_client.dart';
 import '../app_version_store.dart';
 import '../approval_inbox_store.dart';
 import '../host_status_store.dart';
-import '../relative_time_ticker.dart';
 import '../host_store.dart';
 import '../live_activity_service.dart';
 import '../local_notification_service.dart';
@@ -1177,7 +1176,7 @@ class _RecentPaneLoadingState extends StatelessWidget {
     final basePadding =
         padding ??
         (dense
-            ? const EdgeInsets.fromLTRB(6, 4, 6, 24)
+            ? const EdgeInsets.fromLTRB(AppSpacing.sm, AppSpacing.xs, AppSpacing.sm, AppSpacing.xl)
             : const EdgeInsets.fromLTRB(16, 8, 16, 88));
     final spacing = dense ? 8.0 : 10.0;
     return ListView(
@@ -1836,7 +1835,7 @@ class _RecentPaneState extends State<RecentPane> {
         final basePadding =
             widget.padding ??
             (widget.dense
-                ? const EdgeInsets.fromLTRB(6, 4, 6, 24)
+                ? const EdgeInsets.fromLTRB(AppSpacing.sm, AppSpacing.xs, AppSpacing.sm, AppSpacing.xl)
                 : const EdgeInsets.fromLTRB(16, 8, 16, 88));
         Future<void> handleRefresh() async {
           await _store.refresh();
@@ -1943,7 +1942,7 @@ class _RecentPaneState extends State<RecentPane> {
     final padding =
         widget.padding ??
         (widget.dense
-            ? const EdgeInsets.fromLTRB(6, 4, 6, 24)
+            ? const EdgeInsets.fromLTRB(AppSpacing.sm, AppSpacing.xs, AppSpacing.sm, AppSpacing.xl)
             : const EdgeInsets.fromLTRB(16, 8, 16, 88));
     return ListView.builder(
       padding: padding,
@@ -2695,14 +2694,9 @@ class _PendingSendCard extends StatelessWidget {
     final stateLabel = _pendingSendStateLabel(analysis.state);
     final stateIcon = _pendingSendStateIcon(analysis.state);
     final issueLabel = _pendingSendIssueLabel(analysis.issue);
-    final borderTone = analysis.needsAttention
-        ? colors.warning.withValues(alpha: 0.55)
-        : colors.info.withValues(alpha: 0.45);
 
     if (dense) {
-      return MeshCard(
-        tone: MeshCardTone.surface,
-        borderColor: borderTone,
+      return Padding(
         padding: const EdgeInsets.fromLTRB(12, 11, 10, 11),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -2771,9 +2765,7 @@ class _PendingSendCard extends StatelessWidget {
       );
     }
 
-    return MeshCard(
-      tone: MeshCardTone.surface,
-      borderColor: borderTone,
+    return Padding(
       padding: const EdgeInsets.fromLTRB(14, 12, 12, 12),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -3195,7 +3187,7 @@ class _InboxCard extends StatelessWidget {
                     width: 6,
                     height: 6,
                     decoration: BoxDecoration(
-                      color: colors.warning,
+                      color: colors.accent,
                       shape: BoxShape.circle,
                     ),
                   ),
@@ -3211,7 +3203,7 @@ class _InboxCard extends StatelessWidget {
                           Expanded(
                             child: Text(
                               action.title,
-                              maxLines: 1,
+                              maxLines: 2,
                               overflow: TextOverflow.ellipsis,
                               style: Theme.of(context).textTheme.bodyMedium
                                   ?.copyWith(
@@ -3220,18 +3212,11 @@ class _InboxCard extends StatelessWidget {
                                   ),
                             ),
                           ),
-                          const SizedBox(width: 6),
-                          MeshStatusBadge(
-                            label: _actionKindLabel(action.kind),
-                            tone: _actionKindTone(action.kind),
-                            icon: _actionKindIcon(action.kind),
-                            compact: true,
-                          ),
                         ],
                       ),
                       const SizedBox(height: 3),
                       Text(
-                        hostMeta,
+                        '${_actionKindLabel(action.kind)} · $hostMeta',
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: monoStyle(
@@ -3250,12 +3235,14 @@ class _InboxCard extends StatelessWidget {
         ),
       );
     }
-    return MeshCard(
-      tone: MeshCardTone.surface,
-      borderColor: colors.warning.withValues(alpha: 0.55),
-      onTap: onOpenSession,
-      padding: const EdgeInsets.fromLTRB(14, 12, 10, 12),
-      child: Column(
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onOpenSession,
+        borderRadius: AppShapes.input,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: AppSpacing.sm, vertical: AppSpacing.lg),
+          child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
@@ -3272,18 +3259,11 @@ class _InboxCard extends StatelessWidget {
                   ),
                 ),
               ),
-              const SizedBox(width: 8),
-              MeshStatusBadge(
-                label: _actionKindLabel(action.kind),
-                tone: _actionKindTone(action.kind),
-                icon: _actionKindIcon(action.kind),
-                compact: true,
-              ),
             ],
           ),
           const SizedBox(height: 6),
           Text(
-            hostMeta,
+            '${_actionKindLabel(action.kind)} · $hostMeta',
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
             style: monoStyle(color: colors.textTertiary, fontSize: 11),
@@ -3374,6 +3354,8 @@ class _InboxCard extends StatelessWidget {
           ),
         ],
       ),
+        ),
+      ),
     );
   }
 }
@@ -3387,24 +3369,6 @@ String _actionKindLabel(String kind) {
     'user_input' => 'reply',
     'elicitation' => 'form',
     _ => kind,
-  };
-}
-
-MeshStatusTone _actionKindTone(String kind) {
-  return switch (kind) {
-    'user_input' => MeshStatusTone.waiting,
-    'elicitation' => MeshStatusTone.queued,
-    _ => MeshStatusTone.approval,
-  };
-}
-
-IconData _actionKindIcon(String kind) {
-  return switch (kind) {
-    'user_input' => Icons.chat_bubble_outline_rounded,
-    'elicitation' => Icons.fact_check_rounded,
-    'file_change' => Icons.description_outlined,
-    'command' => Icons.terminal_rounded,
-    _ => Icons.shield_rounded,
   };
 }
 
@@ -3679,7 +3643,7 @@ class HostsPane extends StatelessWidget {
     }
     return ListView.separated(
       padding: dense
-          ? const EdgeInsets.fromLTRB(6, 4, 6, 24)
+          ? const EdgeInsets.fromLTRB(AppSpacing.sm, AppSpacing.xs, AppSpacing.sm, AppSpacing.xl)
           : const EdgeInsets.fromLTRB(
               AppSizes.mobileGutter,
               AppSpacing.sm,
@@ -3746,242 +3710,60 @@ class _HostRowCard extends StatelessWidget {
                 minimumVersion: node!.minimumMobileClientVersion,
               );
         final endpointLabel = _hostEndpointLabel(host.baseUrl);
-        if (dense) {
-          return Material(
-            color: Colors.transparent,
-            child: InkWell(
-              onTap: onTap,
-              borderRadius: AppShapes.input,
-              child: AnimatedContainer(
-                duration: const Duration(milliseconds: 120),
-                padding: const EdgeInsets.fromLTRB(10, 9, 6, 10),
-                decoration: BoxDecoration(
-                  color: selected
-                      ? colors.accentMuted.withValues(alpha: 0.48)
-                      : Colors.transparent,
-                  borderRadius: AppShapes.input,
-                ),
-                child: Row(
-                  children: [
-                    Stack(
-                      clipBehavior: Clip.none,
-                      children: [
-                        Container(
-                          width: 30,
-                          height: 30,
-                          decoration: BoxDecoration(
-                            color: colors.accentMuted,
-                            borderRadius: AppShapes.iconWell,
-                          ),
-                          alignment: Alignment.center,
-                          child: Icon(
-                            Icons.dns_rounded,
-                            color: colors.accent,
-                            size: 15,
-                          ),
-                        ),
-                        Positioned(
-                          right: -2,
-                          bottom: -2,
-                          child: _HostStatusDot(
-                            status: status,
-                            enabled: host.enabled,
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Text(
-                            host.label,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: Theme.of(context).textTheme.bodyMedium
-                                ?.copyWith(
-                                  fontWeight: AppWeights.body,
-                                  height: 1.25,
-                                  color: host.enabled
-                                      ? colors.textPrimary
-                                      : colors.textTertiary,
-                                ),
-                          ),
-                          const SizedBox(height: 2),
-                          Text(
-                            host.enabled ? endpointLabel : 'Disabled',
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: monoStyle(
-                              color: colors.textTertiary,
-                              fontSize: 10.5,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    _HostRowActionsMenu(
-                      hostEnabled: host.enabled,
-                      onToggleEnabled: onToggleEnabled,
-                      onEdit: onEdit,
-                      onRemove: onRemove,
-                      compact: true,
-                    ),
-                  ],
-                ),
+        final statusLabel = !host.enabled ? 'Disabled' : switch (status.reachability) {
+          HostReachability.online => 'Online',
+          HostReachability.offline => 'Offline',
+          HostReachability.probing => 'Connecting',
+          HostReachability.unknown => 'Not connected',
+        };
+        return Material(
+          color: selected ? colors.surfaceMuted : Colors.transparent,
+          borderRadius: AppShapes.badge,
+          child: InkWell(
+            onTap: onTap,
+            borderRadius: AppShapes.badge,
+            child: Padding(
+              padding: EdgeInsets.symmetric(
+                horizontal: AppSpacing.md,
+                vertical: dense ? AppSpacing.sm : AppSpacing.lg,
               ),
-            ),
-          );
-        }
-        final showStatusLine =
-            !host.enabled || status.reachability != HostReachability.unknown;
-        final supplementalBadges = <Widget>[
-          if (node?.updateAvailable == true && !dense)
-            MeshPill(
-              label: node?.usesBleedingEdgeTrack == true
-                  ? 'New commits'
-                  : 'App update',
-              icon: Icons.system_update_alt_rounded,
-              tone: MeshPillTone.warning,
-            ),
-          if (compatibility.level == MobileClientCompatibilityLevel.required)
-            MeshPill(
-              label:
-                  'Mobile ${mobileClientVersionLabel(compatibility.targetVersion)} needed',
-              icon: Icons.phone_android_rounded,
-              tone: MeshPillTone.danger,
-            )
-          else if (compatibility.level ==
-              MobileClientCompatibilityLevel.recommended)
-            MeshPill(
-              label:
-                  'Mobile ${mobileClientVersionLabel(compatibility.targetVersion)} recommended',
-              icon: Icons.phone_android_rounded,
-              tone: MeshPillTone.info,
-            ),
-        ];
-        return MeshSurface(
-          onTap: onTap,
-          selected: selected,
-          bordered: selected,
-          padding: AppPadding.listRow,
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.center,
                 children: [
-                  Stack(
-                    clipBehavior: Clip.none,
-                    children: [
-                      Container(
-                        width: AppSizes.compactControl,
-                        height: AppSizes.compactControl,
-                        decoration: BoxDecoration(
-                          color: colors.accentMuted,
-                          borderRadius: AppShapes.input,
-                        ),
-                        alignment: Alignment.center,
-                        child: Icon(
-                          Icons.dns_rounded,
-                          color: colors.accent,
-                          size: AppSizes.icon,
-                        ),
-                      ),
-                      Positioned(
-                        right: -2,
-                        bottom: -2,
-                        child: _HostStatusDot(
-                          status: status,
-                          enabled: host.enabled,
-                        ),
-                      ),
-                    ],
-                  ),
+                  Icon(Icons.computer_rounded, size: AppSizes.icon,
+                    color: colors.textSecondary),
                   const SizedBox(width: AppSpacing.md),
                   Expanded(
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
-                      mainAxisSize: MainAxisSize.min,
                       children: [
-                        Text(
-                          host.label,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: Theme.of(context).textTheme.titleSmall
-                              ?.copyWith(
-                                fontWeight: AppWeights.emphasis,
-                                color: host.enabled
-                                    ? null
-                                    : colors.textTertiary,
-                              ),
-                        ),
-                        const SizedBox(height: 5),
-                        Text(
-                          endpointLabel,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: monoStyle(
-                            color: host.enabled
-                                ? colors.textSecondary
-                                : colors.textTertiary,
-                            fontSize: 11.5,
-                          ),
-                        ),
+                        Text(host.label, maxLines: 1, overflow: TextOverflow.ellipsis,
+                          style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                            fontWeight: AppWeights.emphasis, letterSpacing: 0,
+                            color: host.enabled ? colors.textPrimary : colors.textTertiary)),
+                        const SizedBox(height: AppSpacing.xs),
+                        Text(endpointLabel, maxLines: 1, overflow: TextOverflow.ellipsis,
+                          style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                            color: colors.textTertiary, letterSpacing: 0)),
+                        if (compatibility.level != MobileClientCompatibilityLevel.none)
+                          Text('Mobile ${mobileClientVersionLabel(compatibility.targetVersion)} '
+                            '${compatibility.level == MobileClientCompatibilityLevel.required ? "required" : "recommended"}',
+                            style: Theme.of(context).textTheme.bodySmall?.copyWith(color: colors.textSecondary)),
                       ],
                     ),
                   ),
-                  const SizedBox(width: 6),
-                  _HostRowActionsMenu(
-                    hostEnabled: host.enabled,
-                    onToggleEnabled: onToggleEnabled,
-                    onEdit: onEdit,
-                    onRemove: onRemove,
-                    compact: false,
+                  const SizedBox(width: AppSpacing.sm),
+                  Tooltip(
+                    message: _statusLine(status),
+                    child: Text(statusLabel, style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      color: _statusColor(colors, status), letterSpacing: 0)),
                   ),
+                  _HostRowActionsMenu(hostEnabled: host.enabled,
+                    onToggleEnabled: onToggleEnabled, onEdit: onEdit,
+                    onRemove: onRemove, compact: dense),
                 ],
               ),
-              if (showStatusLine || supplementalBadges.isNotEmpty) ...[
-                const SizedBox(height: 10),
-                Padding(
-                  padding: const EdgeInsets.only(
-                    left: AppSizes.compactControl + AppSpacing.md,
-                  ),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      if (showStatusLine)
-                        ListenableBuilder(
-                          listenable: RelativeTimeTicker.minutes,
-                          builder: (context, _) {
-                            return Text(
-                              _statusLine(status),
-                              maxLines: 2,
-                              overflow: TextOverflow.ellipsis,
-                              style: monoStyle(
-                                color: _statusColor(colors, status),
-                                fontSize: 10.5,
-                                fontWeight: AppWeights.body,
-                              ),
-                            );
-                          },
-                        ),
-                      if (showStatusLine && supplementalBadges.isNotEmpty)
-                        const SizedBox(height: 8),
-                      if (supplementalBadges.isNotEmpty)
-                        Wrap(
-                          spacing: 8,
-                          runSpacing: 6,
-                          children: supplementalBadges,
-                        ),
-                    ],
-                  ),
-                ),
-              ],
-            ],
+            ),
           ),
         );
       },
@@ -4039,7 +3821,7 @@ class _HostRowCard extends StatelessWidget {
       case HostReachability.online:
         return colors.success;
       case HostReachability.offline:
-        return colors.danger;
+        return colors.textSecondary;
       case HostReachability.probing:
         return colors.textSecondary;
       case HostReachability.unknown:
@@ -4153,45 +3935,6 @@ class _HostActionMenuItem extends StatelessWidget {
   }
 }
 
-class _HostStatusDot extends StatelessWidget {
-  const _HostStatusDot({required this.status, required this.enabled});
-
-  final HostStatus status;
-  final bool enabled;
-
-  @override
-  Widget build(BuildContext context) {
-    final colors = context.colors;
-    final Color fill;
-    if (!enabled) {
-      fill = colors.textTertiary;
-    } else {
-      switch (status.reachability) {
-        case HostReachability.online:
-          fill = colors.success;
-          break;
-        case HostReachability.offline:
-          fill = colors.danger;
-          break;
-        case HostReachability.probing:
-          fill = colors.warning;
-          break;
-        case HostReachability.unknown:
-          fill = colors.textTertiary;
-          break;
-      }
-    }
-    return Container(
-      width: 12,
-      height: 12,
-      decoration: BoxDecoration(
-        color: fill,
-        shape: BoxShape.circle,
-        border: Border.all(color: colors.canvas, width: 2),
-      ),
-    );
-  }
-}
 
 class HostEditorSheet extends StatefulWidget {
   const HostEditorSheet({super.key, this.initialHost, this.fullPage = false});

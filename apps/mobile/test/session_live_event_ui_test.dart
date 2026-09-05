@@ -1985,7 +1985,7 @@ Finder _composerTextFieldFinder() {
   return find.byWidgetPredicate(
     (widget) =>
         widget is TextField &&
-        widget.decoration?.hintText?.startsWith('Reply here') == true,
+        widget.decoration?.hintText?.startsWith('Reply') == true,
   );
 }
 

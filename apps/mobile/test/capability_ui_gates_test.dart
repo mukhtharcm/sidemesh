@@ -2203,7 +2203,7 @@ TextField _composerTextField(WidgetTester tester) {
   final finder = find.byWidgetPredicate(
     (widget) =>
         widget is TextField &&
-        widget.decoration?.hintText?.startsWith('Reply here') == true,
+        widget.decoration?.hintText?.startsWith('Reply') == true,
   );
   expect(finder, findsOneWidget);
   return tester.widget<TextField>(finder);

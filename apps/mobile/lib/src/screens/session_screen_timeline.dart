@@ -1060,7 +1060,7 @@ class _MessageBubble extends StatelessWidget {
     final bubbleColor = switch (message.role) {
       'user' => colors.userBubble,
       'assistant' => colors.canvas,
-      _ => colors.surfaceMuted,
+      _ => colors.canvas,
     };
     final textColor = messageBodyColor(colors, userBubble: isUser);
     final metaColor = messageMetaColor(colors, userBubble: isUser);
@@ -1097,9 +1097,6 @@ class _MessageBubble extends StatelessWidget {
     final messagePadding = isAssistant
         ? const EdgeInsets.symmetric(vertical: AppSpacing.sm)
         : const EdgeInsets.fromLTRB(16, 12, 16, 14);
-    final bubbleBorderColor = live
-        ? colors.accent
-        : colors.accent.withValues(alpha: 0.28);
     final phaseLabel = live
         ? 'Writing'
         : message.phase == 'commentary'
@@ -1110,17 +1107,13 @@ class _MessageBubble extends StatelessWidget {
       builder: (context, showChrome) => Align(
         alignment: isUser ? Alignment.centerRight : Alignment.centerLeft,
         child: Padding(
-          padding: EdgeInsets.only(bottom: isAssistant ? 14 : 10),
+          padding: EdgeInsets.only(bottom: isAssistant ? AppSpacing.xl : AppSpacing.lg),
           child: ConstrainedBox(
             constraints: BoxConstraints(maxWidth: isAssistant ? AppSizes.readingMaxWidth : 560),
             child: DecoratedBox(
               decoration: BoxDecoration(
-                color: isAssistant ? null : bubbleColor,
-                borderRadius: isAssistant ? null : AppShapes.card,
-                border: isAssistant ? null : Border.all(
-                  color: bubbleBorderColor,
-                  width: live ? 1.4 : 1,
-                ),
+                color: isUser ? bubbleColor : null,
+                borderRadius: isUser ? AppShapes.card : null,
               ),
               child: TextSelectionTheme(
                 data: bubbleSelectionTheme,
@@ -1213,7 +1206,7 @@ class _MessageBubble extends StatelessWidget {
                           ),
                       if (showChrome && (canPin || hasText))
                         Padding(
-                          padding: const EdgeInsets.only(top: 6),
+                          padding: const EdgeInsets.only(top: AppSpacing.xs),
                           child: Align(
                             alignment: Alignment.centerRight,
                             child: Wrap(
@@ -2313,7 +2306,7 @@ class _ActivityCardState extends State<_ActivityCard> {
       padding: const EdgeInsets.only(top: 6),
       child: Container(
         width: double.infinity,
-        padding: const EdgeInsets.fromLTRB(10, 10, 10, 10),
+        padding: const EdgeInsets.all(AppSpacing.md),
         decoration: BoxDecoration(
           color: colors.surface.withValues(alpha: 0.58),
           borderRadius: AppShapes.input,
@@ -2364,17 +2357,6 @@ class _ActivityCardState extends State<_ActivityCard> {
       _ => null,
     };
 
-    final activityLabel = switch (activity.type) {
-      'command' => null,
-      'tool' => _toolActivityLabel(activity),
-      'file_change' => 'File edit',
-      'turn_diff' => null,
-      'web_search' => 'Web search',
-      'image_generation' => 'Image',
-      'context_compaction' => 'Context',
-      _ => 'Activity',
-    };
-
     final activityIcon = switch (activity.type) {
       'command' => Icons.terminal_rounded,
       'tool' => _toolActivityIcon(activity),
@@ -2393,24 +2375,15 @@ class _ActivityCardState extends State<_ActivityCard> {
     return Align(
       alignment: Alignment.centerLeft,
       child: Padding(
-        padding: const EdgeInsets.only(bottom: 10),
+        padding: const EdgeInsets.only(bottom: AppSpacing.xs),
         child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 640),
+          constraints: const BoxConstraints(maxWidth: AppSizes.readingMaxWidth),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Material(
-                color: commandLikeActivity
-                    ? colors.surface.withValues(alpha: 0.76)
-                    : colors.surfaceMuted.withValues(alpha: 0.48),
-                shape: RoundedRectangleBorder(
-                  borderRadius: AppShapes.input,
-                  side: BorderSide(
-                    color: commandLikeActivity
-                        ? colors.codeBorder.withValues(alpha: 0.76)
-                        : colors.border.withValues(alpha: 0.62),
-                  ),
-                ),
+                color: Colors.transparent,
+                shape: RoundedRectangleBorder(borderRadius: AppShapes.input),
                 clipBehavior: Clip.antiAlias,
                 child: InkWell(
                   onTap: () {
@@ -2428,48 +2401,15 @@ class _ActivityCardState extends State<_ActivityCard> {
                     child: Row(
                       crossAxisAlignment: CrossAxisAlignment.center,
                       children: [
-                        if (!commandLikeActivity) Container(
-                          width: 30,
-                          height: 30,
-                          decoration: BoxDecoration(
-                            color: commandLikeActivity
-                                ? colors.surfaceElevated
-                                : activity.isCommand || activity.isTool
-                                ? colors.surfaceMuted.withValues(alpha: 0.72)
-                                : colors.accentMuted.withValues(alpha: 0.68),
-                            borderRadius: AppShapes.iconWell,
-                            border: Border.all(
-                              color: colors.border.withValues(alpha: 0.5),
-                            ),
-                          ),
-                          alignment: Alignment.center,
-                          child: Icon(
-                            activityIcon,
-                            size: 16,
-                            color: commandLikeActivity
-                                ? colors.codeForeground
-                                : activity.isCommand || activity.isTool
-                                ? colors.textPrimary
-                                : colors.accent,
-                          ),
-                        ),
-                        if (!commandLikeActivity) const SizedBox(width: AppSpacing.sm),
+                        if (!commandLikeActivity) ...[
+                          Icon(activityIcon, size: AppSizes.compactIcon,
+                            color: colors.textTertiary),
+                          const SizedBox(width: AppSpacing.sm),
+                        ],
                         Expanded(
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              if (activityLabel != null && !commandLikeActivity) ...[
-                                Text(
-                                  activityLabel,
-                                  style: Theme.of(context).textTheme.labelSmall
-                                      ?.copyWith(
-                                        color: colors.textTertiary,
-                                        fontWeight: AppWeights.title,
-                                        letterSpacing: 0.2,
-                                      ),
-                                ),
-                                const SizedBox(height: AppSpacing.xs),
-                              ],
                               _buildActivityTitle(
                                 context,
                                 activity: activity,
@@ -2588,9 +2528,9 @@ class _ActivityCardState extends State<_ActivityCard> {
     return Align(
       alignment: Alignment.centerLeft,
       child: Padding(
-        padding: const EdgeInsets.only(bottom: 10),
+        padding: const EdgeInsets.only(bottom: AppSpacing.xs),
         child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 640),
+          constraints: const BoxConstraints(maxWidth: AppSizes.readingMaxWidth),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
@@ -3194,34 +3134,6 @@ class _ActivityCardState extends State<_ActivityCard> {
     }
     final name = (activity.toolName ?? '').trim();
     return name.isNotEmpty ? name : null;
-  }
-
-  String? _toolActivityLabel(SessionActivity activity) {
-    if (activity.toolAction == 'mode_change') {
-      return 'Mode';
-    }
-    if (_toolIsCommandActivity(activity)) {
-      return null;
-    }
-    return switch (activity.toolCategory) {
-      'filesystem' => switch (activity.toolAction) {
-        'read' => 'File read',
-        'write' => 'File edit',
-        'list' => 'File list',
-        'search' => 'File search',
-        _ => 'Filesystem',
-      },
-      'network' => switch (activity.toolAction) {
-        'fetch' => 'Web fetch',
-        'search' => 'Web search',
-        _ => 'Network',
-      },
-      'command' => null,
-      'session' => 'Session',
-      'memory' => 'Memory',
-      'task' => 'Task',
-      _ => 'Tool',
-    };
   }
 
   IconData _toolActivityIcon(SessionActivity activity) {
