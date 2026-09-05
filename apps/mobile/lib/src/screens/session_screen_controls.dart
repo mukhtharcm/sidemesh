@@ -214,7 +214,7 @@ class _SessionControlsSheetState extends State<SessionControlsSheet> {
       if (provider != null) {
         return 'Loading models for this session…';
       }
-      return 'Loading the available models from this host.';
+      return 'Loading the available models from this machine.';
     }
     if (_modelsError != null) {
       return _modelsError!;
@@ -227,7 +227,7 @@ class _SessionControlsSheetState extends State<SessionControlsSheet> {
     if (provider != null) {
       return 'Use the current model source for new turns.';
     }
-    return 'Use the host default model for new turns.';
+    return 'Use the machine default model for new turns.';
   }
 
   String? get _runtimeModelProvider {
@@ -478,7 +478,7 @@ class _SessionControlsSheetState extends State<SessionControlsSheet> {
         _loadingModels = false;
         _modelsError = models.isEmpty
             ? _runtimeModelProvider == null
-                  ? 'No models are available from this host right now.'
+                  ? 'No models are available from this machine right now.'
                   : 'No models were returned for this session.'
             : null;
       });
@@ -898,7 +898,7 @@ class _SessionControlsSheetState extends State<SessionControlsSheet> {
             padding: const EdgeInsets.all(14),
             decoration: BoxDecoration(
               color: colors.surfaceMuted,
-              borderRadius: BorderRadius.circular(14),
+              borderRadius: AppShapes.card,
               border: Border.all(color: colors.border),
             ),
             child: Row(

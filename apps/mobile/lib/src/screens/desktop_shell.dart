@@ -89,7 +89,7 @@ class _OnboardingEmptyState extends StatelessWidget {
               ),
               const SizedBox(height: 8),
               Text(
-                'Install Sidemesh on the machine you want to control, then add that host here.',
+                'Install Sidemesh on the machine you want to control, then add that machine here.',
                 textAlign: TextAlign.center,
                 style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                   color: colors.textSecondary,
@@ -100,12 +100,12 @@ class _OnboardingEmptyState extends StatelessWidget {
               FilledButton.icon(
                 onPressed: onAddHost,
                 icon: const Icon(Icons.add_rounded),
-                label: const Text('Add your first host'),
+                label: const Text('Add your first machine'),
               ),
               const SizedBox(height: 10),
               TextButton(
                 onPressed: onAddHost,
-                child: const Text('Enter host details manually'),
+                child: const Text('Enter machine details manually'),
               ),
               const SizedBox(height: 24),
               Container(
@@ -167,7 +167,7 @@ class _CommandBlock extends StatelessWidget {
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
       decoration: BoxDecoration(
         color: colors.codeBackground,
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: AppShapes.input,
         border: Border.all(color: colors.codeBorder),
       ),
       child: Row(
@@ -262,8 +262,8 @@ class _DesktopShellState extends State<DesktopShell> {
   // stay clean. 28pt matches the standard NSWindow titlebar height.
   static const double _titlebarInset = 28;
   static const double _railWidth = 76;
-  static const double _defaultSidebarWidth = 352;
-  static const double _minSidebarWidth = 300;
+  static const double _defaultSidebarWidth = 300;
+  static const double _minSidebarWidth = 260;
   static const double _maxSidebarWidth = 440;
   static const String _sidebarWidthPref = 'sidemesh.desktop.sidebarWidth';
   static const double _defaultInspectorWidth = 380;
@@ -303,6 +303,7 @@ class _DesktopShellState extends State<DesktopShell> {
 
   @override
   void dispose() {
+    _sessionComposerFocus.dispose();
     LocalNotificationService.instance.routeIntent.removeListener(
       _onNotificationRouteIntent,
     );
@@ -455,13 +456,13 @@ class _DesktopShellState extends State<DesktopShell> {
                 title: 'Move around',
                 items: [
                   (
-                    keys: '⌘1 / ⌘2 / ⌘3',
+                    keys: Platform.isMacOS ? '⌘1 / ⌘2 / ⌘3' : 'Ctrl+1 / Ctrl+2 / Ctrl+3',
                     label: 'Switch between Sessions, Inbox, and Machines',
                   ),
-                  (keys: '⌘F', label: 'Focus search'),
-                  (keys: '⌘J', label: 'Focus the composer'),
-                  (keys: '⌘R', label: 'Refresh the current list'),
-                  (keys: '⌘W', label: 'Close the current session'),
+                  (keys: Platform.isMacOS ? '⌘F' : 'Ctrl+F', label: 'Focus search'),
+                  (keys: Platform.isMacOS ? '⌘J' : 'Ctrl+J', label: 'Focus the composer'),
+                  (keys: Platform.isMacOS ? '⌘R' : 'Ctrl+R', label: 'Refresh the current list'),
+                  (keys: Platform.isMacOS ? '⌘W' : 'Ctrl+W', label: 'Close the current session'),
                 ],
               ),
               (
@@ -474,13 +475,13 @@ class _DesktopShellState extends State<DesktopShell> {
               ),
               (
                 title: 'Help',
-                items: [(keys: '⌘/', label: 'Open this shortcut list')],
+                items: [(keys: Platform.isMacOS ? '⌘/' : 'Ctrl+/', label: 'Open this shortcut list')],
               ),
             ];
         return Dialog(
           backgroundColor: colors.surface,
           shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(14),
+            borderRadius: AppShapes.card,
             side: BorderSide(color: colors.border),
           ),
           child: ConstrainedBox(
@@ -600,7 +601,7 @@ class _DesktopShellState extends State<DesktopShell> {
       return;
     }
     if (_enabledHosts.isEmpty) {
-      showAppSnackBar(context, 'Enable a host before starting a session.');
+      showAppSnackBar(context, 'Enable a machine before starting a session.');
       return;
     }
     final existingDraft = _draft;
@@ -953,36 +954,38 @@ class _DesktopShellState extends State<DesktopShell> {
   @override
   Widget build(BuildContext context) {
     final colors = context.colors;
-    return Scaffold(
+    final shell = Scaffold(
       backgroundColor: colors.canvas,
       body: Stack(
         children: [
           Shortcuts(
-            shortcuts: const <ShortcutActivator, Intent>{
-              SingleActivator(LogicalKeyboardKey.keyR, meta: true):
+            shortcuts: <ShortcutActivator, Intent>{
+              SingleActivator(LogicalKeyboardKey.keyJ, meta: Platform.isMacOS, control: !Platform.isMacOS): _FocusComposerIntent(),
+              SingleActivator(LogicalKeyboardKey.keyR, meta: Platform.isMacOS, control: !Platform.isMacOS):
                   _RefreshIntent(),
-              SingleActivator(LogicalKeyboardKey.keyF, meta: true):
+              SingleActivator(LogicalKeyboardKey.keyF, meta: Platform.isMacOS, control: !Platform.isMacOS):
                   _FocusSearchIntent(),
-              SingleActivator(LogicalKeyboardKey.keyW, meta: true):
+              SingleActivator(LogicalKeyboardKey.keyW, meta: Platform.isMacOS, control: !Platform.isMacOS):
                   _CloseActiveSessionIntent(),
-              SingleActivator(LogicalKeyboardKey.keyI, meta: true, shift: true):
+              SingleActivator(LogicalKeyboardKey.keyI, meta: Platform.isMacOS, control: !Platform.isMacOS, shift: true):
                   _ToggleInspectorDebugIntent(),
-              SingleActivator(LogicalKeyboardKey.slash, meta: true):
+              SingleActivator(LogicalKeyboardKey.slash, meta: Platform.isMacOS, control: !Platform.isMacOS):
                   _ShowShortcutsIntent(),
               SingleActivator(
                 LogicalKeyboardKey.slash,
-                meta: true,
+                meta: Platform.isMacOS, control: !Platform.isMacOS,
                 shift: true,
               ): _ShowShortcutsIntent(),
-              SingleActivator(LogicalKeyboardKey.digit1, meta: true):
+              SingleActivator(LogicalKeyboardKey.digit1, meta: Platform.isMacOS, control: !Platform.isMacOS):
                   _SwitchSectionIntent(_SidebarSection.recent),
-              SingleActivator(LogicalKeyboardKey.digit2, meta: true):
+              SingleActivator(LogicalKeyboardKey.digit2, meta: Platform.isMacOS, control: !Platform.isMacOS):
                   _SwitchSectionIntent(_SidebarSection.inbox),
-              SingleActivator(LogicalKeyboardKey.digit3, meta: true):
+              SingleActivator(LogicalKeyboardKey.digit3, meta: Platform.isMacOS, control: !Platform.isMacOS):
                   _SwitchSectionIntent(_SidebarSection.hosts),
             },
             child: Actions(
               actions: <Type, Action<Intent>>{
+                _FocusComposerIntent: CallbackAction<_FocusComposerIntent>(onInvoke: (_) { _focusActiveComposer(); return null; }),
                 _RefreshIntent: CallbackAction<_RefreshIntent>(
                   onInvoke: (_) {
                     _loadHosts();
@@ -1139,6 +1142,7 @@ class _DesktopShellState extends State<DesktopShell> {
                               SizedBox(
                                 width: widths.detail,
                                 child: _DetailPane(
+                                  composerFocusNode: _sessionComposerFocus,
                                   titlebarInset: _titlebarInset,
                                   active: _active,
                                   draft: _draft,
@@ -1214,7 +1218,60 @@ class _DesktopShellState extends State<DesktopShell> {
         ],
       ),
     );
+    if (!Platform.isMacOS) return shell;
+    return PlatformMenuBar(
+      menus: [
+        PlatformMenu(label: 'Sidemesh', menus: [
+          const PlatformProvidedMenuItem(type: PlatformProvidedMenuItemType.about),
+          PlatformMenuItem(label: 'Settings…', shortcut: const SingleActivator(LogicalKeyboardKey.comma, meta: true), onSelected: _openSettings),
+          const PlatformProvidedMenuItem(type: PlatformProvidedMenuItemType.servicesSubmenu),
+          const PlatformProvidedMenuItem(type: PlatformProvidedMenuItemType.hide),
+          const PlatformProvidedMenuItem(type: PlatformProvidedMenuItemType.hideOtherApplications),
+          const PlatformProvidedMenuItem(type: PlatformProvidedMenuItemType.showAllApplications),
+          const PlatformProvidedMenuItem(type: PlatformProvidedMenuItemType.quit),
+        ]),
+        PlatformMenu(label: 'Edit', menus: [
+          PlatformMenuItem(label: 'Undo', shortcut: const SingleActivator(LogicalKeyboardKey.keyZ, meta: true), onSelectedIntent: const UndoTextIntent(SelectionChangedCause.keyboard)),
+          PlatformMenuItem(label: 'Redo', shortcut: const SingleActivator(LogicalKeyboardKey.keyZ, meta: true, shift: true), onSelectedIntent: const RedoTextIntent(SelectionChangedCause.keyboard)),
+          PlatformMenuItem(label: 'Cut', shortcut: const SingleActivator(LogicalKeyboardKey.keyX, meta: true), onSelectedIntent: const CopySelectionTextIntent.cut(SelectionChangedCause.keyboard)),
+          PlatformMenuItem(label: 'Copy', shortcut: const SingleActivator(LogicalKeyboardKey.keyC, meta: true), onSelectedIntent: CopySelectionTextIntent.copy),
+          PlatformMenuItem(label: 'Paste', shortcut: const SingleActivator(LogicalKeyboardKey.keyV, meta: true), onSelectedIntent: const PasteTextIntent(SelectionChangedCause.keyboard)),
+          PlatformMenuItem(label: 'Select All', shortcut: const SingleActivator(LogicalKeyboardKey.keyA, meta: true), onSelectedIntent: const SelectAllTextIntent(SelectionChangedCause.keyboard)),
+        ]),
+        PlatformMenu(label: 'View', menus: [
+          for (final section in _SidebarSection.values)
+            PlatformMenuItem(label: _sidebarSectionTitle(section),
+              shortcut: SingleActivator(switch (section) {
+                _SidebarSection.recent => LogicalKeyboardKey.digit1,
+                _SidebarSection.inbox => LogicalKeyboardKey.digit2,
+                _SidebarSection.hosts => LogicalKeyboardKey.digit3,
+              }, meta: true),
+              onSelected: () => setState(() => _section = section)),
+          PlatformMenuItem(label: 'Search sessions', shortcut: const SingleActivator(LogicalKeyboardKey.keyF, meta: true), onSelected: () => _searchFocus.requestFocus()),
+          PlatformMenuItem(label: 'Focus composer', shortcut: const SingleActivator(LogicalKeyboardKey.keyJ, meta: true), onSelected: _active == null ? null : _focusActiveComposer),
+          PlatformMenuItem(label: 'Refresh', shortcut: const SingleActivator(LogicalKeyboardKey.keyR, meta: true), onSelected: () { _loadHosts(); _bumpRefresh(); }),
+        ]),
+        PlatformMenu(label: 'Window', menus: [
+          PlatformMenuItem(label: 'Close session', shortcut: const SingleActivator(LogicalKeyboardKey.keyW, meta: true), onSelected: _active == null ? null : () => setState(() => _active = null)),
+          const PlatformProvidedMenuItem(type: PlatformProvidedMenuItemType.minimizeWindow),
+          const PlatformProvidedMenuItem(type: PlatformProvidedMenuItemType.toggleFullScreen),
+        ]),
+        PlatformMenu(label: 'Help', menus: [
+          PlatformMenuItem(label: 'Keyboard shortcuts', shortcut: const SingleActivator(LogicalKeyboardKey.slash, meta: true), onSelected: _showShortcutsSheet),
+        ]),
+      ],
+      child: shell,
+    );
   }
+
+  final _sessionComposerFocus = FocusNode();
+
+  void _focusActiveComposer() {
+    if (_sessionComposerFocus.context != null) {
+      _sessionComposerFocus.requestFocus();
+    }
+  }
+
 }
 
 class _RefreshIntent extends Intent {
@@ -1299,7 +1356,7 @@ class _DesktopRail extends StatelessWidget {
               height: 34,
               decoration: BoxDecoration(
                 color: colors.surfaceMuted,
-                borderRadius: BorderRadius.circular(11),
+                borderRadius: AppShapes.input,
               ),
               alignment: Alignment.center,
               child: Icon(
@@ -1330,7 +1387,7 @@ class _DesktopRail extends StatelessWidget {
             selected: section == _SidebarSection.hosts,
             icon: _sidebarSectionIcon(_SidebarSection.hosts),
             label: 'Machines',
-            badge: hostCount > 0 ? hostCount.toString() : null,
+
             onTap: () => onSelectSection(_SidebarSection.hosts),
           ),
           const Spacer(),
@@ -1393,7 +1450,7 @@ class _RailItem extends StatelessWidget {
         child: Material(
           color: Colors.transparent,
           child: InkWell(
-            borderRadius: BorderRadius.circular(14),
+            borderRadius: AppShapes.card,
             onTap: onTap,
             child: SizedBox(
               width: 54,
@@ -1411,7 +1468,7 @@ class _RailItem extends StatelessWidget {
                       color: selected
                           ? colors.accentMuted.withValues(alpha: 0.72)
                           : Colors.transparent,
-                      borderRadius: BorderRadius.circular(12),
+                      borderRadius: AppShapes.input,
                     ),
                     alignment: Alignment.center,
                     child: Icon(icon, size: 18, color: foreground),
@@ -1428,7 +1485,7 @@ class _RailItem extends StatelessWidget {
                         ),
                         decoration: BoxDecoration(
                           color: selected ? colors.accent : colors.canvas,
-                          borderRadius: BorderRadius.circular(999),
+                          borderRadius: AppShapes.badge,
                           border: Border.all(color: colors.border),
                         ),
                         child: Text(
@@ -1477,7 +1534,7 @@ class _RailUtilityButton extends StatelessWidget {
         child: Material(
           color: Colors.transparent,
           child: InkWell(
-            borderRadius: BorderRadius.circular(12),
+            borderRadius: AppShapes.input,
             onTap: onTap,
             child: SizedBox(
               width: 48,
@@ -1902,7 +1959,9 @@ class _SidebarPane extends StatelessWidget {
         .toList(growable: false);
     switch (section) {
       case _SidebarSection.recent:
-        return RecentPane(
+        return Column(children: [
+          _NeedsReviewGroup(onOpen: onOpenSessionFromAction),
+          Expanded(child: RecentPane(
           hosts: enabledHosts,
           api: api,
           onOpenSession: onOpenSession,
@@ -1914,7 +1973,8 @@ class _SidebarPane extends StatelessWidget {
           hasSavedHosts: hosts.isNotEmpty,
           screenAwakeSourceKey: 'desktop-recent-sessions',
           filters: recentFilters,
-        );
+          )),
+        ]);
       case _SidebarSection.inbox:
         return InboxPane(
           hosts: enabledHosts,
@@ -1949,6 +2009,7 @@ class _SidebarPane extends StatelessWidget {
 
 class _DetailPane extends StatefulWidget {
   const _DetailPane({
+    required this.composerFocusNode,
     required this.titlebarInset,
     required this.active,
     required this.draft,
@@ -1967,6 +2028,7 @@ class _DetailPane extends StatefulWidget {
     required this.onShowHosts,
   });
 
+  final FocusNode composerFocusNode;
   final double titlebarInset;
   final _ActiveSession? active;
   final _DesktopSessionDraft? draft;
@@ -2086,7 +2148,7 @@ class _DetailPaneState extends State<_DetailPane> {
                           height: 56,
                           decoration: BoxDecoration(
                             color: colors.surfaceMuted,
-                            borderRadius: BorderRadius.circular(14),
+                            borderRadius: AppShapes.card,
                             border: Border.all(color: colors.border),
                           ),
                           alignment: Alignment.center,
@@ -2104,7 +2166,7 @@ class _DetailPaneState extends State<_DetailPane> {
                         Text(
                           hasEnabledHosts
                               ? 'Choose a session or start a new one'
-                              : 'Turn on a host',
+                              : 'Turn on a machine',
                           style: Theme.of(context).textTheme.titleMedium
                               ?.copyWith(fontWeight: AppWeights.title),
                         ),
@@ -2158,6 +2220,7 @@ class _DetailPaneState extends State<_DetailPane> {
     required Key key,
   }) {
     return SessionScreen(
+      composerFocusNode: widget.composerFocusNode,
       key: ValueKey(
         'session-${active.host.id}-${active.session.id}-${active.serial}',
       ),
@@ -2357,3 +2420,35 @@ class _InspectorPane extends StatelessWidget {
     );
   }
 }
+
+/// A compact preview of the real pending-action queue; opening never approves it.
+class _NeedsReviewGroup extends StatelessWidget {
+  const _NeedsReviewGroup({required this.onOpen});
+  final void Function(HostProfile, PendingAction) onOpen;
+  @override
+  Widget build(BuildContext context) => ListenableBuilder(
+    listenable: ApprovalInboxStore.instance,
+    builder: (context, _) {
+      final entries = ApprovalInboxStore.instance.entries;
+      if (entries.isEmpty) return const SizedBox.shrink();
+      return Padding(
+        padding: const EdgeInsets.symmetric(horizontal: AppSpacing.sm),
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          Align(alignment: Alignment.centerLeft, child: Text('Needs review · ${entries.length}',
+            style: Theme.of(context).textTheme.labelMedium?.copyWith(color: context.colors.accent))),
+          for (final entry in entries.take(3))
+            ListTile(
+              dense: true,
+              contentPadding: const EdgeInsets.symmetric(horizontal: AppSpacing.xs),
+              title: Text(entry.action.title, maxLines: 1, overflow: TextOverflow.ellipsis),
+              trailing: Text(entry.action.isApproval ? 'Review' : 'Answer',
+                style: Theme.of(context).textTheme.labelSmall?.copyWith(color: context.colors.accent)),
+              onTap: () => onOpen(entry.host, entry.action),
+            ),
+        ]),
+      );
+    },
+  );
+}
+
+class _FocusComposerIntent extends Intent { const _FocusComposerIntent(); }

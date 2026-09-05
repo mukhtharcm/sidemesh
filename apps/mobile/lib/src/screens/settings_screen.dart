@@ -906,7 +906,7 @@ class _SettingsContent extends StatelessWidget {
         _SettingsSection(
           icon: Icons.rocket_launch_rounded,
           title: 'Session defaults',
-          subtitle: 'Starting values before host-specific overrides.',
+          subtitle: 'Starting values before machine-specific overrides.',
           children: [
             ListenableBuilder(
               listenable: defaultsStore,
@@ -1363,7 +1363,7 @@ class _AboutFooter extends StatelessWidget {
           ),
           const SizedBox(height: AppSpacing.xs),
           Text(
-            'Sidemesh on $platformLabel. Hosts, tokens, favorites, caches, and other local state stay inside this app install.',
+            'Sidemesh on $platformLabel. Machines, tokens, favorites, caches, and other local state stay inside this app install.',
             style: Theme.of(context).textTheme.bodySmall?.copyWith(
               color: colors.textSecondary,
               height: 1.35,

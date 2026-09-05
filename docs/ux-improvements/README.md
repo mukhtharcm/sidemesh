@@ -8,13 +8,13 @@ implementation plan.
 
 | ID | Priority | Title | Status |
 |----|----------|-------|--------|
-| [p0-01](p0-01-empty-session-state.md) | P0 | Empty timeline after session creation | open |
-| [p0-02](p0-02-onboarding-skip.md) | P0 | Skip during onboarding strands new users | open |
-| [p0-03](p0-03-host-test-connection.md) | P0 | No "Test connection" in host editor | open |
+| [p0-01](p0-01-empty-session-state.md) | P0 | Empty timeline after session creation | implemented, interface phase 2 |
+| [p0-02](p0-02-onboarding-skip.md) | P0 | Skip during onboarding strands new users | implemented, interface phase 6 |
+| [p0-03](p0-03-host-test-connection.md) | P0 | No "Test connection" in host editor | implemented, interface phase 6 |
 | [p0-04](p0-04-working-directory-browse.md) | P0 | Working directory requires manual typing | open |
-| [p1-05](p1-05-workspace-sessions-redundancy.md) | P1 | Workspaces + Sessions show the same data twice | open |
-| [p1-06](p1-06-host-label-redundant.md) | P1 | Host label is redundant on host-detail session cards | open |
-| [p1-07](p1-07-context-window-framing.md) | P1 | "ctx X% left" framing is backwards-sounding | open |
+| [p1-05](p1-05-workspace-sessions-redundancy.md) | P1 | Workspaces + Sessions show the same data twice | implemented, interface phase 4 |
+| [p1-06](p1-06-host-label-redundant.md) | P1 | Host label is redundant on host-detail session cards | implemented, interface phase 4 |
+| [p1-07](p1-07-context-window-framing.md) | P1 | "ctx X% left" framing is backwards-sounding | implemented, interface phase 1 |
 | [p1-08](p1-08-inbox-tab-name.md) | P1 | "Inbox" tab name doesn't match mental model | open |
 | [p1-09](p1-09-approval-confirmation.md) | P1 | No feedback after tapping Approve / Reject | open |
 | [p2-10](p2-10-session-rename-discoverability.md) | P2 | Session rename is completely hidden | open |
@@ -24,7 +24,7 @@ implementation plan.
 | [p3-15](p3-15-search-bar-threshold.md) | P3 | Search bar visible even with very few sessions | open |
 | [p3-16](p3-16-qr-pair-success-state.md) | P3 | No success state after QR pairing | open |
 | [p3-17](p3-17-terminal-keybar-sizing.md) | P3 | Terminal key bar too narrow on small phones | open |
-| [p3-18](p3-18-session-appbar-crowding.md) | P3 | Session AppBar gets crowded on compact when Stop is visible | open |
+| [p3-18](p3-18-session-appbar-crowding.md) | P3 | Session AppBar gets crowded on compact when Stop is visible | implemented, interface phase 3 |
 | [p3-19](p3-19-host-management-section-header.md) | P3 | Host management card needs a section header | open |
 
 ## Priority definitions
@@ -33,3 +33,14 @@ implementation plan.
 - **P1** — Creates friction on every use; important before marketing push.
 - **P2** — Feature exists but is nearly invisible; fix before calling the feature "done".
 - **P3** — Polish that accumulates; fix during any related screen work.
+
+## Systemic interface implementation
+
+The six interface phases preserve the palette, user-selected interface font,
+workspace grouping, and desktop rail. They replace assistant cards with document
+prose, simplify mobile navigation and session rows, expose pending actions in
+Sessions, and move git context to the composer. The Inbox destination remains;
+its naming question (p1-08) is not closed by standardizing Machines terminology.
+
+See [the phase map and verification record](interface-direction.md) for scope,
+deliberate choices, and remaining platform interaction checks.

@@ -3374,7 +3374,7 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
     if (selected == null) {
       return <String>[
         if (_defaultProfileName != null) 'folder default',
-        if (_profileToSubmit == null) 'host',
+        if (_profileToSubmit == null) 'machine',
       ];
     }
     return <String>[

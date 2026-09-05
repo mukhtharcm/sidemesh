@@ -71,25 +71,18 @@ rounded glyph when pinned.
 The footer row guard was `canPin || (!isUser && hasText) || hasText`, which
 simplifies to `canPin || hasText`. Cleaned up.
 
-## Medium priority — known issues, not in this PR
+## Medium priority — follow-up status
 
-These are notable but defer cleanly to follow-ups (most need design input or
-larger refactors):
+The interface-direction implementation resolves the first three items below.
+The other items remain separate follow-ups.
 
-- **Three stacked status strips above the composer.** `_PendingSendStrip`,
-  `_RuntimeSignalStrip`, and `_ComposerStatusStrip` can all render together,
-  consuming a lot of vertical space on phones. Worth merging into a single
-  composable strip that shows the most relevant signal first and demotes the
-  rest to a kebab.
-- **`_ActivityCard` pill explosion.** When expanded, a command activity can
-  show 6+ pills (`turn`, `exit`, duration, source, `pty`, `stdin`,
-  `interactive`, `command actions`). They're individually useful but together
-  feel like noise. Group: `status` (already a separate pill) + a single
-  collapsed "details" chip.
-- **Per-message timestamps for user messages.** Showing a timestamp under
-  every user bubble is redundant when messages are minutes apart. Recommend
-  only showing the timestamp on hover/long-press, or grouping under day
-  separators that already exist.
+- **Implemented, phase 5: stacked composer status.** One composer status control
+  opens pending-send recovery and runtime details together. Neither signal hides
+  the other, and working state shares the workspace/branch/diff strip.
+- **Resolved, phase 2: activity pill explosion.** Commands no longer repeat a
+  terminal icon or nest bordered command chips. Expanded metadata is plain text.
+- **Resolved, phase 2: per-message timestamps.** Timestamp, pin, and copy appear
+  on hover, keyboard focus, or long-press; repeated minute labels are suppressed.
 - **`_PlanUpdateCard` sits inside the timeline as an `ExpansionTile` with
   `initiallyExpanded: true`,** but the surrounding `MeshCard` already has its
   own visual weight. Result: doubled padding, low information density. Should

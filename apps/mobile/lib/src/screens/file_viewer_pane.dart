@@ -663,7 +663,7 @@ class FileViewerPaneState extends State<FileViewerPane> {
                   vertical: 10,
                 ),
                 child: Text(
-                  'This file changed on the host. Reload it before saving to avoid overwriting newer work.',
+                  'This file changed on the machine. Reload it before saving to avoid overwriting newer work.',
                   style: Theme.of(context).textTheme.bodySmall,
                 ),
               ),

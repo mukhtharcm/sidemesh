@@ -182,7 +182,6 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                               await _onManualHost(host);
                             }
                           },
-                          onSkip: _skip,
                         ),
                 ],
               ),
@@ -207,7 +206,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                         height: 8,
                         decoration: BoxDecoration(
                           color: active ? colors.accent : colors.borderStrong,
-                          borderRadius: BorderRadius.circular(4),
+                          borderRadius: AppShapes.badge,
                         ),
                       );
                     }),
@@ -221,7 +220,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                   else
                     FilledButton(
                       onPressed: _skip,
-                      child: const Text('Finish later'),
+                      child: Text(_pairingSuccess != null ? 'Finish' : 'Finish later'),
                     ),
                 ],
               ),
@@ -280,7 +279,7 @@ class _WelcomePage extends StatelessWidget {
             height: 120,
             decoration: BoxDecoration(
               color: colors.accentMuted,
-              borderRadius: BorderRadius.circular(32),
+              borderRadius: AppShapes.card,
               border: Border.all(color: colors.accent.withValues(alpha: 0.4)),
             ),
             child: Icon(Icons.hub_rounded, size: 56, color: colors.accent),
@@ -429,7 +428,7 @@ class _StepItem extends StatelessWidget {
           height: 28,
           decoration: BoxDecoration(
             color: colors.accentMuted,
-            borderRadius: BorderRadius.circular(8),
+            borderRadius: AppShapes.badge,
             border: Border.all(color: colors.accent.withValues(alpha: 0.4)),
           ),
           alignment: Alignment.center,
@@ -578,7 +577,7 @@ class _ActionLine extends StatelessWidget {
           height: 34,
           decoration: BoxDecoration(
             color: colors.accentMuted,
-            borderRadius: BorderRadius.circular(10),
+            borderRadius: AppShapes.input,
           ),
           alignment: Alignment.center,
           child: Icon(icon, size: 18, color: colors.accent),
@@ -624,13 +623,8 @@ class _FeatureChip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Container(
+    return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-      decoration: BoxDecoration(
-        color: colors.surfaceMuted,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: colors.border),
-      ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
@@ -658,13 +652,11 @@ class _ConnectPage extends StatelessWidget {
     required this.colors,
     required this.onScanQr,
     required this.onManualEntry,
-    required this.onSkip,
   });
 
   final AppColors colors;
   final VoidCallback onScanQr;
   final VoidCallback onManualEntry;
-  final VoidCallback onSkip;
 
   @override
   Widget build(BuildContext context) {
@@ -678,7 +670,7 @@ class _ConnectPage extends StatelessWidget {
             height: 80,
             decoration: BoxDecoration(
               color: colors.accentMuted,
-              borderRadius: BorderRadius.circular(22),
+              borderRadius: AppShapes.card,
               border: Border.all(color: colors.accent.withValues(alpha: 0.4)),
             ),
             child: Icon(
@@ -707,9 +699,9 @@ class _ConnectPage extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 24),
-          // Command card
-          MeshCard(
-            tone: MeshCardTone.muted,
+          // Commands are the only boxed surface in this section.
+          Padding(
+            padding: const EdgeInsets.all(12),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
@@ -756,11 +748,6 @@ class _ConnectPage extends StatelessWidget {
                 onPressed: onManualEntry,
                 child: const Text('Add manually'),
               ),
-              Text(' · ', style: TextStyle(color: colors.textTertiary)),
-              TextButton(
-                onPressed: onSkip,
-                child: const Text('I\'ll do this later'),
-              ),
             ],
           ),
         ],
@@ -781,7 +768,7 @@ class _CommandLine extends StatelessWidget {
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
       decoration: BoxDecoration(
         color: colors.codeBackground,
-        borderRadius: BorderRadius.circular(10),
+        borderRadius: AppShapes.input,
         border: Border.all(color: colors.codeBorder),
       ),
       child: Row(

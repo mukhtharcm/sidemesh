@@ -16,6 +16,7 @@ import '../image_blob_cache_store.dart';
 import '../live_activity_service.dart';
 import '../message_text_styles.dart';
 import '../models.dart';
+import '../workspace_label.dart';
 import '../fs_models.dart';
 import '../resource_reference.dart';
 import '../pending_send_recovery.dart';
@@ -66,7 +67,6 @@ import '../widgets/diff_view.dart';
 import '../widgets/launch_options_form.dart';
 import '../widgets/mesh_widgets.dart';
 import 'package:sidemesh_mobile/src/host_reconnect_scheduler.dart';
-import '../widgets/provider_badge.dart';
 import '../widgets/provider_access_mode_choices.dart';
 import '../widgets/reasoning_choice_list.dart';
 import '../relative_time_ticker.dart';
@@ -85,16 +85,16 @@ class SessionScreen extends StatefulWidget {
     required this.session,
     required this.api,
     this.onOpenSession,
+    this.composerFocusNode,
     this.onArchived,
     this.onClose,
     this.initialComposerSeed,
     this.topPadding,
     this.desktopMode = false,
     this.screenAwakeSourceKey,
-    this.sessionDrawer,
-    this.onReturnToSessionList,
   });
 
+  final FocusNode? composerFocusNode;
   final HostProfile host;
   final SessionSummary session;
   final ApiClient api;
@@ -105,14 +105,6 @@ class SessionScreen extends StatefulWidget {
   final VoidCallback? onClose;
   final SessionComposerSeed? initialComposerSeed;
 
-  /// When provided (mobile only), a drawer that lets the user switch sessions
-  /// without navigating back to the home screen. The drawer is opened via a
-  /// leading ☰ button in the AppBar.
-  final WidgetBuilder? sessionDrawer;
-
-  /// Returns the user from the mobile session drawer to the owning session
-  /// list screen instead of stepping through previously opened session routes.
-  final VoidCallback? onReturnToSessionList;
   // Extra top padding for embedded desktop use (to avoid overlapping the
   // transparent macOS titlebar). When null, SafeArea handles insets.
   final double? topPadding;
@@ -313,7 +305,7 @@ class _DesktopButtonGroup extends StatelessWidget {
       height: 28,
       decoration: BoxDecoration(
         color: colors.surface,
-        borderRadius: BorderRadius.circular(AppRadii.control),
+        borderRadius: AppShapes.input,
         border: Border.all(color: colors.border),
       ),
       child: ClipRRect(
@@ -609,7 +601,7 @@ class _BrowserDockShell extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colors = context.colors;
-    final radius = BorderRadius.circular(compact ? 22 : 28);
+    final radius = AppShapes.card;
     final content = Container(
       height: height,
       margin: EdgeInsets.fromLTRB(10, compact ? 6 : 4, 10, 8),
@@ -681,7 +673,7 @@ class _BrowserDockGlyph extends StatelessWidget {
       height: size,
       decoration: BoxDecoration(
         color: colors.codeBackground,
-        borderRadius: BorderRadius.circular(compact ? 14 : 16),
+        borderRadius: AppShapes.card,
         border: Border.all(color: colors.accent.withValues(alpha: 0.28)),
       ),
       child: Stack(
@@ -691,7 +683,7 @@ class _BrowserDockGlyph extends StatelessWidget {
             width: compact ? 18 : 22,
             height: compact ? 18 : 22,
             decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(7),
+              borderRadius: AppShapes.badge,
               border: Border.all(color: colors.accent, width: 1.5),
             ),
           ),
@@ -735,14 +727,14 @@ class _BrowserDockAction extends StatelessWidget {
       child: Material(
         color: Colors.transparent,
         child: InkWell(
-          borderRadius: BorderRadius.circular(14),
+          borderRadius: AppShapes.card,
           onTap: onTap,
           child: Container(
             width: 38,
             height: 38,
             decoration: BoxDecoration(
               color: fg.withValues(alpha: 0.09),
-              borderRadius: BorderRadius.circular(14),
+              borderRadius: AppShapes.card,
               border: Border.all(color: fg.withValues(alpha: 0.20)),
             ),
             alignment: Alignment.center,
@@ -773,7 +765,7 @@ class _BrowserDockCloseButton extends StatelessWidget {
       child: Material(
         color: Colors.transparent,
         child: InkWell(
-          borderRadius: BorderRadius.circular(12),
+          borderRadius: AppShapes.input,
           onTap: onTap,
           child: SizedBox(
             width: 32,
@@ -799,7 +791,8 @@ class _SessionScreenState extends State<SessionScreen>
   static const _failedSendRetryWindow = Duration(minutes: 10);
   final _composerController = TextEditingController();
   final _searchController = TextEditingController();
-  final _composerFocusNode = FocusNode(debugLabel: 'session_composer');
+  late final _composerFocusNode = widget.composerFocusNode ??
+      FocusNode(debugLabel: 'session_composer');
   final _searchFocusNode = FocusNode(debugLabel: 'session_search');
   final _scrollController = ScrollController();
   final SessionLocalStore _localStore = SessionLocalStore.instance;
@@ -850,6 +843,8 @@ class _SessionScreenState extends State<SessionScreen>
   int _activityLimit = _initialActivityLimit;
   bool _running = false;
   bool _loading = true;
+  bool _transcriptResolved = false;
+  String? _transcriptLoadError;
   bool _loadingOlderHistory = false;
   bool _sending = false;
   bool _awaitingAssistantReply = false;
@@ -935,6 +930,7 @@ class _SessionScreenState extends State<SessionScreen>
   // banner can reappear if the truncation window changes.
   bool _historyBannerDismissed = false;
   SessionGitStatus? _gitStatus;
+  SessionGitDiff? _composerGitDiff;
   bool _gitStatusLoading = false;
   String? _gitStatusError;
   int _gitStatusRequestId = 0;
@@ -1530,7 +1526,7 @@ class _SessionScreenState extends State<SessionScreen>
     _sendOutbox.removeListener(_handleSendOutboxChanged);
     _composerController.dispose();
     _searchController.dispose();
-    _composerFocusNode.dispose();
+    if (widget.composerFocusNode == null) _composerFocusNode.dispose();
     _searchFocusNode.dispose();
     _scrollController.removeListener(_onTranscriptScroll);
     _scrollController.dispose();
@@ -1619,14 +1615,6 @@ class _SessionScreenState extends State<SessionScreen>
     final cur = scope.current;
     return cur != null &&
         cur.kind == InspectorSurfaceKind.search &&
-        cur.ownerKey == _inspectorOwnerKey();
-  }
-
-  bool _isPinnedInspectorOpen(InspectorController? scope) {
-    if (scope == null) return false;
-    final cur = scope.current;
-    return cur != null &&
-        cur.kind == InspectorSurfaceKind.pinned &&
         cur.ownerKey == _inspectorOwnerKey();
   }
 
@@ -1935,9 +1923,20 @@ class _SessionScreenState extends State<SessionScreen>
       }
       setState(() {
         _gitStatus = status;
+        _composerGitDiff = null;
         _gitStatusLoading = false;
         _gitStatusError = status.error;
       });
+      if (status.isRepo && _supportsGitDiffKind('working')) {
+        try {
+          final diff = await widget.api.fetchGitDiff(widget.host, widget.session.id, kind: 'working');
+          if (mounted && requestId == _gitStatusRequestId) {
+            setState(() => _composerGitDiff = diff);
+          }
+        } catch (_) {
+          // Git context is optional; a failed diff must not hide the transcript.
+        }
+      }
     } catch (error) {
       if (!mounted || requestId != _gitStatusRequestId) {
         return;
@@ -2443,7 +2442,11 @@ class _SessionScreenState extends State<SessionScreen>
     final resolvedMessageLimit = messageLimit ?? _messageLimit;
     final resolvedActivityLimit = activityLimit ?? _activityLimit;
     final requestId = ++_snapshotRequestId;
-    setState(() => _snapshotInFlightRequestId = requestId);
+    setState(() {
+      _snapshotInFlightRequestId = requestId;
+      if (!_transcriptResolved) _loading = true;
+      _transcriptLoadError = null;
+    });
     try {
       final log = await widget.api.fetchLog(
         widget.host,
@@ -2467,6 +2470,8 @@ class _SessionScreenState extends State<SessionScreen>
       );
       setState(() {
         _session = log.session;
+        _transcriptResolved = true;
+        _transcriptLoadError = null;
         _messages = log.messages;
         _optimisticMessages = _reconcileOptimisticMessages(log.messages);
         _activities = snapshotActivities;
@@ -2536,6 +2541,7 @@ class _SessionScreenState extends State<SessionScreen>
           _showingCachedSnapshot || _showingPossiblyStaleSnapshot;
       setState(() {
         _loading = false;
+        if (!_transcriptResolved) _transcriptLoadError = friendlyError(error);
         if (canKeepShowingSavedTranscript) {
           _resumeSyncFailed = true;
         }
@@ -2569,6 +2575,8 @@ class _SessionScreenState extends State<SessionScreen>
       final log = cached.log;
       setState(() {
         _session = log.session;
+        _transcriptResolved = true;
+        _transcriptLoadError = null;
         _messages = log.messages;
         _optimisticMessages = _reconcileOptimisticMessages(log.messages);
         _activities = _sortActivities(log.activities);
@@ -3136,6 +3144,9 @@ class _SessionScreenState extends State<SessionScreen>
           _appendTimelineRuntimeEvent(
             _TimelineLiveEventKind.providerWarning,
             event,
+            replaceSemanticKey: jsonEncode([
+              'notice', event.level, event.source, event.code, message,
+            ]),
           );
         });
       case 'thread_status_changed':
@@ -3228,8 +3239,15 @@ class _SessionScreenState extends State<SessionScreen>
     DateTime? createdAt,
     int? seqOverride,
   }) {
+    final existingIndex = replaceSemanticKey == null
+        ? -1
+        : _timelineLiveEvents.indexWhere(
+            (candidate) => candidate.semanticKey == replaceSemanticKey,
+          );
     final record = _TimelineLiveEventRecord(
       kind: kind,
+      occurrences: kind == _TimelineLiveEventKind.providerWarning && existingIndex >= 0
+          ? _timelineLiveEvents[existingIndex].occurrences + 1 : 1,
       event: event,
       createdAt: createdAt ?? DateTime.now(),
       seq: seqOverride ?? event.seq ?? _nextTimelineSeq(),
@@ -3238,11 +3256,6 @@ class _SessionScreenState extends State<SessionScreen>
           : '${kind.name}:$replaceSemanticKey',
       semanticKey: replaceSemanticKey,
     );
-    final existingIndex = replaceSemanticKey == null
-        ? -1
-        : _timelineLiveEvents.indexWhere(
-            (candidate) => candidate.semanticKey == replaceSemanticKey,
-          );
     if (existingIndex == -1) {
       final next = [..._timelineLiveEvents, record];
       _timelineLiveEvents = next.length > 16
@@ -4038,6 +4051,7 @@ class _SessionScreenState extends State<SessionScreen>
   }
 
   Future<void> _sendInput() async {
+    if (!_transcriptResolved) return;
     final text = _composerController.text.trim();
     final draftAttachments = List<ComposerImageAttachment>.from(
       _draftAttachments,
@@ -4176,7 +4190,7 @@ class _SessionScreenState extends State<SessionScreen>
           );
           showAppSnackBar(
             context,
-            'Message queued. Sidemesh will retry when the host is reachable.',
+            'Message queued. Sidemesh will retry when the machine is reachable.',
           );
           setState(() {
             _running = wasRunning;
@@ -4471,7 +4485,7 @@ class _SessionScreenState extends State<SessionScreen>
       icon: Icons.archive_outlined,
       title: 'Archive this session?',
       body:
-          'Archived sessions disappear from Recent. You can still restore them later from the host.',
+          'Archived sessions disappear from Recent. You can still restore them later from the machine.',
       confirmLabel: 'Archive session',
     );
     if (!confirmed) {
@@ -4691,6 +4705,48 @@ class _SessionScreenState extends State<SessionScreen>
     await showSheet();
   }
 
+  Future<void> _showComposerSignals() async {
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      builder: (sheetContext) => StatefulBuilder(
+        builder: (context, refresh) => SingleChildScrollView(
+          padding: AppPadding.mobilePage,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              const AppSectionHeader(title: 'Session status'),
+              if (_pendingSends.isNotEmpty) _PendingSendStrip(
+                host: widget.host,
+                pending: _pendingSends,
+                retrying: _retryingPendingSend,
+                onRetryNow: () async {
+                  await _retryPendingSends(manual: true);
+                  if (sheetContext.mounted) refresh(() {});
+                },
+                onEditCopy: (pending) async {
+                  await _movePendingSendToComposer(pending);
+                  if (sheetContext.mounted) refresh(() {});
+                },
+                onDiscard: (pending) async {
+                  await _discardPendingSend(pending);
+                  if (sheetContext.mounted) refresh(() {});
+                },
+              ),
+              if (_showRuntimeSignalStrip) _RuntimeSignalStrip(
+                threadStatus: _latestThreadStatus,
+                queueUpdated: _latestQueueUpdate,
+                autoRetryUpdated: _latestAutoRetryUpdate,
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   Future<void> _showSessionDetailsSheet(SessionSummary session) async {
     final gitLabel = _supportsGitStatus
         ? _gitHeaderLabel(session, _gitStatus)
@@ -4748,7 +4804,16 @@ class _SessionScreenState extends State<SessionScreen>
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                _DetailRow(label: 'Host', value: widget.host.label),
+                _DetailRow(label: 'Machine', value: widget.host.label),
+                _DetailRow(label: 'Provider', value: agentProviderDisplayLabel(
+                  session.provider, nodeInfo: _nodeInfo) ?? 'Unknown'),
+                if (_supportsAgentRuns) TextButton(
+                  onPressed: () {
+                    Navigator.of(surfaceContext).pop();
+                    _openAgentsPanel();
+                  },
+                  child: const Text('View agent runs'),
+                ),
                 _DetailRow(label: 'Folder', value: session.cwd),
                 _DetailRow(
                   label: 'Status',
@@ -4841,14 +4906,6 @@ class _SessionScreenState extends State<SessionScreen>
     return trimmed;
   }
 
-  String _compactComposerModelLabel(String value) {
-    final model = value.split('/').last.trim();
-    if (model.length <= 24) {
-      return model;
-    }
-    return '${model.substring(0, 21)}...';
-  }
-
   SessionTurnConfig _composerTurnConfig(SessionSummary session) {
     return _turnConfigStore.configFor(widget.host, session.id);
   }
@@ -4857,11 +4914,11 @@ class _SessionScreenState extends State<SessionScreen>
     final turnConfig = _composerTurnConfig(session);
     final override = _cleanComposerLabel(turnConfig.model);
     if (override != null) {
-      return _compactComposerModelLabel(override);
+      return override;
     }
     final runtime = _cleanComposerLabel(session.runtime?.model);
     if (runtime != null) {
-      return _compactComposerModelLabel(runtime);
+      return runtime;
     }
     final provider = agentProviderDisplayLabel(
       session.provider,
@@ -4974,7 +5031,7 @@ class _SessionScreenState extends State<SessionScreen>
     if (models.isEmpty) {
       showAppSnackBar(
         context,
-        'No models are available from this host right now.',
+        'No models are available from this machine right now.',
       );
       return;
     }
@@ -5036,7 +5093,7 @@ class _SessionScreenState extends State<SessionScreen>
     if (models.isEmpty) {
       showAppSnackBar(
         context,
-        'No models are available from this host right now.',
+        'No models are available from this machine right now.',
       );
       return;
     }
@@ -5396,7 +5453,6 @@ class _SessionScreenState extends State<SessionScreen>
           onArchived: widget.onArchived,
           topPadding: widget.topPadding,
           desktopMode: widget.desktopMode,
-          onReturnToSessionList: widget.onReturnToSessionList,
         ),
       ),
     );
@@ -5404,7 +5460,7 @@ class _SessionScreenState extends State<SessionScreen>
 
   Future<void> _openTerminal({String? cwdOverride}) async {
     if (!_supportsTerminal) {
-      showAppSnackBar(context, 'This host does not expose terminals.');
+      showAppSnackBar(context, 'This machine does not expose terminals.');
       return;
     }
     final session = _session ?? widget.session;
@@ -5438,7 +5494,7 @@ class _SessionScreenState extends State<SessionScreen>
     BrowserPreviewTargetCandidate candidate,
   ) async {
     if (!_supportsBrowserPreview) {
-      showAppSnackBar(context, 'This host does not expose the browser.');
+      showAppSnackBar(context, 'This machine does not expose the browser.');
       return;
     }
     final session = _session ?? widget.session;
@@ -5493,7 +5549,7 @@ class _SessionScreenState extends State<SessionScreen>
     );
     final candidate = parsed.candidate;
     if (candidate == null) {
-      showAppSnackBar(context, parsed.error ?? 'Could not open host link.');
+      showAppSnackBar(context, parsed.error ?? 'Could not open machine link.');
       return;
     }
     unawaited(_openBrowserPreviewTarget(candidate));
@@ -5501,7 +5557,7 @@ class _SessionScreenState extends State<SessionScreen>
 
   Future<void> _openMessageResource(String path) async {
     if (!_supportsFilesystem) {
-      showAppSnackBar(context, 'This host does not expose workspace files.');
+      showAppSnackBar(context, 'This machine does not expose workspace files.');
       return;
     }
     final session = _session ?? widget.session;
@@ -5563,7 +5619,7 @@ class _SessionScreenState extends State<SessionScreen>
 
   Future<void> _openBrowserTabs() async {
     if (!_supportsBrowserPreview) {
-      showAppSnackBar(context, 'This host does not expose the browser.');
+      showAppSnackBar(context, 'This machine does not expose the browser.');
       return;
     }
     final session = _session ?? widget.session;
@@ -5712,7 +5768,7 @@ class _SessionScreenState extends State<SessionScreen>
 
   void _openWorkspaceFile(String path) {
     if (!_supportsFilesystem) {
-      showAppSnackBar(context, 'This host does not expose workspace files.');
+      showAppSnackBar(context, 'This machine does not expose workspace files.');
       return;
     }
     final session = _session ?? widget.session;
@@ -5746,7 +5802,7 @@ class _SessionScreenState extends State<SessionScreen>
 
   void _browseWorkspacePath(String path) {
     if (!_supportsFilesystem) {
-      showAppSnackBar(context, 'This host does not expose workspace files.');
+      showAppSnackBar(context, 'This machine does not expose workspace files.');
       return;
     }
     final session = _session ?? widget.session;
@@ -6415,6 +6471,9 @@ class _SessionScreenState extends State<SessionScreen>
           _openAgentsPanel();
         }
         break;
+      case 'pins':
+        _openPinnedPanel();
+        break;
       case 'favorite':
         _toggleFavorite();
         break;
@@ -6454,7 +6513,7 @@ class _SessionScreenState extends State<SessionScreen>
     required bool resourcesOpen,
     bool includeStop = true,
     bool includeNew = true,
-    bool includeControls = false,
+    bool includeControls = true,
     bool controlsCustomized = false,
   }) {
     return [
@@ -6577,6 +6636,12 @@ class _SessionScreenState extends State<SessionScreen>
                   : _SessionActionTone.neutral,
               active: controlsCustomized,
             ),
+          const _SessionActionSpec(
+            value: 'pins',
+            label: 'Pinned messages',
+            detail: 'Return to messages you saved in this session.',
+            icon: Icons.push_pin_outlined,
+          ),
           _SessionActionSpec(
             value: 'favorite',
             label: favorite ? 'Remove favorite' : 'Add favorite',
@@ -6605,13 +6670,13 @@ class _SessionScreenState extends State<SessionScreen>
           const _SessionActionSpec(
             value: 'info',
             label: 'Session details',
-            detail: 'View host, model, git, and usage info.',
+            detail: 'View machine, model, git, and usage info.',
             icon: Icons.info_outline_rounded,
           ),
           const _SessionActionSpec(
             value: 'reload',
             label: 'Reload',
-            detail: 'Refresh this transcript from the host.',
+            detail: 'Refresh this transcript from the machine.',
             icon: Icons.refresh_rounded,
           ),
           if (widget.topPadding != null &&
@@ -6634,7 +6699,7 @@ class _SessionScreenState extends State<SessionScreen>
               const _SessionActionSpec(
                 value: 'restart_provider',
                 label: 'Restart agent',
-                detail: 'Restart the active agent on this host.',
+                detail: 'Restart the active agent on this machine.',
                 icon: Icons.restart_alt_rounded,
                 tone: _SessionActionTone.warning,
               ),
@@ -6670,7 +6735,7 @@ class _SessionScreenState extends State<SessionScreen>
     BuildContext? anchorContext,
     bool includeStop = true,
     bool includeNew = true,
-    bool includeControls = false,
+    bool includeControls = true,
     bool controlsCustomized = false,
   }) async {
     final groups = _sessionActionGroups(
@@ -6787,11 +6852,7 @@ class _SessionScreenState extends State<SessionScreen>
     final colors = context.colors;
     final timelineEntries = _buildTimelineEntries();
     final visibleTimelineEntries = timelineEntries;
-    final pinnedMessages = _pinsStore.pinsFor(widget.host, session.id);
     final isCompact = MediaQuery.of(context).size.width < 600;
-    final pinnedActive = _isPinnedInspectorOpen(
-      InspectorScope.maybeOf(context),
-    );
     final showHistoryBanner =
         (_history?.isTruncated ?? false) && !_historyBannerDismissed;
     final showStopPill = isCompact && _running && _supportsSessionInterrupt;
@@ -6827,9 +6888,16 @@ class _SessionScreenState extends State<SessionScreen>
         Expanded(
           child: (_loading && timelineEntries.isEmpty)
               ? const _SessionTimelineLoadingState()
+              : _transcriptLoadError != null && !_transcriptResolved
+              ? _SessionLoadErrorState(
+                  error: _transcriptLoadError!,
+                  onRetry: () => unawaited(_loadSnapshot()),
+                )
               : Stack(
                   children: [
-                    if (showWaitingState)
+                    if (!showWaitingState && timelineEntries.isEmpty && !showHistoryBanner)
+                      const Positioned.fill(child: _SessionEmptyState())
+                    else if (showWaitingState)
                       Positioned.fill(
                         child: _SessionWaitingState(
                           onStop: _supportsSessionInterrupt
@@ -6848,7 +6916,8 @@ class _SessionScreenState extends State<SessionScreen>
                             reverse: true,
                             keyboardDismissBehavior:
                                 ScrollViewKeyboardDismissBehavior.onDrag,
-                            padding: const EdgeInsets.fromLTRB(16, 6, 16, 12),
+                            // Physical bottom padding clears both floating controls, even reversed.
+                            padding: const EdgeInsets.fromLTRB(16, 8, 16, 56),
                             physics: const AlwaysScrollableScrollPhysics(),
                             itemCount:
                                 visibleTimelineEntries.length +
@@ -6893,6 +6962,9 @@ class _SessionScreenState extends State<SessionScreen>
                                     api: widget.api,
                                     sessionId: session.id,
                                     message: entry.message!,
+                                    showTimestamp: prev?.message == null ||
+                                        prev!.createdAt.millisecondsSinceEpoch ~/ 60000 !=
+                                            entry.createdAt.millisecondsSinceEpoch ~/ 60000,
                                     pinned: _pinsStore.isPinned(
                                       widget.host,
                                       session.id,
@@ -6935,6 +7007,7 @@ class _SessionScreenState extends State<SessionScreen>
                                   _TimelineEntryKind.providerWarning =>
                                     _ProviderWarningRow(
                                       event: entry.runtimeEvent!.event,
+                                      occurrences: entry.runtimeEvent!.occurrences,
                                     ),
                                   _TimelineEntryKind.planUpdated =>
                                     _PlanUpdateCard(
@@ -6952,15 +7025,21 @@ class _SessionScreenState extends State<SessionScreen>
                                     ),
                                 },
                               );
-                              if (!showDay) return child;
-                              return Column(
-                                crossAxisAlignment: CrossAxisAlignment.stretch,
-                                children: [
-                                  _DaySeparator(
-                                    label: _formatDaySeparator(entry.createdAt),
+                              return Center(
+                                child: ConstrainedBox(
+                                  constraints: const BoxConstraints(
+                                    maxWidth: AppSizes.readingMaxWidth,
                                   ),
-                                  child,
-                                ],
+                                  child: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                                    children: [
+                                      if (showDay) _DaySeparator(
+                                        label: _formatDaySeparator(entry.createdAt),
+                                      ),
+                                      child,
+                                    ],
+                                  ),
+                                ),
                               );
                             },
                           ),
@@ -7016,32 +7095,27 @@ class _SessionScreenState extends State<SessionScreen>
             onStop: () => unawaited(_stopDockedBrowserPreview()),
             onStopped: (_) => _closeDockedBrowserPreview(),
           ),
-        if (_pendingSends.isNotEmpty)
-          _PendingSendStrip(
-            host: widget.host,
-            pending: _pendingSends,
-            retrying: _retryingPendingSend,
-            onRetryNow: () => unawaited(_retryPendingSends(manual: true)),
-            onEditCopy: (pending) =>
-                unawaited(_movePendingSendToComposer(pending)),
-            onDiscard: (pending) => unawaited(_discardPendingSend(pending)),
-          ),
-        if (_showRuntimeSignalStrip)
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 0, 16, 10),
-            child: _RuntimeSignalStrip(
-              threadStatus: _latestThreadStatus,
-              queueUpdated: _latestQueueUpdate,
-              autoRetryUpdated: _latestAutoRetryUpdate,
-            ),
-          ),
-        _ComposerStatusStrip(thinking: _thinkingNotifier),
         ListenableBuilder(
           listenable: _turnConfigStore,
           builder: (context, _) {
             final showModelPicker = _supportsComposerModelPicker;
             final showThinkingPicker = _supportsComposerThinkingPicker;
             return _Composer(
+              workspaceStrip: _ComposerWorkspaceStrip(
+                desktop: widget.desktopMode,
+                session: session,
+                status: _gitStatus,
+                diff: _composerGitDiff,
+                thinking: _thinkingNotifier,
+                showWorking: _pendingSends.isEmpty && !_showRuntimeSignalStrip,
+                signalLabel: _pendingSends.isNotEmpty
+                    ? '${_pendingSends.length} unsent'
+                    : _showRuntimeSignalStrip ? 'Session status' : null,
+                onSignalTap: _showComposerSignals,
+                onReview: _supportsGitStatus && _gitStatus?.isRepo == true
+                    ? () => _showGitSheet(session)
+                    : null,
+              ),
               controller: _composerController,
               focusNode: _composerFocusNode,
               attachments: _draftAttachments,
@@ -7056,6 +7130,7 @@ class _SessionScreenState extends State<SessionScreen>
               loadingFileSearch: _loadingFileSearch,
               fileError: _fileSearchError,
               sending: _sending,
+              enabled: _transcriptResolved,
               supportsImageInput: _supportsImageInput,
               supportsSkillInput: _supportsSkillInput,
               supportsFileMentions: _supportsFileMentions,
@@ -7105,82 +7180,23 @@ class _SessionScreenState extends State<SessionScreen>
     final terminalOpenInInspector = _isTerminalInspectorOpen(inspectorScope);
     final browserOpenInInspector = _isBrowserInspectorOpen(inspectorScope);
     final browserOpen = browserOpenInInspector || _dockedBrowserPreview != null;
-    // All layouts get the same compact info strip: status dot, host·folder,
-    // provider badge, git chip, context %, pinned count, ℹ️ tap for details.
-    // Desktop uses it as a subtitle since the title row has no room for meta.
-    // Tablet uses it instead of the old _SessionHeader card (~100px saved).
-    // Compact mobile already used it; now all three layouts are consistent.
+    // Keep orientation visible; detailed metadata lives in session details.
     final appBarBottom = PreferredSize(
       preferredSize: const Size.fromHeight(30),
       child: _SessionAppBarSubtitle(
         host: widget.host,
         session: session,
-        gitStatus: _gitStatus,
-        showGit: _supportsGitStatus,
         running: _running,
         verifying: _verifyingVisibleSnapshot,
-        pinnedCount: pinnedMessages.length,
-        pinnedActive: pinnedActive,
-        onPinnedTap: _openPinnedPanel,
         onDetails: () => _showSessionDetailsSheet(session),
-        onGitDetails: () => _showGitSheet(session),
       ),
     );
     final scaffold = Scaffold(
       backgroundColor: colors.canvas,
-      drawer: (!widget.desktopMode && widget.sessionDrawer != null)
-          ? Drawer(
-              width: 300,
-              child: SafeArea(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    // ← Back to all sessions
-                    Material(
-                      color: Colors.transparent,
-                      child: Builder(
-                        builder: (ctx) => ListTile(
-                          leading: const Icon(Icons.arrow_back_rounded),
-                          title: const Text('Sessions'),
-                          dense: true,
-                          onTap: () {
-                            Navigator.of(ctx).pop(); // close drawer
-                            final returnToSessionList =
-                                widget.onReturnToSessionList;
-                            if (returnToSessionList != null) {
-                              returnToSessionList();
-                              return;
-                            }
-                            Navigator.of(ctx).pop();
-                          },
-                        ),
-                      ),
-                    ),
-                    const Divider(height: 1),
-                    // Session list
-                    Expanded(child: Builder(builder: widget.sessionDrawer!)),
-                  ],
-                ),
-              ),
-            )
-          : null,
       appBar: AppBar(
         backgroundColor: colors.canvas,
         elevation: 0,
         scrolledUnderElevation: 0,
-        // Override the default back button with a sessions-list drawer button
-        // on mobile when a drawer is provided.
-        leading: (!widget.desktopMode && widget.sessionDrawer != null)
-            ? Builder(
-                builder: (ctx) => Tooltip(
-                  message: 'Sessions',
-                  child: IconButton(
-                    icon: const Icon(Icons.menu_rounded),
-                    onPressed: () => Scaffold.of(ctx).openDrawer(),
-                  ),
-                ),
-              )
-            : null,
         titleSpacing: widget.desktopMode ? 16 : null,
         toolbarHeight: 52,
         bottom: appBarBottom,
@@ -7229,58 +7245,6 @@ class _SessionScreenState extends State<SessionScreen>
                 ],
               ),
         actions: [
-          // Non-compact mobile toolbar: Stop (when running) + Tune + overflow.
-          // All tool launchers (terminal, browser, search, resources, git,
-          // reload, new session) live in the overflow sheet only.
-          if (!isCompact && !widget.desktopMode && _supportsSessionInterrupt)
-            Padding(
-              padding: const EdgeInsets.only(right: 4),
-              child: AnimatedOpacity(
-                duration: const Duration(milliseconds: 200),
-                opacity: _running ? 1.0 : 0.3,
-                child: IgnorePointer(
-                  ignoring: !_running,
-                  child: MeshIconButton(
-                    icon: Icons.stop_circle_rounded,
-                    tooltip: 'Stop agent',
-                    color: colors.danger,
-                    onTap: _stopSession,
-                    semanticLabel: 'Stop agent',
-                  ),
-                ),
-              ),
-            ),
-          if (!isCompact && !widget.desktopMode)
-            Padding(
-              padding: const EdgeInsets.only(right: 10),
-              child: ListenableBuilder(
-                listenable: Listenable.merge([_policyStore, _turnConfigStore]),
-                builder: (context, _) {
-                  final policy = _policyStore.policyFor(
-                    widget.host,
-                    session.id,
-                  );
-                  final turnConfig = _turnConfigStore.configFor(
-                    widget.host,
-                    session.id,
-                  );
-                  final runtime = session.runtime;
-                  final runtimeLoosened = SessionPolicy.runtimeIsLoosened(
-                    approvalPolicy: runtime?.approvalPolicy,
-                    sandboxMode: runtime?.sandboxMode,
-                    networkAccess: runtime?.networkAccess,
-                  );
-                  final customised =
-                      !policy.isEmpty || !turnConfig.isEmpty || runtimeLoosened;
-                  return MeshIconButton(
-                    icon: Icons.tune_rounded,
-                    tooltip: 'Session controls',
-                    color: customised ? colors.accent : colors.textSecondary,
-                    onTap: () => _showSessionPolicySheet(session),
-                  );
-                },
-              ),
-            ),
           ListenableBuilder(
             listenable: Listenable.merge([
               SessionLocalStore.instance,
@@ -7313,39 +7277,19 @@ class _SessionScreenState extends State<SessionScreen>
               final menuGitAvailable = widget.desktopMode
                   ? gitAvailable
                   : showGitInMenu;
-              if (isCompact) {
+              if (!widget.desktopMode) {
                 return Padding(
                   padding: const EdgeInsets.only(right: AppSpacing.sm),
                   child: Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
                       MeshIconButton(
-                        icon: Icons.tune_rounded,
-                        tooltip: 'Session controls',
-                        framed: false,
-                        color: sessionControlsCustomized
-                            ? colors.accent
-                            : colors.textSecondary,
-                        onTap: () => _showSessionPolicySheet(session),
-                      ),
-                      const SizedBox(width: AppSpacing.xs),
-                      MeshIconButton(
-                        icon: favorite
-                            ? Icons.star_rounded
-                            : Icons.star_outline_rounded,
-                        tooltip: favorite ? 'Unpin session' : 'Pin session',
-                        framed: false,
-                        color: favorite ? colors.warning : colors.textSecondary,
-                        onTap: _toggleFavorite,
-                      ),
-                      const SizedBox(width: AppSpacing.xs),
-                      MeshIconButton(
                         icon: Icons.more_vert_rounded,
                         tooltip: _running
                             ? 'Session actions (agent running)'
                             : 'Session actions',
                         framed: false,
-                        color: _running ? colors.warning : colors.textPrimary,
+                        color: colors.textPrimary,
                         onTap: () => unawaited(
                           _showSessionActionsSheet(
                             session: session,
@@ -7432,7 +7376,9 @@ class _SessionScreenState extends State<SessionScreen>
     if (widget.desktopMode) {
       sessionContent = CallbackShortcuts(
         bindings: <ShortcutActivator, VoidCallback>{
-          const SingleActivator(LogicalKeyboardKey.keyJ, meta: true):
+          SingleActivator(LogicalKeyboardKey.keyJ,
+            meta: defaultTargetPlatform == TargetPlatform.macOS,
+            control: defaultTargetPlatform != TargetPlatform.macOS):
               _focusComposerFromShortcut,
         },
         child: sessionContent,

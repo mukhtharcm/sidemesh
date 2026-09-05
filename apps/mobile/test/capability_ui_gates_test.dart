@@ -384,7 +384,7 @@ void main() {
 
     expect(find.text('Workspace unavailable'), findsOneWidget);
     expect(find.text('session workspace is unavailable'), findsNothing);
-    expect(find.text('repo'), findsNothing);
+    expect(find.text('repo'), findsOneWidget); // Workspace context stays by the composer.
     expect(find.text('Try again'), findsOneWidget);
     expect(
       tester.getTopLeft(find.text('Workspace unavailable')).dy,
@@ -522,7 +522,9 @@ void main() {
       );
       await _pumpFrames(tester);
 
-      await tester.tap(find.byTooltip('Session controls').first);
+      await tester.tap(find.byTooltip('Session actions'));
+      await _pumpFrames(tester);
+      await tester.tap(find.text('Session controls'));
       await _pumpFrames(tester);
 
       expect(find.text('Session controls'), findsWidgets);
@@ -2003,10 +2005,9 @@ void main() {
       final thinkingContainer = tester.widget<Container>(
         find.descendant(of: thinking, matching: find.byType(Container)),
       );
-      expect(
-        (modelContainer.decoration! as BoxDecoration).color,
-        (thinkingContainer.decoration! as BoxDecoration).color,
-      );
+      expect(modelContainer.decoration, isNull);
+      expect(thinkingContainer.decoration, isNull);
+      expect(modelRect.height, greaterThanOrEqualTo(44));
       expect(tester.takeException(), isNull);
     },
   );

@@ -45,7 +45,6 @@ class AppColors extends ThemeExtension<AppColors> {
     required this.userBubble,
     required this.userBubbleOn,
     required this.assistantBubble,
-    required this.assistantBubbleBorder,
     required this.composerBackground,
   });
 
@@ -90,7 +89,6 @@ class AppColors extends ThemeExtension<AppColors> {
   final Color userBubble;
   final Color userBubbleOn;
   final Color assistantBubble;
-  final Color assistantBubbleBorder;
 
   final Color composerBackground;
 
@@ -131,7 +129,6 @@ class AppColors extends ThemeExtension<AppColors> {
     Color? userBubble,
     Color? userBubbleOn,
     Color? assistantBubble,
-    Color? assistantBubbleBorder,
     Color? composerBackground,
   }) {
     return AppColors(
@@ -170,8 +167,6 @@ class AppColors extends ThemeExtension<AppColors> {
       userBubble: userBubble ?? this.userBubble,
       userBubbleOn: userBubbleOn ?? this.userBubbleOn,
       assistantBubble: assistantBubble ?? this.assistantBubble,
-      assistantBubbleBorder:
-          assistantBubbleBorder ?? this.assistantBubbleBorder,
       composerBackground: composerBackground ?? this.composerBackground,
     );
   }
@@ -217,8 +212,6 @@ class AppColors extends ThemeExtension<AppColors> {
       userBubble: Color.lerp(userBubble, other.userBubble, t)!,
       userBubbleOn: Color.lerp(userBubbleOn, other.userBubbleOn, t)!,
       assistantBubble: Color.lerp(assistantBubble, other.assistantBubble, t)!,
-      assistantBubbleBorder:
-          Color.lerp(assistantBubbleBorder, other.assistantBubbleBorder, t)!,
       composerBackground:
           Color.lerp(composerBackground, other.composerBackground, t)!,
     );

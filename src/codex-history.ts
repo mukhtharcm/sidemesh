@@ -22,6 +22,7 @@ import type {
   SessionRuntimeSummary,
   ThreadRecord,
   ToolActivity,
+  ToolActivitySemantic,
 } from "./types.js";
 
 const RECENT_ROLLOUT_SCAN_DAYS = 3;
@@ -993,7 +994,9 @@ function parseToolFunctionCall(parsed: any): PendingToolFunctionCall | null {
     name,
     args:
       payloadType === "custom_tool_call"
-        ? parseFunctionArguments(payload.input)
+        ? (typeof payload.input === "string" && /(?:^|\.)exec$/.test(name)
+            ? { code: payload.input }
+            : parseFunctionArguments(payload.input))
         : parseFunctionArguments(payload.arguments),
     createdAt: parseTimestamp(parsed.timestamp),
   };
@@ -1029,7 +1032,8 @@ function parseToolFunctionOutput(
   }
   pendingCalls.delete(callId);
   const attachments = extractSessionAttachments(payload.output);
-  if (attachments.length === 0) {
+  const semantic = commandToolSemantic(pending.name, pending.args);
+  if (attachments.length === 0 && semantic == null) {
     return null;
   }
   return {
@@ -1046,7 +1050,25 @@ function parseToolFunctionOutput(
     result: extractToolOutputText(payload.output),
     attachments,
     isError: false,
-    semantic: null,
+    semantic,
+  };
+}
+
+function commandToolSemantic(
+  name: string,
+  rawArgs: unknown,
+): ToolActivitySemantic | null {
+  const args = parseFunctionArguments(rawArgs);
+  const command = asOptionalString(args.command) ?? asOptionalString(args.cmd) ??
+    asOptionalString(args.fullCommandText) ??
+    (/(?:^|\.)(?:exec|shell|bash|python)$/.test(name)
+      ? asOptionalString(args.code) ?? asOptionalString(args.script)
+      : null);
+  if (!command?.trim()) return null;
+  return {
+    category: "command",
+    action: "invoke",
+    targets: [{ type: "command", command: command.trim() }],
   };
 }
 

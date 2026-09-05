@@ -8,8 +8,8 @@ export 'theme/color_contrast.dart'
     show contrastRatio, minimumReadableTextContrast, readableColorForBackground;
 
 Color messageLinkColor(AppColors colors, {required bool userBubble}) {
-  final background = userBubble ? colors.userBubble : colors.assistantBubble;
-  final preferred = userBubble ? colors.userBubbleOn : colors.accent;
+  final background = userBubble ? colors.userBubble : colors.canvas;
+  final preferred = userBubble ? colors.userBubbleOn : colors.textPrimary;
   final fallbacks = userBubble
       ? <Color>[
           colors.userBubbleOn,
@@ -18,8 +18,6 @@ Color messageLinkColor(AppColors colors, {required bool userBubble}) {
           colors.textSecondary,
         ]
       : <Color>[
-          colors.accent,
-          colors.info,
           colors.textPrimary,
           colors.textSecondary,
         ];
@@ -31,7 +29,7 @@ Color messageLinkColor(AppColors colors, {required bool userBubble}) {
 }
 
 Color messageBodyColor(AppColors colors, {required bool userBubble}) {
-  final background = userBubble ? colors.userBubble : colors.assistantBubble;
+  final background = userBubble ? colors.userBubble : colors.canvas;
   final preferred = userBubble ? colors.userBubbleOn : colors.textPrimary;
   return readableTextOn(
     colors,
@@ -41,7 +39,7 @@ Color messageBodyColor(AppColors colors, {required bool userBubble}) {
 }
 
 Color messageMetaColor(AppColors colors, {required bool userBubble}) {
-  final background = userBubble ? colors.userBubble : colors.assistantBubble;
+  final background = userBubble ? colors.userBubble : colors.canvas;
   final preferred = userBubble ? colors.userBubbleOn : colors.textTertiary;
   final fallbacks = userBubble
       ? <Color>[
@@ -68,7 +66,7 @@ TextStyle messageLinkStyle(
 }) {
   final linkColor = messageLinkColor(colors, userBubble: userBubble);
   return linkTextStyleForBackground(
-    background: userBubble ? colors.userBubble : colors.assistantBubble,
+    background: userBubble ? colors.userBubble : colors.canvas,
     preferred: linkColor,
     fallbacks: const <Color>[],
     baseStyle: baseStyle,

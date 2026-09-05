@@ -50,10 +50,10 @@ void main() {
     await tester.tap(find.byIcon(Icons.more_horiz_rounded));
     await tester.pumpAndSettle();
 
-    expect(find.text('Edit host'), findsOneWidget);
-    expect(find.text('Remove host'), findsOneWidget);
+    expect(find.text('Edit machine'), findsOneWidget);
+    expect(find.text('Remove machine'), findsOneWidget);
 
-    await tester.tap(find.text('Edit host'));
+    await tester.tap(find.text('Edit machine'));
     await tester.pumpAndSettle();
 
     expect(edits, 1);

@@ -14,7 +14,7 @@ void main() {
         expect(
           contrastRatio(
             messageBodyColor(colors, userBubble: false),
-            colors.assistantBubble,
+            colors.canvas,
           ),
           greaterThanOrEqualTo(minimumReadableTextContrast),
           reason: '${variant.id} assistant bubble body contrast is too low',
@@ -39,7 +39,7 @@ void main() {
         expect(
           contrastRatio(
             messageLinkColor(colors, userBubble: false),
-            colors.assistantBubble,
+            colors.canvas,
           ),
           greaterThanOrEqualTo(minimumReadableTextContrast),
           reason: '${variant.id} assistant bubble link contrast is too low',
@@ -47,7 +47,7 @@ void main() {
         expect(
           contrastRatio(
             messageMetaColor(colors, userBubble: false),
-            colors.assistantBubble,
+            colors.canvas,
           ),
           greaterThanOrEqualTo(minimumReadableTextContrast),
           reason: '${variant.id} assistant metadata contrast is too low',

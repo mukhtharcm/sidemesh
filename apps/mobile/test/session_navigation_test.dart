@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:sidemesh_mobile/src/api_client.dart';
+import 'package:sidemesh_mobile/src/widgets/app_composer.dart';
 import 'package:sidemesh_mobile/src/db.dart';
 import 'package:sidemesh_mobile/src/models.dart';
 import 'package:sidemesh_mobile/src/screens/session_screen.dart';
@@ -27,58 +28,59 @@ void main() {
     SharedPreferences.setMockInitialValues(<String, Object>{});
   });
 
-  testWidgets(
-    'switching sessions from the mobile drawer replaces the current route',
-    (tester) async {
-      await _pumpApp(tester, const _SessionNavigationHarness());
-      await _pumpFrames(tester);
+  testWidgets('failed initial load disables composer and retry restores the empty state', (tester) async {
+    final api = _NavigationFakeApi(_nodeInfo())..failLoad = true;
+    addTearDown(api.dispose);
+    await _pumpApp(tester, SessionScreen(
+      host: const HostProfile(id: 'failed-load', label: 'Machine', baseUrl: 'http://127.0.0.1:4099', token: 'test-token'),
+      session: _session('failed-load', 'Session'), api: api));
+    await _pumpFrames(tester);
+    expect(find.text('Could not load this session'), findsOneWidget);
+    expect(tester.widget<AppComposer>(find.byType(AppComposer)).enabled, isFalse);
+    api.failLoad = false;
+    await tester.tap(find.widgetWithText(FilledButton, 'Retry'));
+    await _pumpFrames(tester);
+    expect(find.text('Could not load this session'), findsNothing);
+    expect(find.text('What would you like to work on?'), findsOneWidget);
+    expect(tester.widget<AppComposer>(find.byType(AppComposer)).enabled, isTrue);
+  });
 
-      await tester.tap(find.text('Open Session A'));
-      await _pumpFrames(tester);
-      expect(find.text('Session A'), findsOneWidget);
+  testWidgets('back chevron returns to the session list without a drawer', (tester) async {
+    await _pumpApp(tester, const _SessionNavigationHarness());
+    await _pumpFrames(tester);
+    await tester.tap(find.text('Open Session A'));
+    await _pumpFrames(tester);
+    expect(find.text('Session A'), findsOneWidget);
+    expect(find.byType(Drawer), findsNothing);
+    expect(find.byType(BackButton), findsOneWidget);
+    await tester.tap(find.byType(BackButton));
+    await tester.pumpAndSettle();
+    expect(find.text('Home'), findsOneWidget);
+    expect(find.text('Session A'), findsNothing);
+  });
 
-      await tester.tap(find.byIcon(Icons.menu_rounded).hitTestable());
-      await tester.pumpAndSettle();
-      await tester.tap(find.widgetWithText(ListTile, 'Session B').hitTestable());
-      await _pumpFrames(tester);
+  testWidgets('iOS edge swipe returns at a normal gesture distance', (tester) async {
+    await _pumpApp(tester, const _SessionNavigationHarness(), platform: TargetPlatform.iOS);
+    await _pumpFrames(tester);
+    await tester.tap(find.text('Open Session A'));
+    await _pumpFrames(tester);
+    await tester.pumpAndSettle();
+    await tester.flingFrom(const Offset(1, 400), const Offset(200, 0), 800);
+    await tester.pumpAndSettle();
+    expect(find.text('Home'), findsOneWidget);
+    expect(find.text('Session A'), findsNothing);
+  });
 
-      expect(find.text('Session B'), findsOneWidget);
-
-      await tester.binding.handlePopRoute();
-      await tester.pumpAndSettle();
-
-      expect(find.text('Home'), findsOneWidget);
-      expect(find.text('Session A'), findsNothing);
-      expect(find.text('Session B'), findsNothing);
-    },
-  );
-
-  testWidgets(
-    'drawer Sessions action returns to home instead of the previous session',
-    (tester) async {
-      await _pumpApp(tester, const _SessionNavigationHarness());
-      await _pumpFrames(tester);
-
-      await tester.tap(find.text('Open Session A'));
-      await _pumpFrames(tester);
-      expect(find.text('Session A'), findsOneWidget);
-
-      await tester.tap(find.byIcon(Icons.menu_rounded).hitTestable());
-      await tester.pumpAndSettle();
-      await tester.tap(find.widgetWithText(ListTile, 'Session B').hitTestable());
-      await _pumpFrames(tester);
-      expect(find.text('Session B'), findsOneWidget);
-
-      await tester.tap(find.byIcon(Icons.menu_rounded).hitTestable());
-      await tester.pumpAndSettle();
-      await tester.tap(find.widgetWithText(ListTile, 'Sessions').hitTestable());
-      await tester.pumpAndSettle();
-
-      expect(find.text('Home'), findsOneWidget);
-      expect(find.text('Session A'), findsNothing);
-      expect(find.text('Session B'), findsNothing);
-    },
-  );
+  testWidgets('system back returns to the session list', (tester) async {
+    await _pumpApp(tester, const _SessionNavigationHarness());
+    await _pumpFrames(tester);
+    await tester.tap(find.text('Open Session A'));
+    await _pumpFrames(tester);
+    await tester.binding.handlePopRoute();
+    await tester.pumpAndSettle();
+    expect(find.text('Home'), findsOneWidget);
+    expect(find.text('Session A'), findsNothing);
+  });
 }
 
 Future<void> _pumpFrames(WidgetTester tester) async {
@@ -88,7 +90,7 @@ Future<void> _pumpFrames(WidgetTester tester) async {
   await tester.pump();
 }
 
-Future<void> _pumpApp(WidgetTester tester, Widget child) async {
+Future<void> _pumpApp(WidgetTester tester, Widget child, {TargetPlatform? platform}) async {
   tester.view
     ..devicePixelRatio = 1
     ..physicalSize = const Size(430, 932);
@@ -100,7 +102,7 @@ Future<void> _pumpApp(WidgetTester tester, Widget child) async {
   final palette = ThemeVariant.codexAmber;
   await tester.pumpWidget(
     MaterialApp(
-      theme: buildLightTheme(palette.light),
+      theme: buildLightTheme(palette.light).copyWith(platform: platform),
       darkTheme: buildDarkTheme(palette.dark),
       home: child,
     ),
@@ -123,7 +125,6 @@ class _SessionNavigationHarnessState extends State<_SessionNavigationHarness> {
     token: 'test-token',
   );
   late final SessionSummary _sessionA = _session('session-a', 'Session A');
-  late final SessionSummary _sessionB = _session('session-b', 'Session B');
   late final _NavigationFakeApi _api = _NavigationFakeApi(_nodeInfo());
 
   @override
@@ -138,19 +139,6 @@ class _SessionNavigationHarnessState extends State<_SessionNavigationHarness> {
         host: _host,
         session: session,
         api: _api,
-        onReturnToSessionList: () =>
-            Navigator.of(context).popUntil((route) => route.isFirst),
-        sessionDrawer: (ctx) => ListView(
-          children: [
-            ListTile(
-              title: const Text('Session B'),
-              onTap: () {
-                Navigator.of(ctx).pop();
-                unawaited(_openSession(_sessionB, replaceCurrentRoute: true));
-              },
-            ),
-          ],
-        ),
       ),
     );
   }
@@ -230,6 +218,7 @@ class _NavigationFakeApi extends ApiClient {
   _NavigationFakeApi(this.node);
 
   final NodeInfo node;
+  bool failLoad = false;
   final _IdleWebSocketChannel _channel = _IdleWebSocketChannel();
 
   @override
@@ -241,7 +230,9 @@ class _NavigationFakeApi extends ApiClient {
     String sessionId, {
     int? messageLimit,
     int? activityLimit,
-  }) async => SessionLog(
+  }) async {
+    if (failLoad) throw Exception("Unavailable");
+    return SessionLog(
     session: _session(sessionId, sessionId == 'session-a' ? 'Session A' : 'Session B'),
     messages: const [],
     activities: const [],
@@ -254,6 +245,7 @@ class _NavigationFakeApi extends ApiClient {
       returnedActivities: 0,
     ),
   );
+  }
 
   @override
   WebSocketChannel openLive(HostProfile host, String sessionId) => _channel;

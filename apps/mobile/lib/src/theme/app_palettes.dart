@@ -114,7 +114,6 @@ const _codexAmberDark = AppColors(
   userBubble: Color(0xFF3A2818),
   userBubbleOn: Color(0xFFE6EDF3),
   assistantBubble: Color(0xFF12171F),
-  assistantBubbleBorder: Color(0xFF232B37),
   composerBackground: Color(0xFF12171F),
 );
 
@@ -154,7 +153,6 @@ const _codexAmberLight = AppColors(
   userBubble: Color(0xFFF4DCC0),
   userBubbleOn: Color(0xFF1C1812),
   assistantBubble: Color(0xFFFBF3E1),
-  assistantBubbleBorder: Color(0xFFD9C8A8),
   composerBackground: Color(0xFFFFFBF3),
 );
 
@@ -199,7 +197,6 @@ const _nordDark = AppColors(
   userBubble: Color(0xFF2A3A44),
   userBubbleOn: Color(0xFFECEFF4),
   assistantBubble: Color(0xFF2E3440),
-  assistantBubbleBorder: Color(0xFF434C5E),
   composerBackground: Color(0xFF2E3440),
 );
 
@@ -239,7 +236,6 @@ const _nordLight = AppColors(
   userBubble: Color(0xFFD7E1EE),
   userBubbleOn: Color(0xFF2E3440),
   assistantBubble: Color(0xFFF8F9FB),
-  assistantBubbleBorder: Color(0xFFD8DEE9),
   composerBackground: Color(0xFFFFFFFF),
 );
 
@@ -285,7 +281,6 @@ const _draculaDark = AppColors(
   userBubble: Color(0xFF3A2E5C),
   userBubbleOn: Color(0xFFF8F8F2),
   assistantBubble: Color(0xFF282A36),
-  assistantBubbleBorder: Color(0xFF44475A),
   composerBackground: Color(0xFF282A36),
 );
 
@@ -325,7 +320,6 @@ const _draculaLight = AppColors(
   userBubble: Color(0xFFE9DEF8),
   userBubbleOn: Color(0xFF22212C),
   assistantBubble: Color(0xFFFFFFFF),
-  assistantBubbleBorder: Color(0xFFD9D9E3),
   composerBackground: Color(0xFFFFFFFF),
 );
 
@@ -370,7 +364,6 @@ const _catppuccinMocha = AppColors(
   userBubble: Color(0xFF3C2E4E),
   userBubbleOn: Color(0xFFCDD6F4),
   assistantBubble: Color(0xFF1E1E2E),
-  assistantBubbleBorder: Color(0xFF313244),
   composerBackground: Color(0xFF1E1E2E),
 );
 
@@ -410,7 +403,6 @@ const _catppuccinLatte = AppColors(
   userBubble: Color(0xFFE9DBFB),
   userBubbleOn: Color(0xFF4C4F69),
   assistantBubble: Color(0xFFFFFFFF),
-  assistantBubbleBorder: Color(0xFFCCD0DA),
   composerBackground: Color(0xFFFFFFFF),
 );
 
@@ -455,7 +447,6 @@ const _rosePineDark = AppColors(
   userBubble: Color(0xFF3C2B30),
   userBubbleOn: Color(0xFFE0DEF4),
   assistantBubble: Color(0xFF1F1D2E),
-  assistantBubbleBorder: Color(0xFF393552),
   composerBackground: Color(0xFF1F1D2E),
 );
 
@@ -495,7 +486,6 @@ const _rosePineDawn = AppColors(
   userBubble: Color(0xFFF4DDDB),
   userBubbleOn: Color(0xFF575279),
   assistantBubble: Color(0xFFFFFAF3),
-  assistantBubbleBorder: Color(0xFFDFDAD9),
   composerBackground: Color(0xFFFFFAF3),
 );
 
@@ -540,7 +530,6 @@ const _tokyoNightDark = AppColors(
   userBubble: Color(0xFF1F2C4D),
   userBubbleOn: Color(0xFFC0CAF5),
   assistantBubble: Color(0xFF1A1B26),
-  assistantBubbleBorder: Color(0xFF2F334D),
   composerBackground: Color(0xFF1A1B26),
 );
 
@@ -580,6 +569,5 @@ const _tokyoDay = AppColors(
   userBubble: Color(0xFFDCE8FD),
   userBubbleOn: Color(0xFF3760BF),
   assistantBubble: Color(0xFFE9E9EE),
-  assistantBubbleBorder: Color(0xFFC1C5D4),
   composerBackground: Color(0xFFE9E9EE),
 );
