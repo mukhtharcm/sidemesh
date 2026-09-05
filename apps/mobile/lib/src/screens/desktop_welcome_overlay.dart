@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'dart:async';
 import 'package:flutter/material.dart';
 
@@ -553,14 +554,14 @@ class _ShortcutsTab extends StatelessWidget {
   Widget build(BuildContext context) {
     final colors = context.colors;
     final shortcuts = <({String keys, String label})>[
-      (keys: '⌘F', label: 'Focus search'),
-      (keys: '⌘J', label: 'Focus composer'),
-      (keys: '⌘R', label: 'Refresh'),
-      (keys: '⌘W', label: 'Close active session'),
-      (keys: '⌘1', label: 'Recent pane'),
-      (keys: '⌘2', label: 'Inbox pane'),
-      (keys: '⌘3', label: 'Hosts pane'),
-      (keys: '⌘/', label: 'Show keyboard shortcuts'),
+      (keys: defaultTargetPlatform == TargetPlatform.macOS ? '⌘F' : 'Ctrl+F', label: 'Focus search'),
+      (keys: defaultTargetPlatform == TargetPlatform.macOS ? '⌘J' : 'Ctrl+J', label: 'Focus composer'),
+      (keys: defaultTargetPlatform == TargetPlatform.macOS ? '⌘R' : 'Ctrl+R', label: 'Refresh'),
+      (keys: defaultTargetPlatform == TargetPlatform.macOS ? '⌘W' : 'Ctrl+W', label: 'Close active session'),
+      (keys: defaultTargetPlatform == TargetPlatform.macOS ? '⌘1' : 'Ctrl+1', label: 'Recent pane'),
+      (keys: defaultTargetPlatform == TargetPlatform.macOS ? '⌘2' : 'Ctrl+2', label: 'Inbox pane'),
+      (keys: defaultTargetPlatform == TargetPlatform.macOS ? '⌘3' : 'Ctrl+3', label: 'Machines pane'),
+      (keys: defaultTargetPlatform == TargetPlatform.macOS ? '⌘/' : 'Ctrl+/', label: 'Show keyboard shortcuts'),
       (keys: 'Enter', label: 'Send message'),
       (keys: 'Shift + Enter', label: 'Newline in composer'),
       (keys: 'Long-press message', label: 'Copy to clipboard'),
@@ -627,10 +628,10 @@ class _ShortcutHint extends StatelessWidget {
       spacing: 8,
       runSpacing: 8,
       children: [
-        _Kbd(text: '⌘F', colors: colors),
-        _Kbd(text: '⌘R', colors: colors),
-        _Kbd(text: '⌘1/2/3', colors: colors),
-        _Kbd(text: '⌘/', colors: colors),
+        _Kbd(text: defaultTargetPlatform == TargetPlatform.macOS ? '⌘F' : 'Ctrl+F', colors: colors),
+        _Kbd(text: defaultTargetPlatform == TargetPlatform.macOS ? '⌘R' : 'Ctrl+R', colors: colors),
+        _Kbd(text: defaultTargetPlatform == TargetPlatform.macOS ? '⌘1/2/3' : 'Ctrl+1/2/3', colors: colors),
+        _Kbd(text: defaultTargetPlatform == TargetPlatform.macOS ? '⌘/' : 'Ctrl+/', colors: colors),
         const SizedBox(width: 4),
         Text(
           'search · refresh · panes · help',

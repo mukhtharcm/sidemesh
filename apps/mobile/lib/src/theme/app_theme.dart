@@ -387,3 +387,17 @@ TextStyle monoStyle({
     fontWeight: fontWeight,
   );
 }
+
+/// Document typography for agent prose, independent of the interface font.
+TextStyle proseStyle({
+  required Color color,
+  double fontSize = 16,
+  double height = 1.6,
+  FontWeight fontWeight = FontWeight.w400,
+}) => TextStyle(
+  fontFamily: 'SourceSerif4',
+  color: color,
+  fontSize: fontSize,
+  height: height,
+  fontWeight: fontWeight,
+);

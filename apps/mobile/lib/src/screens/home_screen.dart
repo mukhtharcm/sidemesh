@@ -15,6 +15,7 @@ import '../local_notification_service.dart';
 import '../ios_push_notification_service.dart';
 import '../mobile_client_version_policy.dart';
 import '../models.dart';
+import '../workspace_label.dart';
 import '../pending_send_recovery.dart';
 import '../pairing_probe.dart';
 import '../recent_session_view_store.dart';
@@ -71,7 +72,7 @@ class _SidemeshHomeScreenState extends State<SidemeshHomeScreen>
       selectedIcon: Icons.speed_rounded,
     ),
     _TabDef(
-      title: 'Hosts',
+      title: 'Machines',
       icon: Icons.hub_rounded,
       selectedIcon: Icons.hub_rounded,
     ),
@@ -106,7 +107,7 @@ class _SidemeshHomeScreenState extends State<SidemeshHomeScreen>
 
   bool _searchVisibleForTab(_TabDef tab, int enabledHostCount) {
     if (tab.title == 'Usage') return false;
-    return tab.title != 'Hosts' || enabledHostCount >= 4;
+    return tab.title != 'Machines' || enabledHostCount >= 4;
   }
 
   @override
@@ -356,29 +357,8 @@ class _SidemeshHomeScreenState extends State<SidemeshHomeScreen>
         api: _api,
         initialComposerSeed: composerSeed,
         onOpenSession: (next) => unawaited(_openSession(host, next)),
-        onReturnToSessionList: _returnToSessionList,
-        // Provide a session-list drawer so the user can switch sessions
-        // without navigating all the way back to the home screen.
-        sessionDrawer: (ctx) => RecentPane(
-          hosts: _hosts.where((h) => h.enabled).toList(),
-          api: _api,
-          selectedSessionId: session.id,
-          onOpenSession: (h, s) {
-            // Close the drawer then replace the current session.
-            Navigator.of(ctx).pop();
-            unawaited(_openSession(h, s, replaceCurrentRoute: true));
-          },
-          onActiveCountChanged: (_) {},
-          dense: false,
-          showGroupingMenu: true,
-          hasSavedHosts: _hosts.isNotEmpty,
-        ),
       ),
     );
-  }
-
-  void _returnToSessionList() {
-    Navigator.of(context).popUntil((route) => route.isFirst);
   }
 
   Future<void> _openSession(
@@ -443,7 +423,7 @@ class _SidemeshHomeScreenState extends State<SidemeshHomeScreen>
     }
     final enabledHosts = _enabledHosts;
     if (enabledHosts.isEmpty) {
-      showAppSnackBar(context, 'Enable a host before starting a session.');
+      showAppSnackBar(context, 'Enable a machine before starting a session.');
       return;
     }
     final result = await showCreateSessionHostLauncher(
@@ -560,16 +540,16 @@ class _SidemeshHomeScreenState extends State<SidemeshHomeScreen>
   }
 
   _HomePrimaryAction? _primaryActionForTab(_TabDef tab) {
-    if (_hosts.isEmpty || tab.title == 'Hosts') {
+    if (_hosts.isEmpty || tab.title == 'Machines') {
       return _HomePrimaryAction(
-        label: 'Add host',
+        label: 'Add machine',
         icon: Icons.add_link_rounded,
         onTap: () => _showHostEditor(),
       );
     }
     if (_enabledHosts.isEmpty) {
       return _HomePrimaryAction(
-        label: 'Open hosts',
+        label: 'Open machines',
         icon: Icons.hub_rounded,
         onTap: () => setState(() => _tabIndex = 3),
       );
@@ -598,6 +578,13 @@ class _SidemeshHomeScreenState extends State<SidemeshHomeScreen>
       dismissedRecommendedVersion: _dismissedRecommendedMobileClientVersion,
     );
     return Scaffold(
+      floatingActionButton: primaryAction == null ? null : FloatingActionButton.extended(
+        onPressed: primaryAction.onTap,
+        backgroundColor: colors.textPrimary,
+        foregroundColor: colors.canvas,
+        icon: Icon(primaryAction.icon),
+        label: Text(primaryAction.label),
+      ),
       backgroundColor: colors.canvas,
       body: SafeArea(
         bottom: false,
@@ -605,7 +592,7 @@ class _SidemeshHomeScreenState extends State<SidemeshHomeScreen>
           children: [
             _HomeStickyHeader(
               tab: tab,
-              primaryAction: primaryAction,
+              primaryAction: null,
               searchController: _searchController,
               searchVisible: _searchVisibleForTab(tab, enabledHosts.length),
               searchExpanded: _searchExpanded || _query.isNotEmpty,
@@ -1099,7 +1086,7 @@ class _HomeBootstrapLoadingState extends StatelessWidget {
   Widget build(BuildContext context) {
     return ListView(
       physics: const AlwaysScrollableScrollPhysics(),
-      padding: const EdgeInsets.fromLTRB(16, 8, 16, 32),
+      padding: const EdgeInsets.fromLTRB(16, 8, 16, 88),
       children: const [
         MeshCard(
           tone: MeshCardTone.muted,
@@ -1191,7 +1178,7 @@ class _RecentPaneLoadingState extends StatelessWidget {
         padding ??
         (dense
             ? const EdgeInsets.fromLTRB(6, 4, 6, 24)
-            : const EdgeInsets.fromLTRB(16, 8, 16, 32));
+            : const EdgeInsets.fromLTRB(16, 8, 16, 88));
     final spacing = dense ? 8.0 : 10.0;
     return ListView(
       physics: const AlwaysScrollableScrollPhysics(),
@@ -1240,7 +1227,7 @@ class _InboxPaneLoadingState extends StatelessWidget {
       physics: const AlwaysScrollableScrollPhysics(),
       padding: dense
           ? const EdgeInsets.fromLTRB(8, 4, 8, 24)
-          : const EdgeInsets.fromLTRB(16, 8, 16, 32),
+          : const EdgeInsets.fromLTRB(16, 8, 16, 88),
       children: [
         MeshCard(
           tone: MeshCardTone.muted,
@@ -1427,11 +1414,7 @@ class _RecentPaneState extends State<RecentPane> {
     } catch (_) {}
   }
 
-  String _cwdBasename(String cwd) {
-    if (cwd.isEmpty || cwd == '/') return 'Unknown';
-    final parts = cwd.split('/');
-    return parts.lastWhere((p) => p.isNotEmpty, orElse: () => 'Unknown');
-  }
+  String _cwdBasename(String cwd) => workspaceLabel(cwd);
 
   String _projectPath(RemoteSessionEntry entry) {
     final commonDir = entry.session.gitInfo?.gitCommonDir;
@@ -1761,7 +1744,7 @@ class _RecentPaneState extends State<RecentPane> {
     if (widget.filters.isAnyActive) {
       return 'No sessions match the active filters right now.';
     }
-    return 'Saved hosts look fine, but none returned recent sessions right now.';
+    return 'Saved machines look fine, but none returned recent sessions right now.';
   }
 
   List<RemoteSessionEntry> _sortEntries(List<RemoteSessionEntry> entries) {
@@ -1802,15 +1785,15 @@ class _RecentPaneState extends State<RecentPane> {
               icon: Icons.hub_rounded,
               title: 'Connect a machine',
               body:
-                  'Use Add host above to connect sessions, approvals, files, and terminals.',
+                  'Use Add machine above to connect sessions, approvals, files, and terminals.',
             ),
           ),
         );
       }
       return const MeshEmptyState(
         icon: Icons.pause_circle_outline_rounded,
-        title: 'No enabled hosts',
-        body: 'Enable a saved host from Hosts to load recent sessions.',
+        title: 'No enabled machines',
+        body: 'Enable a saved machine from Machines to load recent sessions.',
       );
     }
 
@@ -1854,7 +1837,7 @@ class _RecentPaneState extends State<RecentPane> {
             widget.padding ??
             (widget.dense
                 ? const EdgeInsets.fromLTRB(6, 4, 6, 24)
-                : const EdgeInsets.fromLTRB(16, 8, 16, 32));
+                : const EdgeInsets.fromLTRB(16, 8, 16, 88));
         Future<void> handleRefresh() async {
           await _store.refresh();
           if (widget.query.trim().length >= 2) {
@@ -1939,7 +1922,7 @@ class _RecentPaneState extends State<RecentPane> {
                             offset += 1;
                           }
                           final entry = sortedEntries[index - offset];
-                          return _buildSessionRow(entry);
+                          return _buildSessionRow(entry, showProvider: sortedEntries.map((e) => e.session.provider).toSet().length > 1);
                         },
                       ),
               ),
@@ -1961,7 +1944,7 @@ class _RecentPaneState extends State<RecentPane> {
         widget.padding ??
         (widget.dense
             ? const EdgeInsets.fromLTRB(6, 4, 6, 24)
-            : const EdgeInsets.fromLTRB(16, 8, 16, 32));
+            : const EdgeInsets.fromLTRB(16, 8, 16, 88));
     return ListView.builder(
       padding: padding,
       itemCount:
@@ -1995,8 +1978,8 @@ class _RecentPaneState extends State<RecentPane> {
           if (index == headerIndex) {
             return Padding(
               padding: EdgeInsets.only(
-                top: widget.dense ? 8 : 14,
-                bottom: widget.dense ? 2 : 6,
+                top: AppSpacing.md,
+                bottom: AppSpacing.xs,
               ),
               child: _buildSessionSectionHeader(
                 context,
@@ -2009,8 +1992,8 @@ class _RecentPaneState extends State<RecentPane> {
           if (!collapsed && index >= entriesStart && index < entriesEnd) {
             final entry = group.entries[index - entriesStart];
             return Padding(
-              padding: EdgeInsets.only(bottom: widget.dense ? 2 : 0),
-              child: _buildSessionRow(entry, showBranchLabel: true),
+              padding: EdgeInsets.zero,
+              child: _buildSessionRow(entry, grouped: true, showProvider: group.entries.map((e) => e.session.provider).toSet().length > 1),
             );
           }
           current = entriesEnd;
@@ -2031,74 +2014,35 @@ class _RecentPaneState extends State<RecentPane> {
       color: Colors.transparent,
       child: InkWell(
         onTap: widget.dense ? () => _toggleGroupCollapse(group.key) : null,
-        borderRadius: BorderRadius.circular(AppRadii.control),
+        borderRadius: AppShapes.badge,
         child: Padding(
-          padding: EdgeInsets.symmetric(
-            horizontal: widget.dense ? 4 : 0,
-            vertical: widget.dense ? 5 : 6,
-          ),
+          padding: const EdgeInsets.symmetric(
+            horizontal: AppSpacing.sm, vertical: AppSpacing.sm),
           child: Row(
             children: [
-              if (widget.dense) ...[
-                AnimatedRotation(
-                  turns: collapsed ? -0.25 : 0,
-                  duration: const Duration(milliseconds: 180),
-                  curve: Curves.easeOutCubic,
-                  child: Icon(
-                    Icons.expand_more_rounded,
-                    size: 15,
-                    color: colors.textSecondary,
-                  ),
-                ),
-                const SizedBox(width: 5),
-              ],
-              Icon(icon, size: 13, color: colors.textSecondary),
-              const SizedBox(width: 6),
               Expanded(
-                child: Text(
-                  group.title,
-                  maxLines: 1,
+                child: Text(group.title, maxLines: 1,
                   overflow: TextOverflow.ellipsis,
-                  style: monoStyle(
-                    color: colors.textSecondary,
-                    fontSize: widget.dense ? 10 : 11,
-                    fontWeight: AppWeights.emphasis,
-                  ),
-                ),
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: colors.textTertiary, fontSize: 12.5,
+                    fontWeight: AppWeights.body, letterSpacing: 0)),
               ),
-              const SizedBox(width: 4),
-              // Host label — tells you which machine this project is on.
-              Text(
-                group.host.label,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: monoStyle(
-                  color: colors.textTertiary,
-                  fontSize: widget.dense ? 9.5 : 10.5,
-                ),
-              ),
-              const SizedBox(width: 6),
-              // Live running pulse — only shown when sessions are active
-              if (group.hasRunning) ...[
-                LivePulse(color: colors.success),
-                const SizedBox(width: 6),
+              if (widget.hosts.length > 1) ...[
+                const SizedBox(width: AppSpacing.sm),
+                Flexible(child: Text(group.host.label, maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                    color: colors.textTertiary))),
               ],
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
-                decoration: BoxDecoration(
-                  color: colors.surfaceElevated,
-                  borderRadius: BorderRadius.circular(6),
-                  border: Border.all(color: colors.border),
-                ),
-                child: Text(
-                  '${group.entries.length}',
-                  style: monoStyle(
-                    color: colors.textTertiary,
-                    fontSize: 10,
-                    fontWeight: AppWeights.emphasis,
-                  ),
-                ),
-              ),
+              const SizedBox(width: AppSpacing.sm),
+              Text('${group.entries.length}',
+                style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                  color: colors.textTertiary, letterSpacing: 0)),
+              if (widget.dense) ...[
+                const SizedBox(width: AppSpacing.xs),
+                Icon(collapsed ? Icons.chevron_right_rounded : Icons.expand_more_rounded,
+                  size: AppSizes.compactIcon, color: colors.textTertiary),
+              ],
             ],
           ),
         ),
@@ -2108,11 +2052,9 @@ class _RecentPaneState extends State<RecentPane> {
 
   Widget _buildSessionRow(
     RemoteSessionEntry entry, {
-    bool showBranchLabel = false,
+    bool grouped = false,
+    bool showProvider = false,
   }) {
-    final branch = entry.session.gitInfo?.branch;
-    final secondaryLabel =
-        showBranchLabel && branch != null && branch.isNotEmpty ? branch : null;
     return SessionRowCard(
       host: entry.host,
       session: entry.session,
@@ -2120,7 +2062,9 @@ class _RecentPaneState extends State<RecentPane> {
       selected: widget.selectedSessionId == entry.session.id,
       dense: widget.dense,
       query: widget.query,
-      secondaryLabel: secondaryLabel,
+      showHost: !grouped && widget.hosts.length > 1,
+      showWorkspace: !grouped,
+      showProvider: showProvider,
       onTap: () {
         _localStore.updateGhost(entry.host, entry.session);
         widget.onOpenSession(entry.host, entry.session);
@@ -2439,7 +2383,7 @@ class _InboxPaneState extends State<InboxPane> {
     if (host == null) {
       showAppSnackBar(
         context,
-        'The original host no longer exists. Recreate it from Hosts if needed.',
+        'The original machine no longer exists. Recreate it from Machines if needed.',
       );
       return;
     }
@@ -2449,7 +2393,7 @@ class _InboxPaneState extends State<InboxPane> {
   Future<void> _enablePendingHost(PendingSendAnalysis analysis) async {
     final host = analysis.host;
     if (host == null) {
-      showAppSnackBar(context, 'The original host is no longer available.');
+      showAppSnackBar(context, 'The original machine is no longer available.');
       return;
     }
     if (host.enabled) {
@@ -2461,7 +2405,7 @@ class _InboxPaneState extends State<InboxPane> {
   Future<void> _usePendingCurrentHost(PendingSendAnalysis analysis) async {
     final host = analysis.host;
     if (host == null) {
-      showAppSnackBar(context, 'The original host is no longer available.');
+      showAppSnackBar(context, 'The original machine is no longer available.');
       return;
     }
     await _outbox.remove(analysis.send);
@@ -2469,7 +2413,7 @@ class _InboxPaneState extends State<InboxPane> {
       hostFingerprint: SessionSendOutboxStore.hostFingerprint(host),
       updatedAt: DateTime.now(),
       nextAttemptAt: DateTime.now(),
-      lastError: 'Host configuration updated. Ready to retry.',
+      lastError: 'Machine configuration updated. Ready to retry.',
       blocked: false,
     );
     await _outbox.upsert(rebound);
@@ -2478,7 +2422,7 @@ class _InboxPaneState extends State<InboxPane> {
     }
     showAppSnackBar(
       context,
-      'Queued message is now bound to the current host configuration.',
+      'Queued message is now bound to the current machine configuration.',
     );
   }
 
@@ -2560,11 +2504,11 @@ class _InboxPaneState extends State<InboxPane> {
             ? Icons.notifications_paused_rounded
             : Icons.checklist_rounded,
         title: widget.hasSavedHosts
-            ? 'No enabled hosts'
+            ? 'No enabled machines'
             : 'Nothing needs attention',
         body: widget.hasSavedHosts
-            ? 'Turn on a saved host to review approvals here.'
-            : 'Add a host to review approvals and stuck messages from anywhere.',
+            ? 'Turn on a saved machine to review approvals here.'
+            : 'Add a machine to review approvals and stuck messages from anywhere.',
       );
     }
 
@@ -2598,7 +2542,7 @@ class _InboxPaneState extends State<InboxPane> {
         physics: const AlwaysScrollableScrollPhysics(),
         padding: widget.dense
             ? const EdgeInsets.fromLTRB(8, 4, 8, 24)
-            : const EdgeInsets.fromLTRB(16, 8, 16, 32),
+            : const EdgeInsets.fromLTRB(16, 8, 16, 88),
         children: [
           if (hasFailures)
             _RecentErrorBanner(
@@ -2661,7 +2605,7 @@ class _InboxPaneState extends State<InboxPane> {
                 icon: Icons.verified_rounded,
                 title: 'Inbox is clear',
                 body:
-                    'Queued sends and agent requests from your nodes will show up here.',
+                    'Queued sends and agent requests from your machines will show up here.',
               ),
           ],
         ],
@@ -2925,19 +2869,19 @@ class _PendingSendActions extends StatelessWidget {
     if (onEnableHost != null)
       _PendingSendAction(
         icon: Icons.play_circle_outline_rounded,
-        label: 'Enable host',
+        label: 'Enable machine',
         onTap: onEnableHost!,
       ),
     if (onFixHost != null)
       _PendingSendAction(
         icon: Icons.tune_rounded,
-        label: 'Fix host',
+        label: 'Fix machine',
         onTap: onFixHost!,
       ),
     if (onUseCurrentHost != null)
       _PendingSendAction(
         icon: Icons.link_rounded,
-        label: 'Use current host',
+        label: 'Use current machine',
         onTap: onUseCurrentHost!,
       ),
     if (onRetryNow != null &&
@@ -3091,18 +3035,18 @@ String _pendingSendDetail(
 String _pendingSendRecoveryMessage(PendingSendAnalysis analysis) {
   return switch (analysis.issue) {
     PendingSendIssueKind.hostDisabled =>
-      'Turn this host back on before retrying.',
+      'Turn this machine back on before retrying.',
     PendingSendIssueKind.hostMissing =>
-      'The original host is gone. Discard this message or bind it again.',
+      'The original machine is gone. Discard this message or bind it again.',
     PendingSendIssueKind.hostChanged =>
-      'This host changed since the message was queued. Check it before retrying.',
+      'This machine changed since the message was queued. Check it before retrying.',
     PendingSendIssueKind.unauthorized =>
-      'This host token is no longer valid. Fix the host, then retry.',
-    PendingSendIssueKind.timeout => 'The host is taking too long to respond.',
-    PendingSendIssueKind.unreachable => "Can't reach this host right now.",
+      'This machine token is no longer valid. Fix the machine, then retry.',
+    PendingSendIssueKind.timeout => 'The machine is taking too long to respond.',
+    PendingSendIssueKind.unreachable => "Can't reach this machine right now.",
     PendingSendIssueKind.server =>
-      'The host reported a temporary server problem.',
-    PendingSendIssueKind.rateLimited => 'The host is rate limited right now.',
+      'The machine reported a temporary server problem.',
+    PendingSendIssueKind.rateLimited => 'The machine is rate limited right now.',
     PendingSendIssueKind.unknown =>
       analysis.send.lastError ??
           'This message needs attention before retrying.',
@@ -3138,9 +3082,9 @@ IconData _pendingSendStateIcon(PendingSendDisplayState state) {
 String? _pendingSendIssueLabel(PendingSendIssueKind issue) {
   return switch (issue) {
     PendingSendIssueKind.none => null,
-    PendingSendIssueKind.hostDisabled => 'host disabled',
-    PendingSendIssueKind.hostMissing => 'host missing',
-    PendingSendIssueKind.hostChanged => 'host changed',
+    PendingSendIssueKind.hostDisabled => 'machine disabled',
+    PendingSendIssueKind.hostMissing => 'machine missing',
+    PendingSendIssueKind.hostChanged => 'machine changed',
     PendingSendIssueKind.unauthorized => 'bad token',
     PendingSendIssueKind.timeout => 'timeout',
     PendingSendIssueKind.unreachable => 'offline',
@@ -3622,9 +3566,9 @@ class _SquareIconAction extends StatelessWidget {
       waitDuration: const Duration(milliseconds: 400),
       child: Material(
         color: background,
-        borderRadius: BorderRadius.circular(6),
+        borderRadius: AppShapes.badge,
         child: InkWell(
-          borderRadius: BorderRadius.circular(6),
+          borderRadius: AppShapes.badge,
           onTap: onTap,
           onSecondaryTapDown: onSecondaryTap == null
               ? null
@@ -3715,7 +3659,7 @@ class HostsPane extends StatelessWidget {
         child: MeshEmptyState(
           icon: Icons.route_rounded,
           title: 'No machines yet',
-          body: 'Use Add host above to connect a laptop, desktop, or server.',
+          body: 'Use Add machine above to connect a laptop, desktop, or server.',
         ),
       );
     }
@@ -3807,7 +3751,7 @@ class _HostRowCard extends StatelessWidget {
             color: Colors.transparent,
             child: InkWell(
               onTap: onTap,
-              borderRadius: BorderRadius.circular(AppRadii.control),
+              borderRadius: AppShapes.input,
               child: AnimatedContainer(
                 duration: const Duration(milliseconds: 120),
                 padding: const EdgeInsets.fromLTRB(10, 9, 6, 10),
@@ -3815,7 +3759,7 @@ class _HostRowCard extends StatelessWidget {
                   color: selected
                       ? colors.accentMuted.withValues(alpha: 0.48)
                       : Colors.transparent,
-                  borderRadius: BorderRadius.circular(AppRadii.control),
+                  borderRadius: AppShapes.input,
                 ),
                 child: Row(
                   children: [
@@ -3938,7 +3882,7 @@ class _HostRowCard extends StatelessWidget {
                         height: AppSizes.compactControl,
                         decoration: BoxDecoration(
                           color: colors.accentMuted,
-                          borderRadius: BorderRadius.circular(AppRadii.control),
+                          borderRadius: AppShapes.input,
                         ),
                         alignment: Alignment.center,
                         child: Icon(
@@ -4125,11 +4069,11 @@ class _HostRowActionsMenu extends StatelessWidget {
   Widget build(BuildContext context) {
     final colors = context.colors;
     return PopupMenuButton<_HostRowAction>(
-      tooltip: 'Host actions',
+      tooltip: 'Machine actions',
       position: PopupMenuPosition.under,
       color: colors.surfaceElevated,
       shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(AppRadii.control),
+        borderRadius: AppShapes.input,
         side: BorderSide(color: colors.border),
       ),
       onSelected: (action) {
@@ -4149,7 +4093,7 @@ class _HostRowActionsMenu extends StatelessWidget {
             icon: hostEnabled
                 ? Icons.pause_circle_outline_rounded
                 : Icons.play_circle_outline_rounded,
-            label: hostEnabled ? 'Disable host' : 'Enable host',
+            label: hostEnabled ? 'Disable machine' : 'Enable machine',
             color: hostEnabled ? colors.textSecondary : colors.accent,
           ),
         ),
@@ -4157,7 +4101,7 @@ class _HostRowActionsMenu extends StatelessWidget {
           value: _HostRowAction.edit,
           child: _HostActionMenuItem(
             icon: Icons.edit_rounded,
-            label: 'Edit host',
+            label: 'Edit machine',
             color: colors.textSecondary,
           ),
         ),
@@ -4165,7 +4109,7 @@ class _HostRowActionsMenu extends StatelessWidget {
           value: _HostRowAction.remove,
           child: _HostActionMenuItem(
             icon: Icons.delete_outline,
-            label: 'Remove host',
+            label: 'Remove machine',
             color: colors.danger,
           ),
         ),
@@ -4323,7 +4267,7 @@ class _HostEditorSheetState extends State<HostEditorSheet> {
     showAppSnackBar(
       context,
       probe == null
-          ? 'QR scanned, but this device could not reach the host.'
+          ? 'QR scanned, but this device could not reach the machine.'
           : 'Connected to ${payload.label}',
     );
   }
@@ -4495,7 +4439,7 @@ class _HostEditorSheetState extends State<HostEditorSheet> {
                 Row(
                   children: [
                     Expanded(
-                      child: OutlinedButton.icon(
+                      child: FilledButton.tonalIcon(
                         onPressed: _testing ? null : _testConnection,
                         icon: _testing
                             ? const SizedBox(
@@ -4547,7 +4491,7 @@ class _HostEditorSheetState extends State<HostEditorSheet> {
     if (widget.fullPage) {
       return Scaffold(
         backgroundColor: context.colors.canvas,
-        appBar: AppBar(title: Text(isEditing ? 'Edit host' : 'Add host')),
+        appBar: AppBar(title: Text(isEditing ? 'Edit machine' : 'Add machine')),
         body: SafeArea(
           child: AppContentColumn(
             maxWidth: 560,
@@ -4568,7 +4512,7 @@ class _HostEditorSheetState extends State<HostEditorSheet> {
       padding: EdgeInsets.only(bottom: bottom),
       child: MeshBottomSheetScaffold(
         icon: isEditing ? Icons.edit_note_rounded : Icons.add_link_rounded,
-        title: isEditing ? 'Edit host' : 'Add host',
+        title: isEditing ? 'Edit machine' : 'Add machine',
         description: isEditing
             ? 'Update this machine connection.'
             : 'Connect a laptop, desktop, or server.',
@@ -4825,7 +4769,7 @@ class _HostEditorFooter extends StatelessWidget {
         final saveButton = FilledButton.icon(
           onPressed: onSubmit,
           icon: const Icon(Icons.check_rounded),
-          label: Text(isEditing ? 'Save changes' : 'Save host'),
+          label: Text(isEditing ? 'Save changes' : 'Save machine'),
         );
         if (compact) {
           return Column(
@@ -4870,7 +4814,7 @@ class _RecentErrorBanner extends StatelessWidget {
     final theme = Theme.of(context);
     final summary = hostLabels.length == 1
         ? 'Cannot reach ${hostLabels.first}.'
-        : 'Cannot reach ${hostLabels.length} hosts: ${hostLabels.join(', ')}.';
+        : 'Cannot reach ${hostLabels.length} machines: ${hostLabels.join(', ')}.';
     return Container(
       margin: const EdgeInsets.fromLTRB(16, 8, 16, 4),
       padding: const EdgeInsets.fromLTRB(14, 10, 10, 10),
@@ -4933,10 +4877,10 @@ class _MobileClientUpdateBanner extends StatelessWidget {
       preferred: accent,
     );
     final title = requiresUpdate
-        ? 'Update this app to keep using some hosts'
+        ? 'Update this app to keep using some machines'
         : 'A newer Sidemesh mobile build is recommended';
     final count = notice.affectedHostCount;
-    final hostSummary = count == 1 ? notice.primaryHost.label : '$count hosts';
+    final hostSummary = count == 1 ? notice.primaryHost.label : '$count machines';
     final verb = count == 1
         ? (requiresUpdate ? 'requires' : 'recommends')
         : (requiresUpdate ? 'require' : 'recommend');
@@ -4950,11 +4894,11 @@ class _MobileClientUpdateBanner extends StatelessWidget {
     } else if (requiresUpdate) {
       body =
           'Update to Sidemesh mobile $targetVersion or newer to keep using '
-          '$count hosts. You are on $installedVersion.';
+          '$count machines. You are on $installedVersion.';
     } else {
       body =
           'Update to Sidemesh mobile $targetVersion or newer to satisfy '
-          'recommendations from $count hosts. You are on $installedVersion.';
+          'recommendations from $count machines. You are on $installedVersion.';
     }
 
     return Container(
@@ -5016,7 +4960,7 @@ class _MobileClientUpdateBanner extends StatelessWidget {
                         ),
                         icon: const Icon(Icons.visibility_rounded, size: 16),
                         label: Text(
-                          count == 1 ? 'Review host' : 'Review hosts',
+                          count == 1 ? 'Review machine' : 'Review machines',
                         ),
                       ),
                       if (onDismiss != null)

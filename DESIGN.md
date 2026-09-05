@@ -4,12 +4,34 @@ Sidemesh is a control surface for coding agents used on both phones and
 desktops. The interface should feel calm, direct, and native enough to
 disappear while someone is monitoring or steering real work.
 
+## Interface rules
+
+1. **Canvas, not cards.** Prose sits on the background. Borders are for inputs,
+   code blocks, and terminal output.
+2. **Rows are one line.** Glyph, title, status. Move information constant across
+   a group into its header; search results may add a matching snippet.
+3. **Group by workspace.** The folder is the unit. Show the machine only when
+   more than one is in play. Preserve repository grouping across worktrees.
+4. **Status is a word.** Avoid repeating one state as a dot, badge, and border.
+5. **Chrome on demand.** Show timestamps, copy, and pin on hover, keyboard focus,
+   or long-press. Suppress repeated timestamps within the same minute.
+6. **Serif for reading.** Source Serif 4 is the agent document face. Mono stays
+   for commands, branches, and diffs. Interface controls retain the user's font
+   choice; system sans remains the default and Brand Sans remains opt-in.
+
+## Colour budget
+
+Keep the Nord palette and existing theme choices. Use accent for things wanting
+human attention: needs-review groups, attention indicators, and send. Green/red
+identify diff numerals; green also identifies live machines and running sessions.
+Use neutral text for ordinary metadata. Do not use inventory counts as attention
+badges. Retain the desktop rail and show pending actions in the Sessions pane.
+
 ## Hierarchy
 
 - The canvas establishes the page. Do not place a card around the page itself.
 - Use plain headings and rows for structure. A filled surface groups related
-  information; a border identifies a control, selection, warning, or explicit
-  boundary.
+  information; a border identifies an input, code block, terminal output, or error.
 - Never place a bordered card inside another bordered card.
 - Keep one obvious primary action per region. Put uncommon recovery and
   destructive actions in an overflow menu.
@@ -44,8 +66,7 @@ disappear while someone is monitoring or steering real work.
   for short choices or transient actions. Do not place another floating card
   around the sheet. Long setup and browsing flows remain full pages.
 - `MeshSurface` and `MeshCard` may be borderless when fill and spacing already
-  establish grouping. Reserve `bordered: true` for inputs, selection, errors,
-  warnings, and independently actionable objects.
+  establish grouping. Reserve `bordered: true` for inputs and errors.
 - Adjacent composer controls share one stable visual shell. Inherited and
   overridden values must not look like different kinds of control.
 - Pills are metadata or status, not general-purpose buttons.

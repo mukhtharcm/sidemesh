@@ -47,7 +47,7 @@ void main() {
 
       await tester.pumpAndSettle();
 
-      expect(find.text('Use current host'), findsOneWidget);
+      expect(find.text('Use current machine'), findsOneWidget);
       expect(find.text('Discard'), findsNothing);
       expect(find.byTooltip('More actions'), findsOneWidget);
 
@@ -57,7 +57,7 @@ void main() {
       await tester.tapAt(const Offset(4, 4));
       await tester.pumpAndSettle();
 
-      await tester.tap(find.text('Use current host'));
+      await tester.tap(find.text('Use current machine'));
       await tester.pumpAndSettle();
 
       final loaded = await store.loadAll();

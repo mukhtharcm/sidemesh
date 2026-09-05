@@ -382,7 +382,7 @@ class _WorkspaceRootError extends StatelessWidget {
           ? 'Workspace unavailable'
           : 'Could not load files',
       body: _workspaceUnavailable
-          ? 'Sidemesh could not resolve this session’s folder on the host. '
+          ? 'Sidemesh could not resolve this session’s folder on the machine. '
                 'It may have moved, been removed, or still be reconnecting.'
           : friendlyError(error),
       action: TextButton.icon(

@@ -20,7 +20,7 @@ class _OfflineTranscriptStrip extends StatelessWidget {
       child: Row(
         children: [
           Icon(Icons.wifi_off_rounded, size: 15, color: colors.warning),
-          const SizedBox(width: 8),
+          const SizedBox(width: AppSpacing.sm),
           Expanded(
             child: Text(
               text,
@@ -33,7 +33,7 @@ class _OfflineTranscriptStrip extends StatelessWidget {
             ),
           ),
           if (onRetry != null) ...[
-            const SizedBox(width: 8),
+            const SizedBox(width: AppSpacing.sm),
             TextButton(
               onPressed: onRetry,
               style: TextButton.styleFrom(
@@ -131,7 +131,7 @@ class _SessionActionSheet extends StatelessWidget {
                     ),
                   ),
                 ),
-                const SizedBox(height: 14),
+                const SizedBox(height: AppSpacing.lg),
               ],
               Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -153,7 +153,7 @@ class _SessionActionSheet extends StatelessWidget {
                       color: colors.accent,
                     ),
                   ),
-                  const SizedBox(width: 12),
+                  const SizedBox(width: AppSpacing.md),
                   Expanded(
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
@@ -167,7 +167,7 @@ class _SessionActionSheet extends StatelessWidget {
                                 letterSpacing: -0.2,
                               ),
                         ),
-                        const SizedBox(height: 2),
+                        const SizedBox(height: AppSpacing.xs),
                         Text(
                           session.title,
                           maxLines: 1,
@@ -190,7 +190,7 @@ class _SessionActionSheet extends StatelessWidget {
                     ),
                 ],
               ),
-              const SizedBox(height: 14),
+              const SizedBox(height: AppSpacing.lg),
               for (var index = 0; index < visibleGroups.length; index++)
                 Padding(
                   padding: EdgeInsets.only(
@@ -250,7 +250,7 @@ class _SessionActionGroupCard extends StatelessWidget {
         DecoratedBox(
           decoration: BoxDecoration(
             color: colors.surface,
-            borderRadius: BorderRadius.circular(AppRadii.control),
+            borderRadius: AppShapes.input,
             border: Border.all(color: colors.border),
           ),
           child: Column(
@@ -376,7 +376,7 @@ class _JumpToLatestPill extends StatelessWidget {
             mainAxisSize: MainAxisSize.min,
             children: [
               Icon(Icons.arrow_downward_rounded, size: 16, color: foreground),
-              const SizedBox(width: 6),
+              const SizedBox(width: AppSpacing.sm),
               Text(
                 'Jump to latest',
                 style: Theme.of(context).textTheme.labelMedium?.copyWith(
@@ -398,45 +398,21 @@ class _SessionAppBarSubtitle extends StatelessWidget {
   const _SessionAppBarSubtitle({
     required this.host,
     required this.session,
-    required this.gitStatus,
-    required this.showGit,
     required this.running,
     required this.verifying,
-    required this.pinnedCount,
-    required this.pinnedActive,
-    required this.onPinnedTap,
     required this.onDetails,
-    required this.onGitDetails,
   });
 
   final HostProfile host;
   final SessionSummary session;
-  final SessionGitStatus? gitStatus;
-  final bool showGit;
   final bool running;
   final bool verifying;
-  final int pinnedCount;
-  final bool pinnedActive;
-  final VoidCallback onPinnedTap;
   final VoidCallback onDetails;
-  final VoidCallback onGitDetails;
-
-  String _shortFolder(String cwd) {
-    if (cwd.isEmpty) return '~';
-    final trimmed = cwd.endsWith('/') ? cwd.substring(0, cwd.length - 1) : cwd;
-    final slash = trimmed.lastIndexOf('/');
-    if (slash < 0 || slash == trimmed.length - 1) return trimmed;
-    return trimmed.substring(slash + 1);
-  }
 
   @override
   Widget build(BuildContext context) {
     final colors = context.colors;
-    final folder = _shortFolder(session.cwd);
-    final gitLabel = showGit ? _gitHeaderLabel(session, gitStatus) : null;
-    final contextLabel = _contextUsageShortLabel(session.runtime);
-    final contextTone = _contextUsageTone(session.runtime);
-    final gitDirty = gitStatus?.dirty ?? false;
+    final folder = workspaceLabel(session.cwd);
     return Material(
       color: Colors.transparent,
       child: InkWell(
@@ -463,7 +439,7 @@ class _SessionAppBarSubtitle extends StatelessWidget {
                         ),
                       ),
               ),
-              const SizedBox(width: 6),
+              const SizedBox(width: AppSpacing.sm),
               Expanded(
                 child: Text(
                   '${host.label} · $folder',
@@ -475,131 +451,12 @@ class _SessionAppBarSubtitle extends StatelessWidget {
                   ),
                 ),
               ),
-              if (session.provider != null) ...[
-                const SizedBox(width: 8),
-                AgentProviderBadge(
-                  providerKind: session.provider,
-                  compact: true,
-                ),
-              ],
-              if (gitLabel != null && gitDirty) ...[
-                const SizedBox(width: 6),
-                _CompactMetaChip(
-                  label: '${gitStatus?.changed ?? 0}',
-                  icon: Icons.account_tree_rounded,
-                  color: colors.warning,
-                  onTap: onGitDetails,
-                ),
-              ],
-              if (contextLabel != null) ...[
-                const SizedBox(width: 6),
-                _CompactMetaChip(
-                  label: contextLabel,
-                  icon: Icons.data_usage_rounded,
-                  color: switch (contextTone) {
-                    MeshPillTone.danger => colors.danger,
-                    MeshPillTone.warning => colors.warning,
-                    _ => colors.textSecondary,
-                  },
-                ),
-              ],
-              if (pinnedCount > 0) ...[
-                const SizedBox(width: 6),
-                _CompactMetaChip(
-                  label: '$pinnedCount',
-                  icon: Icons.push_pin_rounded,
-                  color: pinnedActive ? colors.accent : colors.textSecondary,
-                  onTap: onPinnedTap,
-                ),
-              ],
-              const SizedBox(width: 6),
-              Icon(Icons.info_outline_rounded, size: 14, color: colors.accent),
             ],
           ),
         ),
       ),
     );
   }
-}
-
-class _CompactMetaChip extends StatelessWidget {
-  const _CompactMetaChip({
-    required this.label,
-    required this.icon,
-    required this.color,
-    this.onTap,
-  });
-
-  final String label;
-  final IconData icon;
-  final Color color;
-  final VoidCallback? onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    final colors = context.colors;
-    final content = Container(
-      height: 22,
-      padding: const EdgeInsets.symmetric(horizontal: 7),
-      decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.09),
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: color.withValues(alpha: 0.18)),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(icon, size: 12, color: color),
-          const SizedBox(width: 4),
-          Text(
-            label,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: monoStyle(
-              color: colors.textPrimary,
-              fontSize: 10.5,
-              fontWeight: FontWeight.w800,
-            ),
-          ),
-        ],
-      ),
-    );
-    if (onTap == null) {
-      return content;
-    }
-    return GestureDetector(onTap: onTap, child: content);
-  }
-}
-
-String? _contextUsageShortLabel(SessionRuntimeSummary? runtime) {
-  final context = runtime?.telemetry?.contextWindow;
-  if (context == null || context.tokenLimit <= 0) {
-    return null;
-  }
-  if (context.currentTokens == null) {
-    return '?%';
-  }
-  final usedPercent = ((context.currentTokens! / context.tokenLimit) * 100)
-      .clamp(0, 100)
-      .round();
-  return '$usedPercent%';
-}
-
-MeshPillTone _contextUsageTone(SessionRuntimeSummary? runtime) {
-  final context = runtime?.telemetry?.contextWindow;
-  if (context == null ||
-      context.tokenLimit <= 0 ||
-      context.currentTokens == null) {
-    return MeshPillTone.neutral;
-  }
-  final used = context.currentTokens! / context.tokenLimit;
-  if (used >= 0.9) {
-    return MeshPillTone.danger;
-  }
-  if (used >= 0.75) {
-    return MeshPillTone.warning;
-  }
-  return MeshPillTone.neutral;
 }
 
 class _HeaderStatusDot extends StatelessWidget {
@@ -661,7 +518,7 @@ class _GitDetailsSheet extends StatelessWidget {
                 label: const Text('Refresh'),
               ),
             ),
-            const SizedBox(height: 12),
+            const SizedBox(height: AppSpacing.md),
             if (loading && status == null)
               const _GitDetailsLoadingState()
             else if (status != null && !status!.isRepo)
@@ -716,7 +573,7 @@ class _GitDetailsSheet extends StatelessWidget {
                     ),
                 ],
               ),
-              const SizedBox(height: 16),
+              const SizedBox(height: AppSpacing.lg),
               MeshCard(
                 tone: MeshCardTone.muted,
                 padding: const EdgeInsets.all(14),
@@ -740,7 +597,7 @@ class _GitDetailsSheet extends StatelessWidget {
                   ],
                 ),
               ),
-              const SizedBox(height: 14),
+              const SizedBox(height: AppSpacing.lg),
               Wrap(
                 spacing: 8,
                 runSpacing: 8,
@@ -765,7 +622,7 @@ class _GitDetailsSheet extends StatelessWidget {
                     fontWeight: AppWeights.title,
                   ),
                 ),
-                const SizedBox(height: 10),
+                const SizedBox(height: AppSpacing.sm),
                 MeshCard(
                   padding: EdgeInsets.zero,
                   child: Column(
@@ -816,7 +673,7 @@ class _GitDetailsLoadingState extends StatelessWidget {
               MeshSkeleton(width: 96, height: 24, radius: 999),
             ],
           ),
-          SizedBox(height: 16),
+          SizedBox(height: AppSpacing.lg),
           MeshCard(
             tone: MeshCardTone.muted,
             padding: EdgeInsets.all(14),
@@ -824,13 +681,13 @@ class _GitDetailsLoadingState extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 MeshSkeleton(height: 12),
-                SizedBox(height: 10),
+                SizedBox(height: AppSpacing.sm),
                 FractionallySizedBox(
                   widthFactor: 0.76,
                   alignment: Alignment.centerLeft,
                   child: MeshSkeleton(height: 12),
                 ),
-                SizedBox(height: 10),
+                SizedBox(height: AppSpacing.sm),
                 FractionallySizedBox(
                   widthFactor: 0.58,
                   alignment: Alignment.centerLeft,
@@ -839,7 +696,7 @@ class _GitDetailsLoadingState extends StatelessWidget {
               ],
             ),
           ),
-          SizedBox(height: 14),
+          SizedBox(height: AppSpacing.lg),
           Wrap(
             spacing: 8,
             runSpacing: 8,
@@ -854,7 +711,7 @@ class _GitDetailsLoadingState extends StatelessWidget {
             titleWidthFactor: 0.22,
             subtitleWidthFactor: 0.4,
           ),
-          SizedBox(height: 10),
+          SizedBox(height: AppSpacing.sm),
           MeshCard(
             padding: EdgeInsets.zero,
             child: Column(
@@ -1027,7 +884,7 @@ class _GitDiffLoadingState extends StatelessWidget {
             titleWidthFactor: 0.2,
             subtitleWidthFactor: 0.36,
           ),
-          SizedBox(height: 12),
+          SizedBox(height: AppSpacing.md),
           MeshCard(
             tone: MeshCardTone.muted,
             padding: EdgeInsets.all(14),
@@ -1035,37 +892,37 @@ class _GitDiffLoadingState extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 MeshSkeleton(height: 12),
-                SizedBox(height: 8),
+                SizedBox(height: AppSpacing.sm),
                 FractionallySizedBox(
                   widthFactor: 0.78,
                   alignment: Alignment.centerLeft,
                   child: MeshSkeleton(height: 12),
                 ),
-                SizedBox(height: 8),
+                SizedBox(height: AppSpacing.sm),
                 FractionallySizedBox(
                   widthFactor: 0.64,
                   alignment: Alignment.centerLeft,
                   child: MeshSkeleton(height: 12),
                 ),
-                SizedBox(height: 16),
+                SizedBox(height: AppSpacing.lg),
                 MeshSkeleton(height: 10),
-                SizedBox(height: 6),
+                SizedBox(height: AppSpacing.sm),
                 MeshSkeleton(height: 10),
-                SizedBox(height: 6),
+                SizedBox(height: AppSpacing.sm),
                 FractionallySizedBox(
                   widthFactor: 0.7,
                   alignment: Alignment.centerLeft,
                   child: MeshSkeleton(height: 10),
                 ),
-                SizedBox(height: 14),
+                SizedBox(height: AppSpacing.lg),
                 MeshSkeleton(height: 10),
-                SizedBox(height: 6),
+                SizedBox(height: AppSpacing.sm),
                 FractionallySizedBox(
                   widthFactor: 0.82,
                   alignment: Alignment.centerLeft,
                   child: MeshSkeleton(height: 10),
                 ),
-                SizedBox(height: 6),
+                SizedBox(height: AppSpacing.sm),
                 FractionallySizedBox(
                   widthFactor: 0.58,
                   alignment: Alignment.centerLeft,
@@ -1166,7 +1023,7 @@ class _PinnedMessageSheet extends StatelessWidget {
                   tone: colors.textSecondary,
                   accent: colors.accent,
                 ),
-              if (pin.hasText) const SizedBox(width: 6),
+              if (pin.hasText) const SizedBox(width: AppSpacing.sm),
               TextButton.icon(
                 onPressed: onUnpin,
                 icon: const Icon(Icons.push_pin_rounded, size: 17),
@@ -1174,7 +1031,7 @@ class _PinnedMessageSheet extends StatelessWidget {
               ),
             ],
           ),
-          const SizedBox(height: 10),
+          const SizedBox(height: AppSpacing.sm),
           Wrap(
             spacing: 8,
             runSpacing: 8,
@@ -1203,7 +1060,7 @@ class _PinnedMessageSheet extends StatelessWidget {
                 ),
             ],
           ),
-          const SizedBox(height: 14),
+          const SizedBox(height: AppSpacing.lg),
           Expanded(
             child: MeshCard(
               tone: MeshCardTone.muted,
@@ -1373,7 +1230,7 @@ class _PendingActionCardState extends State<_PendingActionCard> {
                 ),
               ],
             ),
-            const SizedBox(height: 8),
+            const SizedBox(height: AppSpacing.sm),
             Flexible(
               child: SingleChildScrollView(
                 child: Column(
@@ -1387,7 +1244,7 @@ class _PendingActionCardState extends State<_PendingActionCard> {
                       ),
                     ),
                     if (action.detail.isNotEmpty) ...[
-                      const SizedBox(height: 8),
+                      const SizedBox(height: AppSpacing.sm),
                       Text(
                         action.detail,
                         style: Theme.of(context).textTheme.bodyMedium?.copyWith(
@@ -1396,17 +1253,17 @@ class _PendingActionCardState extends State<_PendingActionCard> {
                       ),
                     ],
                     if (action.isUserInput) ...[
-                      const SizedBox(height: 12),
+                      const SizedBox(height: AppSpacing.md),
                       _buildUserInputBody(context, action.userInput!),
                     ] else if (action.isElicitation) ...[
-                      const SizedBox(height: 12),
+                      const SizedBox(height: AppSpacing.md),
                       _buildElicitationBody(context, action.elicitation!),
                     ],
                   ],
                 ),
               ),
             ),
-            const SizedBox(height: 14),
+            const SizedBox(height: AppSpacing.lg),
             Wrap(
               spacing: 8,
               runSpacing: 8,
@@ -1449,7 +1306,7 @@ class _PendingActionCardState extends State<_PendingActionCard> {
                 )
                 .toList(growable: false),
           ),
-          if (prompt.allowFreeform) const SizedBox(height: 12),
+          if (prompt.allowFreeform) const SizedBox(height: AppSpacing.md),
         ],
         if (prompt.allowFreeform || choices.isEmpty)
           TextField(
@@ -1506,7 +1363,7 @@ class _PendingActionCardState extends State<_PendingActionCard> {
             ),
           ),
         if (elicitation.mode == 'url' && (elicitation.url ?? '').isNotEmpty)
-          const SizedBox(height: 12),
+          const SizedBox(height: AppSpacing.md),
         if (elicitation.fields.isEmpty)
           Text(
             'No structured fields were provided for this request.',
@@ -1550,7 +1407,7 @@ class _PendingActionCardState extends State<_PendingActionCard> {
                   children: [
                     Text(label),
                     if (field.description != null) ...[
-                      const SizedBox(height: 2),
+                      const SizedBox(height: AppSpacing.xs),
                       Text(
                         field.description!,
                         style: Theme.of(context).textTheme.bodySmall?.copyWith(
@@ -1595,7 +1452,7 @@ class _PendingActionCardState extends State<_PendingActionCard> {
               ).textTheme.labelLarge?.copyWith(fontWeight: FontWeight.w700),
             ),
             if (field.description != null) ...[
-              const SizedBox(height: 4),
+              const SizedBox(height: AppSpacing.xs),
               Text(
                 field.description!,
                 style: Theme.of(
@@ -1603,7 +1460,7 @@ class _PendingActionCardState extends State<_PendingActionCard> {
                 ).textTheme.bodySmall?.copyWith(color: colors.textSecondary),
               ),
             ],
-            const SizedBox(height: 8),
+            const SizedBox(height: AppSpacing.sm),
             Wrap(
               spacing: 8,
               runSpacing: 8,
@@ -2019,7 +1876,7 @@ class _HistoryTruncationCard extends StatelessWidget {
       child: Row(
         children: [
           Icon(Icons.history_rounded, size: 14, color: colors.textSecondary),
-          const SizedBox(width: 8),
+          const SizedBox(width: AppSpacing.sm),
           Expanded(
             child: Text(
               hiddenParts.isEmpty
@@ -2033,7 +1890,7 @@ class _HistoryTruncationCard extends StatelessWidget {
               ),
             ),
           ),
-          const SizedBox(width: 8),
+          const SizedBox(width: AppSpacing.sm),
           if (loading)
             const SizedBox(
               width: 12,
@@ -2043,7 +1900,7 @@ class _HistoryTruncationCard extends StatelessWidget {
           else
             InkWell(
               onTap: onLoadOlderHistory,
-              borderRadius: BorderRadius.circular(6),
+              borderRadius: AppShapes.badge,
               child: Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                 child: Text(

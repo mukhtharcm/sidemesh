@@ -392,7 +392,7 @@ class _HostDetailScreenState extends State<HostDetailScreen>
         if (snapshot.hasError) {
           return MeshEmptyState(
             icon: Icons.wifi_off_rounded,
-            title: 'Could not reach host',
+            title: 'Could not reach machine',
             body: friendlyError(snapshot.error!),
           );
         }
@@ -860,17 +860,17 @@ class _MobileClientCompatibilityCard extends StatelessWidget {
         : 'Current mobile app version is unavailable on this device.';
     final guidance = switch (compatibility.level) {
       MobileClientCompatibilityLevel.required =>
-        'This host requires Sidemesh mobile ${mobileClientVersionLabel(compatibility.targetVersion)} or newer.',
+        'This machine requires Sidemesh mobile ${mobileClientVersionLabel(compatibility.targetVersion)} or newer.',
       MobileClientCompatibilityLevel.recommended =>
-        'This host recommends Sidemesh mobile ${mobileClientVersionLabel(compatibility.targetVersion)} or newer.',
+        'This machine recommends Sidemesh mobile ${mobileClientVersionLabel(compatibility.targetVersion)} or newer.',
       MobileClientCompatibilityLevel.none =>
         node.minimumMobileClientVersion != null &&
                 node.minimumMobileClientVersion!.isNotEmpty
-            ? 'This host currently supports Sidemesh mobile ${mobileClientVersionLabel(node.minimumMobileClientVersion!)} or newer.'
+            ? 'This machine currently supports Sidemesh mobile ${mobileClientVersionLabel(node.minimumMobileClientVersion!)} or newer.'
             : node.recommendedMobileClientVersion != null &&
                   node.recommendedMobileClientVersion!.isNotEmpty
-            ? 'This host currently recommends Sidemesh mobile ${mobileClientVersionLabel(node.recommendedMobileClientVersion!)} or newer.'
-            : 'This host did not publish a mobile client policy.',
+            ? 'This machine currently recommends Sidemesh mobile ${mobileClientVersionLabel(node.recommendedMobileClientVersion!)} or newer.'
+            : 'This machine did not publish a mobile client policy.',
     };
 
     return MeshCard(

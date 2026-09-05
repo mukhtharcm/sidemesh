@@ -1,14 +1,12 @@
 import 'package:flutter/material.dart';
 
 import '../models.dart';
+import '../workspace_label.dart';
 import '../relative_time_ticker.dart';
 import '../search_query.dart';
 import '../session_read_store.dart';
 import '../theme/app_colors.dart';
-import '../theme/app_theme.dart';
 import '../theme/app_tokens.dart';
-import 'mesh_widgets.dart';
-import 'provider_badge.dart';
 
 /// Returns a short human-readable label for how long ago [updatedAt] was.
 String sessionTimeLabel(DateTime updatedAt) {
@@ -18,19 +16,6 @@ String sessionTimeLabel(DateTime updatedAt) {
   if (elapsed.inHours < 24) return '${elapsed.inHours}h ago';
   if (elapsed.inDays < 7) return '${elapsed.inDays}d ago';
   return '${(elapsed.inDays / 7).floor()}w ago';
-}
-
-String _workspaceLabel(String cwd) {
-  final trimmed = cwd.trim();
-  if (trimmed.isEmpty) return 'Workspace';
-  final parts = trimmed.split(RegExp(r'[\\/]'));
-  for (var i = parts.length - 1; i >= 0; i -= 1) {
-    final part = parts[i].trim();
-    if (part.isNotEmpty) {
-      return part;
-    }
-  }
-  return trimmed;
 }
 
 /// The canonical session list card used on both the Recent tab and the Host
@@ -48,10 +33,10 @@ class SessionRowCard extends StatelessWidget {
     this.dense = false,
     this.query = '',
     this.showHost = true,
+    this.showWorkspace = true,
+    this.showProvider = false,
 
-    /// When set, replaces the default "host · workspace" secondary line in
-    /// the dense sidebar variant. Used by grouped views to show the git
-    /// branch name instead of the folder (which is already the group header).
+    /// Optional inline metadata for ungrouped rows.
     this.secondaryLabel,
   });
 
@@ -62,6 +47,8 @@ class SessionRowCard extends StatelessWidget {
   final bool dense;
   final String query;
   final bool showHost;
+  final bool showWorkspace;
+  final bool showProvider;
   final String? secondaryLabel;
   final VoidCallback onTap;
   final VoidCallback onToggleFavorite;
@@ -87,441 +74,98 @@ class SessionRowCard extends StatelessWidget {
     bool unread,
   ) {
     final theme = Theme.of(context);
-    final workspaceLabel = _workspaceLabel(session.cwd);
-    final supportingText = session.matchSnippet?.isNotEmpty == true
-        ? session.matchSnippet!
-        : session.preview;
-    if (dense) {
-      // Compact variant for the desktop sidebar — plain InkWell with tinted
-      // selection fill, no card chrome.
-      final bgColor = selected
-          ? colors.accentMuted.withValues(alpha: 0.48)
-          : Colors.transparent;
-      return Material(
-        color: Colors.transparent,
+    final needsYou = session.status == 'waiting_for_approval' ||
+        session.status == 'waiting_for_input';
+    final status = needsYou ? 'Needs you' : running ? 'Running' :
+        switch (session.status) {
+          'failed' || 'errored' => 'Failed',
+          'queued' => 'Queued',
+          'blocked' => 'Blocked',
+          'stale' => 'Stale',
+          _ => null,
+        };
+    final metadata = [
+      if (showHost) host.label,
+      if (showWorkspace) workspaceLabel(session.cwd),
+      if (secondaryLabel?.isNotEmpty == true) secondaryLabel!,
+      if (showProvider && session.provider != null) session.provider!,
+    ].join(' · ');
+    return Semantics(
+      label: [session.title, if (metadata.isNotEmpty) metadata, ?status].join(', '),
+      child: Material(
+        color: selected ? colors.surfaceMuted : Colors.transparent,
+        borderRadius: AppShapes.badge,
         child: InkWell(
-          onTap: onTap,
           borderRadius: AppShapes.badge,
-          child: AnimatedContainer(
-            duration: const Duration(milliseconds: 120),
-            padding: const EdgeInsets.fromLTRB(10, 9, 8, 10),
-            decoration: BoxDecoration(
-              color: bgColor,
-              borderRadius: AppShapes.badge,
-            ),
-            child: Row(
+          onTap: onTap,
+          onLongPress: onToggleFavorite,
+          child: Padding(
+            padding: EdgeInsets.symmetric(horizontal: AppSpacing.sm, vertical: dense ? 0 : AppSpacing.xs),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Padding(
-                  padding: const EdgeInsets.only(top: 5),
-                  child: running
-                      ? LivePulse(color: colors.success)
-                      : Container(
-                          width: 6,
-                          height: 6,
-                          decoration: BoxDecoration(
-                            color: selected
-                                ? colors.accent
-                                : colors.textTertiary.withValues(alpha: 0.35),
-                            shape: BoxShape.circle,
-                          ),
-                        ),
-                ),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    mainAxisSize: MainAxisSize.min,
+                ConstrainedBox(
+                  constraints: BoxConstraints(minHeight: dense ? AppSizes.compactControl : AppSizes.menuItem),
+                  child: Row(
                     children: [
-                      Row(
-                        children: [
-                          Expanded(
-                            child: Text(
-                              session.title,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: theme.textTheme.bodyMedium?.copyWith(
-                                fontWeight: AppWeights.body,
-                                height: 1.25,
-                                color: colors.textPrimary,
-                              ),
-                            ),
-                          ),
-                        ],
+                      SizedBox.square(
+                        dimension: AppSizes.compactIcon,
+                        child: Center(child: Icon(
+                          session.isSubAgent ? Icons.account_tree_outlined
+                              : unread ? Icons.circle : Icons.circle_outlined,
+                          size: session.isSubAgent ? AppSizes.compactIcon : 6,
+                          color: unread ? colors.accent : colors.textTertiary,
+                        )),
                       ),
-                      const SizedBox(height: 3),
-                      Row(
-                        children: [
-                          Expanded(
-                            child: Text(
-                              // secondaryLabel overrides the default
-                              // "host · workspace" line when we're inside a
-                              // grouped view (e.g. show branch name instead).
-                              secondaryLabel ??
-                                  (showHost
-                                      ? '${host.label} · $workspaceLabel'
-                                      : workspaceLabel),
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: theme.textTheme.bodySmall?.copyWith(
-                                color: colors.textSecondary,
-                                fontSize: 11.5,
-                                height: 1.25,
-                              ),
-                            ),
-                          ),
-                          const SizedBox(width: 8),
-                          ListenableBuilder(
-                            listenable: RelativeTimeTicker.minutes,
-                            builder: (_, _) => Text(
-                              sessionTimeLabel(session.updatedAt),
-                              style: theme.textTheme.bodySmall?.copyWith(
-                                color: colors.textTertiary,
-                                fontSize: 10.5,
-                              ),
-                            ),
-                          ),
-                        ],
+                      const SizedBox(width: AppSpacing.sm),
+                      Expanded(
+                        child: Text(session.title, maxLines: 1, overflow: TextOverflow.ellipsis,
+                          style: theme.textTheme.bodyMedium?.copyWith(fontWeight: AppWeights.body, letterSpacing: 0)),
                       ),
-                      if (session.provider != null || session.isSubAgent) ...[
-                        const SizedBox(height: 4),
-                        Wrap(
-                          spacing: 6,
-                          runSpacing: 4,
-                          children: [
-                            if (session.provider != null)
-                              AgentProviderBadge(
-                                providerKind: session.provider,
-                                compact: true,
-                              ),
-                            if (session.isSubAgent) const _SubAgentBadge(),
-                          ],
+                      if (showWorkspace || showHost) ...[
+                        const SizedBox(width: AppSpacing.sm),
+                        Flexible(
+                          child: Tooltip(
+                            message: metadata,
+                            child: Text(metadata, maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: theme.textTheme.labelSmall?.copyWith(color: colors.textTertiary)),
+                          ),
                         ),
                       ],
-                      if (supportingText.isNotEmpty) ...[
-                        const SizedBox(height: 4),
-                        if (session.matchSnippet?.isNotEmpty == true)
-                          _HighlightedSnippet(
-                            text: supportingText,
-                            query: query,
-                            style: theme.textTheme.bodySmall!.copyWith(
-                              color: colors.textSecondary,
-                              height: 1.3,
-                              fontSize: 11.5,
-                            ),
-                          )
-                        else
-                          Text(
-                            supportingText,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: theme.textTheme.bodySmall?.copyWith(
-                              color: colors.textSecondary,
-                              height: 1.3,
-                              fontSize: 11.5,
-                            ),
-                          ),
+                      if (!showWorkspace && !showHost && showProvider && session.provider != null) ...[
+                        const SizedBox(width: AppSpacing.sm),
+                        Text(session.provider!, style: theme.textTheme.labelSmall),
+                      ],
+                      const SizedBox(width: AppSpacing.sm),
+                      ListenableBuilder(
+                        listenable: RelativeTimeTicker.minutes,
+                        builder: (_, _) => Text(status ?? sessionTimeLabel(session.updatedAt),
+                          style: theme.textTheme.labelSmall?.copyWith(
+                            fontSize: 11, letterSpacing: 0,
+                            color: needsYou ? colors.accent : running ? colors.success : colors.textTertiary)),
+                      ),
+                      if (favorite) ...[
+                        const SizedBox(width: AppSpacing.xs),
+                        Icon(Icons.star_rounded, size: 14, color: colors.textSecondary),
                       ],
                     ],
                   ),
                 ),
-                if (unread) ...[
-                  const SizedBox(width: 4),
-                  Padding(
-                    padding: const EdgeInsets.only(top: 4),
-                    child: _UnreadDot(color: colors.accent),
-                  ),
-                  const SizedBox(width: 2),
-                ],
-                InkWell(
-                  onTap: onToggleFavorite,
-                  borderRadius: AppShapes.badge,
-                  child: SizedBox(
-                    width: 30,
-                    height: 30,
-                    child: Icon(
-                      favorite
-                          ? Icons.star_rounded
-                          : Icons.star_outline_rounded,
-                      size: 15,
-                      color: favorite ? colors.warning : colors.textTertiary,
-                    ),
-                  ),
-                ),
+                if (query.isNotEmpty && session.matchSnippet?.isNotEmpty == true)
+                  _HighlightedSnippet(text: session.matchSnippet!, query: query,
+                    style: theme.textTheme.bodySmall!.copyWith(color: colors.textSecondary)),
               ],
             ),
           ),
         ),
-      );
-    }
-
-    // ── Mobile / full-width variant ──────────────────────────────────────────
-    final statusBadge = _sessionStatusBadge(session);
-    final content = AnimatedContainer(
-      duration: AppMotion.quick,
-      curve: AppMotion.standard,
-      padding: const EdgeInsets.fromLTRB(12, 11, 4, 11),
-      decoration: BoxDecoration(
-        color: selected
-            ? colors.accentMuted.withValues(alpha: 0.52)
-            : Colors.transparent,
-        border: Border(bottom: BorderSide(color: colors.border)),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Expanded(
-                child: Text(
-                  session.title,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                    fontWeight: unread ? AppWeights.title : AppWeights.emphasis,
-                  ),
-                ),
-              ),
-              if (statusBadge != null) ...[
-                const SizedBox(width: AppSpacing.sm),
-                statusBadge,
-              ],
-              if (unread) ...[
-                const SizedBox(width: 6),
-                _UnreadDot(color: colors.accent),
-                const SizedBox(width: 4),
-              ],
-              IconButton(
-                onPressed: onToggleFavorite,
-                tooltip: favorite ? 'Remove favorite' : 'Add favorite',
-                visualDensity: VisualDensity.compact,
-                iconSize: 20,
-                constraints: const BoxConstraints(minWidth: 44, minHeight: 44),
-                icon: Icon(
-                  favorite ? Icons.star_rounded : Icons.star_outline_rounded,
-                  color: favorite ? colors.warning : colors.textTertiary,
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 6),
-          Row(
-            children: [
-              if (showHost) ...[
-                Icon(Icons.dns_rounded, size: 14, color: colors.textTertiary),
-                const SizedBox(width: 4),
-                Flexible(
-                  child: Text(
-                    host.label,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: theme.textTheme.bodySmall?.copyWith(
-                      color: colors.textSecondary,
-                      fontWeight: AppWeights.emphasis,
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 10),
-              ],
-              Icon(Icons.folder_outlined, size: 14, color: colors.textTertiary),
-              const SizedBox(width: 4),
-              Expanded(
-                child: Text(
-                  workspaceLabel,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: theme.textTheme.bodySmall?.copyWith(
-                    color: colors.textSecondary,
-                  ),
-                ),
-              ),
-              if (session.provider != null) ...[
-                const SizedBox(width: 8),
-                AgentProviderBadge(
-                  providerKind: session.provider,
-                  compact: true,
-                ),
-              ],
-              if (session.isSubAgent) ...[
-                const SizedBox(width: 6),
-                const _SubAgentBadge(),
-              ],
-              const SizedBox(width: 8),
-              ListenableBuilder(
-                listenable: RelativeTimeTicker.minutes,
-                builder: (_, _) => Text(
-                  sessionTimeLabel(session.updatedAt),
-                  style: theme.textTheme.bodySmall?.copyWith(
-                    color: colors.textTertiary,
-                    fontSize: 11,
-                  ),
-                ),
-              ),
-            ],
-          ),
-          if (supportingText.isNotEmpty) ...[
-            const SizedBox(height: 6),
-            if (session.matchSnippet?.isNotEmpty == true)
-              _HighlightedSnippet(
-                text: supportingText,
-                query: query,
-                style: theme.textTheme.bodySmall!.copyWith(
-                  color: colors.textSecondary,
-                  height: 1.35,
-                ),
-              )
-            else
-              Text(
-                supportingText,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: theme.textTheme.bodySmall?.copyWith(
-                  color: colors.textSecondary,
-                  height: 1.35,
-                ),
-              ),
-          ],
-        ],
-      ),
-    );
-    return Material(
-      color: Colors.transparent,
-      child: InkWell(
-        onTap: onTap,
-        hoverColor: colors.surfaceMuted.withValues(alpha: 0.62),
-        splashColor: colors.accent.withValues(alpha: 0.08),
-        child: content,
       ),
     );
   }
 }
 
 // ── Private helpers ──────────────────────────────────────────────────────────
-
-Widget? _sessionStatusBadge(SessionSummary session) {
-  final status = session.status;
-  return switch (status) {
-    'waiting_for_approval' || 'pendingApproval' => const _SessionStatusLabel(
-      label: 'approval',
-      tone: MeshStatusTone.approval,
-      icon: Icons.verified_user_outlined,
-    ),
-    'waiting_for_input' => const _SessionStatusLabel(
-      label: 'waiting',
-      tone: MeshStatusTone.waiting,
-      icon: Icons.question_answer_outlined,
-    ),
-    'queued' => const _SessionStatusLabel(
-      label: 'queued',
-      tone: MeshStatusTone.queued,
-      icon: Icons.schedule_rounded,
-    ),
-    'blocked' => const _SessionStatusLabel(
-      label: 'blocked',
-      tone: MeshStatusTone.waiting,
-      icon: Icons.pause_circle_outline_rounded,
-    ),
-    'failed' || 'errored' => const _SessionStatusLabel(
-      label: 'failed',
-      tone: MeshStatusTone.danger,
-      icon: Icons.error_outline_rounded,
-    ),
-    'stale' => const _SessionStatusLabel(
-      label: 'stale',
-      tone: MeshStatusTone.stale,
-      icon: Icons.history_toggle_off_rounded,
-    ),
-    'active' || 'running' => const _SessionStatusLabel(
-      label: 'running',
-      tone: MeshStatusTone.running,
-      live: true,
-    ),
-    _ =>
-      session.isActive
-          ? const _SessionStatusLabel(
-              label: 'running',
-              tone: MeshStatusTone.running,
-              live: true,
-            )
-          : null,
-  };
-}
-
-class _SessionStatusLabel extends StatelessWidget {
-  const _SessionStatusLabel({
-    required this.label,
-    required this.tone,
-    this.icon,
-    this.live = false,
-  });
-
-  final String label;
-  final MeshStatusTone tone;
-  final IconData? icon;
-  final bool live;
-
-  @override
-  Widget build(BuildContext context) {
-    final color = meshStatusBadgeColors(context.colors, tone).foreground;
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        if (live)
-          LivePulse(color: color)
-        else if (icon != null)
-          Icon(icon, size: 13, color: color),
-        const SizedBox(width: AppSpacing.xs),
-        Text(
-          label,
-          style: Theme.of(context).textTheme.labelSmall?.copyWith(
-            color: color,
-            fontWeight: AppWeights.emphasis,
-          ),
-        ),
-      ],
-    );
-  }
-}
-
-class _SubAgentBadge extends StatelessWidget {
-  const _SubAgentBadge();
-
-  @override
-  Widget build(BuildContext context) {
-    final colors = context.colors;
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-      decoration: BoxDecoration(
-        color: colors.info.withValues(alpha: 0.12),
-        borderRadius: BorderRadius.circular(6),
-        border: Border.all(color: colors.info.withValues(alpha: 0.3)),
-      ),
-      child: Text(
-        'Sub-agent',
-        style: monoStyle(
-          color: colors.info,
-          fontSize: 9,
-          fontWeight: AppWeights.emphasis,
-        ),
-      ),
-    );
-  }
-}
-
-class _UnreadDot extends StatelessWidget {
-  const _UnreadDot({required this.color});
-
-  final Color color;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      width: 8,
-      height: 8,
-      decoration: BoxDecoration(color: color, shape: BoxShape.circle),
-    );
-  }
-}
 
 class _HighlightedSnippet extends StatelessWidget {
   const _HighlightedSnippet({

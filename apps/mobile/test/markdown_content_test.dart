@@ -49,6 +49,18 @@ void main() {
     }
   });
 
+  testWidgets('prose headings stay below app chrome without an automatic rule', (tester) async {
+    await _pumpMarkdown(tester, api: _MarkdownImageApi(_onePixelPng), text: '# Heading\n\n## Subheading\n\nBody\n\n1. First');
+    final markdown = tester.widget<GptMarkdown>(find.byType(GptMarkdown));
+    expect(markdown.style?.fontFamily, 'SourceSerif4');
+    final theme = GptMarkdownTheme.of(tester.element(find.byType(GptMarkdown)));
+    expect(theme.h1?.fontSize, lessThanOrEqualTo(17));
+    expect(theme.h2?.fontSize, lessThanOrEqualTo(17));
+    expect(theme.autoAddDividerLineAfterH1, isFalse);
+    expect(find.byType(Divider), findsNothing);
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets('loads local markdown images through the session filesystem', (
     tester,
   ) async {

@@ -45,10 +45,7 @@ class MarkdownContent extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final colors = context.colors;
-    final baseBody = theme.textTheme.bodyMedium?.copyWith(
-      color: textColor,
-      height: 1.5,
-    );
+    final baseBody = proseStyle(color: textColor);
     final markdownText = _autoLinkBareUrlsForMarkdown(text);
     final linkBackground = backgroundColor ?? colors.surface;
     final fallbackLinkColor = readableLinkOn(
@@ -56,10 +53,29 @@ class MarkdownContent extends StatelessWidget {
       background: linkBackground,
     );
 
-    return GptMarkdown(
+    return GptMarkdownTheme(
+      gptThemeData: GptMarkdownThemeData(
+        brightness: theme.brightness,
+        linkColor: linkStyle?.color ?? textColor,
+        h1: theme.textTheme.titleMedium?.copyWith(fontSize: 17, fontWeight: FontWeight.w600, color: textColor),
+        h2: theme.textTheme.titleMedium?.copyWith(fontSize: 16, fontWeight: FontWeight.w600, color: textColor),
+        h3: theme.textTheme.titleMedium?.copyWith(fontSize: 16, fontWeight: FontWeight.w600, color: textColor),
+        h4: theme.textTheme.titleSmall?.copyWith(fontSize: 15, color: textColor),
+        h5: theme.textTheme.titleSmall?.copyWith(fontSize: 15, color: textColor),
+        h6: theme.textTheme.titleSmall?.copyWith(fontSize: 15, color: textColor),
+        autoAddDividerLineAfterH1: false,
+      ),
+      child: GptMarkdown(
       markdownText,
       style: baseBody,
       followLinkColor: false,
+      orderedListBuilder: (context, index, child, config) => Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text('$index. ', style: baseBody),
+          Expanded(child: child),
+        ],
+      ),
       onLinkTap: (href, title) {
         if (href.isEmpty) return;
         final reference = parseSessionResourceReference(href);
@@ -75,7 +91,7 @@ class MarkdownContent extends StatelessWidget {
           } else {
             showAppSnackBar(
               context,
-              'This address belongs to the connected host and cannot open directly on this device.',
+              'This address belongs to the connected machine and cannot open directly on this device.',
             );
           }
           return;
@@ -134,6 +150,7 @@ class MarkdownContent extends StatelessWidget {
           basePath: basePath,
         );
       },
+      ),
     );
   }
 }
@@ -228,7 +245,7 @@ class _MarkdownImageState extends State<_MarkdownImage> {
       final host = widget.host;
       final api = widget.api;
       if (host == null || api == null) {
-        _error = StateError('Host-local image is not attached to a host');
+        _error = StateError('Machine-local image is not attached to a machine');
         return;
       }
       api

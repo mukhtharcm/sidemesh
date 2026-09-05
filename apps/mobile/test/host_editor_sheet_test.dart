@@ -13,7 +13,7 @@ void main() {
     try {
       await _pumpHostEditor(tester);
 
-      expect(find.text('Add host'), findsOneWidget);
+      expect(find.text('Add machine'), findsOneWidget);
       expect(find.text('Pairing'), findsNothing);
       expect(find.text('About this machine'), findsNothing);
       expect(find.text('Connection'), findsNothing);
@@ -23,7 +23,7 @@ void main() {
       expect(find.text('Address'), findsOneWidget);
       expect(find.text('Token'), findsOneWidget);
       expect(find.text('Check connection'), findsOneWidget);
-      expect(find.text('Save host'), findsOneWidget);
+      expect(find.text('Save machine'), findsOneWidget);
       expect(find.byType(Switch), findsOneWidget);
       expect(tester.takeException(), isNull);
     } finally {
@@ -37,8 +37,8 @@ void main() {
     try {
       await _pumpHostEditor(tester, size: const Size(320, 568));
 
-      expect(find.text('Add host'), findsOneWidget);
-      expect(find.text('Save host'), findsOneWidget);
+      expect(find.text('Add machine'), findsOneWidget);
+      expect(find.text('Save machine'), findsOneWidget);
       expect(find.text('Cancel'), findsOneWidget);
       expect(tester.takeException(), isNull);
     } finally {
@@ -64,7 +64,7 @@ void main() {
         ),
       );
 
-      expect(find.text('Edit host'), findsOneWidget);
+      expect(find.text('Edit machine'), findsOneWidget);
       expect(find.text('Save changes'), findsOneWidget);
       expect(find.byTooltip('Show token'), findsOneWidget);
 

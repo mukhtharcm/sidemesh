@@ -221,7 +221,9 @@ specific agent provider.
   crash at runtime. Prefer direct `~/Library/.../<bundle-id>` resolution for
   startup-critical local storage paths in this app.
 - **Flutter flavors**: Build/run commands must include `--flavor dev` or
-  `--flavor prod`.
+  `--flavor prod`. The iOS dev bundle id is `dev.sidemesh.mobile.dev`;
+  `dev.sidemesh.mobile` is production. Launch the id from the built Info.plist
+  when validating, or the simulator can silently show an older installed app.
 - **TestFlight resume**: If App Store Connect accepts the IPA but a later
   metadata or internal-distribution step fails, rerun `Deploy to TestFlight`
   with `resume_existing_build` enabled. It resolves the exact committed
