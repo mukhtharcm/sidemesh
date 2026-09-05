@@ -6,6 +6,7 @@ import '../api_client.dart' show ApiClient, ApiException, friendlyError;
 import '../app_version_store.dart';
 import '../mobile_client_version_policy.dart';
 import '../models.dart';
+import '../workspace_label.dart';
 import '../host_status_store.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../session_local_store.dart';
@@ -23,18 +24,6 @@ import '../widgets/app_primitives.dart';
 import '../widgets/session_row_card.dart';
 import 'create_session_sheet.dart';
 import 'terminal_screen.dart';
-
-String _hostEndpointLabel(String baseUrl) {
-  final uri = Uri.tryParse(baseUrl.trim());
-  if (uri == null || uri.host.isEmpty) {
-    return baseUrl.trim();
-  }
-  final hasDefaultPort =
-      !uri.hasPort ||
-      (uri.scheme == 'http' && uri.port == 80) ||
-      (uri.scheme == 'https' && uri.port == 443);
-  return hasDefaultPort ? uri.host : '${uri.host}:${uri.port}';
-}
 
 String _agentAvailabilityLabel(int count) {
   final noun = count == 1 ? 'agent' : 'agents';
@@ -462,8 +451,9 @@ class _HostDetailScreenState extends State<HostDetailScreen>
                   else
                     ...sortedSessions.map(
                       (session) => Padding(
-                        padding: const EdgeInsets.only(bottom: AppSpacing.sm),
+                        padding: const EdgeInsets.only(bottom: AppSpacing.xs),
                         child: SessionRowCard(
+                          dense: widget.embedded,
                           host: widget.host,
                           session: session,
                           favorite: _localStore.isFavorite(
@@ -517,24 +507,10 @@ class _EmbeddedHostHeader extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colors = context.colors;
-    return Container(
-      padding: const EdgeInsets.fromLTRB(20, 14, 14, 14),
-      decoration: BoxDecoration(
-        border: Border(bottom: BorderSide(color: colors.border)),
-      ),
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(AppSpacing.xl, AppSpacing.md, AppSpacing.lg, AppSpacing.md),
       child: Row(
         children: [
-          Container(
-            width: 32,
-            height: 32,
-            decoration: BoxDecoration(
-              color: colors.accentMuted,
-              borderRadius: BorderRadius.circular(9),
-            ),
-            alignment: Alignment.center,
-            child: Icon(Icons.dns_rounded, size: 17, color: colors.accent),
-          ),
-          const SizedBox(width: 12),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -547,13 +523,6 @@ class _EmbeddedHostHeader extends StatelessWidget {
                   style: Theme.of(context).textTheme.titleMedium?.copyWith(
                     fontWeight: AppWeights.emphasis,
                   ),
-                ),
-                const SizedBox(height: 2),
-                Text(
-                  _hostEndpointLabel(host.baseUrl),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: monoStyle(color: colors.textTertiary, fontSize: 11),
                 ),
               ],
             ),
@@ -733,93 +702,24 @@ class _NodeCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colors = context.colors;
-    return MeshCard(
-      tone: MeshCardTone.surface,
-      bordered: false,
-      padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: AppSpacing.lg),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Row(
-            children: [
-              Container(
-                width: 34,
-                height: 34,
-                decoration: BoxDecoration(
-                  color: colors.accentMuted,
-                  borderRadius: BorderRadius.circular(10),
-                  border: Border.all(
-                    color: colors.accent.withValues(alpha: 0.3),
-                  ),
-                ),
-                alignment: Alignment.center,
-                child: Icon(Icons.dns_rounded, color: colors.accent, size: 18),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      node.label.isNotEmpty ? node.label : host.label,
-                      style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                        fontWeight: AppWeights.title,
-                      ),
-                    ),
-                    const SizedBox(height: 2),
-                    Text(
-                      host.baseUrl,
-                      style: monoStyle(
-                        color: colors.textTertiary,
-                        fontSize: 11,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ),
+          Text('${node.platform} · ${node.hostname}',
+            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+              color: colors.textSecondary, letterSpacing: 0)),
           const SizedBox(height: AppSpacing.sm),
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            children: [
-              MeshPill(
-                label: node.hostname,
-                icon: Icons.memory_rounded,
-                tone: MeshPillTone.neutral,
-                mono: true,
-              ),
-              MeshPill(
-                label: node.platform,
-                icon: Icons.devices_other_rounded,
-                tone: MeshPillTone.neutral,
-                mono: true,
-              ),
-              MeshPill(
-                label: node.providerPillLabel,
-                icon: Icons.auto_awesome_rounded,
-                tone: MeshPillTone.accent,
-                mono: true,
-              ),
-              if (node.providerConfig.command != null)
-                MeshPill(
-                  label: node.providerConfig.command!,
-                  icon: Icons.terminal_rounded,
-                  tone: MeshPillTone.neutral,
-                  mono: true,
-                ),
-              if (node.updateAvailable)
-                MeshPill(
-                  label: node.usesBleedingEdgeTrack
-                      ? 'Verified Early access update'
-                      : 'Update: ${node.latestInstallLabel} available',
-                  icon: Icons.system_update_alt_rounded,
-                  tone: MeshPillTone.warning,
-                  mono: true,
-                ),
-            ],
-          ),
+          SelectableText(host.baseUrl,
+            style: monoStyle(color: colors.textTertiary, fontSize: 12)),
+          if (node.updateAvailable) ...[
+            const SizedBox(height: AppSpacing.md),
+            Text(node.usesBleedingEdgeTrack
+              ? 'Verified Early access update'
+              : 'Update: ${node.latestInstallLabel} available',
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(color: colors.textSecondary)),
+          ],
         ],
       ),
     );
@@ -1553,76 +1453,14 @@ class _ProviderContractSummaryCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final colors = context.colors;
-    final supportedProviders = node.supportedProviders.length;
-    final providerCountLabel = _agentAvailabilityLabel(supportedProviders);
-    return MeshCard(
-      tone: MeshCardTone.muted,
-      bordered: false,
-      padding: EdgeInsets.zero,
-      child: Material(
-        color: Colors.transparent,
-        child: InkWell(
-          borderRadius: AppShapes.card,
-          onTap: () {
-            Navigator.of(context).push(
-              MaterialPageRoute<void>(
-                builder: (_) => HostProviderContractScreen(node: node),
-              ),
-            );
-          },
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(14, 12, 12, 12),
-            child: Row(
-              children: [
-                Container(
-                  width: 34,
-                  height: 34,
-                  decoration: BoxDecoration(
-                    color: colors.infoMuted,
-                    borderRadius: BorderRadius.circular(10),
-                    border: Border.all(
-                      color: colors.info.withValues(alpha: 0.3),
-                    ),
-                  ),
-                  alignment: Alignment.center,
-                  child: Icon(Icons.hub_rounded, color: colors.info, size: 18),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        'Agents on this machine',
-                        style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                          fontWeight: AppWeights.title,
-                        ),
-                      ),
-                      const SizedBox(height: 3),
-                      Text(
-                        '${node.providerDisplayName} in use, $providerCountLabel',
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                          color: colors.textSecondary,
-                          height: 1.3,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-                const SizedBox(width: 8),
-                Icon(
-                  Icons.chevron_right_rounded,
-                  color: colors.textTertiary,
-                  size: 22,
-                ),
-              ],
-            ),
-          ),
-        ),
-      ),
+    return AppSettingsRow(
+      icon: Icons.hub_outlined,
+      title: 'Agents on this machine',
+      subtitle: '${node.providerDisplayName} in use, ${_agentAvailabilityLabel(node.supportedProviders.length)}',
+      trailing: Icon(Icons.chevron_right_rounded, size: AppSizes.icon,
+        color: context.colors.textTertiary),
+      onTap: () => Navigator.of(context).push(MaterialPageRoute<void>(
+        builder: (_) => HostProviderContractScreen(node: node))),
     );
   }
 }
@@ -1641,9 +1479,11 @@ class _SectionHeader extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return AppSectionHeader(
-      icon: icon,
       title: title,
-      subtitle: subtitle,
+      trailing: RegExp(r'^\d').hasMatch(subtitle)
+          ? Text(subtitle, style: Theme.of(context).textTheme.bodySmall?.copyWith(
+              color: context.colors.textTertiary))
+          : null,
     );
   }
 }
@@ -1784,62 +1624,18 @@ class _WorkspaceLaunchRow extends StatelessWidget {
   Widget build(BuildContext context) {
     final colors = context.colors;
     return SizedBox(
-      height: 36,
+      height: AppSizes.menuItem,
       child: ListView.separated(
         scrollDirection: Axis.horizontal,
-        padding: const EdgeInsets.symmetric(horizontal: 2),
         itemCount: workspaces.length,
-        separatorBuilder: (_, _) => const SizedBox(width: AppSpacing.sm),
-        itemBuilder: (context, i) {
-          final ws = workspaces[i];
-          return InkWell(
-            borderRadius: AppShapes.pill,
-            onTap: () => onTap(ws),
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-              decoration: BoxDecoration(
-                color: colors.surfaceMuted,
-                borderRadius: AppShapes.pill,
-                border: Border.all(color: colors.border),
-              ),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(Icons.folder_rounded, size: 14, color: colors.accent),
-                  const SizedBox(width: 6),
-                  Text(
-                    ws.label,
-                    style: monoStyle(
-                      color: colors.textPrimary,
-                      fontSize: 12,
-                      fontWeight: AppWeights.emphasis,
-                    ),
-                  ),
-                  if (ws.sessionCount > 1) ...[
-                    const SizedBox(width: 6),
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 5,
-                        vertical: 1,
-                      ),
-                      decoration: BoxDecoration(
-                        color: colors.surfaceElevated,
-                        borderRadius: BorderRadius.circular(6),
-                        border: Border.all(color: colors.border),
-                      ),
-                      child: Text(
-                        '${ws.sessionCount}',
-                        style: monoStyle(
-                          color: colors.textTertiary,
-                          fontSize: 10,
-                          fontWeight: AppWeights.emphasis,
-                        ),
-                      ),
-                    ),
-                  ],
-                ],
-              ),
-            ),
+        separatorBuilder: (_, _) => const SizedBox(width: AppSpacing.xs),
+        itemBuilder: (context, index) {
+          final workspace = workspaces[index];
+          return TextButton.icon(
+            style: TextButton.styleFrom(foregroundColor: colors.textSecondary),
+            onPressed: () => onTap(workspace),
+            icon: const Icon(Icons.folder_outlined, size: AppSizes.compactIcon),
+            label: Text(workspaceLabel(workspace.cwd)),
           );
         },
       ),
@@ -2360,9 +2156,7 @@ class _HostManagementCardState extends State<_HostManagementCard> {
             HostStatusStore.instance.statusFor(widget.host.id).reachability ==
             HostReachability.offline;
 
-        return MeshCard(
-          tone: MeshCardTone.muted,
-          bordered: false,
+        return Padding(
           padding: EdgeInsets.zero,
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -2759,25 +2553,11 @@ class _ManagementRow extends StatelessWidget {
       radius: AppRadii.control,
       enabled: !busy,
       onTap: busy ? null : onTap,
-      leading: Container(
-        width: 30,
-        height: 30,
-        decoration: BoxDecoration(
-          color: colors.surfaceMuted,
-          borderRadius: BorderRadius.circular(9),
-          border: Border.all(color: colors.border),
-        ),
-        alignment: Alignment.center,
+      leading: SizedBox.square(
+        dimension: AppSizes.icon,
         child: busy
-            ? SizedBox(
-                width: 14,
-                height: 14,
-                child: CircularProgressIndicator(
-                  strokeWidth: 1.5,
-                  color: colors.textSecondary,
-                ),
-              )
-            : Icon(icon, size: 16, color: colors.textSecondary),
+            ? CircularProgressIndicator(strokeWidth: 1.5, color: colors.textSecondary)
+            : Icon(icon, size: AppSizes.icon, color: colors.textSecondary),
       ),
       title: Text(
         label,

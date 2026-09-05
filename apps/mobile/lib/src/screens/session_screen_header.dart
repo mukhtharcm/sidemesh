@@ -361,31 +361,22 @@ class _JumpToLatestPill extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colors = context.colors;
-    final foreground = readableActionForeground(colors, colors.accent);
-    return Material(
-      color: colors.accent,
-      shape: const StadiumBorder(),
-      elevation: 4,
-      shadowColor: Colors.black.withValues(alpha: 0.25),
-      child: InkWell(
-        customBorder: const StadiumBorder(),
-        onTap: onTap,
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(Icons.arrow_downward_rounded, size: 16, color: foreground),
-              const SizedBox(width: AppSpacing.sm),
-              Text(
-                'Jump to latest',
-                style: Theme.of(context).textTheme.labelMedium?.copyWith(
-                  color: foreground,
-                  fontWeight: FontWeight.w700,
-                ),
-              ),
-            ],
-          ),
+    return Tooltip(
+      message: 'Jump to latest',
+      child: Material(
+        color: colors.surface,
+        shape: RoundedRectangleBorder(
+          borderRadius: AppShapes.badge,
+          side: BorderSide(color: colors.border),
+        ),
+        elevation: 1,
+        child: IconButton(
+          tooltip: 'Jump to latest',
+          onPressed: onTap,
+          icon: Icon(Icons.arrow_downward_rounded, size: AppSizes.icon,
+            color: colors.textSecondary),
+          constraints: const BoxConstraints.tightFor(
+            width: AppSizes.menuItem, height: AppSizes.menuItem),
         ),
       ),
     );
@@ -446,8 +437,9 @@ class _SessionAppBarSubtitle extends StatelessWidget {
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                    color: colors.textSecondary,
-                    fontWeight: FontWeight.w700,
+                    color: colors.textTertiary,
+                    letterSpacing: 0,
+                    fontWeight: AppWeights.body,
                   ),
                 ),
               ),

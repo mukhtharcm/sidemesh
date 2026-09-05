@@ -153,7 +153,7 @@ class _Composer extends StatelessWidget {
       onNativePaste: onNativePaste,
       submitOnEnter: submitOnEnter,
       desktopHintText:
-          'Reply here. Press Enter to send, Shift+Enter for a new line',
+          'Reply…',
       hasSendableContext: hasContext,
       leading: leading,
       controls: controls,

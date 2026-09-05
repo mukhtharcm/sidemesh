@@ -93,51 +93,61 @@ ThemeData _buildTheme(
           fontSize: 24,
           height: 1.2,
           fontWeight: AppWeights.strong,
+          letterSpacing: AppLetterSpacing.body,
         ),
         titleLarge: base.textTheme.titleLarge?.copyWith(
           fontSize: 20,
           height: 1.25,
           fontWeight: AppWeights.strong,
+          letterSpacing: AppLetterSpacing.body,
         ),
         titleMedium: base.textTheme.titleMedium?.copyWith(
           fontSize: 16,
           height: 1.3,
           fontWeight: AppWeights.title,
+          letterSpacing: AppLetterSpacing.body,
         ),
         titleSmall: base.textTheme.titleSmall?.copyWith(
           fontSize: 14,
           height: 1.3,
           fontWeight: AppWeights.title,
+          letterSpacing: AppLetterSpacing.body,
         ),
         bodyLarge: base.textTheme.bodyLarge?.copyWith(
           fontSize: 16,
           height: 1.45,
           fontWeight: AppWeights.body,
+          letterSpacing: AppLetterSpacing.body,
         ),
         bodyMedium: base.textTheme.bodyMedium?.copyWith(
           fontSize: 14,
           height: 1.4,
           fontWeight: AppWeights.body,
+          letterSpacing: AppLetterSpacing.body,
         ),
         bodySmall: base.textTheme.bodySmall?.copyWith(
           fontSize: 12,
           height: 1.35,
           fontWeight: AppWeights.body,
+          letterSpacing: AppLetterSpacing.body,
         ),
         labelLarge: base.textTheme.labelLarge?.copyWith(
           fontSize: 14,
           height: 1.2,
           fontWeight: AppWeights.title,
+          letterSpacing: AppLetterSpacing.body,
         ),
         labelMedium: base.textTheme.labelMedium?.copyWith(
           fontSize: 12,
           height: 1.2,
           fontWeight: AppWeights.emphasis,
+          letterSpacing: AppLetterSpacing.body,
         ),
         labelSmall: base.textTheme.labelSmall?.copyWith(
           fontSize: 11,
           height: 1.2,
           fontWeight: AppWeights.emphasis,
+          letterSpacing: AppLetterSpacing.body,
         ),
       )
       .apply(
