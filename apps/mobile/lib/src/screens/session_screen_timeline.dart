@@ -73,6 +73,7 @@ class _TimelineLiveEventRecord {
     required this.seq,
     required this.keyId,
     this.semanticKey,
+    this.occurrences = 1,
   });
 
   final _TimelineLiveEventKind kind;
@@ -81,6 +82,7 @@ class _TimelineLiveEventRecord {
   final int seq;
   final String keyId;
   final String? semanticKey;
+  final int occurrences;
 }
 
 class _TimelineEntry {
@@ -266,7 +268,7 @@ class _ReasoningBlockState extends State<_ReasoningBlock> {
                       size: 16,
                       color: colors.textSecondary,
                     ),
-                    const SizedBox(width: 6),
+                    const SizedBox(width: AppSpacing.sm),
                   ],
                   Expanded(
                     child: Text(
@@ -278,7 +280,7 @@ class _ReasoningBlockState extends State<_ReasoningBlock> {
                       ),
                     ),
                   ),
-                  const SizedBox(width: 4),
+                  const SizedBox(width: AppSpacing.xs),
                   Icon(
                     _expanded
                         ? Icons.expand_less_rounded
@@ -305,132 +307,147 @@ class _ReasoningBlockState extends State<_ReasoningBlock> {
   }
 }
 
-class _ComposerStatusStrip extends StatelessWidget {
-  const _ComposerStatusStrip({required this.thinking});
+class _ComposerWorkspaceStrip extends StatelessWidget {
+  const _ComposerWorkspaceStrip({
+    required this.session,
+    required this.status,
+    required this.diff,
+    required this.thinking,
+    required this.showWorking,
+    required this.desktop,
+    this.signalLabel,
+    this.onSignalTap,
+    this.onReview,
+  });
 
+  final SessionSummary session;
+  final SessionGitStatus? status;
+  final SessionGitDiff? diff;
   final ValueListenable<bool> thinking;
+  final bool showWorking;
+  final bool desktop;
+  final String? signalLabel;
+  final VoidCallback? onSignalTap;
+  final VoidCallback? onReview;
 
   @override
   Widget build(BuildContext context) {
-    return ValueListenableBuilder<bool>(
-      valueListenable: thinking,
-      builder: (context, show, _) {
-        if (!show) {
-          return const SizedBox.shrink();
-        }
-        final colors = context.colors;
-        return Padding(
-          padding: const EdgeInsets.fromLTRB(16, 0, 16, 10),
-          child: DecoratedBox(
-            decoration: BoxDecoration(
-              color: colors.surface,
-              borderRadius: AppShapes.input,
-              border: Border.all(color: colors.border),
-            ),
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-              child: Row(
-                children: [
-                  const LivePulse(),
-                  const SizedBox(width: 10),
-                  Text(
-                    'Working',
-                    style: Theme.of(context).textTheme.labelLarge?.copyWith(
-                      color: colors.textPrimary,
-                      fontWeight: AppWeights.emphasis,
+    final colors = context.colors;
+    final branch = status?.branch ?? session.gitInfo?.branch;
+    final workspace = workspaceLabel(session.cwd);
+    final label = desktop
+        ? [workspace, ?branch].join('  ')
+        : branch ?? workspace;
+    final lines = diff?.diff.split('\n') ?? const <String>[];
+    final added = lines.where((line) =>
+        line.startsWith('+') && !line.startsWith('+++')).length;
+    final removed = lines.where((line) =>
+        line.startsWith('-') && !line.startsWith('---')).length;
+    final prefix = diff?.truncated == true ? '≥' : '';
+    return Padding(
+      padding: EdgeInsets.fromLTRB(
+        desktop ? AppSizes.desktopGutter : AppSpacing.lg,
+        AppSpacing.sm,
+        desktop ? AppSizes.desktopGutter : AppSpacing.lg,
+        0,
+      ),
+      child: Center(
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: AppSizes.readingMaxWidth),
+          child: Row(
+            children: [
+              Expanded(
+                child: Tooltip(
+                  message: onReview == null ? label : '$label · Review changes',
+                  child: InkWell(
+                    onTap: onReview,
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(vertical: AppSpacing.sm),
+                      child: Text(label, maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: monoStyle(color: colors.textSecondary, fontSize: 12.5)),
                     ),
                   ),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: Text(
-                      'Waiting for assistant output…',
-                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                        color: colors.textSecondary,
-                      ),
-                    ),
-                  ),
-                ],
+                ),
               ),
-            ),
+              if (diff != null) ...[
+                const SizedBox(width: AppSpacing.sm),
+                Text('$prefix+$added',
+                  style: monoStyle(color: colors.success, fontSize: 12.5)),
+                const SizedBox(width: AppSpacing.sm),
+                Text('$prefix−$removed',
+                  style: monoStyle(color: colors.danger, fontSize: 12.5)),
+              ],
+              if (signalLabel != null) TextButton(
+                onPressed: onSignalTap,
+                child: Text(signalLabel!),
+              ),
+              if (showWorking) ValueListenableBuilder<bool>(
+                valueListenable: thinking,
+                builder: (_, working, _) => working
+                    ? Padding(
+                        padding: const EdgeInsets.only(left: AppSpacing.sm),
+                        child: Text('Working',
+                          style: Theme.of(context).textTheme.labelMedium),
+                      )
+                    : const SizedBox.shrink(),
+              ),
+              if (desktop && onReview != null) ...[
+                const SizedBox(width: AppSpacing.sm),
+                TextButton(onPressed: onReview, child: const Text('Review changes')),
+              ],
+            ],
           ),
-        );
-      },
+        ),
+      ),
     );
   }
 }
 
 class _ProviderWarningRow extends StatelessWidget {
-  const _ProviderWarningRow({required this.event});
+  const _ProviderWarningRow({required this.event, this.occurrences = 1});
 
   final LiveEvent event;
+  final int occurrences;
 
   @override
   Widget build(BuildContext context) {
     final colors = context.colors;
-    final level = (event.level ?? 'warning').toLowerCase();
-    final tone = switch (level) {
-      'error' => MeshPillTone.danger,
-      'info' => MeshPillTone.info,
-      _ => MeshPillTone.warning,
-    };
-    final icon = switch (level) {
-      'error' => Icons.error_outline_rounded,
-      'info' => Icons.info_outline_rounded,
-      _ => Icons.warning_amber_rounded,
-    };
-    final accent = switch (level) {
-      'error' => colors.danger,
-      'info' => colors.info,
-      _ => colors.warning,
-    };
+    final compatibilityNotice = event.code == 'deprecationNotice' &&
+        event.level == 'info';
+    final details = Text(
+      event.message ?? '',
+      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+        color: colors.textSecondary,
+      ),
+    );
+    final source = [event.source, event.code]
+        .whereType<String>().where((value) => value.isNotEmpty).join(' · ');
     return Padding(
-      padding: const EdgeInsets.only(left: 4, right: 4, bottom: 8),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Padding(
-            padding: const EdgeInsets.only(top: 2),
-            child: Icon(icon, size: 16, color: accent),
-          ),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Column(
+      padding: const EdgeInsets.only(bottom: AppSpacing.sm),
+      child: compatibilityNotice
+          ? ExpansionTile(
+              tilePadding: EdgeInsets.zero,
+              childrenPadding: const EdgeInsets.only(bottom: AppSpacing.sm),
+              shape: const Border(),
+              collapsedShape: const Border(),
+              title: Text('Agent compatibility notice${occurrences > 1 ? ' · $occurrences occurrences' : ''}',
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                  color: colors.textSecondary)),
+              children: [
+                details,
+                if (source.isNotEmpty) Text(source,
+                  style: monoStyle(color: colors.textTertiary, fontSize: 12)),
+              ],
+            )
+          : Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Wrap(
-                  spacing: 8,
-                  runSpacing: 6,
-                  crossAxisAlignment: WrapCrossAlignment.center,
-                  children: [
-                    MeshPill(label: 'Agent notice', tone: tone, icon: icon),
-                    if ((event.source ?? '').isNotEmpty)
-                      MeshPill(
-                        label: event.source!,
-                        tone: MeshPillTone.neutral,
-                        mono: true,
-                      ),
-                    if ((event.code ?? '').isNotEmpty)
-                      MeshPill(
-                        label: event.code!,
-                        tone: MeshPillTone.neutral,
-                        mono: true,
-                      ),
-                  ],
-                ),
-                const SizedBox(height: 6),
-                Text(
-                  event.message ?? '',
-                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                    color: colors.textPrimary,
-                    fontWeight: FontWeight.w600,
-                    height: 1.35,
-                  ),
-                ),
+                Text(occurrences > 1 ? 'Agent notice · $occurrences occurrences' : 'Agent notice',
+                  style: Theme.of(context).textTheme.labelMedium),
+                details,
               ],
             ),
-          ),
-        ],
-      ),
     );
   }
 }
@@ -493,7 +510,7 @@ class _PlanUpdateCardState extends State<_PlanUpdateCard> {
                           color: colors.textSecondary,
                         ),
                       ),
-                      const SizedBox(width: 10),
+                      const SizedBox(width: AppSpacing.sm),
                       Expanded(
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
@@ -507,7 +524,7 @@ class _PlanUpdateCardState extends State<_PlanUpdateCard> {
                                   ),
                             ),
                             if (explanation.isNotEmpty) ...[
-                              const SizedBox(height: 2),
+                              const SizedBox(height: AppSpacing.xs),
                               Text(
                                 explanation,
                                 maxLines: _expanded ? 3 : 1,
@@ -522,14 +539,14 @@ class _PlanUpdateCardState extends State<_PlanUpdateCard> {
                           ],
                         ),
                       ),
-                      const SizedBox(width: 8),
+                      const SizedBox(width: AppSpacing.sm),
                       MeshStatusBadge(
                         label: '$completedCount/${steps.length}',
                         tone: MeshStatusTone.neutral,
                         icon: Icons.checklist_rounded,
                         compact: true,
                       ),
-                      const SizedBox(width: 4),
+                      const SizedBox(width: AppSpacing.xs),
                       Icon(
                         _expanded
                             ? Icons.keyboard_arrow_up_rounded
@@ -557,7 +574,7 @@ class _PlanUpdateCardState extends State<_PlanUpdateCard> {
                             index < steps.length;
                             index += 1
                           ) ...[
-                            if (index > 0) const SizedBox(height: 8),
+                            if (index > 0) const SizedBox(height: AppSpacing.sm),
                             Row(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
@@ -569,7 +586,7 @@ class _PlanUpdateCardState extends State<_PlanUpdateCard> {
                                     steps[index].status,
                                   ),
                                 ),
-                                const SizedBox(width: 10),
+                                const SizedBox(width: AppSpacing.sm),
                                 Expanded(
                                   child: Text(
                                     steps[index].step,
@@ -583,7 +600,7 @@ class _PlanUpdateCardState extends State<_PlanUpdateCard> {
                                         ),
                                   ),
                                 ),
-                                const SizedBox(width: 8),
+                                const SizedBox(width: AppSpacing.sm),
                                 MeshStatusBadge(
                                   label: _planStepLabel(steps[index].status),
                                   tone: _planStepTone(steps[index].status),
@@ -711,7 +728,7 @@ class _RuntimeSignalStrip extends StatelessWidget {
         children: [
           Wrap(spacing: 8, runSpacing: 8, children: pills),
           if (details.isNotEmpty) ...[
-            const SizedBox(height: 8),
+            const SizedBox(height: AppSpacing.sm),
             Text(
               details.join(' • '),
               style: Theme.of(context).textTheme.bodySmall?.copyWith(
@@ -914,7 +931,7 @@ class _PendingSendStrip extends StatelessWidget {
                     color: colors.accent,
                     size: 20,
                   ),
-                  const SizedBox(width: 10),
+                  const SizedBox(width: AppSpacing.sm),
                   Expanded(
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
@@ -927,7 +944,7 @@ class _PendingSendStrip extends StatelessWidget {
                                 fontWeight: AppWeights.title,
                               ),
                         ),
-                        const SizedBox(height: 2),
+                        const SizedBox(height: AppSpacing.xs),
                         Text(
                           detail,
                           maxLines: 2,
@@ -938,7 +955,7 @@ class _PendingSendStrip extends StatelessWidget {
                       ],
                     ),
                   ),
-                  const SizedBox(width: 8),
+                  const SizedBox(width: AppSpacing.sm),
                   MeshPill(
                     label: pendingSendStateLabel(primary.state),
                     tone: _pendingSendStateTone(primary.state),
@@ -946,7 +963,7 @@ class _PendingSendStrip extends StatelessWidget {
                   ),
                 ],
               ),
-              const SizedBox(height: 10),
+              const SizedBox(height: AppSpacing.sm),
               Wrap(
                 spacing: 8,
                 runSpacing: 8,
@@ -1010,6 +1027,7 @@ class _MessageBubble extends StatelessWidget {
     required this.sessionId,
     required this.message,
     this.live = false,
+    this.showTimestamp = true,
     this.pinned = false,
     this.onTogglePin,
     this.onOpenFile,
@@ -1022,6 +1040,7 @@ class _MessageBubble extends StatelessWidget {
   final SessionMessage message;
   final bool live;
   final bool pinned;
+  final bool showTimestamp;
   final VoidCallback? onTogglePin;
   final void Function(String path)? onOpenFile;
   final void Function(String url)? onOpenHostUrl;
@@ -1040,8 +1059,8 @@ class _MessageBubble extends StatelessWidget {
 
     final bubbleColor = switch (message.role) {
       'user' => colors.userBubble,
-      'assistant' => colors.assistantBubble,
-      _ => colors.surfaceMuted,
+      'assistant' => colors.canvas,
+      _ => colors.canvas,
     };
     final textColor = messageBodyColor(colors, userBubble: isUser);
     final metaColor = messageMetaColor(colors, userBubble: isUser);
@@ -1076,82 +1095,100 @@ class _MessageBubble extends StatelessWidget {
       ).textTheme.bodyMedium?.copyWith(color: colors.textPrimary, height: 1.5),
     );
     final messagePadding = isAssistant
-        ? const EdgeInsets.fromLTRB(16, 13, 16, 14)
+        ? const EdgeInsets.symmetric(vertical: AppSpacing.sm)
         : const EdgeInsets.fromLTRB(16, 12, 16, 14);
-    final bubbleBorderColor = isAssistant
-        ? live
-              ? colors.accent.withValues(alpha: 0.36)
-              : colors.assistantBubbleBorder
-        : live
-        ? colors.accent
-        : colors.accent.withValues(alpha: 0.28);
     final phaseLabel = live
         ? 'Writing'
         : message.phase == 'commentary'
         ? 'Progress'
         : null;
 
-    return Align(
-      alignment: isUser ? Alignment.centerRight : Alignment.centerLeft,
-      child: Padding(
-        padding: EdgeInsets.only(bottom: isAssistant ? 14 : 10),
-        child: ConstrainedBox(
-          constraints: BoxConstraints(maxWidth: isAssistant ? 680 : 560),
-          child: DecoratedBox(
-            decoration: BoxDecoration(
-              color: bubbleColor,
-              borderRadius: BorderRadius.circular(isAssistant ? 16 : 20),
-              border: Border.all(
-                color: bubbleBorderColor,
-                width: live ? 1.4 : 1,
+    return _MessageInteraction(
+      builder: (context, showChrome) => Align(
+        alignment: isUser ? Alignment.centerRight : Alignment.centerLeft,
+        child: Padding(
+          padding: EdgeInsets.only(bottom: isAssistant ? AppSpacing.xl : AppSpacing.lg),
+          child: ConstrainedBox(
+            constraints: BoxConstraints(maxWidth: isAssistant ? AppSizes.readingMaxWidth : 560),
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                color: isUser ? bubbleColor : null,
+                borderRadius: isUser ? AppShapes.card : null,
               ),
-            ),
-            child: TextSelectionTheme(
-              data: bubbleSelectionTheme,
-              child: Padding(
-                padding: messagePadding,
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    if (phaseLabel != null && hasAnswer)
-                      Padding(
-                        padding: const EdgeInsets.only(bottom: 6),
-                        child: Row(
-                          children: [
-                            if (live) ...[
-                              const LivePulse(),
-                              const SizedBox(width: 6),
-                            ],
-                            Text(
-                              phaseLabel,
-                              style: Theme.of(context).textTheme.labelSmall
-                                  ?.copyWith(
-                                    color: isAssistant
-                                        ? assistantMetaColor
-                                        : metaColor,
-                                    fontWeight: AppWeights.title,
-                                    letterSpacing: 0.2,
-                                  ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    for (final block in message.content)
-                      if (block is ThinkingBlock)
+              child: TextSelectionTheme(
+                data: bubbleSelectionTheme,
+                child: Padding(
+                  padding: messagePadding,
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      if (phaseLabel != null && hasAnswer)
                         Padding(
-                          padding: EdgeInsets.only(bottom: hasAnswer ? 10 : 0),
-                          child: _ReasoningBlock(
-                            reasoning: block.thinking,
-                            live: live,
-                            collapsedByDefault: hasAnswer,
-                            onOpenFile: onOpenFile,
-                            onOpenHostUrl: onOpenHostUrl,
+                          padding: const EdgeInsets.only(bottom: 6),
+                          child: Row(
+                            children: [
+                              if (live) ...[
+                                const LivePulse(),
+                                const SizedBox(width: AppSpacing.sm),
+                              ],
+                              Text(
+                                phaseLabel,
+                                style: Theme.of(context).textTheme.labelSmall
+                                    ?.copyWith(
+                                      color: isAssistant
+                                          ? assistantMetaColor
+                                          : metaColor,
+                                      fontWeight: AppWeights.title,
+                                      letterSpacing: 0.2,
+                                    ),
+                              ),
+                            ],
                           ),
-                        )
-                      else if (block is TextBlock)
+                        ),
+                      for (final block in message.content)
+                        if (block is ThinkingBlock)
+                          Padding(
+                            padding: EdgeInsets.only(bottom: hasAnswer ? 10 : 0),
+                            child: _ReasoningBlock(
+                              reasoning: block.thinking,
+                              live: live,
+                              collapsedByDefault: hasAnswer,
+                              onOpenFile: onOpenFile,
+                              onOpenHostUrl: onOpenHostUrl,
+                            ),
+                          )
+                        else if (block is TextBlock)
+                          if (isAssistant)
+                            _MarkdownMessageBody(
+                              text: block.text,
+                              textColor: textColor,
+                              linkStyle: assistantLinkStyle,
+                              onOpenFile: onOpenFile,
+                              onOpenHostUrl: onOpenHostUrl,
+                              host: host,
+                              api: api,
+                              sessionId: sessionId,
+                            )
+                          else
+                            _LinkifiedSelectableText(
+                              text: block.text,
+                              style: bodyStyle,
+                              linkStyle: linkStyle,
+                              onOpenHostUrl: onOpenHostUrl,
+                            ),
+                      if (message.attachments.isNotEmpty) ...[
+                        _MessageAttachmentsSection(
+                          host: host,
+                          api: api,
+                          sessionId: sessionId,
+                          attachments: message.attachments,
+                        ),
+                        if (!hasTextBlocks && hasText) const SizedBox(height: AppSpacing.sm),
+                      ],
+                      if (!hasTextBlocks && hasText)
                         if (isAssistant)
                           _MarkdownMessageBody(
-                            text: block.text,
+                            text: message.text,
                             textColor: textColor,
                             linkStyle: assistantLinkStyle,
                             onOpenFile: onOpenFile,
@@ -1162,82 +1199,55 @@ class _MessageBubble extends StatelessWidget {
                           )
                         else
                           _LinkifiedSelectableText(
-                            text: block.text,
+                            text: message.text,
                             style: bodyStyle,
                             linkStyle: linkStyle,
                             onOpenHostUrl: onOpenHostUrl,
                           ),
-                    if (message.attachments.isNotEmpty) ...[
-                      _MessageAttachmentsSection(
-                        host: host,
-                        api: api,
-                        sessionId: sessionId,
-                        attachments: message.attachments,
-                      ),
-                      if (!hasTextBlocks && hasText) const SizedBox(height: 10),
-                    ],
-                    if (!hasTextBlocks && hasText)
-                      if (isAssistant)
-                        _MarkdownMessageBody(
-                          text: message.text,
-                          textColor: textColor,
-                          linkStyle: assistantLinkStyle,
-                          onOpenFile: onOpenFile,
-                          onOpenHostUrl: onOpenHostUrl,
-                          host: host,
-                          api: api,
-                          sessionId: sessionId,
-                        )
-                      else
-                        _LinkifiedSelectableText(
-                          text: message.text,
-                          style: bodyStyle,
-                          linkStyle: linkStyle,
-                          onOpenHostUrl: onOpenHostUrl,
-                        ),
-                    if (canPin || hasText)
-                      Padding(
-                        padding: const EdgeInsets.only(top: 6),
-                        child: Align(
-                          alignment: Alignment.centerRight,
-                          child: Wrap(
-                            spacing: 8,
-                            runSpacing: 4,
-                            crossAxisAlignment: WrapCrossAlignment.center,
-                            children: [
-                              Text(
-                                _formatMessageTime(message.createdAt),
-                                style: Theme.of(context).textTheme.labelSmall
-                                    ?.copyWith(
-                                      color: isUser
-                                          ? metaColor
-                                          : assistantMetaColor,
-                                      fontSize: 10.5,
-                                      fontFeatures: const [
-                                        FontFeature.tabularFigures(),
-                                      ],
-                                    ),
-                              ),
-                              if (canPin)
-                                _MessagePinButton(
-                                  pinned: pinned,
-                                  tone: isUser
-                                      ? metaColor
-                                      : colors.textSecondary,
-                                  accent: colors.warning,
-                                  onTap: onTogglePin!,
+                      if (showChrome && (canPin || hasText))
+                        Padding(
+                          padding: const EdgeInsets.only(top: AppSpacing.xs),
+                          child: Align(
+                            alignment: Alignment.centerRight,
+                            child: Wrap(
+                              spacing: 8,
+                              runSpacing: 4,
+                              crossAxisAlignment: WrapCrossAlignment.center,
+                              children: [
+                                if (showTimestamp) Text(
+                                  _formatMessageTime(message.createdAt),
+                                  style: Theme.of(context).textTheme.labelSmall
+                                      ?.copyWith(
+                                        color: isUser
+                                            ? metaColor
+                                            : assistantMetaColor,
+                                        fontSize: 10.5,
+                                        fontFeatures: const [
+                                          FontFeature.tabularFigures(),
+                                        ],
+                                      ),
                                 ),
-                              if (!isUser && hasText)
-                                _MessageCopyButton(
-                                  text: message.text,
-                                  tone: colors.textSecondary,
-                                  accent: colors.accent,
-                                ),
-                            ],
+                                if (canPin)
+                                  _MessagePinButton(
+                                    pinned: pinned,
+                                    tone: isUser
+                                        ? metaColor
+                                        : colors.textSecondary,
+                                    accent: colors.warning,
+                                    onTap: onTogglePin!,
+                                  ),
+                                if (!isUser && hasText)
+                                  _MessageCopyButton(
+                                    text: message.text,
+                                    tone: colors.textSecondary,
+                                    accent: colors.accent,
+                                  ),
+                              ],
+                            ),
                           ),
                         ),
-                      ),
-                  ],
+                    ],
+                  ),
                 ),
               ),
             ),
@@ -1246,6 +1256,32 @@ class _MessageBubble extends StatelessWidget {
       ),
     );
   }
+}
+
+class _MessageInteraction extends StatefulWidget {
+  const _MessageInteraction({required this.builder});
+  final Widget Function(BuildContext context, bool visible) builder;
+  @override
+  State<_MessageInteraction> createState() => _MessageInteractionState();
+}
+
+class _MessageInteractionState extends State<_MessageInteraction> {
+  bool _hovered = false;
+  bool _focused = false;
+  bool _revealed = false;
+  @override
+  Widget build(BuildContext context) => MouseRegion(
+    onEnter: (_) => setState(() => _hovered = true),
+    onExit: (_) => setState(() => _hovered = false),
+    child: Focus(
+      onFocusChange: (value) => setState(() => _focused = value),
+      child: GestureDetector(
+        behavior: HitTestBehavior.translucent,
+        onLongPress: () => setState(() => _revealed = !_revealed),
+        child: widget.builder(context, _hovered || _focused || _revealed),
+      ),
+    ),
+  );
 }
 
 class _MessageAttachmentsSection extends StatelessWidget {
@@ -1592,11 +1628,11 @@ class _ImageAttachmentCard extends StatelessWidget {
     return DecoratedBox(
       decoration: BoxDecoration(
         color: colors.surfaceMuted,
-        borderRadius: BorderRadius.circular(16),
+        borderRadius: AppShapes.card,
         border: Border.all(color: colors.border),
       ),
       child: ClipRRect(
-        borderRadius: BorderRadius.circular(15),
+        borderRadius: BorderRadius.circular(AppRadii.card - 1),
         child: Material(
           color: Colors.transparent,
           child: InkWell(
@@ -1632,7 +1668,7 @@ class _LocalImageFallback extends StatelessWidget {
             color: colors.accent,
             size: 18,
           ),
-          const SizedBox(width: 10),
+          const SizedBox(width: AppSpacing.sm),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -1646,7 +1682,7 @@ class _LocalImageFallback extends StatelessWidget {
                     fontWeight: AppWeights.emphasis,
                   ),
                 ),
-                const SizedBox(height: 2),
+                const SizedBox(height: AppSpacing.xs),
                 Text(
                   path,
                   maxLines: 1,
@@ -1715,7 +1751,7 @@ class _MessageCopyButtonState extends State<_MessageCopyButton> {
     final color = _copied ? widget.accent : widget.tone;
     return InkWell(
       onTap: _handle,
-      borderRadius: BorderRadius.circular(8),
+      borderRadius: AppShapes.badge,
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
         child: Row(
@@ -1726,7 +1762,7 @@ class _MessageCopyButtonState extends State<_MessageCopyButton> {
               size: 13,
               color: color,
             ),
-            const SizedBox(width: 4),
+            const SizedBox(width: AppSpacing.xs),
             Text(
               _copied ? 'Copied' : 'Copy',
               style: Theme.of(context).textTheme.labelSmall?.copyWith(
@@ -1760,7 +1796,7 @@ class _MessagePinButton extends StatelessWidget {
     final color = pinned ? accent : tone;
     return InkWell(
       onTap: onTap,
-      borderRadius: BorderRadius.circular(8),
+      borderRadius: AppShapes.badge,
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
         child: Row(
@@ -1771,7 +1807,7 @@ class _MessagePinButton extends StatelessWidget {
               size: 13,
               color: color,
             ),
-            const SizedBox(width: 4),
+            const SizedBox(width: AppSpacing.xs),
             Text(
               pinned ? 'Pinned' : 'Pin',
               style: Theme.of(context).textTheme.labelSmall?.copyWith(
@@ -1844,7 +1880,7 @@ class _ReasoningTextBody extends StatelessWidget {
       text: text,
       style: style,
       linkStyle: linkTextStyleForBackground(
-        background: colors.assistantBubble,
+        background: colors.canvas,
         preferred: colors.accent,
         fallbacks: [colors.info, colors.textPrimary, colors.textSecondary],
         baseStyle: style,
@@ -1983,7 +2019,7 @@ Future<void> _openLink(
     } else if (context.mounted) {
       showAppSnackBar(
         context,
-        'This address belongs to the connected host and cannot open directly on this device.',
+        'This address belongs to the connected machine and cannot open directly on this device.',
       );
     }
     return;
@@ -2203,48 +2239,15 @@ class _ActivityCardState extends State<_ActivityCard> {
   }
 
   List<Widget> _activityDetailPills(SessionActivity activity) {
-    final pills = <Widget>[];
-    if (activity.isCommand) {
-      if (activity.exitCode != null && activity.exitCode != 0) {
-        pills.add(
-          MeshPill(
-            label: 'exit ${activity.exitCode}',
-            tone: MeshPillTone.danger,
-            mono: true,
-          ),
-        );
-      }
-      if (activity.durationMs != null &&
-          (activity.status == 'failed' || activity.durationMs! >= 10000)) {
-        pills.add(
-          MeshPill(label: _formatDuration(activity.durationMs!), mono: true),
-        );
-      }
-      if (activity.terminalStatus == 'input') {
-        pills.add(
-          const MeshPill(label: 'stdin', tone: MeshPillTone.info, mono: true),
-        );
-      }
-      if (activity.terminalStatus == 'waiting') {
-        pills.add(
-          const MeshPill(
-            label: 'interactive',
-            tone: MeshPillTone.warning,
-            mono: true,
-          ),
-        );
-      }
-    }
-    if (activity.isTool && activity.toolError == true) {
-      pills.add(
-        const MeshPill(
-          label: 'tool error',
-          tone: MeshPillTone.danger,
-          mono: true,
-        ),
-      );
-    }
-    return pills;
+    final details = <String>[
+      if (activity.exitCode != null) 'exit ${activity.exitCode}',
+      if (activity.durationMs != null) _formatDuration(activity.durationMs!),
+      if (activity.terminalStatus == 'input') 'stdin',
+      if (activity.terminalStatus == 'waiting') 'interactive',
+      if (activity.isTool && activity.toolError == true) 'tool error',
+    ];
+    if (details.isEmpty) return const [];
+    return [Text(details.join(' · '), style: monoStyle(color: context.colors.textSecondary))];
   }
 
   _CommandTitleParts? _activityCommandTitleParts(SessionActivity activity) {
@@ -2303,7 +2306,7 @@ class _ActivityCardState extends State<_ActivityCard> {
       padding: const EdgeInsets.only(top: 6),
       child: Container(
         width: double.infinity,
-        padding: const EdgeInsets.fromLTRB(10, 10, 10, 10),
+        padding: const EdgeInsets.all(AppSpacing.md),
         decoration: BoxDecoration(
           color: colors.surface.withValues(alpha: 0.58),
           borderRadius: AppShapes.input,
@@ -2354,17 +2357,6 @@ class _ActivityCardState extends State<_ActivityCard> {
       _ => null,
     };
 
-    final activityLabel = switch (activity.type) {
-      'command' => null,
-      'tool' => _toolActivityLabel(activity),
-      'file_change' => 'File edit',
-      'turn_diff' => null,
-      'web_search' => 'Web search',
-      'image_generation' => 'Image',
-      'context_compaction' => 'Context',
-      _ => 'Activity',
-    };
-
     final activityIcon = switch (activity.type) {
       'command' => Icons.terminal_rounded,
       'tool' => _toolActivityIcon(activity),
@@ -2383,24 +2375,15 @@ class _ActivityCardState extends State<_ActivityCard> {
     return Align(
       alignment: Alignment.centerLeft,
       child: Padding(
-        padding: const EdgeInsets.only(bottom: 10),
+        padding: const EdgeInsets.only(bottom: AppSpacing.xs),
         child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 640),
+          constraints: const BoxConstraints(maxWidth: AppSizes.readingMaxWidth),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Material(
-                color: commandLikeActivity
-                    ? colors.surface.withValues(alpha: 0.76)
-                    : colors.surfaceMuted.withValues(alpha: 0.48),
-                shape: RoundedRectangleBorder(
-                  borderRadius: AppShapes.input,
-                  side: BorderSide(
-                    color: commandLikeActivity
-                        ? colors.codeBorder.withValues(alpha: 0.76)
-                        : colors.border.withValues(alpha: 0.62),
-                  ),
-                ),
+                color: Colors.transparent,
+                shape: RoundedRectangleBorder(borderRadius: AppShapes.input),
                 clipBehavior: Clip.antiAlias,
                 child: InkWell(
                   onTap: () {
@@ -2418,48 +2401,15 @@ class _ActivityCardState extends State<_ActivityCard> {
                     child: Row(
                       crossAxisAlignment: CrossAxisAlignment.center,
                       children: [
-                        Container(
-                          width: 30,
-                          height: 30,
-                          decoration: BoxDecoration(
-                            color: commandLikeActivity
-                                ? colors.surfaceElevated
-                                : activity.isCommand || activity.isTool
-                                ? colors.surfaceMuted.withValues(alpha: 0.72)
-                                : colors.accentMuted.withValues(alpha: 0.68),
-                            borderRadius: AppShapes.iconWell,
-                            border: Border.all(
-                              color: colors.border.withValues(alpha: 0.5),
-                            ),
-                          ),
-                          alignment: Alignment.center,
-                          child: Icon(
-                            activityIcon,
-                            size: 16,
-                            color: commandLikeActivity
-                                ? colors.codeForeground
-                                : activity.isCommand || activity.isTool
-                                ? colors.textPrimary
-                                : colors.accent,
-                          ),
-                        ),
-                        const SizedBox(width: 10),
+                        if (!commandLikeActivity) ...[
+                          Icon(activityIcon, size: AppSizes.compactIcon,
+                            color: colors.textTertiary),
+                          const SizedBox(width: AppSpacing.sm),
+                        ],
                         Expanded(
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              if (activityLabel != null) ...[
-                                Text(
-                                  activityLabel,
-                                  style: Theme.of(context).textTheme.labelSmall
-                                      ?.copyWith(
-                                        color: colors.textTertiary,
-                                        fontWeight: AppWeights.title,
-                                        letterSpacing: 0.2,
-                                      ),
-                                ),
-                                const SizedBox(height: 2),
-                              ],
                               _buildActivityTitle(
                                 context,
                                 activity: activity,
@@ -2468,7 +2418,7 @@ class _ActivityCardState extends State<_ActivityCard> {
                               if (!_cardCollapsed &&
                                   subtitle != null &&
                                   subtitle.isNotEmpty) ...[
-                                const SizedBox(height: 4),
+                                const SizedBox(height: AppSpacing.xs),
                                 Text(
                                   subtitle,
                                   maxLines: 2,
@@ -2481,10 +2431,10 @@ class _ActivityCardState extends State<_ActivityCard> {
                           ),
                         ),
                         if (statusBadge != null) ...[
-                          const SizedBox(width: 8),
+                          const SizedBox(width: AppSpacing.sm),
                           statusBadge,
                         ],
-                        const SizedBox(width: 4),
+                        const SizedBox(width: AppSpacing.xs),
                         Icon(
                           _cardCollapsed
                               ? Icons.keyboard_arrow_down_rounded
@@ -2514,7 +2464,7 @@ class _ActivityCardState extends State<_ActivityCard> {
                                 runSpacing: 6,
                                 children: detailPills,
                               ),
-                              const SizedBox(height: 12),
+                              const SizedBox(height: AppSpacing.md),
                             ],
                             if (activity.isCommand)
                               ..._buildCommandBody(context, activity)
@@ -2549,7 +2499,7 @@ class _ActivityCardState extends State<_ActivityCard> {
                               ),
                             ],
                             if (contextActions.isNotEmpty) ...[
-                              const SizedBox(height: 12),
+                              const SizedBox(height: AppSpacing.md),
                               _ActivityActionRow(actions: contextActions),
                             ],
                           ],
@@ -2578,9 +2528,9 @@ class _ActivityCardState extends State<_ActivityCard> {
     return Align(
       alignment: Alignment.centerLeft,
       child: Padding(
-        padding: const EdgeInsets.only(bottom: 10),
+        padding: const EdgeInsets.only(bottom: AppSpacing.xs),
         child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 640),
+          constraints: const BoxConstraints(maxWidth: AppSizes.readingMaxWidth),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
@@ -2626,7 +2576,7 @@ class _ActivityCardState extends State<_ActivityCard> {
                             color: colors.textSecondary,
                           ),
                         ),
-                        const SizedBox(width: 10),
+                        const SizedBox(width: AppSpacing.sm),
                         Expanded(
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
@@ -2643,7 +2593,7 @@ class _ActivityCardState extends State<_ActivityCard> {
                                     ),
                               ),
                               if (subtitle.isNotEmpty) ...[
-                                const SizedBox(height: 2),
+                                const SizedBox(height: AppSpacing.xs),
                                 Text(
                                   subtitle,
                                   maxLines: 1,
@@ -2659,10 +2609,10 @@ class _ActivityCardState extends State<_ActivityCard> {
                           ),
                         ),
                         if (statusBadge != null) ...[
-                          const SizedBox(width: 8),
+                          const SizedBox(width: AppSpacing.sm),
                           statusBadge,
                         ],
-                        const SizedBox(width: 4),
+                        const SizedBox(width: AppSpacing.xs),
                         Icon(
                           _cardCollapsed
                               ? Icons.keyboard_arrow_down_rounded
@@ -2688,7 +2638,7 @@ class _ActivityCardState extends State<_ActivityCard> {
                           children: [
                             if (contextActions.isNotEmpty) ...[
                               _ActivityActionRow(actions: contextActions),
-                              const SizedBox(height: 10),
+                              const SizedBox(height: AppSpacing.sm),
                             ],
                             if (changes.isEmpty)
                               _waitingText(context, 'Waiting for file changes.')
@@ -2705,7 +2655,7 @@ class _ActivityCardState extends State<_ActivityCard> {
                                   sessionCwd: sessionCwd,
                                   onOpen: _openWorkspaceFile,
                                 ),
-                              const SizedBox(height: 8),
+                              const SizedBox(height: AppSpacing.sm),
                               _buildLazyFileChanges(
                                 context,
                                 changes: changes,
@@ -2733,7 +2683,7 @@ class _ActivityCardState extends State<_ActivityCard> {
 
     if (_friendlyCommandTitleParts(command, activity.status) != null) {
       widgets.add(_activityCodeBlock(context, 'Raw command', command, 'bash'));
-      widgets.add(const SizedBox(height: 12));
+      widgets.add(const SizedBox(height: AppSpacing.md));
     }
 
     if ((activity.terminalInput ?? '').isNotEmpty) {
@@ -2753,7 +2703,7 @@ class _ActivityCardState extends State<_ActivityCard> {
       widgets.add(
         SyntaxCodeBlock(text: activity.terminalInput!, language: 'bash'),
       );
-      widgets.add(const SizedBox(height: 12));
+      widgets.add(const SizedBox(height: AppSpacing.md));
     }
 
     if ((activity.output ?? '').isNotEmpty) {
@@ -2765,7 +2715,7 @@ class _ActivityCardState extends State<_ActivityCard> {
           : output;
       widgets.add(SyntaxCodeBlock(text: displayText, language: 'bash'));
       if (isLong) {
-        widgets.add(const SizedBox(height: 6));
+        widgets.add(const SizedBox(height: AppSpacing.sm));
         widgets.add(
           _ExpandToggle(
             expanded: _outputExpanded,
@@ -2793,12 +2743,12 @@ class _ActivityCardState extends State<_ActivityCard> {
     final widgets = <Widget>[];
     widgets.addAll(_buildToolSemanticBlocks(context, activity));
     if (widgets.isNotEmpty) {
-      widgets.add(const SizedBox(height: 12));
+      widgets.add(const SizedBox(height: AppSpacing.md));
     }
     final command = _displayCommandText(_toolCommandText(activity));
     if (_friendlyCommandTitleParts(command, activity.status) != null) {
       widgets.add(_activityCodeBlock(context, 'Raw command', command, 'bash'));
-      widgets.add(const SizedBox(height: 12));
+      widgets.add(const SizedBox(height: AppSpacing.md));
     }
     final output = (activity.output ?? '').trimRight();
     final args = _formatActivityValue(activity.toolArgs);
@@ -2806,12 +2756,12 @@ class _ActivityCardState extends State<_ActivityCard> {
 
     if (args.isNotEmpty) {
       widgets.add(_activityCodeBlock(context, 'Arguments', args, 'json'));
-      widgets.add(const SizedBox(height: 12));
+      widgets.add(const SizedBox(height: AppSpacing.md));
     }
 
     if (output.isNotEmpty) {
       widgets.add(_activityCodeBlock(context, 'Output', output, 'text'));
-      widgets.add(const SizedBox(height: 12));
+      widgets.add(const SizedBox(height: AppSpacing.md));
     }
 
     if (activity.toolAttachments.isNotEmpty) {
@@ -2823,12 +2773,12 @@ class _ActivityCardState extends State<_ActivityCard> {
           attachments: activity.toolAttachments,
         ),
       );
-      widgets.add(const SizedBox(height: 12));
+      widgets.add(const SizedBox(height: AppSpacing.md));
     }
 
     if (result.isNotEmpty) {
       widgets.add(_activityCodeBlock(context, 'Result', result, 'json'));
-      widgets.add(const SizedBox(height: 12));
+      widgets.add(const SizedBox(height: AppSpacing.md));
     }
 
     if (widgets.isEmpty) {
@@ -2864,7 +2814,7 @@ class _ActivityCardState extends State<_ActivityCard> {
             fontWeight: AppWeights.emphasis,
           ).copyWith(letterSpacing: 0.8),
         ),
-        const SizedBox(height: 8),
+        const SizedBox(height: AppSpacing.sm),
         SyntaxCodeBlock(text: text, language: language),
       ],
     );
@@ -2914,7 +2864,7 @@ class _ActivityCardState extends State<_ActivityCard> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        ...rows.expand((row) => [row, const SizedBox(height: 10)]),
+        ...rows.expand((row) => [row, const SizedBox(height: AppSpacing.sm)]),
         Text(
           _webSearchStatusCopy(activity),
           style: Theme.of(
@@ -2954,7 +2904,7 @@ class _ActivityCardState extends State<_ActivityCard> {
               fontWeight: AppWeights.emphasis,
             ).copyWith(letterSpacing: 0.8),
           ),
-          const SizedBox(height: 6),
+          const SizedBox(height: AppSpacing.sm),
           linkify
               ? _LinkifiedSelectableText(
                   text: text,
@@ -2982,7 +2932,7 @@ class _ActivityCardState extends State<_ActivityCard> {
     if (callback == null) {
       showAppSnackBar(
         context,
-        'This address belongs to the connected host and cannot open directly on this device.',
+        'This address belongs to the connected machine and cannot open directly on this device.',
       );
       return;
     }
@@ -2993,7 +2943,7 @@ class _ActivityCardState extends State<_ActivityCard> {
     );
     final candidate = parsed.candidate;
     if (candidate == null) {
-      showAppSnackBar(context, parsed.error ?? 'Could not open host link.');
+      showAppSnackBar(context, parsed.error ?? 'Could not open machine link.');
       return;
     }
     callback(candidate);
@@ -3019,7 +2969,7 @@ class _ActivityCardState extends State<_ActivityCard> {
               fontWeight: AppWeights.emphasis,
             ).copyWith(letterSpacing: 0.8),
           ),
-          const SizedBox(height: 8),
+          const SizedBox(height: AppSpacing.sm),
           Container(
             width: double.infinity,
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
@@ -3036,7 +2986,7 @@ class _ActivityCardState extends State<_ActivityCard> {
               ),
             ),
           ),
-          const SizedBox(height: 12),
+          const SizedBox(height: AppSpacing.md),
         ],
         if (savedPath.isNotEmpty) ...[
           _LocalImageAttachmentTile(
@@ -3045,7 +2995,7 @@ class _ActivityCardState extends State<_ActivityCard> {
             sessionId: widget.sessionId,
             path: savedPath,
           ),
-          const SizedBox(height: 8),
+          const SizedBox(height: AppSpacing.sm),
           Text(
             savedPath,
             style: monoStyle(color: colors.textTertiary, fontSize: 10.5),
@@ -3186,34 +3136,6 @@ class _ActivityCardState extends State<_ActivityCard> {
     return name.isNotEmpty ? name : null;
   }
 
-  String? _toolActivityLabel(SessionActivity activity) {
-    if (activity.toolAction == 'mode_change') {
-      return 'Mode';
-    }
-    if (_toolIsCommandActivity(activity)) {
-      return null;
-    }
-    return switch (activity.toolCategory) {
-      'filesystem' => switch (activity.toolAction) {
-        'read' => 'File read',
-        'write' => 'File edit',
-        'list' => 'File list',
-        'search' => 'File search',
-        _ => 'Filesystem',
-      },
-      'network' => switch (activity.toolAction) {
-        'fetch' => 'Web fetch',
-        'search' => 'Web search',
-        _ => 'Network',
-      },
-      'command' => null,
-      'session' => 'Session',
-      'memory' => 'Memory',
-      'task' => 'Task',
-      _ => 'Tool',
-    };
-  }
-
   IconData _toolActivityIcon(SessionActivity activity) {
     if (activity.toolAction == 'mode_change') {
       return Icons.tune_rounded;
@@ -3280,7 +3202,7 @@ class _ActivityCardState extends State<_ActivityCard> {
     }
 
     return [
-      ...rows.expand((row) => [row, const SizedBox(height: 10)]),
+      ...rows.expand((row) => [row, const SizedBox(height: AppSpacing.sm)]),
     ]..removeLast();
   }
 
@@ -3317,7 +3239,7 @@ class _ActivityCardState extends State<_ActivityCard> {
     final args = activity.toolArgs;
     if (args is Map<String, dynamic>) {
       final command =
-          (args['command'] ?? args['cmd'] ?? args['fullCommandText'])
+          (args['command'] ?? args['cmd'] ?? args['fullCommandText'] ?? args['script'] ?? args['code'])
               ?.toString()
               .trim();
       if (command != null && command.isNotEmpty) {
@@ -3326,7 +3248,7 @@ class _ActivityCardState extends State<_ActivityCard> {
     }
     if (args is Map) {
       final command =
-          (args['command'] ?? args['cmd'] ?? args['fullCommandText'])
+          (args['command'] ?? args['cmd'] ?? args['fullCommandText'] ?? args['script'] ?? args['code'])
               ?.toString()
               .trim();
       if (command != null && command.isNotEmpty) {
@@ -3438,7 +3360,7 @@ class _ActivityCardState extends State<_ActivityCard> {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           DiffView(diff: diff),
-          const SizedBox(height: 6),
+          const SizedBox(height: AppSpacing.sm),
           _DiffToggle(
             expanded: true,
             label: label,
@@ -3530,10 +3452,8 @@ class _CommandTitleChip extends StatelessWidget {
                 padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
                 decoration: BoxDecoration(
                   color: colors.surfaceElevated,
-                  borderRadius: BorderRadius.circular(AppRadii.badge),
-                  border: Border.all(
-                    color: colors.codeBorder.withValues(alpha: 0.92),
-                  ),
+                  borderRadius: AppShapes.badge,
+
                 ),
                 child: Text(
                   parts.command,
@@ -3602,19 +3522,19 @@ class _ActivityActionChip extends StatelessWidget {
       color: Colors.transparent,
       child: InkWell(
         onTap: action.onTap,
-        borderRadius: BorderRadius.circular(999),
+        borderRadius: AppShapes.pill,
         child: Container(
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
           decoration: BoxDecoration(
             color: tone.withValues(alpha: 0.08),
-            borderRadius: BorderRadius.circular(999),
+            borderRadius: AppShapes.pill,
             border: Border.all(color: tone.withValues(alpha: 0.18)),
           ),
           child: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
               Icon(action.icon, size: 16, color: tone),
-              const SizedBox(width: 6),
+              const SizedBox(width: AppSpacing.sm),
               Text(
                 action.label,
                 style: Theme.of(context).textTheme.labelMedium?.copyWith(
@@ -3672,7 +3592,7 @@ class _DiffToggle extends StatelessWidget {
                   size: 15,
                   color: colors.textSecondary,
                 ),
-                const SizedBox(width: 6),
+                const SizedBox(width: AppSpacing.sm),
                 Text(
                   expanded ? expandedLabel : label,
                   style: monoStyle(
@@ -3710,7 +3630,7 @@ class _ExpandToggle extends StatelessWidget {
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
         decoration: BoxDecoration(
           color: colors.accentMuted,
-          borderRadius: BorderRadius.circular(8),
+          borderRadius: AppShapes.badge,
           border: Border.all(color: colors.accent.withValues(alpha: 0.3)),
         ),
         child: Row(
@@ -3721,7 +3641,7 @@ class _ExpandToggle extends StatelessWidget {
               size: 16,
               color: colors.accent,
             ),
-            const SizedBox(width: 6),
+            const SizedBox(width: AppSpacing.sm),
             Text(
               expanded ? 'Show less' : '+$hiddenCount lines',
               style: monoStyle(
@@ -3765,7 +3685,7 @@ class _FileChangeBlock extends StatelessWidget {
     final pathRow = Row(
       children: [
         Icon(Icons.description_rounded, size: 16, color: colors.textSecondary),
-        const SizedBox(width: 8),
+        const SizedBox(width: AppSpacing.sm),
         Expanded(
           child: Text(
             _relativeSessionPath(change.path, sessionCwd),
@@ -3780,7 +3700,7 @@ class _FileChangeBlock extends StatelessWidget {
                 ),
           ),
         ),
-        const SizedBox(width: 8),
+        const SizedBox(width: AppSpacing.sm),
         MeshPill(label: change.kind, tone: tone, mono: true),
       ],
     );
@@ -3790,7 +3710,7 @@ class _FileChangeBlock extends StatelessWidget {
         canOpen
             ? InkWell(
                 onTap: () => onOpen!(change.path),
-                borderRadius: BorderRadius.circular(6),
+                borderRadius: AppShapes.badge,
                 child: Padding(
                   padding: const EdgeInsets.symmetric(vertical: 2),
                   child: pathRow,
@@ -3808,7 +3728,7 @@ class _FileChangeBlock extends StatelessWidget {
             ),
           )
         else
-          const SizedBox(height: 8),
+          const SizedBox(height: AppSpacing.sm),
         DiffView(diff: change.diff),
       ],
     );
@@ -3846,7 +3766,7 @@ class _InlineFileChangeRow extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.center,
         children: [
           Icon(Icons.description_rounded, size: 15, color: colors.textTertiary),
-          const SizedBox(width: 8),
+          const SizedBox(width: AppSpacing.sm),
           Expanded(
             child: Text(
               _relativeSessionPath(change.path, sessionCwd),
@@ -3863,7 +3783,7 @@ class _InlineFileChangeRow extends StatelessWidget {
                   ),
             ),
           ),
-          const SizedBox(width: 8),
+          const SizedBox(width: AppSpacing.sm),
           MeshPill(label: change.kind, tone: tone, mono: true),
         ],
       ),
@@ -3905,7 +3825,7 @@ class _DetailRow extends StatelessWidget {
               fontWeight: AppWeights.title,
             ).copyWith(letterSpacing: 1.2),
           ),
-          const SizedBox(height: 4),
+          const SizedBox(height: AppSpacing.xs),
           Text(value, style: Theme.of(context).textTheme.bodyMedium),
         ],
       ),
@@ -4048,25 +3968,25 @@ class _SessionRuntimeDetails extends StatelessWidget {
               ),
             ],
           ),
-          const SizedBox(height: 10),
+          const SizedBox(height: AppSpacing.sm),
           _RuntimeSection(
             title: 'Runtime',
             details: runtimeDetails,
             showTitle: false,
           ),
           if (contextDetails.isNotEmpty) ...[
-            const SizedBox(height: 6),
+            const SizedBox(height: AppSpacing.sm),
             _RuntimeExpansionSection(title: 'Context', details: contextDetails),
           ],
           if (usageDetails.isNotEmpty) ...[
-            const SizedBox(height: 4),
+            const SizedBox(height: AppSpacing.xs),
             _RuntimeExpansionSection(
               title: 'Last usage',
               details: usageDetails,
             ),
           ],
           if (compactionDetails.isNotEmpty) ...[
-            const SizedBox(height: 4),
+            const SizedBox(height: AppSpacing.xs),
             _RuntimeExpansionSection(
               title: 'Compaction',
               details: compactionDetails,
@@ -4104,7 +4024,7 @@ class _RuntimeSection extends StatelessWidget {
               fontWeight: AppWeights.title,
             ).copyWith(letterSpacing: 1.1),
           ),
-          const SizedBox(height: 8),
+          const SizedBox(height: AppSpacing.sm),
         ],
         Wrap(
           spacing: 6,
@@ -4174,7 +4094,7 @@ class _RuntimeDetailChip extends StatelessWidget {
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
       decoration: BoxDecoration(
         color: colors.surface,
-        borderRadius: BorderRadius.circular(10),
+        borderRadius: AppShapes.input,
         border: Border.all(color: colors.border),
       ),
       child: Row(
@@ -4867,23 +4787,23 @@ class _SessionTimelineLoadingState extends StatelessWidget {
       padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
       children: const [
         Center(child: MeshSkeleton(width: 88, height: 20, radius: 999)),
-        SizedBox(height: 14),
+        SizedBox(height: AppSpacing.lg),
         _SessionBubbleSkeleton(
           widthFactor: 0.78,
           lineWidths: [1.0, 0.86, 0.48],
         ),
-        SizedBox(height: 10),
+        SizedBox(height: AppSpacing.sm),
         _SessionBubbleSkeleton(
           widthFactor: 0.62,
           rightAligned: true,
           lineWidths: [0.94, 0.72],
         ),
-        SizedBox(height: 10),
+        SizedBox(height: AppSpacing.sm),
         _SessionBubbleSkeleton(
           widthFactor: 0.82,
           lineWidths: [1.0, 0.92, 0.68],
         ),
-        SizedBox(height: 10),
+        SizedBox(height: AppSpacing.sm),
         _SessionBubbleSkeleton(
           widthFactor: 0.54,
           rightAligned: true,
@@ -4924,14 +4844,14 @@ class _SessionBubbleSkeleton extends StatelessWidget {
                 alignment: Alignment.centerLeft,
                 child: MeshSkeleton(height: 10, radius: AppRadii.badge),
               ),
-              const SizedBox(height: 10),
+              const SizedBox(height: AppSpacing.sm),
               for (var index = 0; index < lineWidths.length; index += 1) ...[
                 FractionallySizedBox(
                   widthFactor: lineWidths[index],
                   alignment: Alignment.centerLeft,
                   child: const MeshSkeleton(height: 12, radius: AppRadii.badge),
                 ),
-                if (index != lineWidths.length - 1) const SizedBox(height: 8),
+                if (index != lineWidths.length - 1) const SizedBox(height: AppSpacing.sm),
               ],
             ],
           ),
@@ -4990,4 +4910,44 @@ class _SessionWaitingState extends StatelessWidget {
       ),
     );
   }
+}
+
+class _SessionLoadErrorState extends StatelessWidget {
+  const _SessionLoadErrorState({required this.error, required this.onRetry});
+  final String error;
+  final VoidCallback onRetry;
+  @override
+  Widget build(BuildContext context) => Center(
+    child: Padding(
+      padding: const EdgeInsets.all(AppSpacing.lg),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text('Could not load this session', style: Theme.of(context).textTheme.titleMedium),
+          const SizedBox(height: AppSpacing.sm),
+          Text(error, textAlign: TextAlign.center),
+          const SizedBox(height: AppSpacing.md),
+          FilledButton.icon(onPressed: onRetry, icon: const Icon(Icons.refresh_rounded), label: const Text('Retry')),
+        ],
+      ),
+    ),
+  );
+}
+
+class _SessionEmptyState extends StatelessWidget {
+  const _SessionEmptyState();
+  @override
+  Widget build(BuildContext context) => Center(
+    child: Padding(
+      padding: const EdgeInsets.all(AppSpacing.lg),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text('What would you like to work on?', style: Theme.of(context).textTheme.titleMedium),
+          const SizedBox(height: AppSpacing.sm),
+          const Text('Send a message below to start this session.', textAlign: TextAlign.center),
+        ],
+      ),
+    ),
+  );
 }

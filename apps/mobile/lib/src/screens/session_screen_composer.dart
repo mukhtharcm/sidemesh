@@ -24,6 +24,8 @@ class _Composer extends StatelessWidget {
     required this.loadingFileSearch,
     required this.fileError,
     required this.sending,
+    required this.enabled,
+    required this.workspaceStrip,
     required this.supportsImageInput,
     required this.supportsSkillInput,
     required this.supportsFileMentions,
@@ -65,6 +67,8 @@ class _Composer extends StatelessWidget {
   final String? fileError;
 
   final bool sending;
+  final bool enabled;
+  final Widget workspaceStrip;
   final bool supportsImageInput;
   final bool supportsSkillInput;
 
@@ -126,10 +130,10 @@ class _Composer extends StatelessWidget {
     final hasContext =
         attachments.isNotEmpty || skills.isNotEmpty || files.isNotEmpty;
     final leading = isDesktop && supportsImageInput
-        ? _ComposerAttachButton(enabled: !sending, onPressed: onPickImages)
+        ? _ComposerAttachButton(enabled: enabled && !sending, onPressed: onPickImages)
         : showPlusButton
         ? _ComposerPlusButton(
-            enabled: !sending,
+            enabled: enabled && !sending,
             supportsImageInput: supportsImageInput,
             supportsSkillInput: supportsSkillInput,
             supportsFileMentions: supportsFileMentions,
@@ -143,18 +147,20 @@ class _Composer extends StatelessWidget {
       controller: controller,
       focusNode: focusNode,
       sending: sending,
+      enabled: enabled,
       onSend: onSend,
       onDismiss: onDismiss,
       onNativePaste: onNativePaste,
       submitOnEnter: submitOnEnter,
       desktopHintText:
-          'Reply here. Press Enter to send, Shift+Enter for a new line',
+          'Reply…',
       hasSendableContext: hasContext,
       leading: leading,
       controls: controls,
       header: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
+          workspaceStrip,
           AnimatedSize(
             duration: AppMotion.quick,
             curve: AppMotion.standard,
@@ -257,7 +263,7 @@ class _ComposerContextShelf extends StatelessWidget {
             id: 'image-${a.id}',
             icon: isDesktop
                 ? ClipRRect(
-                    borderRadius: BorderRadius.circular(6),
+                    borderRadius: AppShapes.badge,
                     child: Image.memory(
                       a.bytes,
                       width: 20,

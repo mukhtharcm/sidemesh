@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/gestures.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -27,6 +28,72 @@ void main() {
     final db = await SidemeshDb.instance;
     await db.delete('sessions');
     SharedPreferences.setMockInitialValues(<String, Object>{});
+  });
+
+  testWidgets('composer preserves long model names before layout', (tester) async {
+    const model = 'a-provider-model-name-longer-than-twenty-four-characters';
+    final session = _session('long-model').copyWith(
+      runtime: SessionRuntimeSummary.fromJson({'model': model}),
+    );
+    final api = _RichEventFakeApi(sessionSummary: session,
+      nodeInfo: _nodeInfo(modelControls: true));
+    addTearDown(api.dispose);
+    await _pumpApp(tester, SessionScreen(host: _host('long-model'),
+      session: session, api: api), size: const Size(1180, 900));
+    await _pumpFrames(tester);
+    expect(find.text(model), findsOneWidget);
+  });
+
+  testWidgets('short initial history window keeps load older available', (tester) async {
+    final api = _RichEventFakeApi(sessionLogHistory: const SessionLogHistorySummary(
+      isTruncated: true, totalMessages: 93, returnedMessages: 0,
+      totalActivities: 0, returnedActivities: 0,
+    ));
+    addTearDown(api.dispose);
+    await _pumpApp(tester, SessionScreen(host: _host('short-history'),
+      session: _session('short-history'), api: api), size: const Size(390, 840));
+    await _pumpFrames(tester);
+    expect(find.text('Load older'), findsOneWidget);
+    expect(find.text('Start the conversation'), findsNothing);
+  });
+
+  testWidgets('assistant prose is borderless and reveals copy only on hover', (tester) async {
+    final api = _RichEventFakeApi(messages: [
+      _assistantMessage(id: 'document', text: 'A readable document.', content: const []),
+    ]);
+    addTearDown(api.dispose);
+    await _pumpApp(tester, SessionScreen(host: _host('document'),
+      session: _session('document'), api: api, desktopMode: true), size: const Size(1180, 900));
+    await _pumpFrames(tester);
+    final message = find.text('A readable document.');
+    expect(message, findsOneWidget);
+    expect(find.text('Copy'), findsNothing);
+    final boxes = tester.widgetList<DecoratedBox>(find.ancestor(of: message, matching: find.byType(DecoratedBox)));
+    expect(boxes.where((box) => box.decoration is BoxDecoration &&
+      (box.decoration as BoxDecoration).border != null), isEmpty);
+    final mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
+    await mouse.addPointer(location: Offset.zero);
+    await mouse.moveTo(tester.getCenter(message));
+    await tester.pump();
+    expect(find.text('Copy'), findsOneWidget);
+    await mouse.moveTo(Offset.zero);
+    await tester.pump();
+    expect(find.text('Copy'), findsNothing);
+    await mouse.removePointer();
+  });
+
+  testWidgets('long press reveals message actions on mobile', (tester) async {
+    final api = _RichEventFakeApi(messages: [
+      _assistantMessage(id: 'document', text: 'A readable document.', content: const []),
+    ]);
+    addTearDown(api.dispose);
+    await _pumpApp(tester, SessionScreen(host: _host('long-press'),
+      session: _session('long-press'), api: api), size: const Size(390, 840));
+    await _pumpFrames(tester);
+    expect(find.text('Copy'), findsNothing);
+    await tester.longPress(find.text('A readable document.'));
+    await tester.pump();
+    expect(find.text('Copy'), findsOneWidget);
   });
 
   testWidgets('desktop session focuses the composer after opening', (
@@ -249,11 +316,15 @@ void main() {
       expect(find.text('Heads up from the fake provider'), findsOneWidget);
       expect(find.text('Plan update'), findsOneWidget);
       expect(find.text('Ship the change'), findsNothing);
+      await tester.tap(find.text('Session status'));
+      await _pumpFrames(tester);
       expect(find.text('Queue · 1 steering · 2 follow-up'), findsOneWidget);
       expect(find.text('Retry 2 / 3 in 1.5s'), findsOneWidget);
       expect(find.textContaining('Keep it provider-neutral'), findsOneWidget);
       expect(find.textContaining('Overloaded'), findsOneWidget);
 
+      Navigator.of(tester.element(find.text('Queue · 1 steering · 2 follow-up'))).pop();
+      await _pumpFrames(tester);
       await _expandPlanCard(tester);
 
       expect(find.text('Ship the change'), findsOneWidget);
@@ -1914,7 +1985,7 @@ Finder _composerTextFieldFinder() {
   return find.byWidgetPredicate(
     (widget) =>
         widget is TextField &&
-        widget.decoration?.hintText?.startsWith('Reply here') == true,
+        widget.decoration?.hintText?.startsWith('Reply') == true,
   );
 }
 
@@ -2272,6 +2343,7 @@ SessionActivity _turnDiffActivity({
 }
 
 NodeInfo _nodeInfo({
+  bool modelControls = false,
   Map<String, Object?> hostWorkspaceCapabilities = const {
     'filesystem': false,
     'gitStatus': false,
@@ -2299,9 +2371,9 @@ NodeInfo _nodeInfo({
       'localImage': false,
       'skills': false,
     },
-    'configuration': {'models': false, 'profiles': false, 'skills': false},
+    'configuration': {'models': modelControls, 'profiles': false, 'skills': false},
     'runtimeControls': {
-      'model': false,
+      'model': modelControls,
       'approvalPolicy': false,
       'sandboxMode': false,
       'networkAccess': false,
@@ -2320,9 +2392,9 @@ NodeInfo _nodeInfo({
       'localImage': false,
       'skills': false,
     },
-    'configuration': {'models': false, 'profiles': false, 'skills': false},
+    'configuration': {'models': modelControls, 'profiles': false, 'skills': false},
     'runtimeControls': {
-      'model': false,
+      'model': modelControls,
       'approvalPolicy': false,
       'sandboxMode': false,
       'networkAccess': false,

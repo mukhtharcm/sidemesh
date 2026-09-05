@@ -544,6 +544,31 @@ describe("loadSessionRuntime", () => {
     assert.match(activity.output ?? "", /tests passed/);
   });
 
+  it("names text-only exec tools while preserving non-command image tools", async () => {
+    const code = "const result = await tools.exec_command({cmd: 'pwd'}); text(result);";
+    const records = [
+      { type: "session_meta", payload: { id: "thread-1", cwd: "/repo" } },
+      { type: "response_item", payload: {
+        type: "custom_tool_call", name: "functions.exec", input: code, call_id: "exec-1",
+      } },
+      { type: "response_item", payload: {
+        type: "custom_tool_call_output", call_id: "exec-1", output: "/repo",
+      } },
+    ];
+    await writeFile(rolloutPath, records.map((record) => JSON.stringify({
+      timestamp: "2026-09-05T00:00:00.000Z", ...record,
+    })).join("\n") + "\n");
+    const log = await loadRolloutLog("thread-1", rolloutPath, null);
+    assert.equal(log.activities.length, 1);
+    const activity = log.activities[0];
+    assert(activity?.type === "tool");
+    assert.deepEqual(activity.semantic, {
+      category: "command", action: "invoke", targets: [{ type: "command", command: code }],
+    });
+    assert.equal(activity.result, "/repo");
+    assert.deepEqual(activity.attachments, []);
+  });
+
   it("reconstructs image-bearing tool outputs without matching tool names", async () => {
     const imageUrl = "data:image/png;base64,AAAA";
     const lines = [
@@ -584,6 +609,7 @@ describe("loadSessionRuntime", () => {
     const activity = log.activities[0];
     assert(activity && activity.type === "tool");
     assert.equal(activity.toolName, "provider_image_inspector");
+    assert.equal(activity.semantic, null);
     assert.equal(activity.result, "Captured screenshot");
     assert.deepEqual(activity.attachments, [
       { type: "image", url: imageUrl },

@@ -38,7 +38,7 @@ void main() {
     final field = find.byType(DesktopSidebarSearchField);
     final icon = find.byIcon(Icons.search_rounded);
     final editable = find.byType(EditableText);
-    final hint = find.text('Search (⌘F)');
+    final hint = find.text('Search (Ctrl+F)');
     final textField = tester.widget<TextField>(find.byType(TextField));
     final surface = tester.widget<Container>(
       find.descendant(of: field, matching: find.byType(Container)).first,

@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 import '../theme/app_colors.dart';
@@ -107,7 +108,9 @@ class _DesktopSidebarSearchFieldState extends State<DesktopSidebarSearchField> {
                     filled: false,
                     hoverColor: Colors.transparent,
                     focusColor: Colors.transparent,
-                    hintText: 'Search (⌘F)',
+                    hintText: defaultTargetPlatform == TargetPlatform.macOS
+                        ? 'Search (⌘F)'
+                        : 'Search (Ctrl+F)',
                     hintStyle: TextStyle(
                       color: colors.textTertiary,
                       fontSize: 13,
