@@ -37,10 +37,16 @@ Pi also ships an npm shrinkwrap that pins vulnerable transitive versions.
 `scripts/patch-pi-transitives.mjs` replaces only the audited packages after
 install:
 
-- `brace-expansion` `5.0.7`
+- `brace-expansion` `5.0.9`
 - `protobufjs` `7.6.5`
+- `undici` `8.9.0`
 
-Keep those root dependencies exact. `protobufjs` 8 is not a drop-in replacement
+Keep those root dependencies exact, and keep their nested Pi lockfile entries in
+sync. Npm dependency updates may restore vulnerable entries from the upstream
+shrinkwrap. Verify a clean `npm ci`, the installed nested versions, and a separate
+`npm audit` after the postinstall remediation.
+
+`protobufjs` 8 is not a drop-in replacement
 for Pi's `^7.5.4` consumer constraint.
 
 ### GitHub Copilot SDK `1.0.4`
