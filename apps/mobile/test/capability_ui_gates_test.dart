@@ -1114,6 +1114,7 @@ void main() {
       tester,
       SessionControlsSheet(
         onClose: () {},
+        showReplyControls: false,
         api: api,
         host: host,
         session: session,
@@ -1134,6 +1135,10 @@ void main() {
 
     expect(find.text('Apply').hitTestable(), findsOneWidget);
     expect(find.text('Ask for approval'), findsNothing);
+    expect(
+      tester.getTopLeft(find.text('Provider configuration')).dx,
+      tester.getTopLeft(find.text('Fast mode')).dx,
+    );
     await tester.ensureVisible(find.text('Provider configuration'));
     await tester.tap(find.text('Provider configuration'));
     await tester.pumpAndSettle();
