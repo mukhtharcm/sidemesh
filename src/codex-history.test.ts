@@ -494,6 +494,53 @@ describe("loadSessionRuntime", () => {
     );
   });
 
+  it("reads completed message items with legacy history, images, and bounded previews", async () => {
+    const timestamp = "2026-09-06T00:00:00.000Z";
+    const event = (payload: unknown) => ({ timestamp, type: "event_msg", payload });
+    const completed = (item: unknown) => event({ type: "item_completed", item });
+    const rows = [
+      { timestamp, type: "session_meta", payload: { id: "thread-1", cwd: "/repo", timestamp } },
+      // Model input can contain instructions and copies of visible messages.
+      { timestamp, type: "response_item", payload: { type: "message", role: "user", content: [{ type: "input_text", text: "Internal context" }] } },
+      completed({ type: "UserMessage", id: "user-1", content: [{ type: "text", text: "New task" }] }),
+      { timestamp, type: "response_item", payload: { type: "message", role: "user", content: [{ type: "input_text", text: "New task" }] } },
+      completed({ type: "AgentMessage", id: "comment-1", phase: "commentary", content: [{ type: "Text", text: "Checking" }, { type: "Text", text: "the task" }] }),
+      completed({ type: "Reasoning", id: "reasoning-1", summary_text: ["Private reasoning"] }),
+      completed({ type: "AgentMessage", id: "empty-1", content: [null, { type: "Text", text: 123 }] }),
+      completed({ type: "UserMessage", id: "image-1", content: [{ type: "image", url: "https://example.com/image.png" }, { type: "localImage", path: "/tmp/image.png" }] }),
+      completed({ type: "AgentMessage", id: "answer-1", phase: "final_answer", content: [{ type: "Text", text: "Done" }] }),
+      event({ type: "turn_aborted", reason: "interrupted" }),
+      event({ type: "user_message", message: "Older format" }),
+      event({ type: "agent_message", message: "Older reply" }),
+    ];
+    await writeFile(rolloutPath, rows.map((row) => JSON.stringify(row)).join("\n") + "\n");
+    const log = await loadRolloutLog("thread-1", rolloutPath, null);
+    assert.deepEqual(log.messages.map((message) => message.text), [
+      "New task", "Checking\nthe task", "", "Done", "Turn aborted: interrupted", "Older format", "Older reply",
+    ]);
+    assert.equal(log.messages[0]?.id, "user-1");
+    assert.equal(log.messages[1]?.phase, "commentary");
+    assert.equal(log.messages[3]?.phase, "final_answer");
+    assert.deepEqual(log.messages[2]?.attachments, [
+      { type: "image", url: "https://example.com/image.png" },
+      { type: "localImage", path: "/tmp/image.png" },
+    ]);
+    assert.deepEqual(log.messages.map((message) => message.seq), [0, 1, 2, 3, 4, 5, 6]);
+    const bounded = await loadRolloutLog("thread-1", rolloutPath, null, 2);
+    assert.deepEqual(bounded.messages, log.messages.slice(-2));
+    assert.equal(bounded.totalMessages, 7);
+    assert.equal(bounded.nextSeq, 7);
+
+    const directory = nodePath.join(tempDir, "sessions", "2026", "09", "06");
+    await mkdir(directory, { recursive: true });
+    const summaryPath = nodePath.join(directory, "rollout-2026-09-06T00-00-00-thread-1.jsonl");
+    for (const padding of ["", `${" ".repeat(3 * 1024 * 1024)}\n`]) {
+      await writeFile(summaryPath, rows.map((row) => JSON.stringify(row)).join("\n") + "\n" + padding);
+      const threads = await listRecentRolloutThreads(tempDir, 1);
+      assert.equal(threads[0]?.preview, "New task");
+    }
+  });
+
   it("reconstructs command activities from Codex response function calls", async () => {
     const lines = [
       JSON.stringify({

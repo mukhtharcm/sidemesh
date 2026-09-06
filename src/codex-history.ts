@@ -385,8 +385,9 @@ async function readRolloutThreadSummary(rolloutPath: string): Promise<ThreadReco
       continue;
     }
 
-    if (parsed.payload?.type === "user_message" && !preview) {
-      preview = typeof parsed.payload.message === "string" ? parsed.payload.message : "";
+    if (!preview) {
+      const message = parseMessage(parsed, 0);
+      if (message?.role === "user") preview = message.text;
     }
     if (parsed.payload?.type === "task_started") {
       inProgress = true;
@@ -454,8 +455,9 @@ async function readLargeRolloutThreadSummary(
     if (parsed.type !== "event_msg") {
       continue;
     }
-    if (parsed.payload?.type === "user_message" && !preview) {
-      preview = typeof parsed.payload.message === "string" ? parsed.payload.message : "";
+    if (!preview) {
+      const message = parseMessage(parsed, 0);
+      if (message?.role === "user") preview = message.text;
     }
     if (parsed.payload?.type === "task_started") {
       inProgress = true;
@@ -680,6 +682,33 @@ export function parseMessage(parsed: any, seq: number): SessionMessage | null {
   const createdAt = parseTimestamp(parsed.timestamp);
   if (parsed.type === "event_msg") {
     const payloadType = parsed.payload?.type;
+    if (payloadType === "item_completed") {
+      const item = parsed.payload?.item;
+      if (item?.type !== "UserMessage" && item?.type !== "AgentMessage") {
+        return null;
+      }
+      const role = item.type === "UserMessage" ? "user" : "assistant";
+      const blocks: unknown[] = Array.isArray(item.content) ? item.content : [];
+      const text = blocks.flatMap((block) => {
+        if (!block || typeof block !== "object") return [];
+        const value = block as Record<string, unknown>;
+        return (value.type === "text" || value.type === "Text") && typeof value.text === "string"
+          ? [value.text]
+          : [];
+      }).join("\n");
+      const attachments = extractSessionAttachments(blocks);
+      if (!text && attachments.length === 0) return null;
+      return {
+        id: asOptionalString(item.id) ?? `${createdAt}-${role}-${seq}`,
+        role,
+        text,
+        content: [{ type: "text", text }],
+        attachments,
+        createdAt,
+        seq,
+        ...(role === "assistant" ? { phase: item.phase === "commentary" ? "commentary" : "final_answer" } : {}),
+      };
+    }
     if (payloadType === "user_message") {
       const text = typeof parsed.payload?.message === "string" ? parsed.payload.message : "";
       const attachments = parseMessageAttachments(parsed.payload);
