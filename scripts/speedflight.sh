@@ -100,7 +100,7 @@ PLIST
 
 xcodebuild -exportArchive \
   -archivePath "$OUT/App.xcarchive" \
-  -exportOptionsPlist "$OUT/ExportOptions.plist" \
+  -exportOptionsPlist "${SPEEDFLIGHT_EXPORT_OPTIONS_PLIST:-$OUT/ExportOptions.plist}" \
   -exportPath "$OUT/export" \
   -allowProvisioningUpdates \
   -authenticationKeyID "$ASC_KEY_ID" \

@@ -52,6 +52,13 @@ elif name == 'curl' and 'POST' in args:
     assert 'CODE_SIGN_STYLE=Automatic' in archive and 'PROVISIONING_PROFILE_SPECIFIER=' in archive
     assert 'generic/platform=iOS' in archive
     assert any(call[0] == 'curl' and 'PUT' in call for call in calls)
+    custom = root / 'custom-export.plist'
+    custom.write_text('test')
+    result = subprocess.run(command, cwd=root, env={**env, 'SPEEDFLIGHT_EXPORT_OPTIONS_PLIST': str(custom)}, capture_output=True, text=True)
+    assert result.returncode == 0, result.stderr
+    calls = [json.loads(line) for line in (root / 'calls.jsonl').read_text().splitlines()]
+    export = [call for call in calls if call[0] == 'xcodebuild' and '-exportArchive' in call][-1]
+    assert export[export.index('-exportOptionsPlist') + 1] == str(custom)
     (root / 'calls.jsonl').unlink()
     result = subprocess.run(command, cwd=root, env={**env, 'MOCK_DIRTY': ' M file'}, capture_output=True, text=True)
     assert result.returncode != 0 and 'working tree is dirty' in result.stderr
