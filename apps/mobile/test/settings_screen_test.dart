@@ -131,6 +131,10 @@ void main() {
           await tester.tap(find.widgetWithText(ListTile, 'Appearance'));
           await tester.pumpAndSettle();
           expect(find.text('Color mode'), findsOneWidget);
+          final settingX = tester.getTopLeft(find.text('Color mode')).dx;
+          expect(tester.getTopLeft(find.text('Palette')).dx, settingX);
+          expect(tester.getTopLeft(find.text('App font')).dx, settingX);
+          expect(tester.getTopLeft(find.text('Text size')).dx, settingX);
           expect(find.byType(Dialog), findsOneWidget);
           expect(find.byType(BottomSheet), findsNothing);
           await tester.tap(find.widgetWithText(ListTile, 'New sessions'));

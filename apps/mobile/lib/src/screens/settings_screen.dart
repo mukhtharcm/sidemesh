@@ -634,7 +634,7 @@ class _LaunchDefaultsSheetState extends State<_LaunchDefaultsSheet> {
             title: 'Fast mode',
             trailing: Semantics(
               label: 'Fast mode',
-              child: Switch.adaptive(
+              child: Switch(
                 value: _draft.fastMode,
                 onChanged: _saving
                     ? null
@@ -698,7 +698,7 @@ class _LaunchDefaultsSheetState extends State<_LaunchDefaultsSheet> {
             title: 'Web search',
             trailing: Semantics(
               label: 'Web search',
-              child: Switch.adaptive(
+              child: Switch(
                 value: _draft.webSearch,
                 onChanged: _saving
                     ? null
