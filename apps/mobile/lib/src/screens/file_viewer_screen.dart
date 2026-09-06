@@ -1,14 +1,13 @@
 import 'package:flutter/material.dart';
 
 import '../api_client.dart';
-import '../fs_languages.dart';
 import '../fs_models.dart';
 import '../models.dart';
 import '../theme/app_colors.dart';
 import '../theme/app_theme.dart';
-import '../widgets/mesh_widgets.dart';
 import 'file_viewer_pane.dart';
 import 'pdf_viewer_pane.dart';
+import '../theme/app_tokens.dart';
 
 /// Mobile-friendly full-screen file viewer. Wraps [FileViewerPane] in a
 /// Scaffold + AppBar.
@@ -52,7 +51,6 @@ class _FileViewerScreenState extends State<FileViewerScreen> {
   @override
   Widget build(BuildContext context) {
     final colors = context.colors;
-    final languageId = languageForPath(widget.path);
     final scaffold = Scaffold(
       backgroundColor: colors.canvas,
       appBar: AppBar(
@@ -74,16 +72,12 @@ class _FileViewerScreenState extends State<FileViewerScreen> {
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                    fontWeight: FontWeight.w700,
+                    fontWeight: AppWeights.strong,
                   ),
                 ),
-                const SizedBox(height: 2),
+                const SizedBox(height: AppSpacing.xxs),
                 Row(
                   children: [
-                    if (languageId != null) ...[
-                      MeshPill(label: languageId, mono: true),
-                      const SizedBox(width: 6),
-                    ],
                     if (state?.file != null)
                       Flexible(
                         child: Text(
@@ -92,7 +86,7 @@ class _FileViewerScreenState extends State<FileViewerScreen> {
                           overflow: TextOverflow.ellipsis,
                           style: monoStyle(
                             color: colors.textTertiary,
-                            fontSize: 11,
+                            fontSize: AppFontSizes.metadata,
                           ),
                         ),
                       ),
@@ -108,7 +102,7 @@ class _FileViewerScreenState extends State<FileViewerScreen> {
             builder: (context, _) =>
                 FileViewerActions(state: _paneKey.currentState),
           ),
-          const SizedBox(width: 4),
+          const SizedBox(width: AppSpacing.xs),
         ],
       ),
       body: FileViewerPane(

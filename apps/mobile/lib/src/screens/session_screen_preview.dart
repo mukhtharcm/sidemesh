@@ -17,26 +17,31 @@ class _StopAgentPill extends StatelessWidget {
       color: colors.danger,
       shape: const StadiumBorder(),
       elevation: 4,
-      shadowColor: Colors.black.withValues(alpha: 0.24),
+      shadowColor: AppOverlayColors.shadow.withValues(
+        alpha: AppEmphasis.borderTint,
+      ),
       child: InkWell(
         customBorder: const StadiumBorder(),
         onTap: onTap,
         child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+          padding: const EdgeInsets.symmetric(
+            horizontal: AppSpacing.md,
+            vertical: AppSpacing.sm,
+          ),
           child: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
               Icon(
                 Icons.stop_circle_rounded,
-                size: 16,
+                size: AppSizes.compactIcon,
                 color: foreground,
               ),
-              const SizedBox(width: 6),
+              const SizedBox(width: AppSpacing.tight),
               Text(
                 'Stop agent',
                 style: Theme.of(context).textTheme.labelMedium?.copyWith(
                   color: foreground,
-                  fontWeight: FontWeight.w700,
+                  fontWeight: AppWeights.strong,
                 ),
               ),
             ],

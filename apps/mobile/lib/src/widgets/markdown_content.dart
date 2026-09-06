@@ -45,10 +45,11 @@ class MarkdownContent extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final colors = context.colors;
-    final baseBody = theme.textTheme.bodyMedium?.copyWith(
-      color: textColor,
-      height: 1.5,
-    );
+    final baseBody =
+        (MediaQuery.sizeOf(context).width >= 760
+                ? theme.textTheme.bodyMedium
+                : theme.textTheme.bodyLarge)
+            ?.copyWith(color: textColor, height: AppLineHeights.code);
     final markdownText = _autoLinkBareUrlsForMarkdown(text);
     final linkBackground = backgroundColor ?? colors.surface;
     final fallbackLinkColor = readableLinkOn(
@@ -90,7 +91,8 @@ class MarkdownContent extends StatelessWidget {
               color: linkColor,
               decoration: linkStyle?.decoration ?? TextDecoration.underline,
               decorationColor: linkStyle?.decorationColor ?? linkColor,
-              decorationThickness: linkStyle?.decorationThickness ?? 1.2,
+              decorationThickness:
+                  linkStyle?.decorationThickness ?? AppStrokes.focus,
             );
         return Text.rich(
           TextSpan(children: [linkText], style: effectiveLinkStyle),
@@ -98,7 +100,7 @@ class MarkdownContent extends StatelessWidget {
       },
       codeBuilder: (context, name, code, closed) {
         return Padding(
-          padding: const EdgeInsets.symmetric(vertical: 6),
+          padding: const EdgeInsets.symmetric(vertical: AppSpacing.tight),
           child: SyntaxCodeBlock(
             text: code.trimRight(),
             language: name.isEmpty ? null : name,
@@ -110,7 +112,7 @@ class MarkdownContent extends StatelessWidget {
         final displayStyle =
             monoStyle(
               color: isPath ? colors.textPrimary : colors.textSecondary,
-              fontSize: 12.5,
+              fontSize: AppFontSizes.code,
             ).copyWith(
               decoration: isPath ? TextDecoration.underline : null,
               decorationColor: isPath ? colors.textSecondary : null,
@@ -166,8 +168,7 @@ class _MarkdownImageState extends State<_MarkdownImage> {
   Object? _error;
   int _loadGeneration = 0;
 
-  bool get _isLocal =>
-      parseSessionResourceReference(widget.source).isLocalFile;
+  bool get _isLocal => parseSessionResourceReference(widget.source).isLocalFile;
 
   @override
   void initState() {
@@ -302,7 +303,7 @@ class _MarkdownImageState extends State<_MarkdownImage> {
       child: ConstrainedBox(
         constraints: BoxConstraints(maxWidth: maxWidth, maxHeight: maxHeight),
         child: ClipRRect(
-          borderRadius: BorderRadius.circular(12),
+          borderRadius: BorderRadius.circular(AppRadii.panel),
           child: Image(
             image: provider,
             fit: BoxFit.contain,
@@ -352,11 +353,14 @@ class _MarkdownImageStatus extends StatelessWidget {
         child: DecoratedBox(
           decoration: BoxDecoration(
             color: colors.surfaceMuted,
-            borderRadius: BorderRadius.circular(12),
+            borderRadius: BorderRadius.circular(AppRadii.panel),
             border: Border.all(color: colors.border),
           ),
           child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
+            padding: const EdgeInsets.symmetric(
+              horizontal: AppSpacing.md,
+              vertical: AppSpacing.sm,
+            ),
             child: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
@@ -365,17 +369,17 @@ class _MarkdownImageStatus extends StatelessWidget {
                     width: 18,
                     height: 18,
                     child: CircularProgressIndicator(
-                      strokeWidth: 2,
+                      strokeWidth: AppStrokes.indicator,
                       color: colors.accent,
                     ),
                   )
                 else
                   Icon(
                     Icons.image_not_supported_outlined,
-                    size: 20,
+                    size: AppSizes.icon,
                     color: colors.textSecondary,
                   ),
-                const SizedBox(width: 10),
+                const SizedBox(width: AppSpacing.compact),
                 Flexible(
                   child: Column(
                     mainAxisSize: MainAxisSize.min,
@@ -390,7 +394,7 @@ class _MarkdownImageStatus extends StatelessWidget {
                           fontWeight: AppWeights.emphasis,
                         ),
                       ),
-                      const SizedBox(height: 2),
+                      const SizedBox(height: AppSpacing.xxs),
                       Text(
                         label,
                         maxLines: 1,
@@ -403,12 +407,15 @@ class _MarkdownImageStatus extends StatelessWidget {
                   ),
                 ),
                 if (onRetry != null) ...[
-                  const SizedBox(width: 4),
+                  const SizedBox(width: AppSpacing.xs),
                   IconButton(
                     tooltip: 'Retry image',
                     visualDensity: VisualDensity.compact,
                     onPressed: onRetry,
-                    icon: const Icon(Icons.refresh_rounded, size: 20),
+                    icon: const Icon(
+                      Icons.refresh_rounded,
+                      size: AppSizes.icon,
+                    ),
                   ),
                 ],
               ],

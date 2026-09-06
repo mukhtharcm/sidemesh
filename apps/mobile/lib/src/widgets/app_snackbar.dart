@@ -3,11 +3,10 @@ import 'dart:collection';
 
 import 'package:flutter/material.dart';
 
-import '../theme/app_colors.dart';
 import '../theme/app_tokens.dart';
+import '../theme/app_control_styles.dart';
 
-/// Shows a floating toast anchored to the bottom-right corner on wide windows
-/// (desktop) and bottom-center on phones. Runs through the root [Overlay] so
+/// Shows a notice near the top of the window, clear of composer controls. Runs through the root [Overlay] so
 /// it isn't bounded by a nested Scaffold — important in the desktop shell
 /// where the session pane is nested inside another Scaffold.
 void showAppSnackBar(
@@ -20,7 +19,6 @@ void showAppSnackBar(
   if (overlay == null) return;
   _ToastQueue.instance.enqueue(
     overlay: overlay,
-    colors: context.colors,
     message: message,
     duration: duration,
     action: action,
@@ -40,7 +38,6 @@ class _ToastQueue {
 
   void enqueue({
     required OverlayState overlay,
-    required AppColors colors,
     required String message,
     required Duration duration,
     SnackBarAction? action,
@@ -63,7 +60,6 @@ class _ToastQueue {
     _queue.add(
       _QueuedToast(
         overlay: overlay,
-        colors: colors,
         message: message,
         duration: duration,
         action: action,
@@ -118,7 +114,6 @@ class _ToastQueue {
     entry = OverlayEntry(
       builder: (context) => _ToastOverlay(
         controller: controller,
-        colors: toast.colors,
         message: toast.message,
         action: toast.action,
         onDismiss: () => complete(drain: true),
@@ -132,9 +127,13 @@ class _ToastQueue {
       actionLabel: toast.action?.label,
     );
     toast.overlay.insert(entry);
-    autoDismissTimer = Timer(toast.duration, () {
-      controller.dismiss();
-    });
+    final accessibleAction =
+        toast.action != null &&
+        (MediaQuery.maybeOf(toast.overlay.context)?.accessibleNavigation ??
+            false);
+    if (!accessibleAction) {
+      autoDismissTimer = Timer(toast.duration, controller.dismiss);
+    }
   }
 
   void _dropStaleQueuedToasts() {
@@ -145,13 +144,11 @@ class _ToastQueue {
 class _QueuedToast {
   const _QueuedToast({
     required this.overlay,
-    required this.colors,
     required this.message,
     required this.duration,
     required this.action,
   });
   final OverlayState overlay;
-  final AppColors colors;
   final String message;
   final Duration duration;
   final SnackBarAction? action;
@@ -183,7 +180,6 @@ class _ToastController extends ChangeNotifier {
 class _ToastOverlay extends StatefulWidget {
   const _ToastOverlay({
     required this.controller,
-    required this.colors,
     required this.message,
     required this.onDismiss,
     required this.onDisposed,
@@ -191,7 +187,6 @@ class _ToastOverlay extends StatefulWidget {
   });
 
   final _ToastController controller;
-  final AppColors colors;
   final String message;
   final SnackBarAction? action;
   final VoidCallback onDismiss;
@@ -205,14 +200,14 @@ class _ToastOverlayState extends State<_ToastOverlay>
     with SingleTickerProviderStateMixin {
   late final AnimationController _anim = AnimationController(
     vsync: this,
-    duration: const Duration(milliseconds: 220),
-    reverseDuration: const Duration(milliseconds: 180),
+    duration: AppMotion.reveal,
+    reverseDuration: AppMotion.quick,
   );
   bool _dismissing = false;
   bool _completed = false;
   late final Animation<double> _fade = CurvedAnimation(
     parent: _anim,
-    curve: Curves.easeOutCubic,
+    curve: AppMotion.standard,
     reverseCurve: Curves.easeInCubic,
   );
 
@@ -283,99 +278,68 @@ class _ToastOverlayState extends State<_ToastOverlay>
   Widget build(BuildContext context) {
     final media = MediaQuery.of(context);
     final theme = Theme.of(context);
-    final isWide = media.size.width > 640;
-    final double right = isWide ? 20 : 12;
-    final double left = isWide ? media.size.width - 440 - right : 12;
-    final double bottom = isWide ? 20 : 20 + media.padding.bottom;
-    final colors = widget.colors;
+    final desktop = AppSizes.usesPointerControls(theme.platform);
+    final snackTheme = theme.snackBarTheme;
     return Positioned(
-      left: left,
-      right: right,
-      bottom: bottom,
-      child: IgnorePointer(
-        ignoring: false,
-        child: FadeTransition(
-          opacity: _fade,
-          child: SlideTransition(
-            position: Tween<Offset>(
-              begin: const Offset(0, 0.35),
-              end: Offset.zero,
-            ).animate(_fade),
-            child: Align(
-              alignment: isWide
-                  ? Alignment.bottomRight
-                  : Alignment.bottomCenter,
-              child: Material(
-                color: Colors.transparent,
-                child: ConstrainedBox(
-                  constraints: const BoxConstraints(maxWidth: 420),
-                  child: Container(
-                    padding: const EdgeInsets.fromLTRB(14, 12, 10, 12),
-                    decoration: BoxDecoration(
-                      color: colors.surfaceElevated,
-                      borderRadius: BorderRadius.circular(AppRadii.control),
-                      border: Border.all(color: colors.borderStrong),
-                      boxShadow: [
-                        BoxShadow(
-                          color: colors.canvas.withValues(alpha: 0.1),
-                          blurRadius: 14,
-                          offset: const Offset(0, 4),
+      top: media.padding.top + (desktop ? AppSizes.control : AppSpacing.sm),
+      left: AppSpacing.lg,
+      right: AppSpacing.lg,
+      child: FadeTransition(
+        opacity: _fade,
+        child: Align(
+          alignment: desktop ? Alignment.topRight : Alignment.topCenter,
+          child: Semantics(
+            container: true,
+            liveRegion: true,
+            child: Material(
+              color: snackTheme.backgroundColor,
+              elevation: snackTheme.elevation ?? 0,
+              shape: snackTheme.shape,
+              clipBehavior: Clip.antiAlias,
+              child: ConstrainedBox(
+                constraints: BoxConstraints(
+                  maxWidth: AppSizes.toastWidth,
+                  maxHeight: media.size.height * 0.5,
+                ),
+                child: SingleChildScrollView(
+                  padding: const EdgeInsets.fromLTRB(
+                    AppSpacing.lg,
+                    AppSpacing.xs,
+                    AppSpacing.xs,
+                    AppSpacing.xs,
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Flexible(
+                        child: Text(
+                          widget.message,
+                          style: snackTheme.contentTextStyle,
+                        ),
+                      ),
+                      if (widget.action != null) ...[
+                        const SizedBox(width: AppSpacing.sm),
+                        TextButton(
+                          onPressed: () {
+                            widget.action!.onPressed();
+                            widget.controller.dismiss();
+                          },
+                          style: snackTheme.actionTextColor == null
+                              ? null
+                              : AppControlStyles.foreground(
+                                  snackTheme.actionTextColor!,
+                                ),
+                          child: Text(widget.action!.label),
                         ),
                       ],
-                    ),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Flexible(
-                          child: Text(
-                            widget.message,
-                            style: theme.textTheme.bodyMedium?.copyWith(
-                              color: colors.textPrimary,
-                              fontWeight: FontWeight.w600,
-                              height: 1.25,
-                            ),
-                          ),
-                        ),
-                        if (widget.action != null) ...[
-                          const SizedBox(width: 8),
-                          TextButton(
-                            onPressed: () {
-                              widget.action!.onPressed();
-                              widget.controller.dismiss();
-                            },
-                            style: TextButton.styleFrom(
-                              foregroundColor: colors.textPrimary,
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 10,
-                                vertical: 8,
-                              ),
-                              minimumSize: const Size(0, 34),
-                              visualDensity: VisualDensity.compact,
-                              textStyle: theme.textTheme.labelMedium?.copyWith(
-                                fontWeight: FontWeight.w700,
-                              ),
-                            ),
-                            child: Text(widget.action!.label),
-                          ),
-                        ],
-                        const SizedBox(width: 4),
-                        IconButton(
-                          tooltip: 'Dismiss',
-                          iconSize: 16,
-                          visualDensity: VisualDensity.compact,
-                          padding: EdgeInsets.zero,
-                          constraints: const BoxConstraints.tightFor(
-                            width: 28,
-                            height: 28,
-                          ),
-                          onPressed: _ToastQueue.instance.clear,
-                          icon: Icon(
-                            Icons.close_rounded,
-                            color: colors.textSecondary,
-                          ),
-                        ),
-                      ],
-                    ),
+                      const SizedBox(width: AppSpacing.xs),
+                      IconButton(
+                        tooltip: 'Dismiss',
+                        iconSize: AppSizes.compactIcon,
+                        onPressed: _ToastQueue.instance.clear,
+                        icon: const Icon(Icons.close_rounded),
+                      ),
+                    ],
                   ),
                 ),
               ),

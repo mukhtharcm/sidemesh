@@ -9,18 +9,21 @@ import 'theme_controller.dart';
 ThemeData buildLightTheme(
   AppColors palette, {
   AppTypographyPreferences typography = AppTypographyPreferences.defaults,
-}) => _buildTheme(Brightness.light, palette, typography);
+  TargetPlatform? platform,
+}) => _buildTheme(Brightness.light, palette, typography, platform);
 
 /// Builds a dark [ThemeData] from the given palette.
 ThemeData buildDarkTheme(
   AppColors palette, {
   AppTypographyPreferences typography = AppTypographyPreferences.defaults,
-}) => _buildTheme(Brightness.dark, palette, typography);
+  TargetPlatform? platform,
+}) => _buildTheme(Brightness.dark, palette, typography, platform);
 
 ThemeData _buildTheme(
   Brightness brightness,
   AppColors palette,
   AppTypographyPreferences typography,
+  TargetPlatform? platform,
 ) {
   final actionForeground = readableActionForeground(palette, palette.accent);
   final secondaryForeground = readableTextOn(
@@ -45,12 +48,12 @@ ThemeData _buildTheme(
   );
   final inputLabelColor = readableTextOn(
     palette,
-    background: palette.surface,
+    background: palette.surfaceMuted,
     preferred: palette.textSecondary,
   );
   final inputHintColor = readableTextOn(
     palette,
-    background: palette.surface,
+    background: palette.surfaceMuted,
     preferred: palette.textTertiary,
     additionalFallbacks: <Color>[palette.textSecondary],
   );
@@ -74,68 +77,89 @@ ThemeData _buildTheme(
     onError: errorForeground,
     surface: palette.surface,
     onSurface: palette.textPrimary,
+    surfaceDim: palette.canvas,
+    surfaceBright: palette.surfaceElevated,
+    surfaceContainerLowest: palette.canvas,
+    surfaceContainerLow: palette.surface,
+    surfaceContainer: palette.surfaceMuted,
+    surfaceContainerHigh: palette.surfaceElevated,
     surfaceContainerHighest: palette.surfaceElevated,
     outline: palette.border,
     outlineVariant: palette.borderStrong,
   );
 
   final base = ThemeData(
+    platform: platform,
     brightness: brightness,
     colorScheme: colorScheme,
     useMaterial3: true,
     scaffoldBackgroundColor: palette.canvas,
   );
 
+  final desktop = AppSizes.usesPointerControls(base.platform);
+  final controlSize = desktop ? AppSizes.compactControl : AppSizes.control;
+  final menuRowHeight = desktop ? AppSizes.desktopMenuItem : AppSizes.menuItem;
+
   final fontFamily = typography.interfaceFont.fontFamily;
   final textTheme = base.textTheme
       .copyWith(
         headlineSmall: base.textTheme.headlineSmall?.copyWith(
-          fontSize: 24,
+          letterSpacing: 0,
+          fontSize: AppFontSizes.page,
           height: 1.2,
           fontWeight: AppWeights.strong,
         ),
         titleLarge: base.textTheme.titleLarge?.copyWith(
-          fontSize: 20,
+          letterSpacing: 0,
+          fontSize: AppFontSizes.heading,
           height: 1.25,
           fontWeight: AppWeights.strong,
         ),
         titleMedium: base.textTheme.titleMedium?.copyWith(
-          fontSize: 16,
+          letterSpacing: 0,
+          fontSize: AppFontSizes.reading,
           height: 1.3,
           fontWeight: AppWeights.title,
         ),
         titleSmall: base.textTheme.titleSmall?.copyWith(
-          fontSize: 14,
+          letterSpacing: 0,
+          fontSize: AppFontSizes.body,
           height: 1.3,
           fontWeight: AppWeights.title,
         ),
         bodyLarge: base.textTheme.bodyLarge?.copyWith(
-          fontSize: 16,
+          letterSpacing: 0,
+          fontSize: AppFontSizes.reading,
           height: 1.45,
           fontWeight: AppWeights.body,
         ),
         bodyMedium: base.textTheme.bodyMedium?.copyWith(
-          fontSize: 14,
+          letterSpacing: 0,
+          fontSize: AppFontSizes.body,
           height: 1.4,
           fontWeight: AppWeights.body,
         ),
         bodySmall: base.textTheme.bodySmall?.copyWith(
-          fontSize: 12,
+          letterSpacing: 0,
+          fontSize: AppFontSizes.caption,
           height: 1.35,
           fontWeight: AppWeights.body,
         ),
         labelLarge: base.textTheme.labelLarge?.copyWith(
-          fontSize: 14,
+          letterSpacing: 0,
+          fontSize: AppFontSizes.body,
           height: 1.2,
           fontWeight: AppWeights.title,
         ),
         labelMedium: base.textTheme.labelMedium?.copyWith(
-          fontSize: 12,
+          letterSpacing: 0,
+          fontSize: AppFontSizes.caption,
           height: 1.2,
           fontWeight: AppWeights.emphasis,
         ),
         labelSmall: base.textTheme.labelSmall?.copyWith(
-          fontSize: 11,
+          letterSpacing: 0,
+          fontSize: AppFontSizes.metadata,
           height: 1.2,
           fontWeight: AppWeights.emphasis,
         ),
@@ -148,6 +172,51 @@ ThemeData _buildTheme(
 
   return base.copyWith(
     textTheme: textTheme,
+    dialogTheme: DialogThemeData(
+      backgroundColor: palette.surfaceElevated,
+      surfaceTintColor: Colors.transparent,
+      shape: RoundedRectangleBorder(
+        borderRadius: AppShapes.dialog,
+        side: BorderSide(color: palette.border),
+      ),
+      titleTextStyle: textTheme.titleMedium,
+      contentTextStyle: textTheme.bodyMedium,
+    ),
+    segmentedButtonTheme: SegmentedButtonThemeData(
+      style: ButtonStyle(
+        textStyle: WidgetStatePropertyAll(textTheme.bodyMedium),
+        minimumSize: WidgetStatePropertyAll(Size(0, controlSize)),
+        visualDensity: VisualDensity.standard,
+        foregroundColor: WidgetStatePropertyAll(palette.textPrimary),
+        backgroundColor: WidgetStateProperty.resolveWith(
+          (states) => states.contains(WidgetState.selected)
+              ? palette.surfaceMuted
+              : palette.surfaceElevated,
+        ),
+        shape: WidgetStatePropertyAll(
+          RoundedRectangleBorder(borderRadius: AppShapes.input),
+        ),
+        side: WidgetStatePropertyAll(BorderSide(color: palette.border)),
+      ),
+    ),
+    switchTheme: SwitchThemeData(
+      thumbColor: WidgetStateProperty.resolveWith(
+        (states) => states.contains(WidgetState.disabled)
+            ? disabledControlForeground
+            : states.contains(WidgetState.selected)
+            ? actionForeground
+            : palette.textSecondary,
+      ),
+      trackColor: WidgetStateProperty.resolveWith(
+        (states) =>
+            !states.contains(WidgetState.disabled) &&
+                states.contains(WidgetState.selected)
+            ? palette.accent
+            : palette.surfaceMuted,
+      ),
+    ),
+    hoverColor: palette.textPrimary.withValues(alpha: AppEmphasis.hover),
+    splashFactory: NoSplash.splashFactory,
     extensions: <ThemeExtension<dynamic>>[palette],
     textSelectionTheme: TextSelectionThemeData(
       cursorColor: focusOutline,
@@ -171,18 +240,15 @@ ThemeData _buildTheme(
       ),
     ),
     cardTheme: CardThemeData(
-      color: palette.surface,
+      color: palette.surfaceElevated,
       surfaceTintColor: Colors.transparent,
       elevation: 0,
       margin: EdgeInsets.zero,
-      shape: RoundedRectangleBorder(
-        borderRadius: AppShapes.card,
-        side: BorderSide(color: palette.border),
-      ),
+      shape: RoundedRectangleBorder(borderRadius: AppShapes.card),
     ),
     snackBarTheme: SnackBarThemeData(
       behavior: SnackBarBehavior.floating,
-      backgroundColor: palette.surface,
+      backgroundColor: palette.surfaceElevated,
       contentTextStyle: textTheme.bodyMedium?.copyWith(
         color: palette.textPrimary,
         fontWeight: AppWeights.body,
@@ -194,37 +260,64 @@ ThemeData _buildTheme(
       ),
       actionTextColor: accentOnSurface,
     ),
+    iconButtonTheme: IconButtonThemeData(
+      style: ButtonStyle(
+        visualDensity: VisualDensity.standard,
+        foregroundColor: WidgetStateProperty.resolveWith(
+          (states) => states.contains(WidgetState.disabled)
+              ? disabledControlForeground
+              : palette.textSecondary,
+        ),
+        overlayColor: WidgetStateProperty.resolveWith(
+          (states) => palette.textPrimary.withValues(
+            alpha: states.contains(WidgetState.focused)
+                ? AppEmphasis.focus
+                : AppEmphasis.hover,
+          ),
+        ),
+        minimumSize: WidgetStatePropertyAll(Size(controlSize, controlSize)),
+        padding: const WidgetStatePropertyAll(EdgeInsets.all(AppSpacing.xs)),
+        shape: const WidgetStatePropertyAll(
+          RoundedRectangleBorder(
+            borderRadius: BorderRadius.all(Radius.circular(AppRadii.hover)),
+          ),
+        ),
+      ),
+    ),
     popupMenuTheme: PopupMenuThemeData(
       color: palette.surfaceElevated,
       surfaceTintColor: Colors.transparent,
-      elevation: 6,
+      elevation: AppEmphasis.popupElevation,
       shadowColor: palette.textPrimary.withValues(alpha: 0.08),
       shape: RoundedRectangleBorder(
-        borderRadius: AppShapes.card,
+        borderRadius: AppShapes.menu,
         side: BorderSide(color: palette.border),
       ),
       textStyle: textTheme.bodyMedium?.copyWith(
         color: palette.textPrimary,
-        fontWeight: AppWeights.emphasis,
+        fontWeight: AppWeights.body,
       ),
       labelTextStyle: WidgetStateProperty.all(
         textTheme.bodyMedium?.copyWith(
           color: palette.textPrimary,
-          fontWeight: AppWeights.emphasis,
+          fontWeight: AppWeights.body,
         ),
       ),
     ),
     menuTheme: MenuThemeData(
       style: MenuStyle(
         backgroundColor: WidgetStateProperty.all(palette.surfaceElevated),
+        minimumSize: const WidgetStatePropertyAll(
+          Size(AppSizes.menuMinWidth, 0),
+        ),
         surfaceTintColor: WidgetStateProperty.all(Colors.transparent),
         shadowColor: WidgetStateProperty.all(
           palette.textPrimary.withValues(alpha: 0.08),
         ),
-        elevation: WidgetStateProperty.all(6),
+        elevation: WidgetStateProperty.all(AppEmphasis.popupElevation),
         shape: WidgetStateProperty.all(
           RoundedRectangleBorder(
-            borderRadius: AppShapes.card,
+            borderRadius: AppShapes.menu,
             side: BorderSide(color: palette.border),
           ),
         ),
@@ -233,6 +326,7 @@ ThemeData _buildTheme(
     ),
     menuButtonTheme: MenuButtonThemeData(
       style: ButtonStyle(
+        visualDensity: VisualDensity.standard,
         foregroundColor: WidgetStateProperty.resolveWith((states) {
           return states.contains(WidgetState.disabled)
               ? disabledControlForeground
@@ -247,22 +341,24 @@ ThemeData _buildTheme(
           if (states.contains(WidgetState.hovered) ||
               states.contains(WidgetState.focused) ||
               states.contains(WidgetState.pressed)) {
-            return palette.surfaceMuted;
+            return palette.textPrimary.withValues(
+              alpha: states.contains(WidgetState.focused)
+                  ? AppEmphasis.focus
+                  : AppEmphasis.hover,
+            );
           }
           return Colors.transparent;
         }),
         textStyle: WidgetStatePropertyAll(
-          textTheme.bodyMedium?.copyWith(fontWeight: AppWeights.emphasis),
+          textTheme.bodyMedium?.copyWith(fontWeight: AppWeights.body),
         ),
-        minimumSize: const WidgetStatePropertyAll(
-          Size(0, AppSizes.menuItem),
-        ),
+        minimumSize: WidgetStatePropertyAll(Size(0, menuRowHeight)),
         tapTargetSize: MaterialTapTargetSize.shrinkWrap,
         padding: const WidgetStatePropertyAll(
           EdgeInsets.symmetric(horizontal: AppSpacing.md),
         ),
         shape: WidgetStatePropertyAll(
-          RoundedRectangleBorder(borderRadius: AppShapes.input),
+          RoundedRectangleBorder(borderRadius: AppShapes.hover),
         ),
       ),
     ),
@@ -290,44 +386,39 @@ ThemeData _buildTheme(
     ),
     filledButtonTheme: FilledButtonThemeData(
       style: FilledButton.styleFrom(
+        visualDensity: VisualDensity.standard,
         backgroundColor: palette.accent,
         foregroundColor: actionForeground,
         disabledBackgroundColor: palette.surfaceMuted,
         disabledForegroundColor: disabledControlForeground,
         shape: RoundedRectangleBorder(borderRadius: AppShapes.input),
         textStyle: textTheme.labelLarge?.copyWith(fontWeight: AppWeights.title),
-        minimumSize: const Size(0, AppSizes.control),
+        minimumSize: Size(0, controlSize),
         padding: const EdgeInsets.symmetric(horizontal: AppSpacing.lg),
       ),
     ),
     outlinedButtonTheme: OutlinedButtonThemeData(
       style: OutlinedButton.styleFrom(
+        visualDensity: VisualDensity.standard,
         foregroundColor: palette.textPrimary,
         side: BorderSide(color: controlBorder),
         shape: RoundedRectangleBorder(borderRadius: AppShapes.input),
-        minimumSize: const Size(0, AppSizes.control),
+        minimumSize: Size(0, controlSize),
         padding: const EdgeInsets.symmetric(horizontal: AppSpacing.lg),
       ),
     ),
     textButtonTheme: TextButtonThemeData(
       style: TextButton.styleFrom(
+        visualDensity: VisualDensity.standard,
         foregroundColor: accentOnSurface,
         textStyle: textTheme.labelLarge?.copyWith(fontWeight: AppWeights.title),
-        minimumSize: const Size(0, AppSizes.control),
+        minimumSize: Size(0, controlSize),
         padding: const EdgeInsets.symmetric(horizontal: AppSpacing.md),
-      ),
-    ),
-    iconButtonTheme: IconButtonThemeData(
-      style: IconButton.styleFrom(
-        foregroundColor: palette.textSecondary,
-        minimumSize: const Size.square(AppSizes.control),
-        maximumSize: const Size.square(AppSizes.control),
-        iconSize: AppSizes.icon,
       ),
     ),
     inputDecorationTheme: InputDecorationTheme(
       filled: true,
-      fillColor: palette.surface,
+      fillColor: palette.surfaceMuted,
       hoverColor: palette.surfaceElevated,
       border: OutlineInputBorder(
         borderRadius: AppShapes.input,
@@ -339,15 +430,48 @@ ThemeData _buildTheme(
       ),
       focusedBorder: OutlineInputBorder(
         borderRadius: AppShapes.input,
-        borderSide: BorderSide(color: focusOutline, width: 1.5),
+        borderSide: BorderSide(
+          color: visibleUiColorOn(
+            palette,
+            background: palette.surfaceMuted,
+            preferred: palette.accent,
+          ),
+          width: AppStrokes.focus,
+        ),
+      ),
+      disabledBorder: OutlineInputBorder(
+        borderRadius: AppShapes.input,
+        borderSide: BorderSide(color: palette.border),
+      ),
+      errorBorder: OutlineInputBorder(
+        borderRadius: AppShapes.input,
+        borderSide: BorderSide(color: palette.danger),
+      ),
+      focusedErrorBorder: OutlineInputBorder(
+        borderRadius: AppShapes.input,
+        borderSide: BorderSide(color: palette.danger, width: AppStrokes.focus),
       ),
       labelStyle: TextStyle(color: inputLabelColor),
       hintStyle: TextStyle(color: inputHintColor),
-      constraints: const BoxConstraints(minHeight: AppSizes.control),
-      contentPadding: const EdgeInsets.symmetric(
+      constraints: BoxConstraints(minHeight: controlSize),
+      contentPadding: EdgeInsets.symmetric(
         horizontal: AppSpacing.lg,
-        vertical: AppSpacing.md,
+        vertical: desktop ? AppSpacing.sm : AppSpacing.md,
       ),
+    ),
+    sliderTheme: SliderThemeData(
+      trackHeight: 3,
+      activeTrackColor: palette.accent,
+      inactiveTrackColor: palette.surfaceMuted,
+      thumbColor: palette.accent,
+      overlayColor: palette.accent.withValues(alpha: AppEmphasis.tint),
+      thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 7),
+    ),
+    expansionTileTheme: ExpansionTileThemeData(
+      shape: const Border(),
+      collapsedShape: const Border(),
+      iconColor: palette.textSecondary,
+      collapsedIconColor: palette.textSecondary,
     ),
     dividerTheme: DividerThemeData(color: palette.border, space: 1),
     floatingActionButtonTheme: FloatingActionButtonThemeData(
@@ -375,12 +499,12 @@ ThemeData _buildTheme(
 /// Monospace font used everywhere for code-like surfaces.
 TextStyle monoStyle({
   required Color color,
-  double fontSize = 12.5,
+  double fontSize = AppFontSizes.code,
   double height = 1.45,
   FontWeight fontWeight = FontWeight.w500,
 }) {
   return TextStyle(
-    fontFamily: 'JetBrainsMono',
+    fontFamily: AppFonts.code,
     color: color,
     fontSize: fontSize,
     height: height,

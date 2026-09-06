@@ -102,9 +102,8 @@ class RecentSessionControlsMenu extends StatelessWidget {
               closeOnActivate: false,
               onPressed: onFavoritesOnlyChanged == null
                   ? null
-                  : () => onFavoritesOnlyChanged!(
-                      !currentFilters.favoritesOnly,
-                    ),
+                  : () =>
+                        onFavoritesOnlyChanged!(!currentFilters.favoritesOnly),
             ),
             AppMenuItem(
               label: 'Running',
@@ -134,10 +133,10 @@ class RecentSessionControlsMenu extends StatelessWidget {
         ];
 
         return MenuAnchor(
+          style: appActionMenuStyle,
+          crossAxisUnconstrained: false,
+          alignmentOffset: const Offset(-appActionMenuWidth, 4),
           animated: true,
-          style: MenuStyle(
-            minimumSize: const WidgetStatePropertyAll(Size(200, 0)),
-          ),
           menuChildren: menuChildren,
           builder: (context, controller, _) {
             final tooltip = switch ((showGrouping, _showsFilters)) {

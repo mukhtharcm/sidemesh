@@ -18,6 +18,7 @@ class SessionControlsSheet extends StatefulWidget {
     required this.policyStore,
     required this.turnConfigStore,
     this.onClose,
+    this.showReplyControls = true,
   });
 
   final ApiClient api;
@@ -35,6 +36,7 @@ class SessionControlsSheet extends StatefulWidget {
   final SessionPolicyStore policyStore;
   final SessionTurnConfigStore turnConfigStore;
   final VoidCallback? onClose;
+  final bool showReplyControls;
 
   @override
   State<SessionControlsSheet> createState() => _SessionControlsSheetState();
@@ -206,28 +208,6 @@ class _SessionControlsSheetState extends State<SessionControlsSheet> {
       return selected.displayName;
     }
     return _effectiveModelValue ?? 'Use session default';
-  }
-
-  String get _effectiveModelDescription {
-    if (_loadingModels) {
-      final provider = _runtimeModelProvider;
-      if (provider != null) {
-        return 'Loading models for this session…';
-      }
-      return 'Loading the available models from this host.';
-    }
-    if (_modelsError != null) {
-      return _modelsError!;
-    }
-    final selected = _selectedModelEntry;
-    if (selected != null && selected.description.trim().isNotEmpty) {
-      return selected.description.trim();
-    }
-    final provider = _runtimeModelProvider;
-    if (provider != null) {
-      return 'Use the current model source for new turns.';
-    }
-    return 'Use the host default model for new turns.';
   }
 
   String? get _runtimeModelProvider {
@@ -537,20 +517,31 @@ class _SessionControlsSheetState extends State<SessionControlsSheet> {
       models: _models,
       currentModel: _effectiveModelValue,
       providerName: _runtimeModelProvider,
+      compact: widget.onClose != null,
+      currentReasoning: _effectiveReasoningEffort,
+      onReasoningSelected: _supportsReasoningEffort
+          ? (effort) async => setState(() {
+              _turnConfig = _turnConfig.copyWith(reasoningEffort: effort);
+            })
+          : null,
     );
     final ModelCatalogEntry? selected;
     if (widget.onClose != null && MediaQuery.sizeOf(context).width >= 900) {
       selected = await showDialog<ModelCatalogEntry>(
         context: context,
-        barrierColor: Colors.black.withValues(alpha: 0.35),
+        barrierColor: AppOverlayColors.modalBarrier,
         builder: (dialogContext) => Dialog(
-          backgroundColor: Colors.transparent,
+          // The compact list relies on its parent for a solid surface.
+          clipBehavior: Clip.antiAlias,
           insetPadding: const EdgeInsets.symmetric(
-            horizontal: 48,
-            vertical: 48,
+            horizontal: AppSizes.control,
+            vertical: AppSizes.control,
           ),
           child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 760, maxHeight: 640),
+            constraints: const BoxConstraints(
+              maxWidth: AppSizes.pickerWidth,
+              maxHeight: AppSizes.pickerMaxHeight,
+            ),
             child: picker,
           ),
         ),
@@ -559,7 +550,7 @@ class _SessionControlsSheetState extends State<SessionControlsSheet> {
       selected = await showModalBottomSheet<ModelCatalogEntry>(
         context: context,
         backgroundColor: Colors.transparent,
-        barrierColor: Colors.black.withValues(alpha: 0.28),
+        barrierColor: AppOverlayColors.modalBarrier,
         showDragHandle: false,
         useSafeArea: true,
         isScrollControlled: true,
@@ -630,7 +621,7 @@ class _SessionControlsSheetState extends State<SessionControlsSheet> {
           ? _trimmedOrNull(_policy.accessMode)
           : null,
     );
-    final savedTurnConfig = _normalisedTurnConfig(
+    var savedTurnConfig = _normalisedTurnConfig(
       SessionTurnConfig(
         model: _supportsModelOverride ? _turnConfig.model : null,
         mode: _supportsMode ? _turnConfig.mode : null,
@@ -640,6 +631,16 @@ class _SessionControlsSheetState extends State<SessionControlsSheet> {
         fastMode: _supportsFastMode ? _turnConfig.fastMode : null,
       ),
     );
+    if (!widget.showReplyControls) {
+      final replyConfig = widget.turnConfigStore.configFor(
+        widget.host,
+        widget.session.id,
+      );
+      savedTurnConfig = savedTurnConfig.copyWith(
+        model: replyConfig.model,
+        reasoningEffort: replyConfig.reasoningEffort,
+      );
+    }
     await widget.policyStore.setPolicy(
       widget.host,
       widget.session.id,
@@ -665,7 +666,9 @@ class _SessionControlsSheetState extends State<SessionControlsSheet> {
       _policy = _supportsAccessModes
           ? const SessionPolicy()
           : SessionPolicy.factoryDefaults;
-      _turnConfig = _factoryTurnConfig();
+      _turnConfig = widget.showReplyControls
+          ? _factoryTurnConfig()
+          : _turnConfig.copyWith(mode: null, fastMode: false);
     });
   }
 
@@ -758,7 +761,10 @@ class _SessionControlsSheetState extends State<SessionControlsSheet> {
       builder: (context, constraints) {
         final reset = TextButton.icon(
           onPressed: _reset,
-          icon: const Icon(Icons.restart_alt_rounded, size: 18),
+          icon: const Icon(
+            Icons.restart_alt_rounded,
+            size: AppSizes.inlineIcon,
+          ),
           label: const Text('Reset'),
         );
         final cancel = TextButton(
@@ -767,7 +773,7 @@ class _SessionControlsSheetState extends State<SessionControlsSheet> {
         );
         final apply = FilledButton.icon(
           onPressed: _save,
-          icon: const Icon(Icons.check_rounded, size: 18),
+          icon: const Icon(Icons.check_rounded, size: AppSizes.inlineIcon),
           label: const Text('Apply'),
         );
         if (constraints.maxWidth < 380) {
@@ -775,7 +781,7 @@ class _SessionControlsSheetState extends State<SessionControlsSheet> {
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               apply,
-              const SizedBox(height: 4),
+              const SizedBox(height: AppSpacing.xs),
               Row(children: [reset, const Spacer(), cancel]),
             ],
           );
@@ -785,7 +791,7 @@ class _SessionControlsSheetState extends State<SessionControlsSheet> {
             reset,
             const Spacer(),
             cancel,
-            const SizedBox(width: 8),
+            const SizedBox(width: AppSpacing.sm),
             apply,
           ],
         );
@@ -798,11 +804,7 @@ class _SessionControlsSheetState extends State<SessionControlsSheet> {
     final theme = Theme.of(context);
     final catalog = _accessModeCatalog;
     if (_loadingAccessModes && catalog == null) {
-      return const MeshSelectionCardSkeleton(
-        showIcon: false,
-        badgeCount: 0,
-        showCurrentValue: true,
-      );
+      return const MeshLoader(label: 'Loading options');
     }
     if (_accessModesError != null && catalog == null) {
       return Row(
@@ -825,10 +827,21 @@ class _SessionControlsSheetState extends State<SessionControlsSheet> {
         style: theme.textTheme.bodySmall?.copyWith(color: colors.textSecondary),
       );
     }
-    return ProviderAccessModeChoices(
+    final choices = ProviderAccessModeChoices(
       modes: catalog.modes,
       selectedModeId: _effectiveAccessMode,
       onSelected: (mode) => unawaited(_selectAccessMode(mode)),
+    );
+    final selected = providerAccessModeById(catalog, _effectiveAccessMode);
+    if (widget.onClose == null || selected == null) return choices;
+    return ExpansionTile(
+      tilePadding: EdgeInsets.zero,
+      title: Text(selected.label, style: theme.textTheme.bodyMedium),
+      subtitle: Text(
+        selected.disabledReason ?? selected.description,
+        style: theme.textTheme.bodySmall?.copyWith(color: colors.textSecondary),
+      ),
+      children: [choices],
     );
   }
 
@@ -865,14 +878,8 @@ class _SessionControlsSheetState extends State<SessionControlsSheet> {
     final bottomInset = MediaQuery.of(context).viewInsets.bottom;
     final selectedModel = _selectedModelEntry;
     final effectiveReasoning = _effectiveReasoningEffort;
-    String? reasoningDescription;
-    for (final option in _supportedReasoningOptions) {
-      if (option.reasoningEffort == effectiveReasoning) {
-        reasoningDescription = option.description;
-        break;
-      }
-    }
-    final showModelControls = _supportsModels && _supportsModelOverride;
+    final showModelControls =
+        widget.showReplyControls && _supportsModels && _supportsModelOverride;
     final showModeControls = _supportsMode;
     final showReasoningControls = showModelControls && _supportsReasoningEffort;
     final showAccessControls = _supportsAccessModes;
@@ -890,49 +897,14 @@ class _SessionControlsSheetState extends State<SessionControlsSheet> {
         showAccessControls ||
         showLegacyPolicyControls;
     final content = Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         if (!showAnyControls) ...[
-          Container(
-            width: double.infinity,
-            padding: const EdgeInsets.all(14),
-            decoration: BoxDecoration(
-              color: colors.surfaceMuted,
-              borderRadius: BorderRadius.circular(14),
-              border: Border.all(color: colors.border),
-            ),
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Icon(
-                  Icons.info_outline_rounded,
-                  color: colors.textSecondary,
-                  size: 20,
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        'Nothing to change here',
-                        style: theme.textTheme.titleSmall?.copyWith(
-                          fontWeight: FontWeight.w700,
-                        ),
-                      ),
-                      const SizedBox(height: 2),
-                      Text(
-                        '$_providerName does not offer session settings you can change after a run starts.',
-                        style: theme.textTheme.bodySmall?.copyWith(
-                          color: colors.textSecondary,
-                          height: 1.35,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ],
-            ),
+          MeshEmptyState.compact(
+            icon: Icons.tune_rounded,
+            title: 'Nothing to change here',
+            body:
+                '$_providerName does not offer settings for an existing session.',
           ),
         ] else ...[
           if (showModeControls) ...[
@@ -940,42 +912,24 @@ class _SessionControlsSheetState extends State<SessionControlsSheet> {
               'Mode',
               style: theme.textTheme.labelLarge?.copyWith(
                 color: colors.textSecondary,
-                letterSpacing: 0.4,
+                letterSpacing: AppLetterSpacing.caps,
               ),
             ),
-            const SizedBox(height: 8),
-            Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              children:
-                  <String?>[
-                    null,
-                    ..._availableModeChoices.map((mode) => mode.id),
-                  ].map((mode) {
-                    final selected = mode == _effectiveMode;
-                    final fromRuntime =
-                        mode != null &&
-                        _turnConfig.mode == null &&
-                        widget.runtimeMode == mode;
-                    return _ReasoningChoiceChip(
-                      label: _sessionModeChoiceLabel(
-                        mode,
-                        _availableModeChoices,
-                      ),
-                      selected: selected,
-                      isDefault: mode == null || fromRuntime,
-                      defaultLabel: mode == null ? 'inherit' : 'current',
-                      onTap: () {
-                        setState(() {
-                          _turnConfig = _normalisedTurnConfig(
-                            _turnConfig.copyWith(mode: mode),
-                          );
-                        });
-                      },
-                    );
-                  }).toList(),
+            const SizedBox(height: AppSpacing.sm),
+            AppSelect<String?>(
+              value: _effectiveMode,
+              values: [null, ..._availableModeChoices.map((mode) => mode.id)],
+              hint: 'Use session default',
+              expanded: true,
+              label: (mode) =>
+                  _sessionModeChoiceLabel(mode, _availableModeChoices),
+              onChanged: (mode) => setState(() {
+                _turnConfig = _normalisedTurnConfig(
+                  _turnConfig.copyWith(mode: mode),
+                );
+              }),
             ),
-            const SizedBox(height: 8),
+            const SizedBox(height: AppSpacing.sm),
             Text(
               _sessionModeDescription(
                 _effectiveMode,
@@ -984,59 +938,64 @@ class _SessionControlsSheetState extends State<SessionControlsSheet> {
               ),
               style: theme.textTheme.bodySmall?.copyWith(
                 color: colors.textSecondary,
-                height: 1.35,
+                height: AppLineHeights.caption,
               ),
             ),
           ],
           if (showModelControls) ...[
-            const SizedBox(height: 20),
-            Text(
-              showReasoningControls ? 'Model and thinking' : 'Model',
-              style: theme.textTheme.labelLarge?.copyWith(
-                color: colors.textSecondary,
-                letterSpacing: 0.4,
+            if (showModeControls) const SizedBox(height: AppSpacing.lg),
+            Text('Model', style: theme.textTheme.labelLarge),
+            const SizedBox(height: AppSpacing.sm),
+            if (_loadingModels && _models.isEmpty)
+              const MeshLoader(label: 'Loading models')
+            else
+              TextButton(
+                style: AppControlStyles.select(context),
+                onPressed: _loadingModels ? null : _chooseModel,
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        _effectiveModelLabel,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                    const Icon(
+                      Icons.expand_more_rounded,
+                      size: AppSizes.compactIcon,
+                    ),
+                  ],
+                ),
               ),
-            ),
-            const SizedBox(height: 8),
-            _loadingModels && _models.isEmpty
-                ? const MeshSelectionCardSkeleton(
-                    showIcon: false,
-                    badgeCount: 3,
-                    showCurrentValue: true,
-                  )
-                : MeshSelectionCard(
-                    title: 'Model',
-                    value: _effectiveModelLabel,
-                    subtitle: _effectiveModelDescription,
-                    loading: _loadingModels,
-                    error: _modelsError,
-                    currentValue: _turnConfig.model != null
-                        ? widget.runtimeModel
-                        : null,
-                    badges: <String>[
-                      ?_runtimeModelProvider,
-                      if (selectedModel?.isAutoModel ?? false) 'auto',
-                      if (selectedModel?.isDefault ?? false) 'default',
-                      if (_turnConfig.model != null) 'next turn',
-                    ],
-                    onTap: _chooseModel,
-                    onRetry: () {
-                      unawaited(_loadModels());
-                    },
+            if (_modelsError != null)
+              Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      _modelsError!,
+                      style: theme.textTheme.bodySmall,
+                    ),
                   ),
+                  TextButton(
+                    onPressed: _loadModels,
+                    child: const Text('Retry'),
+                  ),
+                ],
+              ),
           ],
           if (showReasoningControls) ...[
-            const SizedBox(height: 18),
+            const SizedBox(height: AppSpacing.lg),
             Text(
               'Reasoning effort',
               style: theme.textTheme.labelLarge?.copyWith(
                 color: colors.textSecondary,
-                letterSpacing: 0.4,
+                letterSpacing: AppLetterSpacing.caps,
               ),
             ),
-            const SizedBox(height: 8),
+            const SizedBox(height: AppSpacing.sm),
             if (_loadingModels && _models.isEmpty)
-              const MeshChipSkeletonWrap()
+              const MeshLoader(label: 'Loading options')
             else if (_selectedModelIsAuto)
               _InlineSettingNote(
                 text:
@@ -1046,42 +1005,24 @@ class _SessionControlsSheetState extends State<SessionControlsSheet> {
               const _InlineSettingNote(
                 text: 'This model does not expose adjustable thinking effort.',
               )
-            else ...[
-              _ReasoningEffortSlider(
-                options: _supportedReasoningOptions,
-                selectedEffort: effectiveReasoning,
-                defaultEffort: selectedModel?.defaultReasoningEffort,
-                onChanged: (effort) {
-                  setState(() {
-                    _turnConfig = _normalisedTurnConfig(
-                      _turnConfig.copyWith(reasoningEffort: effort),
-                    );
-                  });
-                },
+            else
+              AppSelect<String>(
+                value:
+                    effectiveReasoning ?? selectedModel?.defaultReasoningEffort,
+                values: _supportedReasoningOptions
+                    .map((option) => option.reasoningEffort)
+                    .toList(),
+                label: reasoningEffortLabel,
+                expanded: true,
+                onChanged: (effort) => setState(() {
+                  _turnConfig = _normalisedTurnConfig(
+                    _turnConfig.copyWith(reasoningEffort: effort),
+                  );
+                }),
               ),
-              if (reasoningDescription != null &&
-                  reasoningDescription.trim().isNotEmpty) ...[
-                const SizedBox(height: 8),
-                Text(
-                  reasoningDescription.trim(),
-                  style: theme.textTheme.bodySmall?.copyWith(
-                    color: colors.textSecondary,
-                    height: 1.35,
-                  ),
-                ),
-              ],
-            ],
           ],
           if (_showFastSection) ...[
-            const SizedBox(height: 18),
-            Text(
-              'Speed',
-              style: theme.textTheme.labelLarge?.copyWith(
-                color: colors.textSecondary,
-                letterSpacing: 0.4,
-              ),
-            ),
-            const SizedBox(height: 8),
+            const SizedBox(height: AppSpacing.lg),
             _FastModeTile(
               value: _effectiveFastMode,
               enabled: _selectedModelSupportsFast,
@@ -1095,26 +1036,26 @@ class _SessionControlsSheetState extends State<SessionControlsSheet> {
             ),
           ],
           if (showAccessControls) ...[
-            const SizedBox(height: 18),
+            const SizedBox(height: AppSpacing.lg),
             Text(
               'Access',
               style: theme.textTheme.labelLarge?.copyWith(
                 color: colors.textSecondary,
-                letterSpacing: 0.4,
+                letterSpacing: AppLetterSpacing.caps,
               ),
             ),
-            const SizedBox(height: 8),
+            const SizedBox(height: AppSpacing.sm),
             Text(
               'Choose how the provider should handle sensitive actions.',
               style: theme.textTheme.bodySmall?.copyWith(
                 color: colors.textSecondary,
               ),
             ),
-            const SizedBox(height: 6),
+            const SizedBox(height: AppSpacing.tight),
             _buildAccessModeControls(context),
           ],
           if (showLegacyPolicyControls) ...[
-            const SizedBox(height: 18),
+            const SizedBox(height: AppSpacing.lg),
             LaunchOptionsForm(
               dense: true,
               value: LaunchOptionsValue(
@@ -1148,8 +1089,6 @@ class _SessionControlsSheetState extends State<SessionControlsSheet> {
             ),
           ],
         ],
-        const SizedBox(height: 22),
-        _buildActions(context),
       ],
     );
 
@@ -1157,146 +1096,22 @@ class _SessionControlsSheetState extends State<SessionControlsSheet> {
       padding: EdgeInsets.only(bottom: bottomInset),
       child: SafeArea(
         top: false,
-        child: SingleChildScrollView(
-          padding: const EdgeInsets.fromLTRB(20, 8, 20, 24),
-          child: content,
-        ),
-      ),
-    );
-  }
-}
-
-class _ReasoningChoiceChip extends StatelessWidget {
-  const _ReasoningChoiceChip({
-    required this.label,
-    required this.selected,
-    required this.isDefault,
-    required this.onTap,
-    this.defaultLabel = 'default',
-  });
-
-  final String label;
-  final bool selected;
-  final bool isDefault;
-  final VoidCallback onTap;
-  final String defaultLabel;
-
-  @override
-  Widget build(BuildContext context) {
-    return MeshSurface(
-      onTap: onTap,
-      selected: selected,
-      tone: MeshSurfaceTone.muted,
-      radius: AppRadii.control,
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Text(
-            label,
-            style: Theme.of(
-              context,
-            ).textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.w600),
-          ),
-          if (isDefault) ...[
-            const SizedBox(width: 8),
-            MeshInlineBadge(label: defaultLabel),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Flexible(
+              child: SingleChildScrollView(
+                padding: const EdgeInsets.all(AppSpacing.lg),
+                child: content,
+              ),
+            ),
+            const Divider(height: AppStrokes.border),
+            Padding(
+              padding: const EdgeInsets.all(AppSpacing.md),
+              child: _buildActions(context),
+            ),
           ],
-        ],
-      ),
-    );
-  }
-}
-
-class _ReasoningEffortSlider extends StatelessWidget {
-  const _ReasoningEffortSlider({
-    required this.options,
-    required this.selectedEffort,
-    required this.defaultEffort,
-    required this.onChanged,
-  });
-
-  final List<ModelReasoningEffortOption> options;
-  final String? selectedEffort;
-  final String? defaultEffort;
-  final ValueChanged<String> onChanged;
-
-  @override
-  Widget build(BuildContext context) {
-    final colors = context.colors;
-    var selectedIndex = options.indexWhere(
-      (option) => option.reasoningEffort == selectedEffort,
-    );
-    if (selectedIndex < 0) {
-      selectedIndex = options.indexWhere(
-        (option) => option.reasoningEffort == defaultEffort,
-      );
-    }
-    if (selectedIndex < 0) selectedIndex = 0;
-    final selected = options[selectedIndex];
-    final selectedLabel = reasoningEffortLabel(selected.reasoningEffort);
-    final isDefault = selected.reasoningEffort == defaultEffort;
-
-    if (options.length == 1) {
-      return Text(
-        selectedLabel,
-        style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-          color: colors.textPrimary,
-          fontWeight: AppWeights.emphasis,
         ),
-      );
-    }
-
-    return Semantics(
-      label: 'Reasoning effort',
-      value: selectedLabel,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Row(
-            children: [
-              Text(
-                selectedLabel,
-                style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                  color: colors.accent,
-                  fontWeight: AppWeights.title,
-                ),
-              ),
-              if (isDefault) ...[
-                const SizedBox(width: 8),
-                const MeshInlineBadge(label: 'default'),
-              ],
-            ],
-          ),
-          Slider(
-            value: selectedIndex.toDouble(),
-            min: 0,
-            max: (options.length - 1).toDouble(),
-            divisions: options.length - 1,
-            label: selectedLabel,
-            onChanged: (value) {
-              final index = value.round().clamp(0, options.length - 1);
-              onChanged(options[index].reasoningEffort);
-            },
-          ),
-          Row(
-            children: [
-              Text(
-                reasoningEffortLabel(options.first.reasoningEffort),
-                style: Theme.of(
-                  context,
-                ).textTheme.bodySmall?.copyWith(color: colors.textSecondary),
-              ),
-              const Spacer(),
-              Text(
-                reasoningEffortLabel(options.last.reasoningEffort),
-                style: Theme.of(
-                  context,
-                ).textTheme.bodySmall?.copyWith(color: colors.textSecondary),
-              ),
-            ],
-          ),
-        ],
       ),
     );
   }
@@ -1336,22 +1151,22 @@ class _InlineSettingNote extends StatelessWidget {
   Widget build(BuildContext context) {
     final colors = context.colors;
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 4),
+      padding: const EdgeInsets.symmetric(vertical: AppSpacing.xs),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Icon(
             Icons.info_outline_rounded,
-            size: 18,
+            size: AppSizes.inlineIcon,
             color: colors.textTertiary,
           ),
-          const SizedBox(width: 10),
+          const SizedBox(width: AppSpacing.compact),
           Expanded(
             child: Text(
               text,
               style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                 color: colors.textSecondary,
-                height: 1.35,
+                height: AppLineHeights.caption,
               ),
             ),
           ),
@@ -1366,19 +1181,17 @@ class _ModelPickerSheet extends StatefulWidget {
     required this.models,
     required this.currentModel,
     required this.providerName,
-    this.embedded = false,
-    this.showEmbeddedHeader = true,
-    this.onBack,
-    this.onSelected,
+    this.compact = false,
+    this.currentReasoning,
+    this.onReasoningSelected,
   });
 
   final List<ModelCatalogEntry> models;
   final String? currentModel;
   final String? providerName;
-  final bool embedded;
-  final bool showEmbeddedHeader;
-  final VoidCallback? onBack;
-  final ValueChanged<ModelCatalogEntry>? onSelected;
+  final bool compact;
+  final String? currentReasoning;
+  final Future<void> Function(String)? onReasoningSelected;
 
   @override
   State<_ModelPickerSheet> createState() => _ModelPickerSheetState();
@@ -1423,58 +1236,74 @@ class _ModelPickerSheetState extends State<_ModelPickerSheet> {
         })
         .toList(growable: false);
 
+    if (!widget.compact && MediaQuery.sizeOf(context).width < 760) {
+      return MobileModelPicker(
+        models: widget.models,
+        currentModel: widget.currentModel,
+        currentReasoning: widget.currentReasoning,
+        onReasoningSelected: widget.onReasoningSelected,
+        onModelSelected: (model) => Navigator.of(context).pop(model),
+      );
+    }
+
+    if (widget.compact) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          const AppMenuSectionLabel('Choose a model'),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(
+              AppSpacing.md,
+              0,
+              AppSpacing.md,
+              AppSpacing.xs,
+            ),
+            child: TextField(
+              controller: _queryController,
+              style: AppControlStyles.searchText(context),
+              decoration: AppControlStyles.search(
+                context,
+              ).copyWith(hintText: 'Search models'),
+            ),
+          ),
+          Expanded(
+            child: filtered.isEmpty
+                ? const Center(child: Text('No models match that search.'))
+                : ListView(
+                    padding: EdgeInsets.zero,
+                    children: [
+                      for (final model in filtered)
+                        Tooltip(
+                          message: model.description,
+                          child: AppMenuItem(
+                            label: model.displayName,
+                            selected:
+                                model.model ==
+                                _trimmedOrNull(widget.currentModel),
+                            onPressed: () => Navigator.of(context).pop(model),
+                          ),
+                        ),
+                    ],
+                  ),
+          ),
+        ],
+      );
+    }
+
     final content = Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        if (widget.embedded && widget.showEmbeddedHeader) ...[
-          Padding(
-            padding: const EdgeInsets.fromLTRB(12, 8, 12, 12),
-            child: Row(
-              children: [
-                Tooltip(
-                  message: 'Back to session controls',
-                  child: TextButton.icon(
-                    onPressed: widget.onBack,
-                    icon: const Icon(Icons.arrow_back_rounded, size: 18),
-                    label: const Text('All controls'),
-                  ),
-                ),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        'Choose a model',
-                        style: Theme.of(context).textTheme.titleMedium
-                            ?.copyWith(fontWeight: AppWeights.title),
-                      ),
-                      Text(
-                        'Changes apply to the next reply.',
-                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                          color: colors.textSecondary,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ],
         Padding(
-          padding: widget.embedded
-              ? const EdgeInsets.symmetric(horizontal: 16)
-              : EdgeInsets.zero,
+          padding: EdgeInsets.zero,
           child: TextField(
             controller: _queryController,
-            decoration: const InputDecoration(
-              prefixIcon: Icon(Icons.search_rounded),
-              hintText: 'Search models',
-            ),
+            style: AppControlStyles.searchText(context),
+            decoration: AppControlStyles.search(
+              context,
+            ).copyWith(hintText: 'Search models'),
           ),
         ),
-        const SizedBox(height: 14),
+        const SizedBox(height: AppSpacing.md),
         Expanded(
           child: filtered.isEmpty
               ? Center(
@@ -1486,9 +1315,7 @@ class _ModelPickerSheetState extends State<_ModelPickerSheet> {
                   ),
                 )
               : ListView.separated(
-                  padding: widget.embedded
-                      ? const EdgeInsets.fromLTRB(8, 0, 8, 24)
-                      : EdgeInsets.zero,
+                  padding: EdgeInsets.zero,
                   itemCount: filtered.length,
                   separatorBuilder: (_, _) =>
                       Divider(height: 1, indent: 56, color: colors.border),
@@ -1502,12 +1329,7 @@ class _ModelPickerSheetState extends State<_ModelPickerSheet> {
                       icon: Icons.memory_rounded,
                       selected: isCurrent,
                       onTap: () {
-                        final onSelected = widget.onSelected;
-                        if (onSelected != null) {
-                          onSelected(model);
-                        } else {
-                          Navigator.of(context).pop(model);
-                        }
+                        Navigator.of(context).pop(model);
                       },
                       footer: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
@@ -1516,7 +1338,7 @@ class _ModelPickerSheetState extends State<_ModelPickerSheet> {
                             model.model,
                             style: monoStyle(
                               color: colors.textSecondary,
-                              fontSize: 12,
+                              fontSize: AppFontSizes.caption,
                               fontWeight: AppWeights.body,
                             ),
                           ),
@@ -1543,9 +1365,6 @@ class _ModelPickerSheetState extends State<_ModelPickerSheet> {
         ),
       ],
     );
-    if (widget.embedded) {
-      return content;
-    }
     return MeshBottomSheetScaffold(
       icon: Icons.memory_rounded,
       title: 'Choose a model',
@@ -1560,12 +1379,14 @@ class _ModelPickerSheetState extends State<_ModelPickerSheet> {
 
 class _ReasoningPickerSheet extends StatelessWidget {
   const _ReasoningPickerSheet({
+    this.compact = false,
     required this.options,
     required this.currentReasoning,
     required this.defaultReasoning,
     required this.modelLabel,
   });
 
+  final bool compact;
   final List<ModelReasoningEffortOption> options;
   final String currentReasoning;
   final String defaultReasoning;
@@ -1573,6 +1394,31 @@ class _ReasoningPickerSheet extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    if (compact) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          const AppMenuSectionLabel('Choose thinking level'),
+          Expanded(
+            child: ListView(
+              padding: EdgeInsets.zero,
+              children: [
+                for (final option in options)
+                  Tooltip(
+                    message: option.description,
+                    child: AppMenuItem(
+                      label: reasoningEffortLabel(option.reasoningEffort),
+                      selected: option.reasoningEffort == currentReasoning,
+                      onPressed: () =>
+                          Navigator.of(context).pop(option.reasoningEffort),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+        ],
+      );
+    }
     return MeshBottomSheetScaffold(
       icon: Icons.psychology_alt_rounded,
       title: 'Choose thinking level',

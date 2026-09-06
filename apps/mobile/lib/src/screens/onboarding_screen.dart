@@ -45,8 +45,8 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
   void _nextPage() {
     if (_pageIndex < _pageCount - 1) {
       _pageController.nextPage(
-        duration: const Duration(milliseconds: 350),
-        curve: Curves.easeInOutCubic,
+        duration: AppMotion.page,
+        curve: AppMotion.standard,
       );
       HapticFeedback.lightImpact();
     }
@@ -57,8 +57,8 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
     // to add a host before the app is useful.
     _pageController.animateToPage(
       _pageCount - 1,
-      duration: const Duration(milliseconds: 400),
-      curve: Curves.easeInOutCubic,
+      duration: AppMotion.page,
+      curve: AppMotion.standard,
     );
     HapticFeedback.lightImpact();
   }
@@ -129,7 +129,12 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
           children: [
             // Skip button
             Padding(
-              padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+              padding: const EdgeInsets.fromLTRB(
+                AppSpacing.lg,
+                AppSpacing.sm,
+                AppSpacing.lg,
+                0,
+              ),
               child: Row(
                 mainAxisAlignment: MainAxisAlignment.end,
                 children: [
@@ -140,7 +145,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                         'Go to setup',
                         style: Theme.of(context).textTheme.labelLarge?.copyWith(
                           color: colors.textSecondary,
-                          fontWeight: FontWeight.w600,
+                          fontWeight: AppWeights.title,
                         ),
                       ),
                     ),
@@ -189,7 +194,12 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
             ),
             // Bottom controls
             Padding(
-              padding: const EdgeInsets.fromLTRB(24, 0, 24, 24),
+              padding: const EdgeInsets.fromLTRB(
+                AppSpacing.xl,
+                0,
+                AppSpacing.xl,
+                AppSpacing.xl,
+              ),
               child: Wrap(
                 alignment: WrapAlignment.spaceBetween,
                 crossAxisAlignment: WrapCrossAlignment.center,
@@ -201,13 +211,15 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                     children: List.generate(_pageCount, (i) {
                       final active = i == _pageIndex;
                       return AnimatedContainer(
-                        duration: const Duration(milliseconds: 200),
-                        margin: const EdgeInsets.symmetric(horizontal: 4),
+                        duration: AppMotion.reveal,
+                        margin: const EdgeInsets.symmetric(
+                          horizontal: AppSpacing.xs,
+                        ),
                         width: active ? 24 : 8,
                         height: 8,
                         decoration: BoxDecoration(
                           color: active ? colors.accent : colors.borderStrong,
-                          borderRadius: BorderRadius.circular(4),
+                          borderRadius: AppShapes.pill,
                         ),
                       );
                     }),
@@ -280,32 +292,38 @@ class _WelcomePage extends StatelessWidget {
             height: 120,
             decoration: BoxDecoration(
               color: colors.accentMuted,
-              borderRadius: BorderRadius.circular(32),
-              border: Border.all(color: colors.accent.withValues(alpha: 0.4)),
+              borderRadius: AppShapes.card,
+              border: Border.all(
+                color: colors.accent.withValues(alpha: AppEmphasis.muted),
+              ),
             ),
-            child: Icon(Icons.hub_rounded, size: 56, color: colors.accent),
+            child: Icon(
+              Icons.hub_rounded,
+              size: AppSizes.emptyIconWell,
+              color: colors.accent,
+            ),
           ),
           const SizedBox(height: 40),
           Text(
             'Stay in control\naway from your desk.',
             textAlign: TextAlign.center,
             style: Theme.of(context).textTheme.headlineMedium?.copyWith(
-              fontWeight: FontWeight.w800,
+              fontWeight: AppWeights.strong,
               color: colors.textPrimary,
-              height: 1.2,
-              letterSpacing: -0.5,
+              height: AppLineHeights.tight,
+              letterSpacing: AppLetterSpacing.headline,
             ),
           ),
-          const SizedBox(height: 16),
+          const SizedBox(height: AppSpacing.lg),
           Text(
             'Connect one machine, then check sessions, approvals, files, and terminals from your phone or desktop.',
             textAlign: TextAlign.center,
             style: Theme.of(context).textTheme.bodyLarge?.copyWith(
               color: colors.textSecondary,
-              height: 1.4,
+              height: AppLineHeights.body,
             ),
           ),
-          const SizedBox(height: 24),
+          const SizedBox(height: AppSpacing.xl),
           Wrap(
             spacing: 8,
             runSpacing: 8,
@@ -355,28 +373,28 @@ class _HowItWorksPage extends StatelessWidget {
             'Connect your first machine.',
             textAlign: TextAlign.center,
             style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-              fontWeight: FontWeight.w800,
+              fontWeight: AppWeights.strong,
               color: colors.textPrimary,
-              letterSpacing: -0.3,
+              letterSpacing: AppLetterSpacing.headline,
             ),
           ),
-          const SizedBox(height: 12),
+          const SizedBox(height: AppSpacing.md),
           Text(
             'Most people start with one machine. You can add more after the first pairing works.',
             textAlign: TextAlign.center,
             style: Theme.of(context).textTheme.bodyLarge?.copyWith(
               color: colors.textSecondary,
-              height: 1.4,
+              height: AppLineHeights.body,
             ),
           ),
-          const SizedBox(height: 20),
+          const SizedBox(height: AppSpacing.xl),
           _StepItem(
             number: '1',
             title: 'Install Sidemesh',
             body: 'Run the setup commands on the machine you want to manage.',
             colors: colors,
           ),
-          const SizedBox(height: 16),
+          const SizedBox(height: AppSpacing.lg),
           _StepItem(
             number: '2',
             title: 'Pair this app',
@@ -384,7 +402,7 @@ class _HowItWorksPage extends StatelessWidget {
                 'Open the pairing code on that machine, then scan it here or add the machine manually.',
             colors: colors,
           ),
-          const SizedBox(height: 16),
+          const SizedBox(height: AppSpacing.lg),
           _StepItem(
             number: '3',
             title: 'Jump back in',
@@ -392,7 +410,7 @@ class _HowItWorksPage extends StatelessWidget {
                 'Open a session, check approvals, or use the terminal when the agent needs you.',
             colors: colors,
           ),
-          const SizedBox(height: 20),
+          const SizedBox(height: AppSpacing.xl),
           Text(
             'About a minute if you already have terminal access.',
             textAlign: TextAlign.center,
@@ -429,20 +447,22 @@ class _StepItem extends StatelessWidget {
           height: 28,
           decoration: BoxDecoration(
             color: colors.accentMuted,
-            borderRadius: BorderRadius.circular(8),
-            border: Border.all(color: colors.accent.withValues(alpha: 0.4)),
+            borderRadius: AppShapes.iconWell,
+            border: Border.all(
+              color: colors.accent.withValues(alpha: AppEmphasis.muted),
+            ),
           ),
           alignment: Alignment.center,
           child: Text(
             number,
             style: monoStyle(
               color: colors.accent,
-              fontSize: 13,
-              fontWeight: FontWeight.w700,
+              fontSize: AppFontSizes.compact,
+              fontWeight: AppWeights.strong,
             ),
           ),
         ),
-        const SizedBox(width: 14),
+        const SizedBox(width: AppSpacing.md),
         Expanded(
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -450,16 +470,16 @@ class _StepItem extends StatelessWidget {
               Text(
                 title,
                 style: Theme.of(context).textTheme.bodyLarge?.copyWith(
-                  fontWeight: FontWeight.w700,
+                  fontWeight: AppWeights.strong,
                   color: colors.textPrimary,
                 ),
               ),
-              const SizedBox(height: 2),
+              const SizedBox(height: AppSpacing.xxs),
               Text(
                 body,
                 style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                   color: colors.textSecondary,
-                  height: 1.4,
+                  height: AppLineHeights.body,
                 ),
               ),
             ],
@@ -490,21 +510,21 @@ class _ActionsPage extends StatelessWidget {
             'Know what needs you.',
             textAlign: TextAlign.center,
             style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-              fontWeight: FontWeight.w800,
+              fontWeight: AppWeights.strong,
               color: colors.textPrimary,
-              letterSpacing: -0.3,
+              letterSpacing: AppLetterSpacing.headline,
             ),
           ),
-          const SizedBox(height: 8),
+          const SizedBox(height: AppSpacing.sm),
           Text(
             'The goal is simple: see the next action quickly, then jump back into the right machine.',
             textAlign: TextAlign.center,
             style: Theme.of(context).textTheme.bodyLarge?.copyWith(
               color: colors.textSecondary,
-              height: 1.4,
+              height: AppLineHeights.body,
             ),
           ),
-          const SizedBox(height: 32),
+          const SizedBox(height: AppSpacing.xxl),
           MeshCard(
             tone: MeshCardTone.surface,
             child: Column(
@@ -516,7 +536,7 @@ class _ActionsPage extends StatelessWidget {
                   body: 'See what each agent is doing and jump back in.',
                   colors: colors,
                 ),
-                const SizedBox(height: 14),
+                const SizedBox(height: AppSpacing.md),
                 _ActionLine(
                   icon: Icons.rule_folder_rounded,
                   title: 'Approvals',
@@ -524,14 +544,14 @@ class _ActionsPage extends StatelessWidget {
                       'Approve or reject risky actions without reopening your laptop.',
                   colors: colors,
                 ),
-                const SizedBox(height: 14),
+                const SizedBox(height: AppSpacing.md),
                 _ActionLine(
                   icon: Icons.folder_open_rounded,
                   title: 'Files',
                   body: 'Check changed files, logs, and saved outputs.',
                   colors: colors,
                 ),
-                const SizedBox(height: 14),
+                const SizedBox(height: AppSpacing.md),
                 _ActionLine(
                   icon: Icons.terminal_rounded,
                   title: 'Terminal',
@@ -541,7 +561,7 @@ class _ActionsPage extends StatelessWidget {
               ],
             ),
           ),
-          const SizedBox(height: 20),
+          const SizedBox(height: AppSpacing.xl),
           Text(
             'Best first step: connect a machine and open one test session.',
             textAlign: TextAlign.center,
@@ -578,12 +598,12 @@ class _ActionLine extends StatelessWidget {
           height: 34,
           decoration: BoxDecoration(
             color: colors.accentMuted,
-            borderRadius: BorderRadius.circular(10),
+            borderRadius: AppShapes.iconWell,
           ),
           alignment: Alignment.center,
-          child: Icon(icon, size: 18, color: colors.accent),
+          child: Icon(icon, size: AppSizes.inlineIcon, color: colors.accent),
         ),
-        const SizedBox(width: 12),
+        const SizedBox(width: AppSpacing.md),
         Expanded(
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -591,16 +611,16 @@ class _ActionLine extends StatelessWidget {
               Text(
                 title,
                 style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                  fontWeight: FontWeight.w700,
+                  fontWeight: AppWeights.strong,
                   color: colors.textPrimary,
                 ),
               ),
-              const SizedBox(height: 2),
+              const SizedBox(height: AppSpacing.xxs),
               Text(
                 body,
                 style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                   color: colors.textSecondary,
-                  height: 1.35,
+                  height: AppLineHeights.caption,
                 ),
               ),
             ],
@@ -625,22 +645,25 @@ class _FeatureChip extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      padding: const EdgeInsets.symmetric(
+        horizontal: AppSpacing.md,
+        vertical: AppSpacing.sm,
+      ),
       decoration: BoxDecoration(
         color: colors.surfaceMuted,
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: AppShapes.panel,
         border: Border.all(color: colors.border),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(icon, size: 16, color: colors.textSecondary),
-          const SizedBox(width: 6),
+          Icon(icon, size: AppSizes.compactIcon, color: colors.textSecondary),
+          const SizedBox(width: AppSpacing.tight),
           Text(
             label,
             style: Theme.of(context).textTheme.labelMedium?.copyWith(
               color: colors.textSecondary,
-              fontWeight: FontWeight.w600,
+              fontWeight: AppWeights.title,
             ),
           ),
         ],
@@ -678,35 +701,37 @@ class _ConnectPage extends StatelessWidget {
             height: 80,
             decoration: BoxDecoration(
               color: colors.accentMuted,
-              borderRadius: BorderRadius.circular(22),
-              border: Border.all(color: colors.accent.withValues(alpha: 0.4)),
+              borderRadius: AppShapes.card,
+              border: Border.all(
+                color: colors.accent.withValues(alpha: AppEmphasis.muted),
+              ),
             ),
             child: Icon(
               Icons.qr_code_scanner_rounded,
-              size: 36,
+              size: AppSizes.heroIcon,
               color: colors.accent,
             ),
           ),
-          const SizedBox(height: 32),
+          const SizedBox(height: AppSpacing.xxl),
           Text(
             'Add your first machine',
             textAlign: TextAlign.center,
             style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-              fontWeight: FontWeight.w800,
+              fontWeight: AppWeights.strong,
               color: colors.textPrimary,
-              letterSpacing: -0.3,
+              letterSpacing: AppLetterSpacing.headline,
             ),
           ),
-          const SizedBox(height: 12),
+          const SizedBox(height: AppSpacing.md),
           Text(
             'Run these commands on the machine you want to manage. Then scan the pairing code here.',
             textAlign: TextAlign.center,
             style: Theme.of(context).textTheme.bodyLarge?.copyWith(
               color: colors.textSecondary,
-              height: 1.4,
+              height: AppLineHeights.body,
             ),
           ),
-          const SizedBox(height: 24),
+          const SizedBox(height: AppSpacing.xl),
           // Command card
           MeshCard(
             tone: MeshCardTone.muted,
@@ -716,28 +741,28 @@ class _ConnectPage extends StatelessWidget {
                 Text(
                   'Quick start',
                   style: Theme.of(context).textTheme.labelLarge?.copyWith(
-                    fontWeight: FontWeight.w700,
+                    fontWeight: AppWeights.strong,
                     color: colors.textPrimary,
                   ),
                 ),
-                const SizedBox(height: 10),
+                const SizedBox(height: AppSpacing.compact),
                 _CommandLine(text: 'npm install -g sidemesh', colors: colors),
-                const SizedBox(height: 6),
+                const SizedBox(height: AppSpacing.tight),
                 _CommandLine(text: 'sidemesh setup', colors: colors),
-                const SizedBox(height: 6),
+                const SizedBox(height: AppSpacing.tight),
                 _CommandLine(text: 'sidemesh pair', colors: colors),
-                const SizedBox(height: 12),
+                const SizedBox(height: AppSpacing.md),
                 Text(
                   'If the machine is already set up, you can scan the pairing code right away or add it manually.',
                   style: Theme.of(context).textTheme.bodySmall?.copyWith(
                     color: colors.textSecondary,
-                    height: 1.4,
+                    height: AppLineHeights.body,
                   ),
                 ),
               ],
             ),
           ),
-          const SizedBox(height: 24),
+          const SizedBox(height: AppSpacing.xl),
           SizedBox(
             width: double.infinity,
             child: FilledButton(
@@ -745,7 +770,7 @@ class _ConnectPage extends StatelessWidget {
               child: const Text('Scan QR code'),
             ),
           ),
-          const SizedBox(height: 10),
+          const SizedBox(height: AppSpacing.compact),
           Wrap(
             alignment: WrapAlignment.center,
             crossAxisAlignment: WrapCrossAlignment.center,
@@ -778,20 +803,32 @@ class _CommandLine extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      padding: const EdgeInsets.symmetric(
+        horizontal: AppSpacing.md,
+        vertical: AppSpacing.sm,
+      ),
       decoration: BoxDecoration(
         color: colors.codeBackground,
-        borderRadius: BorderRadius.circular(10),
+        borderRadius: AppShapes.iconWell,
         border: Border.all(color: colors.codeBorder),
       ),
       child: Row(
         children: [
-          Text('\$', style: monoStyle(color: colors.accent, fontSize: 12)),
-          const SizedBox(width: 8),
+          Text(
+            '\$',
+            style: monoStyle(
+              color: colors.accent,
+              fontSize: AppFontSizes.caption,
+            ),
+          ),
+          const SizedBox(width: AppSpacing.sm),
           Expanded(
             child: Text(
               text,
-              style: monoStyle(color: colors.codeForeground, fontSize: 12),
+              style: monoStyle(
+                color: colors.codeForeground,
+                fontSize: AppFontSizes.caption,
+              ),
             ),
           ),
         ],
@@ -837,19 +874,23 @@ class _PairingSuccessPage extends StatelessWidget {
               color: colors.successMuted,
               shape: BoxShape.circle,
             ),
-            child: Icon(Icons.check_rounded, size: 40, color: colors.success),
+            child: Icon(
+              Icons.check_rounded,
+              size: AppSizes.heroIcon,
+              color: colors.success,
+            ),
           ),
-          const SizedBox(height: 28),
+          const SizedBox(height: AppSpacing.xxl),
           Text(
             'Machine added',
             textAlign: TextAlign.center,
             style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-              fontWeight: FontWeight.w800,
+              fontWeight: AppWeights.strong,
               color: colors.textPrimary,
-              letterSpacing: -0.3,
+              letterSpacing: AppLetterSpacing.headline,
             ),
           ),
-          const SizedBox(height: 12),
+          const SizedBox(height: AppSpacing.md),
           Text(
             payload.label,
             textAlign: TextAlign.center,
@@ -857,13 +898,16 @@ class _PairingSuccessPage extends StatelessWidget {
               context,
             ).textTheme.titleMedium?.copyWith(fontWeight: AppWeights.title),
           ),
-          const SizedBox(height: 4),
+          const SizedBox(height: AppSpacing.xs),
           Text(
             payload.baseUrl,
             textAlign: TextAlign.center,
-            style: monoStyle(color: colors.textSecondary, fontSize: 12),
+            style: monoStyle(
+              color: colors.textSecondary,
+              fontSize: AppFontSizes.caption,
+            ),
           ),
-          const SizedBox(height: 10),
+          const SizedBox(height: AppSpacing.compact),
           Text(
             'Ready to open sessions on this machine.',
             textAlign: TextAlign.center,

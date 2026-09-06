@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:video_player/video_player.dart';
 
@@ -6,6 +8,8 @@ import '../models.dart';
 import '../theme/app_colors.dart';
 import '../theme/app_theme.dart';
 import '../widgets/mesh_widgets.dart';
+import '../theme/app_tokens.dart';
+import '../theme/app_status_styles.dart';
 
 class AudioViewerPane extends StatefulWidget {
   const AudioViewerPane({
@@ -76,6 +80,7 @@ class _AudioViewerPaneState extends State<AudioViewerPane> {
       _error = null;
     });
     await previous?.dispose();
+    if (!mounted || generation != _loadGeneration) return;
 
     final controller = VideoPlayerController.networkUrl(
       widget.api.fsBlobUri(
@@ -94,7 +99,7 @@ class _AudioViewerPaneState extends State<AudioViewerPane> {
       await controller.setLooping(false);
     } catch (error) {
       controller.removeListener(_handleControllerChanged);
-      await controller.dispose();
+      unawaited(controller.dispose());
       if (!mounted || generation != _loadGeneration) {
         return;
       }
@@ -171,12 +176,18 @@ class _AudioViewerPaneState extends State<AudioViewerPane> {
         (controller?.value.hasError == true
             ? controller?.value.errorDescription
             : null);
-    if (error != null && controller == null) {
-      return _AudioViewerErrorState(error: friendlyError(error));
+    if (error != null) {
+      return _AudioViewerErrorState(
+        error: friendlyError(error),
+        onRetry: _initialize,
+      );
     }
     if (controller == null || !controller.value.isInitialized) {
       if (error != null) {
-        return _AudioViewerErrorState(error: friendlyError(error));
+        return _AudioViewerErrorState(
+          error: friendlyError(error),
+          onRetry: _initialize,
+        );
       }
       return const _AudioViewerLoadingState();
     }
@@ -184,8 +195,18 @@ class _AudioViewerPaneState extends State<AudioViewerPane> {
     final value = controller.value;
     final colors = context.colors;
     final surfacePadding = widget.dense
-        ? const EdgeInsets.fromLTRB(12, 12, 12, 14)
-        : const EdgeInsets.fromLTRB(14, 14, 14, 16);
+        ? const EdgeInsets.fromLTRB(
+            AppSpacing.md,
+            AppSpacing.md,
+            AppSpacing.md,
+            AppSpacing.md,
+          )
+        : const EdgeInsets.fromLTRB(
+            AppSpacing.md,
+            AppSpacing.md,
+            AppSpacing.md,
+            AppSpacing.lg,
+          );
     final duration = value.duration;
     final durationMs = duration.inMilliseconds;
     final position = _clampPosition(
@@ -212,10 +233,15 @@ class _AudioViewerPaneState extends State<AudioViewerPane> {
             Container(
               decoration: BoxDecoration(
                 color: colors.surfaceMuted,
-                borderRadius: BorderRadius.circular(14),
+                borderRadius: BorderRadius.circular(AppRadii.panel),
                 border: Border.all(color: colors.border),
               ),
-              padding: const EdgeInsets.fromLTRB(18, 18, 18, 18),
+              padding: const EdgeInsets.fromLTRB(
+                AppSpacing.lg,
+                AppSpacing.lg,
+                AppSpacing.lg,
+                AppSpacing.lg,
+              ),
               child: Column(
                 children: [
                   Container(
@@ -228,18 +254,18 @@ class _AudioViewerPaneState extends State<AudioViewerPane> {
                     ),
                     child: Icon(
                       Icons.graphic_eq_rounded,
-                      size: 34,
+                      size: AppSizes.iconWell,
                       color: colors.accent,
                     ),
                   ),
-                  const SizedBox(height: 14),
+                  const SizedBox(height: AppSpacing.md),
                   Text(
                     'Audio preview',
                     style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                      fontWeight: FontWeight.w700,
+                      fontWeight: AppWeights.strong,
                     ),
                   ),
-                  const SizedBox(height: 6),
+                  const SizedBox(height: AppSpacing.tight),
                   Text(
                     'Streamed from ${widget.host.label}',
                     textAlign: TextAlign.center,
@@ -247,18 +273,18 @@ class _AudioViewerPaneState extends State<AudioViewerPane> {
                       color: colors.textSecondary,
                     ),
                   ),
-                  const SizedBox(height: 12),
+                  const SizedBox(height: AppSpacing.md),
                   MeshPill(label: mimeLabel, mono: true),
                 ],
               ),
             ),
-            const SizedBox(height: 14),
+            const SizedBox(height: AppSpacing.md),
             Row(
               children: [
                 IconButton(
                   tooltip: value.isPlaying ? 'Pause audio' : 'Play audio',
                   onPressed: _togglePlayback,
-                  iconSize: 30,
+                  iconSize: AppSizes.featureIcon,
                   icon: Icon(
                     value.isPlaying
                         ? Icons.pause_circle_filled_rounded
@@ -268,20 +294,12 @@ class _AudioViewerPaneState extends State<AudioViewerPane> {
                   ),
                 ),
                 Expanded(
-                  child: SliderTheme(
-                    data: SliderTheme.of(context).copyWith(
-                      activeTrackColor: colors.accent,
-                      inactiveTrackColor: colors.surfaceMuted,
-                      thumbColor: colors.accent,
-                      overlayColor: colors.accent.withValues(alpha: 0.14),
-                    ),
-                    child: Slider(
-                      value: sliderValue,
-                      min: 0,
-                      max: sliderMax,
-                      onChanged: durationMs > 0 ? _handleSeekChanged : null,
-                      onChangeEnd: durationMs > 0 ? _handleSeekCommitted : null,
-                    ),
+                  child: Slider(
+                    value: sliderValue,
+                    min: 0,
+                    max: sliderMax,
+                    onChanged: durationMs > 0 ? _handleSeekChanged : null,
+                    onChangeEnd: durationMs > 0 ? _handleSeekCommitted : null,
                   ),
                 ),
               ],
@@ -290,16 +308,22 @@ class _AudioViewerPaneState extends State<AudioViewerPane> {
               children: [
                 Text(
                   _formatDuration(position),
-                  style: monoStyle(color: colors.textSecondary, fontSize: 11.5),
+                  style: monoStyle(
+                    color: colors.textSecondary,
+                    fontSize: AppFontSizes.caption,
+                  ),
                 ),
                 const Spacer(),
                 Text(
                   _formatDuration(duration),
-                  style: monoStyle(color: colors.textSecondary, fontSize: 11.5),
+                  style: monoStyle(
+                    color: colors.textSecondary,
+                    fontSize: AppFontSizes.caption,
+                  ),
                 ),
               ],
             ),
-            const SizedBox(height: 10),
+            const SizedBox(height: AppSpacing.compact),
             Text(
               'Tap play to start, then drag the seek bar to scrub.',
               style: Theme.of(
@@ -315,33 +339,22 @@ class _AudioViewerPaneState extends State<AudioViewerPane> {
 
 class _AudioViewerLoadingState extends StatelessWidget {
   const _AudioViewerLoadingState();
-
   @override
-  Widget build(BuildContext context) {
-    return MeshSurface(
-      padding: EdgeInsets.zero,
-      tone: MeshSurfaceTone.surface,
-      child: const SizedBox(
-        height: 240,
-        child: Center(child: CircularProgressIndicator()),
-      ),
-    );
-  }
+  Widget build(BuildContext context) =>
+      const MeshLoader(label: 'Loading audio');
 }
 
 class _AudioViewerErrorState extends StatelessWidget {
-  const _AudioViewerErrorState({required this.error});
-
+  const _AudioViewerErrorState({required this.error, required this.onRetry});
   final String error;
-
+  final VoidCallback onRetry;
   @override
-  Widget build(BuildContext context) {
-    return MeshEmptyState(
-      icon: Icons.error_outline_rounded,
-      title: 'Could not load audio',
-      body: error,
-    );
-  }
+  Widget build(BuildContext context) => MeshEmptyState.compact(
+    icon: Icons.error_outline_rounded,
+    title: 'Could not load audio',
+    body: error,
+    action: TextButton(onPressed: onRetry, child: const Text('Retry')),
+  );
 }
 
 Duration _clampPosition(Duration position, Duration duration) {

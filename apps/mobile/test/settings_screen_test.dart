@@ -1,3 +1,4 @@
+import 'package:sidemesh_mobile/src/widgets/app_menu.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
@@ -62,7 +63,7 @@ void main() {
       expect(find.text('Settings'), findsOneWidget);
       expect(find.text('Appearance & device'), findsOneWidget);
       expect(find.text('Appearance'), findsOneWidget);
-      expect(find.text('Keep screen awake while agent runs'), findsOneWidget);
+      expect(find.text('Keep screen awake'), findsOneWidget);
       expect(find.text('Notifications'), findsOneWidget);
       expect(find.text('New session defaults'), findsOneWidget);
       expect(find.text('Local data'), findsOneWidget);
@@ -74,7 +75,7 @@ void main() {
     }
   });
 
-  testWidgets('opens desktop settings as an embedded dialog surface', (
+  testWidgets('desktop settings categories stay inside one dialog', (
     tester,
   ) async {
     debugDefaultTargetPlatformOverride = TargetPlatform.macOS;
@@ -120,21 +121,21 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(find.byType(Dialog), findsOneWidget);
-      expect(find.text('Settings'), findsOneWidget);
-      expect(find.text('Appearance & device'), findsOneWidget);
-      expect(find.text('Replay onboarding'), findsNothing);
-
-      await tester.scrollUntilVisible(
-        find.widgetWithText(TextButton, 'Edit'),
-        300,
-        scrollable: find.byType(Scrollable).first,
-      );
-      await tester.tap(find.widgetWithText(TextButton, 'Edit'));
+      expect(find.text('General'), findsOneWidget);
+      await tester.tap(find.widgetWithText(ListTile, 'Appearance'));
       await tester.pumpAndSettle();
-
-      expect(find.byType(DropdownButton<ApprovalPolicy>), findsOneWidget);
-      expect(find.byType(DropdownButton<SandboxMode>), findsOneWidget);
-      expect(find.text('Used when you start a new session.'), findsOneWidget);
+      expect(find.text('Color mode'), findsOneWidget);
+      expect(find.byType(Dialog), findsOneWidget);
+      expect(find.byType(BottomSheet), findsNothing);
+      await tester.tap(find.widgetWithText(ListTile, 'New sessions'));
+      await tester.pumpAndSettle();
+      expect(find.byType(AppSelect<ApprovalPolicy>), findsOneWidget);
+      expect(find.byType(Dialog), findsOneWidget);
+      expect(find.text('Color mode'), findsNothing);
+      await tester.tap(find.widgetWithText(ListTile, 'Local data'));
+      await tester.pumpAndSettle();
+      expect(find.text('Clear saved transcript cache'), findsOneWidget);
+      expect(find.byType(Dialog), findsOneWidget);
     } finally {
       debugDefaultTargetPlatformOverride = null;
       tester.view.resetPhysicalSize();
@@ -185,6 +186,9 @@ void main() {
       );
       await tester.pumpAndSettle();
 
+      await tester.tap(find.text('App updates'));
+      await tester.pumpAndSettle();
+
       expect(
         find.text('Could not load macOS update settings.'),
         findsOneWidget,
@@ -209,58 +213,58 @@ void main() {
     }
   });
 
-  testWidgets(
-    'opens appearance sheet on narrow mobile width without overflow',
-    (tester) async {
-      debugDefaultTargetPlatformOverride = TargetPlatform.android;
-      tester.view
-        ..devicePixelRatio = 1
-        ..physicalSize = const Size(390, 844);
-      try {
-        await CreateSessionDefaultsStore.instance.ensureLoaded();
-        final controller = await ThemeController.load();
-        final palette = ThemeVariant.codexAmber;
+  testWidgets('opens appearance page on narrow mobile width without overflow', (
+    tester,
+  ) async {
+    debugDefaultTargetPlatformOverride = TargetPlatform.android;
+    tester.view
+      ..devicePixelRatio = 1
+      ..physicalSize = const Size(390, 844);
+    try {
+      await CreateSessionDefaultsStore.instance.ensureLoaded();
+      final controller = await ThemeController.load();
+      final palette = ThemeVariant.codexAmber;
 
-        await tester.pumpWidget(
-          ThemeScope(
-            notifier: controller,
-            child: MaterialApp(
-              theme: buildLightTheme(
-                palette.light,
-                typography: controller.typography,
-              ),
-              darkTheme: buildDarkTheme(
-                palette.dark,
-                typography: controller.typography,
-              ),
-              home: Builder(
-                builder: (context) => Scaffold(
-                  body: Center(
-                    child: FilledButton(
-                      onPressed: () => showAppearanceSheet(context),
-                      child: const Text('Open appearance'),
-                    ),
+      await tester.pumpWidget(
+        ThemeScope(
+          notifier: controller,
+          child: MaterialApp(
+            theme: buildLightTheme(
+              palette.light,
+              typography: controller.typography,
+            ),
+            darkTheme: buildDarkTheme(
+              palette.dark,
+              typography: controller.typography,
+            ),
+            home: Builder(
+              builder: (context) => Scaffold(
+                body: Center(
+                  child: FilledButton(
+                    onPressed: () => showAppearanceSheet(context),
+                    child: const Text('Open appearance'),
                   ),
                 ),
               ),
             ),
           ),
-        );
+        ),
+      );
 
-        await tester.tap(find.text('Open appearance'));
-        await tester.pumpAndSettle();
+      await tester.tap(find.text('Open appearance'));
+      await tester.pumpAndSettle();
 
-        expect(find.text('Appearance'), findsOneWidget);
-        expect(find.text('Changes the app look only.'), findsOneWidget);
-        expect(find.text('Color mode'), findsOneWidget);
-        expect(tester.takeException(), isNull);
-      } finally {
-        debugDefaultTargetPlatformOverride = null;
-        tester.view.resetPhysicalSize();
-        tester.view.resetDevicePixelRatio();
-      }
-    },
-  );
+      expect(find.text('Appearance'), findsOneWidget);
+      expect(find.byType(AppBar), findsOneWidget);
+      expect(find.byType(BottomSheet), findsNothing);
+      expect(find.text('Color mode'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    } finally {
+      debugDefaultTargetPlatformOverride = null;
+      tester.view.resetPhysicalSize();
+      tester.view.resetDevicePixelRatio();
+    }
+  });
 
   testWidgets('opens compact session defaults and enables save after changes', (
     tester,
@@ -299,7 +303,7 @@ void main() {
       );
       await tester.pumpAndSettle();
 
-      await tester.tap(find.widgetWithText(TextButton, 'Edit'));
+      await tester.tap(find.text('New session defaults'));
       await tester.pumpAndSettle();
 
       expect(find.text('Fast mode'), findsOneWidget);

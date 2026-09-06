@@ -21,6 +21,8 @@ import 'src/models.dart';
 import 'src/screens/session_screen.dart';
 import 'src/theme/app_theme.dart';
 import 'src/theme/theme_controller.dart';
+import 'src/theme/app_tokens.dart';
+import 'src/theme/app_colors.dart';
 
 // ── Configure to match your local daemon ─────────────────────────────────────
 const _kBaseUrl = 'http://localhost:8899';
@@ -109,32 +111,24 @@ class _HarnessFrameState extends State<_HarnessFrame> {
   Widget build(BuildContext context) {
     final v = _views[_view];
     return Scaffold(
-      backgroundColor: Colors.black,
+      backgroundColor: context.colors.canvas,
       body: Column(
         children: [
           // View switcher
           Container(
-            color: Colors.black,
-            padding: const EdgeInsets.all(8),
+            color: context.colors.canvas,
+            padding: const EdgeInsets.all(AppSpacing.sm),
             child: Row(
               children: [
                 for (var i = 0; i < _views.length; i++)
                   Padding(
-                    padding: const EdgeInsets.only(right: 8),
-                    child: ElevatedButton(
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor:
-                            i == _view ? Colors.blue : Colors.grey[800],
-                        foregroundColor: Colors.white,
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 16,
-                          vertical: 8,
-                        ),
-                      ),
-                      onPressed: () => setState(() => _view = i),
-                      child: Text(
+                    padding: const EdgeInsets.only(right: AppSpacing.sm),
+                    child: ChoiceChip(
+                      selected: i == _view,
+                      onSelected: (_) => setState(() => _view = i),
+                      label: Text(
                         _views[i].label,
-                        style: const TextStyle(fontSize: 12),
+                        style: const TextStyle(fontSize: AppFontSizes.caption),
                       ),
                     ),
                   ),

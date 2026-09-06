@@ -5,6 +5,7 @@ import 'package:flutter/widgets.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 
 import 'models.dart';
+import 'theme/app_palettes.dart';
 
 class LocalNotificationService with WidgetsBindingObserver {
   LocalNotificationService._();
@@ -15,7 +16,7 @@ class LocalNotificationService with WidgetsBindingObserver {
   static const _approvalChannelName = 'Approvals';
   static const _approvalChannelDescription =
       'Agent approval requests from Sidemesh hosts';
-  static const _approvalAccent = Color(0xFFD69E2E);
+  static final _approvalAccent = ThemeVariant.nord.dark.warning;
 
   final FlutterLocalNotificationsPlugin _plugin =
       FlutterLocalNotificationsPlugin();
@@ -427,7 +428,9 @@ class NotificationRouteIntent {
           type == null) {
         return null;
       }
-      if (type == 'approval' || type == 'approval_required' || type == 'input_required') {
+      if (type == 'approval' ||
+          type == 'approval_required' ||
+          type == 'input_required') {
         if (actionId.isEmpty) return null;
         return NotificationRouteIntent.approval(
           hostId: hostId,

@@ -12,7 +12,6 @@ import '../session_local_store.dart';
 import '../session_overrides_store.dart';
 import '../session_read_store.dart';
 import '../theme/app_colors.dart';
-import '../theme/color_contrast.dart';
 import '../theme/app_theme.dart';
 import '../theme/app_tokens.dart';
 import '../widgets/app_dialogs.dart';
@@ -23,6 +22,7 @@ import '../widgets/app_primitives.dart';
 import '../widgets/session_row_card.dart';
 import 'create_session_sheet.dart';
 import 'terminal_screen.dart';
+import '../theme/app_status_styles.dart';
 
 String _hostEndpointLabel(String baseUrl) {
   final uri = Uri.tryParse(baseUrl.trim());
@@ -94,6 +94,7 @@ class _HostDetailScreenState extends State<HostDetailScreen>
   Timer? _refreshTimer;
   Future<void>? _updateInfoRefresh;
   bool _checkingUpdateInfo = false;
+  bool _showAllSessions = false;
   AppLifecycleState? _lifecycleState;
   static const Duration _refreshInterval = Duration(minutes: 1);
 
@@ -217,8 +218,7 @@ class _HostDetailScreenState extends State<HostDetailScreen>
     List<SessionSummary> favorites,
   ) {
     final byId = <String, SessionSummary>{
-      for (final s in recents.where((session) => !session.isSubAgent))
-        s.id: s,
+      for (final s in recents.where((session) => !session.isSubAgent)) s.id: s,
     };
     for (final fav in favorites.where((session) => !session.isSubAgent)) {
       byId.putIfAbsent(fav.id, () => fav);
@@ -229,8 +229,13 @@ class _HostDetailScreenState extends State<HostDetailScreen>
 
   Future<void> _refresh() async {
     setState(() => _future = _load());
-    await _future;
-    unawaited(_refreshUpdateInfo());
+    try {
+      await _future;
+    } catch (_) {
+      // The page shows the load error and Retry action.
+      return;
+    }
+    if (mounted) unawaited(_refreshUpdateInfo());
   }
 
   Future<void> _refreshUpdateInfo() {
@@ -386,14 +391,16 @@ class _HostDetailScreenState extends State<HostDetailScreen>
     return FutureBuilder<_HostOverview>(
       future: _future,
       builder: (context, snapshot) {
-        if (snapshot.connectionState != ConnectionState.done) {
-          return _HostDetailLoadingState(embedded: widget.embedded);
+        if (snapshot.connectionState != ConnectionState.done &&
+            !snapshot.hasData) {
+          return MeshLoader(label: 'Loading machine');
         }
-        if (snapshot.hasError) {
+        if (snapshot.hasError && !snapshot.hasData) {
           return MeshEmptyState(
             icon: Icons.wifi_off_rounded,
-            title: 'Could not reach host',
+            title: 'Could not reach machine',
             body: friendlyError(snapshot.error!),
+            action: TextButton(onPressed: _refresh, child: const Text('Retry')),
           );
         }
         final data = snapshot.data!;
@@ -409,90 +416,115 @@ class _HostDetailScreenState extends State<HostDetailScreen>
                 color: colors.accent,
                 onRefresh: _refresh,
                 child: ListView(
-                padding: EdgeInsets.fromLTRB(
-                  widget.embedded
-                      ? AppSizes.desktopGutter
-                      : AppSizes.mobileGutter,
-                  AppSpacing.sm,
-                  widget.embedded
-                      ? AppSizes.desktopGutter
-                      : AppSizes.mobileGutter,
-                  widget.embedded ? 32 : 120,
-                ),
-                children: [
-                  _NodeCard(host: widget.host, node: data.node),
-                  if (_shouldShowMobileCompatibility(data.node)) ...[
-                    const SizedBox(height: AppSpacing.sm),
-                    _MobileClientCompatibilityCard(
-                      node: data.node,
-                      appVersionInfo: _appVersionStore.info,
-                    ),
-                  ],
-                  const SizedBox(height: AppSpacing.sm),
-                  _ProviderContractSummaryCard(node: data.node),
-                  if (data.workspaces.length > 1) ...[
-                    const SizedBox(height: AppSpacing.lg),
-                    _SectionHeader(
-                      icon: Icons.folder_open_rounded,
-                      title: 'Start from folder',
-                      subtitle:
-                          '${data.workspaces.length} recent ${data.workspaces.length == 1 ? "folder" : "folders"}',
-                    ),
-                    const SizedBox(height: AppSpacing.sm),
-                    _WorkspaceLaunchRow(
-                      workspaces: data.workspaces,
-                      onTap: (workspace) =>
-                          _startSession(prefilledCwd: workspace.cwd),
-                    ),
-                  ],
-                  const SizedBox(height: AppSpacing.xl),
-                  _SectionHeader(
-                    icon: Icons.history_rounded,
-                    title: 'Recent sessions',
-                    subtitle:
-                        '${data.sessions.length} ${data.sessions.length == 1 ? "session" : "sessions"}',
+                  padding: EdgeInsets.fromLTRB(
+                    widget.embedded
+                        ? AppSizes.desktopGutter
+                        : AppSizes.mobileGutter,
+                    AppSpacing.sm,
+                    widget.embedded
+                        ? AppSizes.desktopGutter
+                        : AppSizes.mobileGutter,
+                    widget.embedded
+                        ? AppSpacing.xxl
+                        : AppSizes.floatingActionClearance,
                   ),
-                  const SizedBox(height: AppSpacing.sm),
-                  if (sortedSessions.isEmpty)
-                    const MeshEmptyState(
-                      icon: Icons.chat_bubble_outline_rounded,
-                      title: 'No sessions yet',
-                      body: 'Start a session on this machine to see it here.',
-                    )
-                  else
-                    ...sortedSessions.map(
-                      (session) => Padding(
-                        padding: const EdgeInsets.only(bottom: AppSpacing.sm),
-                        child: SessionRowCard(
-                          host: widget.host,
-                          session: session,
-                          favorite: _localStore.isFavorite(
-                            widget.host,
-                            session.id,
+                  children: [
+                    _NodeCard(host: widget.host, node: data.node),
+                    if (_shouldShowMobileCompatibility(data.node)) ...[
+                      const SizedBox(height: AppSpacing.sm),
+                      _MobileClientCompatibilityCard(
+                        node: data.node,
+                        appVersionInfo: _appVersionStore.info,
+                      ),
+                    ],
+                    const SizedBox(height: AppSpacing.sm),
+                    _ProviderContractSummaryCard(node: data.node),
+                    const SizedBox(height: AppSpacing.sm),
+                    if (data.workspaces.length > 1) ...[
+                      const SizedBox(height: AppSpacing.lg),
+                      _SectionHeader(
+                        icon: Icons.folder_open_rounded,
+                        title: 'Start from folder',
+                        subtitle:
+                            '${data.workspaces.length} recent ${data.workspaces.length == 1 ? "folder" : "folders"}',
+                      ),
+                      const SizedBox(height: AppSpacing.sm),
+                      _WorkspaceLaunchRow(
+                        workspaces: data.workspaces,
+                        onTap: (workspace) =>
+                            _startSession(prefilledCwd: workspace.cwd),
+                      ),
+                    ],
+                    const SizedBox(height: AppSpacing.xl),
+                    _SectionHeader(
+                      icon: Icons.history_rounded,
+                      title: 'Recent sessions',
+                      subtitle:
+                          '${data.sessions.length} ${data.sessions.length == 1 ? "session" : "sessions"}',
+                    ),
+                    const SizedBox(height: AppSpacing.sm),
+                    if (sortedSessions.isEmpty)
+                      const MeshEmptyState(
+                        icon: Icons.chat_bubble_outline_rounded,
+                        title: 'No sessions yet',
+                        body: 'Start a session on this machine to see it here.',
+                      )
+                    else
+                      ...(_showAllSessions
+                              ? sortedSessions
+                              : sortedSessions.take(6))
+                          .map(
+                            (session) => Padding(
+                              padding: const EdgeInsets.only(
+                                bottom: AppSpacing.sm,
+                              ),
+                              child: SessionRowCard(
+                                host: widget.host,
+                                session: session,
+                                favorite: _localStore.isFavorite(
+                                  widget.host,
+                                  session.id,
+                                ),
+                                showHost: false,
+                                onTap: () => widget.onOpenSession(session),
+                                onToggleFavorite: () {
+                                  _localStore.toggleFavorite(
+                                    widget.host,
+                                    session.id,
+                                  );
+                                },
+                              ),
+                            ),
                           ),
-                          showHost: false,
-                          onTap: () => widget.onOpenSession(session),
-                          onToggleFavorite: () {
-                            _localStore.toggleFavorite(widget.host, session.id);
-                          },
+                    if (sortedSessions.length > 6)
+                      TextButton(
+                        onPressed: () => setState(
+                          () => _showAllSessions = !_showAllSessions,
+                        ),
+                        child: Text(
+                          _showAllSessions
+                              ? 'Show recent only'
+                              : 'View all ${sortedSessions.length} sessions',
                         ),
                       ),
+                    const SizedBox(height: AppSpacing.lg),
+                    ExpansionTile(
+                      tilePadding: const EdgeInsets.symmetric(
+                        horizontal: AppSpacing.md,
+                      ),
+                      title: const Text('Machine tools'),
+                      subtitle: const Text('Terminal and maintenance'),
+                      children: [
+                        _HostManagementCard(
+                          host: widget.host,
+                          api: widget.api,
+                          node: data.node,
+                          checkingUpdateInfo: _checkingUpdateInfo,
+                          onRefresh: _refresh,
+                        ),
+                      ],
                     ),
-                  const SizedBox(height: AppSpacing.lg),
-                  _SectionHeader(
-                    icon: Icons.build_circle_outlined,
-                    title: 'Machine tools',
-                    subtitle: 'Terminal, updates, and restart controls',
-                  ),
-                  const SizedBox(height: AppSpacing.sm),
-                  _HostManagementCard(
-                    host: widget.host,
-                    api: widget.api,
-                    node: data.node,
-                    checkingUpdateInfo: _checkingUpdateInfo,
-                    onRefresh: _refresh,
-                  ),
-                ],
+                  ],
                 ),
               ),
             );
@@ -518,7 +550,12 @@ class _EmbeddedHostHeader extends StatelessWidget {
   Widget build(BuildContext context) {
     final colors = context.colors;
     return Container(
-      padding: const EdgeInsets.fromLTRB(20, 14, 14, 14),
+      padding: const EdgeInsets.fromLTRB(
+        AppSpacing.xl,
+        AppSpacing.md,
+        AppSpacing.md,
+        AppSpacing.md,
+      ),
       decoration: BoxDecoration(
         border: Border(bottom: BorderSide(color: colors.border)),
       ),
@@ -529,12 +566,16 @@ class _EmbeddedHostHeader extends StatelessWidget {
             height: 32,
             decoration: BoxDecoration(
               color: colors.accentMuted,
-              borderRadius: BorderRadius.circular(9),
+              borderRadius: AppShapes.iconWell,
             ),
             alignment: Alignment.center,
-            child: Icon(Icons.dns_rounded, size: 17, color: colors.accent),
+            child: Icon(
+              Icons.dns_rounded,
+              size: AppSizes.inlineIcon,
+              color: colors.accent,
+            ),
           ),
-          const SizedBox(width: 12),
+          const SizedBox(width: AppSpacing.md),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -548,175 +589,32 @@ class _EmbeddedHostHeader extends StatelessWidget {
                     fontWeight: AppWeights.emphasis,
                   ),
                 ),
-                const SizedBox(height: 2),
+                const SizedBox(height: AppSpacing.xxs),
                 Text(
                   _hostEndpointLabel(host.baseUrl),
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
-                  style: monoStyle(color: colors.textTertiary, fontSize: 11),
+                  style: monoStyle(
+                    color: colors.textTertiary,
+                    fontSize: AppFontSizes.metadata,
+                  ),
                 ),
               ],
             ),
           ),
           IconButton(
             tooltip: 'Refresh',
-            icon: const Icon(Icons.refresh_rounded, size: 18),
+            icon: const Icon(Icons.refresh_rounded, size: AppSizes.inlineIcon),
             onPressed: onRefresh,
           ),
-          const SizedBox(width: 4),
+          const SizedBox(width: AppSpacing.xs),
           FilledButton.icon(
             onPressed: onNewSession,
-            icon: const Icon(Icons.play_arrow_rounded, size: 16),
-            label: const Text('New session'),
-            style: FilledButton.styleFrom(
-              backgroundColor: colors.accent,
-              foregroundColor: readableActionForeground(colors, colors.accent),
-              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+            icon: const Icon(
+              Icons.play_arrow_rounded,
+              size: AppSizes.compactIcon,
             ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _HostDetailLoadingState extends StatelessWidget {
-  const _HostDetailLoadingState({required this.embedded});
-
-  final bool embedded;
-
-  @override
-  Widget build(BuildContext context) {
-    return ListView(
-      physics: const AlwaysScrollableScrollPhysics(),
-      padding: EdgeInsets.fromLTRB(16, 8, 16, embedded ? 32 : 120),
-      children: const [
-        MeshCard(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  MeshSkeleton(width: 34, height: 34, radius: 10),
-                  SizedBox(width: 12),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        FractionallySizedBox(
-                          widthFactor: 0.32,
-                          alignment: Alignment.centerLeft,
-                          child: MeshSkeleton(
-                            height: 16,
-                            radius: AppRadii.badge,
-                          ),
-                        ),
-                        SizedBox(height: 6),
-                        FractionallySizedBox(
-                          widthFactor: 0.44,
-                          alignment: Alignment.centerLeft,
-                          child: MeshSkeleton(
-                            height: 12,
-                            radius: AppRadii.badge,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-              SizedBox(height: 14),
-              Wrap(
-                spacing: 8,
-                runSpacing: 8,
-                children: [
-                  MeshSkeleton(width: 92, height: 20, radius: 999),
-                  MeshSkeleton(width: 74, height: 20, radius: 999),
-                  MeshSkeleton(width: 116, height: 20, radius: 999),
-                ],
-              ),
-            ],
-          ),
-        ),
-        SizedBox(height: AppSpacing.sm),
-        MeshCard(
-          tone: MeshCardTone.muted,
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              MeshSectionHeadingSkeleton(
-                titleWidthFactor: 0.24,
-                subtitleWidthFactor: 0.52,
-              ),
-              SizedBox(height: 14),
-              Row(
-                children: [
-                  Expanded(child: _HostSummaryCardSkeleton()),
-                  SizedBox(width: 12),
-                  Expanded(child: _HostSummaryCardSkeleton()),
-                ],
-              ),
-            ],
-          ),
-        ),
-        SizedBox(height: AppSpacing.lg),
-        MeshSectionHeadingSkeleton(
-          titleWidthFactor: 0.22,
-          subtitleWidthFactor: 0.38,
-        ),
-        SizedBox(height: AppSpacing.sm),
-        MeshListRowSkeleton(
-          titleWidthFactor: 0.42,
-          subtitleWidthFactor: 0.62,
-          showTrailing: false,
-        ),
-        SizedBox(height: AppSpacing.sm),
-        MeshListRowSkeleton(
-          titleWidthFactor: 0.5,
-          subtitleWidthFactor: 0.72,
-          showMeta: true,
-          badgeCount: 1,
-        ),
-        SizedBox(height: AppSpacing.sm),
-        MeshListRowSkeleton(
-          titleWidthFactor: 0.46,
-          subtitleWidthFactor: 0.68,
-          showMeta: true,
-        ),
-      ],
-    );
-  }
-}
-
-class _HostSummaryCardSkeleton extends StatelessWidget {
-  const _HostSummaryCardSkeleton();
-
-  @override
-  Widget build(BuildContext context) {
-    return MeshSurface(
-      tone: MeshSurfaceTone.surface,
-      radius: AppRadii.control,
-      padding: const EdgeInsets.all(12),
-      child: const Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          FractionallySizedBox(
-            widthFactor: 0.34,
-            alignment: Alignment.centerLeft,
-            child: MeshSkeleton(height: 10, radius: AppRadii.badge),
-          ),
-          SizedBox(height: 10),
-          FractionallySizedBox(
-            widthFactor: 0.58,
-            alignment: Alignment.centerLeft,
-            child: MeshSkeleton(height: 18, radius: AppRadii.badge),
-          ),
-          SizedBox(height: 8),
-          FractionallySizedBox(
-            widthFactor: 0.44,
-            alignment: Alignment.centerLeft,
-            child: MeshSkeleton(height: 12, radius: AppRadii.badge),
+            label: const Text('New session'),
           ),
         ],
       ),
@@ -733,95 +631,24 @@ class _NodeCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colors = context.colors;
-    return MeshCard(
-      tone: MeshCardTone.surface,
-      bordered: false,
-      padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Container(
-                width: 34,
-                height: 34,
-                decoration: BoxDecoration(
-                  color: colors.accentMuted,
-                  borderRadius: BorderRadius.circular(10),
-                  border: Border.all(
-                    color: colors.accent.withValues(alpha: 0.3),
-                  ),
-                ),
-                alignment: Alignment.center,
-                child: Icon(Icons.dns_rounded, color: colors.accent, size: 18),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      node.label.isNotEmpty ? node.label : host.label,
-                      style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                        fontWeight: AppWeights.title,
-                      ),
-                    ),
-                    const SizedBox(height: 2),
-                    Text(
-                      host.baseUrl,
-                      style: monoStyle(
-                        color: colors.textTertiary,
-                        fontSize: 11,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: AppSpacing.sm),
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            children: [
-              MeshPill(
-                label: node.hostname,
-                icon: Icons.memory_rounded,
-                tone: MeshPillTone.neutral,
-                mono: true,
-              ),
-              MeshPill(
-                label: node.platform,
-                icon: Icons.devices_other_rounded,
-                tone: MeshPillTone.neutral,
-                mono: true,
-              ),
-              MeshPill(
-                label: node.providerPillLabel,
-                icon: Icons.auto_awesome_rounded,
-                tone: MeshPillTone.accent,
-                mono: true,
-              ),
-              if (node.providerConfig.command != null)
-                MeshPill(
-                  label: node.providerConfig.command!,
-                  icon: Icons.terminal_rounded,
-                  tone: MeshPillTone.neutral,
-                  mono: true,
-                ),
-              if (node.updateAvailable)
-                MeshPill(
-                  label: node.usesBleedingEdgeTrack
-                      ? 'Verified Early access update'
-                      : 'Update: ${node.latestInstallLabel} available',
-                  icon: Icons.system_update_alt_rounded,
-                  tone: MeshPillTone.warning,
-                  mono: true,
-                ),
-            ],
-          ),
-        ],
+    return ExpansionTile(
+      tilePadding: const EdgeInsets.symmetric(horizontal: AppSpacing.md),
+      title: Text(
+        '${node.platform} · ${node.providerDisplayName}',
+        style: Theme.of(context).textTheme.bodyMedium,
       ),
+      subtitle: node.updateAvailable ? const Text('Update available') : null,
+      children: [
+        Padding(
+          padding: const EdgeInsets.all(AppSpacing.md),
+          child: SelectableText(
+            '${host.baseUrl}\n${node.hostname}\n${node.providerPillLabel}',
+            style: Theme.of(
+              context,
+            ).textTheme.bodySmall?.copyWith(color: colors.textSecondary),
+          ),
+        ),
+      ],
     );
   }
 }
@@ -875,8 +702,13 @@ class _MobileClientCompatibilityCard extends StatelessWidget {
 
     return MeshCard(
       tone: MeshCardTone.muted,
-      borderColor: accent.withValues(alpha: 0.5),
-      padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+      borderColor: accent.withValues(alpha: AppEmphasis.disabled),
+      padding: const EdgeInsets.fromLTRB(
+        AppSpacing.md,
+        AppSpacing.md,
+        AppSpacing.md,
+        AppSpacing.md,
+      ),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -885,13 +717,19 @@ class _MobileClientCompatibilityCard extends StatelessWidget {
             height: 34,
             decoration: BoxDecoration(
               color: accentMuted,
-              borderRadius: BorderRadius.circular(10),
-              border: Border.all(color: accent.withValues(alpha: 0.3)),
+              borderRadius: AppShapes.iconWell,
+              border: Border.all(
+                color: accent.withValues(alpha: AppEmphasis.borderTint),
+              ),
             ),
             alignment: Alignment.center,
-            child: Icon(Icons.phone_android_rounded, color: accent, size: 18),
+            child: Icon(
+              Icons.phone_android_rounded,
+              color: accent,
+              size: AppSizes.inlineIcon,
+            ),
           ),
-          const SizedBox(width: 12),
+          const SizedBox(width: AppSpacing.md),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -902,15 +740,15 @@ class _MobileClientCompatibilityCard extends StatelessWidget {
                     fontWeight: AppWeights.title,
                   ),
                 ),
-                const SizedBox(height: 4),
+                const SizedBox(height: AppSpacing.xs),
                 Text(
                   guidance,
                   style: Theme.of(context).textTheme.bodySmall?.copyWith(
                     color: colors.textSecondary,
-                    height: 1.3,
+                    height: AppLineHeights.label,
                   ),
                 ),
-                const SizedBox(height: 8),
+                const SizedBox(height: AppSpacing.sm),
                 Wrap(
                   spacing: 8,
                   runSpacing: 8,
@@ -943,7 +781,7 @@ class _MobileClientCompatibilityCard extends StatelessWidget {
                       ),
                   ],
                 ),
-                const SizedBox(height: 8),
+                const SizedBox(height: AppSpacing.sm),
                 Text(
                   currentVersion,
                   style: Theme.of(
@@ -972,7 +810,12 @@ class HostProviderContractScreen extends StatelessWidget {
       backgroundColor: colors.canvas,
       appBar: AppBar(title: Text('Agents on this machine')),
       body: ListView(
-        padding: const EdgeInsets.fromLTRB(16, 8, 16, 32),
+        padding: const EdgeInsets.fromLTRB(
+          AppSpacing.lg,
+          AppSpacing.sm,
+          AppSpacing.lg,
+          AppSpacing.xxl,
+        ),
         children: [_ProviderContractDetailPanel(node: node, title: title)],
       ),
     );
@@ -1085,7 +928,12 @@ class _ProviderContractOverviewCard extends StatelessWidget {
     final isViewingActiveProvider = selectedProviderKind == node.provider;
     return MeshCard(
       tone: MeshCardTone.surface,
-      padding: const EdgeInsets.fromLTRB(14, 14, 14, 14),
+      padding: const EdgeInsets.fromLTRB(
+        AppSpacing.md,
+        AppSpacing.md,
+        AppSpacing.md,
+        AppSpacing.md,
+      ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -1096,15 +944,21 @@ class _ProviderContractOverviewCard extends StatelessWidget {
                 height: 38,
                 decoration: BoxDecoration(
                   color: colors.infoMuted,
-                  borderRadius: BorderRadius.circular(11),
+                  borderRadius: AppShapes.iconWell,
                   border: Border.all(
-                    color: colors.info.withValues(alpha: 0.32),
+                    color: colors.info.withValues(
+                      alpha: AppEmphasis.borderTint,
+                    ),
                   ),
                 ),
                 alignment: Alignment.center,
-                child: Icon(Icons.hub_rounded, color: colors.info, size: 19),
+                child: Icon(
+                  Icons.hub_rounded,
+                  color: colors.info,
+                  size: AppSizes.icon,
+                ),
               ),
-              const SizedBox(width: 12),
+              const SizedBox(width: AppSpacing.md),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -1117,14 +971,14 @@ class _ProviderContractOverviewCard extends StatelessWidget {
                         fontWeight: AppWeights.title,
                       ),
                     ),
-                    const SizedBox(height: 2),
+                    const SizedBox(height: AppSpacing.xxs),
                     Text(
                       '$selectedDisplayName · $selectedVersion',
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: Theme.of(context).textTheme.bodySmall?.copyWith(
                         color: colors.textTertiary,
-                        height: 1.3,
+                        height: AppLineHeights.label,
                       ),
                     ),
                   ],
@@ -1132,7 +986,7 @@ class _ProviderContractOverviewCard extends StatelessWidget {
               ),
             ],
           ),
-          const SizedBox(height: 12),
+          const SizedBox(height: AppSpacing.md),
           Wrap(
             spacing: 8,
             runSpacing: 8,
@@ -1195,7 +1049,7 @@ class _ProviderDefinitionSection extends StatelessWidget {
           title: 'Available agents',
           detail: '${providers.length} available',
         ),
-        const SizedBox(height: 8),
+        const SizedBox(height: AppSpacing.sm),
         MeshSurface(
           padding: EdgeInsets.zero,
           child: Column(
@@ -1246,10 +1100,10 @@ class _ProviderDefinitionRow extends StatelessWidget {
         height: 30,
         decoration: BoxDecoration(
           color: iconBackground,
-          borderRadius: BorderRadius.circular(9),
+          borderRadius: AppShapes.iconWell,
           border: Border.all(
             color: selected
-                ? colors.accent.withValues(alpha: 0.36)
+                ? colors.accent.withValues(alpha: AppEmphasis.muted)
                 : colors.border,
           ),
         ),
@@ -1258,7 +1112,7 @@ class _ProviderDefinitionRow extends StatelessWidget {
           selected
               ? Icons.radio_button_checked_rounded
               : Icons.radio_button_unchecked_rounded,
-          size: 17,
+          size: AppSizes.inlineIcon,
           color: iconTone,
         ),
       ),
@@ -1277,7 +1131,7 @@ class _ProviderDefinitionRow extends StatelessWidget {
             ),
           ),
           if (active) ...[
-            const SizedBox(width: 7),
+            const SizedBox(width: AppSpacing.sm),
             _TinyStatusPill(label: 'In use', tone: MeshPillTone.success),
           ],
         ],
@@ -1296,7 +1150,11 @@ class _ProviderDefinitionRow extends StatelessWidget {
         ).textTheme.bodySmall?.copyWith(color: colors.textTertiary),
       ),
       trailing: selected
-          ? Icon(Icons.check_rounded, color: colors.accent, size: 18)
+          ? Icon(
+              Icons.check_rounded,
+              color: colors.accent,
+              size: AppSizes.inlineIcon,
+            )
           : null,
     );
   }
@@ -1334,7 +1192,7 @@ class _CapabilitySummaryMatrix extends StatelessWidget {
           title: title,
           detail: total == 0 ? null : '$enabled/$total ready',
         ),
-        const SizedBox(height: 8),
+        const SizedBox(height: AppSpacing.sm),
         if (groups.isEmpty)
           Text(
             emptyText,
@@ -1347,7 +1205,7 @@ class _CapabilitySummaryMatrix extends StatelessWidget {
             children: groups
                 .map(
                   (group) => Padding(
-                    padding: const EdgeInsets.only(bottom: 8),
+                    padding: const EdgeInsets.only(bottom: AppSpacing.sm),
                     child: _CapabilitySummaryGroup(group: group),
                   ),
                 )
@@ -1368,7 +1226,12 @@ class _CapabilitySummaryGroup extends StatelessWidget {
     final colors = context.colors;
     final allEnabled = group.enabledCount == group.totalCount;
     return MeshSurface(
-      padding: const EdgeInsets.fromLTRB(12, 11, 12, 12),
+      padding: const EdgeInsets.fromLTRB(
+        AppSpacing.md,
+        AppSpacing.md,
+        AppSpacing.md,
+        AppSpacing.md,
+      ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -1379,12 +1242,16 @@ class _CapabilitySummaryGroup extends StatelessWidget {
                 height: 28,
                 decoration: BoxDecoration(
                   color: colors.infoMuted,
-                  borderRadius: BorderRadius.circular(8),
+                  borderRadius: AppShapes.iconWell,
                 ),
                 alignment: Alignment.center,
-                child: Icon(group.icon, size: 15, color: colors.info),
+                child: Icon(
+                  group.icon,
+                  size: AppSizes.compactIcon,
+                  color: colors.info,
+                ),
               ),
-              const SizedBox(width: 10),
+              const SizedBox(width: AppSpacing.compact),
               Expanded(
                 child: Text(
                   group.title,
@@ -1399,7 +1266,7 @@ class _CapabilitySummaryGroup extends StatelessWidget {
               ),
             ],
           ),
-          const SizedBox(height: 10),
+          const SizedBox(height: AppSpacing.compact),
           Wrap(
             spacing: 7,
             runSpacing: 7,
@@ -1447,8 +1314,8 @@ class _ContractSectionLabel extends StatelessWidget {
     final colors = context.colors;
     return Row(
       children: [
-        Icon(icon, size: 16, color: colors.accent),
-        const SizedBox(width: 8),
+        Icon(icon, size: AppSizes.compactIcon, color: colors.accent),
+        const SizedBox(width: AppSpacing.sm),
         Expanded(
           child: Text(
             title,
@@ -1481,10 +1348,13 @@ class _TinyStatusPill extends StatelessWidget {
     final colors = context.colors;
     final toneColors = meshPillColors(colors, tone);
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+      padding: const EdgeInsets.symmetric(
+        horizontal: AppSpacing.sm,
+        vertical: AppSpacing.xs,
+      ),
       decoration: BoxDecoration(
         color: toneColors.background,
-        borderRadius: BorderRadius.circular(7),
+        borderRadius: AppShapes.badge,
         border: Border.all(color: toneColors.border),
       ),
       child: Text(
@@ -1572,7 +1442,12 @@ class _ProviderContractSummaryCard extends StatelessWidget {
             );
           },
           child: Padding(
-            padding: const EdgeInsets.fromLTRB(14, 12, 12, 12),
+            padding: const EdgeInsets.fromLTRB(
+              AppSpacing.md,
+              AppSpacing.md,
+              AppSpacing.md,
+              AppSpacing.md,
+            ),
             child: Row(
               children: [
                 Container(
@@ -1580,15 +1455,21 @@ class _ProviderContractSummaryCard extends StatelessWidget {
                   height: 34,
                   decoration: BoxDecoration(
                     color: colors.infoMuted,
-                    borderRadius: BorderRadius.circular(10),
+                    borderRadius: AppShapes.iconWell,
                     border: Border.all(
-                      color: colors.info.withValues(alpha: 0.3),
+                      color: colors.info.withValues(
+                        alpha: AppEmphasis.borderTint,
+                      ),
                     ),
                   ),
                   alignment: Alignment.center,
-                  child: Icon(Icons.hub_rounded, color: colors.info, size: 18),
+                  child: Icon(
+                    Icons.hub_rounded,
+                    color: colors.info,
+                    size: AppSizes.inlineIcon,
+                  ),
                 ),
-                const SizedBox(width: 12),
+                const SizedBox(width: AppSpacing.md),
                 Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
@@ -1599,24 +1480,24 @@ class _ProviderContractSummaryCard extends StatelessWidget {
                           fontWeight: AppWeights.title,
                         ),
                       ),
-                      const SizedBox(height: 3),
+                      const SizedBox(height: AppSpacing.xs),
                       Text(
                         '${node.providerDisplayName} in use, $providerCountLabel',
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: Theme.of(context).textTheme.bodySmall?.copyWith(
                           color: colors.textSecondary,
-                          height: 1.3,
+                          height: AppLineHeights.label,
                         ),
                       ),
                     ],
                   ),
                 ),
-                const SizedBox(width: 8),
+                const SizedBox(width: AppSpacing.sm),
                 Icon(
                   Icons.chevron_right_rounded,
                   color: colors.textTertiary,
-                  size: 22,
+                  size: AppSizes.largeIcon,
                 ),
               ],
             ),
@@ -1640,11 +1521,7 @@ class _SectionHeader extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return AppSectionHeader(
-      icon: icon,
-      title: title,
-      subtitle: subtitle,
-    );
+    return AppSectionHeader(icon: icon, title: title, subtitle: subtitle);
   }
 }
 
@@ -1786,7 +1663,7 @@ class _WorkspaceLaunchRow extends StatelessWidget {
       height: 36,
       child: ListView.separated(
         scrollDirection: Axis.horizontal,
-        padding: const EdgeInsets.symmetric(horizontal: 2),
+        padding: const EdgeInsets.symmetric(horizontal: AppSpacing.xxs),
         itemCount: workspaces.length,
         separatorBuilder: (_, _) => const SizedBox(width: AppSpacing.sm),
         itemBuilder: (context, i) {
@@ -1795,7 +1672,10 @@ class _WorkspaceLaunchRow extends StatelessWidget {
             borderRadius: AppShapes.pill,
             onTap: () => onTap(ws),
             child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+              padding: const EdgeInsets.symmetric(
+                horizontal: AppSpacing.md,
+                vertical: AppSpacing.tight,
+              ),
               decoration: BoxDecoration(
                 color: colors.surfaceMuted,
                 borderRadius: AppShapes.pill,
@@ -1804,33 +1684,37 @@ class _WorkspaceLaunchRow extends StatelessWidget {
               child: Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  Icon(Icons.folder_rounded, size: 14, color: colors.accent),
-                  const SizedBox(width: 6),
+                  Icon(
+                    Icons.folder_rounded,
+                    size: AppSizes.smallIcon,
+                    color: colors.accent,
+                  ),
+                  const SizedBox(width: AppSpacing.tight),
                   Text(
                     ws.label,
                     style: monoStyle(
                       color: colors.textPrimary,
-                      fontSize: 12,
+                      fontSize: AppFontSizes.caption,
                       fontWeight: AppWeights.emphasis,
                     ),
                   ),
                   if (ws.sessionCount > 1) ...[
-                    const SizedBox(width: 6),
+                    const SizedBox(width: AppSpacing.tight),
                     Container(
                       padding: const EdgeInsets.symmetric(
-                        horizontal: 5,
-                        vertical: 1,
+                        horizontal: AppSpacing.xs,
+                        vertical: AppSpacing.hairline,
                       ),
                       decoration: BoxDecoration(
                         color: colors.surfaceElevated,
-                        borderRadius: BorderRadius.circular(6),
+                        borderRadius: AppShapes.badge,
                         border: Border.all(color: colors.border),
                       ),
                       child: Text(
                         '${ws.sessionCount}',
                         style: monoStyle(
                           color: colors.textTertiary,
-                          fontSize: 10,
+                          fontSize: AppFontSizes.micro,
                           fontWeight: AppWeights.emphasis,
                         ),
                       ),
@@ -2186,10 +2070,10 @@ class _HostManagementCardState extends State<_HostManagementCard> {
                 'Open terminals and browser tabs disconnect while the update starts.',
                 style: Theme.of(dialogContext).textTheme.bodySmall?.copyWith(
                   color: dialogContext.colors.textSecondary,
-                  height: 1.4,
+                  height: AppLineHeights.body,
                 ),
               ),
-              const SizedBox(height: 14),
+              const SizedBox(height: AppSpacing.md),
               StatefulBuilder(
                 builder: (context, setLocalState) {
                   return MeshListRow(
@@ -2676,16 +2560,23 @@ class _UpdateProgressBanner extends StatelessWidget {
     bool showDismiss = false,
   }) {
     return Padding(
-      padding: const EdgeInsets.fromLTRB(14, 12, 8, 12),
+      padding: const EdgeInsets.fromLTRB(
+        AppSpacing.md,
+        AppSpacing.md,
+        AppSpacing.sm,
+        AppSpacing.md,
+      ),
       child: Row(
         children: [
           Container(
             width: 30,
             height: 30,
             decoration: BoxDecoration(
-              color: iconColor.withValues(alpha: 0.12),
-              borderRadius: BorderRadius.circular(9),
-              border: Border.all(color: iconColor.withValues(alpha: 0.35)),
+              color: iconColor.withValues(alpha: AppEmphasis.tint),
+              borderRadius: AppShapes.iconWell,
+              border: Border.all(
+                color: iconColor.withValues(alpha: AppEmphasis.muted),
+              ),
             ),
             alignment: Alignment.center,
             child: showSpinner
@@ -2693,13 +2584,13 @@ class _UpdateProgressBanner extends StatelessWidget {
                     width: 14,
                     height: 14,
                     child: CircularProgressIndicator(
-                      strokeWidth: 1.5,
+                      strokeWidth: AppStrokes.focus,
                       color: iconColor,
                     ),
                   )
-                : Icon(icon, size: 16, color: iconColor),
+                : Icon(icon, size: AppSizes.compactIcon, color: iconColor),
           ),
-          const SizedBox(width: 12),
+          const SizedBox(width: AppSpacing.md),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -2711,7 +2602,7 @@ class _UpdateProgressBanner extends StatelessWidget {
                   ),
                 ),
                 if (subtitle != null) ...[
-                  const SizedBox(height: 2),
+                  const SizedBox(height: AppSpacing.xxs),
                   Text(
                     subtitle,
                     style: Theme.of(context).textTheme.bodySmall?.copyWith(
@@ -2763,7 +2654,7 @@ class _ManagementRow extends StatelessWidget {
         height: 30,
         decoration: BoxDecoration(
           color: colors.surfaceMuted,
-          borderRadius: BorderRadius.circular(9),
+          borderRadius: AppShapes.iconWell,
           border: Border.all(color: colors.border),
         ),
         alignment: Alignment.center,
@@ -2772,11 +2663,15 @@ class _ManagementRow extends StatelessWidget {
                 width: 14,
                 height: 14,
                 child: CircularProgressIndicator(
-                  strokeWidth: 1.5,
+                  strokeWidth: AppStrokes.focus,
                   color: colors.textSecondary,
                 ),
               )
-            : Icon(icon, size: 16, color: colors.textSecondary),
+            : Icon(
+                icon,
+                size: AppSizes.compactIcon,
+                color: colors.textSecondary,
+              ),
       ),
       title: Text(
         label,

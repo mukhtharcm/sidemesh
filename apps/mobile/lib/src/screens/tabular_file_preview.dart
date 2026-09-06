@@ -241,23 +241,16 @@ class TabularFilePreview extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Wrap(
-          spacing: AppSpacing.sm,
-          runSpacing: AppSpacing.sm,
-          children: [
-            MeshPill(
-              label: preview.format.label,
-              tone: MeshPillTone.accent,
-              icon: Icons.table_chart_rounded,
-            ),
-            MeshPill(label: _countLabel(preview.rowCount, 'row'), mono: true),
-            MeshPill(
-              label: _countLabel(preview.columnCount, 'column'),
-              mono: true,
-            ),
-            if (preview.hasUnevenRows)
-              const MeshPill(label: 'Uneven rows', tone: MeshPillTone.warning),
-          ],
+        Text(
+          [
+            preview.format.label,
+            _countLabel(preview.rowCount, 'row'),
+            _countLabel(preview.columnCount, 'column'),
+            if (preview.hasUnevenRows) 'Uneven rows',
+          ].join(' · '),
+          style: Theme.of(
+            context,
+          ).textTheme.bodySmall?.copyWith(color: colors.textSecondary),
         ),
         if (preview.notices.isNotEmpty) ...[
           const SizedBox(height: AppSpacing.md),
@@ -265,14 +258,14 @@ class TabularFilePreview extends StatelessWidget {
             tone: MeshCardTone.muted,
             padding: const EdgeInsets.symmetric(
               horizontal: AppSpacing.md,
-              vertical: 10,
+              vertical: AppSpacing.compact,
             ),
             child: Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Icon(
                   Icons.info_outline_rounded,
-                  size: 16,
+                  size: AppSizes.compactIcon,
                   color: colors.textSecondary,
                 ),
                 const SizedBox(width: AppSpacing.sm),
@@ -342,10 +335,14 @@ class _TabularGrid extends StatelessWidget {
                   child: Table(
                     border: TableBorder(
                       horizontalInside: BorderSide(
-                        color: colors.border.withValues(alpha: 0.72),
+                        color: colors.border.withValues(
+                          alpha: AppEmphasis.secondary,
+                        ),
                       ),
                       verticalInside: BorderSide(
-                        color: colors.border.withValues(alpha: 0.72),
+                        color: colors.border.withValues(
+                          alpha: AppEmphasis.secondary,
+                        ),
                       ),
                     ),
                     columnWidths: columnWidths,
@@ -372,7 +369,9 @@ class _TabularGrid extends StatelessWidget {
                           decoration: BoxDecoration(
                             color: rowIndex.isEven
                                 ? colors.surface
-                                : colors.surfaceMuted.withValues(alpha: 0.48),
+                                : colors.surfaceMuted.withValues(
+                                    alpha: AppEmphasis.disabled,
+                                  ),
                           ),
                           children: [
                             _TableIndexCell(index: rowIndex + 1),
@@ -413,7 +412,12 @@ class _TableHeaderCell extends StatelessWidget {
   Widget build(BuildContext context) {
     final colors = context.colors;
     return Padding(
-      padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
+      padding: const EdgeInsets.fromLTRB(
+        AppSpacing.md,
+        AppSpacing.compact,
+        AppSpacing.md,
+        AppSpacing.compact,
+      ),
       child: Align(
         alignment: alignEnd ? Alignment.centerRight : Alignment.centerLeft,
         child: Text(
@@ -422,7 +426,7 @@ class _TableHeaderCell extends StatelessWidget {
           overflow: TextOverflow.ellipsis,
           style: monoStyle(
             color: colors.textSecondary,
-            fontSize: 12,
+            fontSize: AppFontSizes.caption,
             fontWeight: AppWeights.title,
           ),
         ),
@@ -440,12 +444,20 @@ class _TableIndexCell extends StatelessWidget {
   Widget build(BuildContext context) {
     final colors = context.colors;
     return Padding(
-      padding: const EdgeInsets.fromLTRB(12, 10, 10, 10),
+      padding: const EdgeInsets.fromLTRB(
+        AppSpacing.md,
+        AppSpacing.compact,
+        AppSpacing.compact,
+        AppSpacing.compact,
+      ),
       child: Align(
         alignment: Alignment.centerRight,
         child: Text(
           '$index',
-          style: monoStyle(color: colors.textTertiary, fontSize: 12),
+          style: monoStyle(
+            color: colors.textTertiary,
+            fontSize: AppFontSizes.caption,
+          ),
         ),
       ),
     );
@@ -472,13 +484,18 @@ class _TableValueCell extends StatelessWidget {
       overflow: TextOverflow.ellipsis,
       style: monoStyle(
         color: colors.textPrimary,
-        fontSize: 12.5,
+        fontSize: AppFontSizes.code,
         fontWeight: AppWeights.body,
       ),
     );
 
     return Container(
-      padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
+      padding: const EdgeInsets.fromLTRB(
+        AppSpacing.md,
+        AppSpacing.compact,
+        AppSpacing.md,
+        AppSpacing.compact,
+      ),
       child: wasClipped ? Tooltip(message: compacted, child: child) : child,
     );
   }

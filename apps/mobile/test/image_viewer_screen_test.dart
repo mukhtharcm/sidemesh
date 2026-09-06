@@ -27,6 +27,37 @@ void main() {
     );
   }
 
+  for (final dark in [false, true]) {
+    testWidgets('image loader recovers through Retry: $dark', (tester) async {
+      var calls = 0;
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: dark
+              ? buildDarkTheme(ThemeVariant.nord.dark)
+              : buildLightTheme(ThemeVariant.nord.light),
+          home: ImageViewerScreen(
+            sources: [
+              ImageViewerSource.loader(
+                title: 'Test image',
+                imageProviderLoader: () async {
+                  if (++calls == 1) throw StateError('Image unavailable');
+                  return const _TestImageProvider();
+                },
+              ),
+            ],
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(find.text('Could not load image'), findsOneWidget);
+      await tester.tap(find.text('Retry'));
+      await tester.pumpAndSettle();
+      expect(calls, 2);
+      expect(find.text('Could not load image'), findsNothing);
+      expect(tester.takeException(), isNull);
+    });
+  }
+
   testWidgets('image viewer zoom controls update the scale label', (
     tester,
   ) async {

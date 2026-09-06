@@ -3,6 +3,7 @@ import 'dart:convert';
 
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:sidemesh_mobile/src/api_client.dart';
@@ -26,6 +27,8 @@ import 'package:sidemesh_mobile/src/session_turn_config_store.dart';
 import 'package:sidemesh_mobile/src/theme/app_palettes.dart';
 import 'package:sidemesh_mobile/src/theme/app_theme.dart';
 import 'package:sidemesh_mobile/src/widgets/app_composer.dart';
+import 'package:sidemesh_mobile/src/widgets/mobile_model_picker.dart';
+import 'package:sidemesh_mobile/src/widgets/app_menu.dart';
 import 'package:stream_channel/stream_channel.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
 
@@ -43,6 +46,52 @@ void main() {
     SharedPreferences.setMockInitialValues(<String, Object>{});
     CreateSessionDefaultsStore.instance.resetForTest();
   });
+
+  for (final mode in [ThemeMode.light, ThemeMode.dark]) {
+    testWidgets('mobile effort stays visible with many models in $mode', (
+      tester,
+    ) async {
+      await _pumpApp(
+        tester,
+        MobileModelPicker(
+          models: List.filled(30, _fakeModel),
+          currentModel: _fakeModel.model,
+          onModelSelected: (_) {},
+          onReasoningSelected: (_) async {},
+        ),
+        size: const Size(390, 840),
+        themeMode: mode,
+      );
+      await tester.pumpAndSettle();
+      final effort = find.text('Effort');
+      expect(effort.hitTestable(), findsOneWidget);
+      expect(
+        tester.getTopLeft(effort).dy,
+        lessThan(tester.getTopLeft(find.text(_fakeModel.displayName).first).dy),
+      );
+      await tester.drag(find.byType(ListView), const Offset(0, -450));
+      await tester.pumpAndSettle();
+      expect(effort.hitTestable(), findsOneWidget);
+      expect(find.byType(TextField), findsNothing);
+      final description = tester.widget<Text>(
+        find.text(_fakeModel.description).first,
+      );
+      expect(
+        description.style?.color,
+        mode == ThemeMode.dark
+            ? ThemeVariant.codexAmber.dark.textSecondary
+            : ThemeVariant.codexAmber.light.textSecondary,
+      );
+      await tester.tap(find.byTooltip('Search models'));
+      await tester.pumpAndSettle();
+      tester.view.viewInsets = const FakeViewPadding(bottom: 300);
+      await tester.enterText(find.byType(TextField), 'no model matches');
+      await tester.pumpAndSettle();
+      expect(find.text('No models match that search.'), findsOneWidget);
+      expect(effort.hitTestable(), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    });
+  }
 
   testWidgets('session screen hides unsupported composer and menu actions', (
     tester,
@@ -65,7 +114,7 @@ void main() {
     expect(find.byTooltip('Attach images'), findsNothing);
     expect(find.byTooltip('Paste image from clipboard'), findsNothing);
 
-    await tester.tap(find.byTooltip('Session actions'));
+    await tester.tap(find.byTooltip('Workspace tools'));
     await _pumpFrames(tester);
 
     expect(find.text('Files'), findsOneWidget);
@@ -103,7 +152,7 @@ void main() {
     );
     await _pumpFrames(tester);
 
-    await tester.tap(find.byTooltip('Session actions'));
+    await tester.tap(find.byTooltip('Workspace tools'));
     await _pumpFrames(tester);
 
     expect(find.text('Agents'), findsNothing);
@@ -145,6 +194,20 @@ void main() {
     await _pumpFrames(tester);
 
     expect(find.text('Choose a model'), findsOneWidget);
+    final search = find.byWidgetPredicate(
+      (widget) =>
+          widget is TextField && widget.decoration?.hintText == 'Search models',
+    );
+    final icon = find.byIcon(Icons.search_rounded).last;
+    expect(
+      (tester.getCenter(search).dy - tester.getCenter(icon).dy).abs(),
+      lessThan(1),
+    );
+    expect(
+      tester.getTopLeft(icon).dx,
+      closeTo(tester.getTopLeft(find.text('Choose a model')).dx, 1),
+    );
+
     expect(find.text('Model and thinking'), findsNothing);
     expect(find.text('Approvals'), findsNothing);
 
@@ -216,7 +279,7 @@ void main() {
       );
       await _pumpFrames(tester);
 
-      await tester.tap(find.byTooltip('Session actions'));
+      await tester.tap(find.byTooltip('Workspace tools'));
       await _pumpFrames(tester);
       await tester.tap(find.text('Files'));
       await _pumpFrames(tester);
@@ -295,7 +358,7 @@ void main() {
     );
     await _pumpFrames(tester);
 
-    await tester.tap(find.byTooltip('Session actions'));
+    await tester.tap(find.byTooltip('Workspace tools'));
     await _pumpFrames(tester);
     await tester.tap(find.text('Files'));
     await _pumpFrames(tester);
@@ -377,7 +440,7 @@ void main() {
     );
     await _pumpFrames(tester);
 
-    await tester.tap(find.byTooltip('Session actions'));
+    await tester.tap(find.byTooltip('Workspace tools'));
     await _pumpFrames(tester);
     await tester.tap(find.text('Files'));
     await _pumpFrames(tester);
@@ -479,15 +542,7 @@ void main() {
           widget is Tooltip &&
           widget.message?.startsWith('Choose thinking level') == true,
     );
-    final thinkingButton = find.descendant(
-      of: thinkingTooltip,
-      matching: find.byType(InkWell),
-    );
-    expect(thinkingButton, findsOneWidget);
-    expect(
-      tester.getCenter(modelButton).dy,
-      closeTo(tester.getCenter(thinkingButton).dy, 0.1),
-    );
+    expect(thinkingTooltip, findsNothing);
 
     await tester.tap(modelButton);
     await _pumpFrames(tester);
@@ -497,46 +552,159 @@ void main() {
     expect(find.text('Approvals'), findsNothing);
     expect(find.byType(BottomSheet), findsOneWidget);
     expect(find.byTooltip('Close'), findsOneWidget);
+    await tester.tap(find.text('Effort'));
+    await _pumpFrames(tester);
+    expect(find.byTooltip('Back to models'), findsOneWidget);
+    expect(find.byType(BottomSheet), findsOneWidget);
+    await tester.tap(find.text('Low'));
+    await _pumpFrames(tester);
+    expect(find.text('Choose a model'), findsOneWidget);
+    expect(
+      SessionTurnConfigStore.instance
+          .configFor(host, session.id)
+          .reasoningEffort,
+      'low',
+    );
+    await tester.tap(find.text('Effort'));
+    await _pumpFrames(tester);
+    await tester.tap(find.byTooltip('Back to models'));
+    await _pumpFrames(tester);
+    expect(find.text('Choose a model'), findsOneWidget);
 
     await tester.pumpWidget(const SizedBox.shrink());
     await tester.pump();
   });
 
-  testWidgets(
-    'mobile session controls use a page and open model choices in a sheet',
-    (tester) async {
-      final api = _CapabilityFakeApi(
-        _nodeForCapabilities(_fullCapabilities),
-        models: const [_fakeModel],
-      );
-      addTearDown(api.dispose);
+  for (final dark in [false, true]) {
+    testWidgets(
+      'desktop settings use a dialog without duplicate model controls ($dark)',
+      (tester) async {
+        final api = _CapabilityFakeApi(
+          _nodeForCapabilities(_fullCapabilities),
+          models: const [_fakeModel],
+        );
+        addTearDown(api.dispose);
+        await SessionTurnConfigStore.instance.setConfig(
+          _host('desktop-settings-$dark'),
+          'desktop-settings-$dark',
+          const SessionTurnConfig(
+            model: 'custom-model',
+            reasoningEffort: 'high',
+          ),
+        );
 
+        await _pumpApp(
+          tester,
+          SessionScreen(
+            host: _host('desktop-settings-$dark'),
+            session: _session('desktop-settings-$dark', provider: 'fake'),
+            api: api,
+            desktopMode: true,
+          ),
+          size: const Size(1180, 900),
+          themeMode: dark ? ThemeMode.dark : ThemeMode.light,
+        );
+        await _pumpFrames(tester);
+        await tester.tap(find.byTooltip('Session actions').first);
+        await _pumpFrames(tester);
+        await tester.tap(find.text('Session settings').hitTestable());
+        await _pumpFrames(tester);
+        expect(find.text('Session settings'), findsOneWidget);
+        expect(
+          find.descendant(
+            of: find.byType(SessionControlsSheet),
+            matching: find.text('Model'),
+          ),
+          findsNothing,
+        );
+        expect(find.text('Apply').hitTestable(), findsOneWidget);
+        await tester.tap(find.text('Reset').hitTestable());
+        await _pumpFrames(tester);
+        await tester.tap(find.text('Apply').hitTestable());
+        await _pumpFrames(tester);
+        expect(find.byType(SessionControlsSheet), findsNothing);
+        final config = SessionTurnConfigStore.instance.configFor(
+          _host('desktop-settings-$dark'),
+          'desktop-settings-$dark',
+        );
+        expect(config.model, 'custom-model');
+        expect(config.reasoningEffort, 'high');
+        expect(tester.takeException(), isNull);
+        await tester.pumpWidget(const SizedBox());
+      },
+    );
+  }
+
+  testWidgets(
+    'saved machines wait, report failure, and retry without an empty-fleet prompt',
+    (tester) async {
+      await OnboardingStore.instance.markCompleted();
+      final store = _DelayedHostStore();
+      final api = _CapabilityFakeApi(_nodeForCapabilities(_fullCapabilities));
+      addTearDown(api.dispose);
       await _pumpApp(
         tester,
-        SessionScreen(
-          host: _host('mobile-session-controls-page'),
-          session: _session('mobile-session-controls-page', provider: 'fake'),
-          api: api,
-        ),
-        size: const Size(390, 840),
+        DesktopShell(api: api, hostStore: store),
+        size: const Size(1280, 760),
       );
+      await tester.pump(const Duration(seconds: 6));
+      expect(find.text('Connect a machine'), findsNothing);
+      expect(find.textContaining('Waiting for secure storage'), findsOneWidget);
+      store.pending.completeError(StateError('storage unavailable'));
       await _pumpFrames(tester);
-
-      await tester.tap(find.byTooltip('Session controls').first);
+      expect(find.text('Could not load saved machines'), findsWidgets);
+      expect(find.text('Connect a machine'), findsNothing);
+      await tester.tap(find.text('Retry').first);
       await _pumpFrames(tester);
-
-      expect(find.text('Session controls'), findsWidgets);
-      expect(find.byType(BottomSheet), findsNothing);
-      expect(find.text('Model and thinking'), findsOneWidget);
-
-      await tester.tap(find.text('Fake Balanced'));
-      await _pumpFrames(tester);
-
-      expect(find.text('Choose a model'), findsOneWidget);
-      expect(find.byTooltip('Close'), findsOneWidget);
-      expect(find.byType(BottomSheet), findsOneWidget);
+      expect(store.calls, 2);
+      expect(find.text('Connect a machine'), findsWidgets);
+      expect(tester.takeException(), isNull);
+      await tester.pumpWidget(const SizedBox());
     },
   );
+
+  testWidgets('mobile settings keep reply controls in the composer', (
+    tester,
+  ) async {
+    final api = _CapabilityFakeApi(
+      _nodeForCapabilities(_fullCapabilities),
+      models: const [_fakeModel],
+    );
+    addTearDown(api.dispose);
+
+    await _pumpApp(
+      tester,
+      SessionScreen(
+        host: _host('mobile-session-controls-page'),
+        session: _session('mobile-session-controls-page', provider: 'fake'),
+        api: api,
+      ),
+      size: const Size(390, 840),
+    );
+    await _pumpFrames(tester);
+
+    await tester.tap(find.byTooltip('Session actions').first);
+    await _pumpFrames(tester);
+    await tester.tap(find.text('Session settings').hitTestable());
+    await _pumpFrames(tester);
+
+    expect(find.text('Session settings'), findsWidgets);
+    expect(find.byType(BottomSheet), findsNothing);
+    expect(
+      tester
+          .widget<SessionControlsSheet>(find.byType(SessionControlsSheet))
+          .showReplyControls,
+      isFalse,
+    );
+    expect(
+      find.descendant(
+        of: find.byType(SessionControlsSheet),
+        matching: find.text('Model'),
+      ),
+      findsNothing,
+    );
+    expect(tester.takeException(), isNull);
+  });
 
   testWidgets('composer thinking chip opens the thinking picker only', (
     tester,
@@ -613,7 +781,7 @@ void main() {
       );
       await _pumpFrames(tester);
 
-      await tester.tap(find.byTooltip('Session actions'));
+      await tester.tap(find.byTooltip('Workspace tools'));
       await _pumpFrames(tester);
 
       expect(find.text('Browser'), findsOneWidget);
@@ -663,12 +831,16 @@ void main() {
       );
       await _pumpFrames(tester);
 
-      await tester.tap(find.byTooltip('Session actions'));
+      await tester.tap(find.byTooltip('Workspace tools'));
       await _pumpFrames(tester);
 
+      final browserAction = find.widgetWithText(MenuItemButton, 'Browser');
       expect(
-        find.text('Choose another tab or return to the open browser.'),
-        findsOneWidget,
+        find.descendant(
+          of: browserAction,
+          matching: find.byIcon(Icons.check_rounded),
+        ),
+        findsNothing,
       );
     },
   );
@@ -701,7 +873,7 @@ void main() {
       );
       await _pumpFrames(tester);
 
-      await tester.tap(find.byTooltip('Session actions'));
+      await tester.tap(find.byTooltip('Workspace tools'));
       await _pumpFrames(tester);
 
       expect(find.text('Browser'), findsNothing);
@@ -844,7 +1016,7 @@ void main() {
     expect(find.text('Nothing to change here'), findsOneWidget);
     expect(
       find.text(
-        'Fake Test Provider does not offer session settings you can change after a run starts.',
+        'Fake Test Provider does not offer settings for an existing session.',
       ),
       findsOneWidget,
     );
@@ -884,9 +1056,10 @@ void main() {
     );
     await _pumpFrames(tester);
 
-    expect(find.text('Model and thinking'), findsOneWidget);
+    expect(find.text('Model'), findsOneWidget);
     expect(find.text('Mode'), findsOneWidget);
-    expect(find.byType(Slider), findsOneWidget);
+    expect(find.byType(Slider), findsNothing);
+    expect(find.byType(AppSelect<String>), findsWidgets);
     expect(find.text('Permissions'), findsOneWidget);
     expect(find.text('Approval'), findsOneWidget);
     expect(find.text('Sandbox'), findsOneWidget);
@@ -940,6 +1113,7 @@ void main() {
     await _pumpApp(
       tester,
       SessionControlsSheet(
+        onClose: () {},
         api: api,
         host: host,
         session: session,
@@ -954,17 +1128,23 @@ void main() {
         policyStore: SessionPolicyStore.instance,
         turnConfigStore: SessionTurnConfigStore.instance,
       ),
-      size: const Size(840, 1100),
+      size: const Size(360, 640),
     );
     await _pumpFrames(tester);
 
+    expect(find.text('Apply').hitTestable(), findsOneWidget);
+    expect(find.text('Ask for approval'), findsNothing);
+    await tester.ensureVisible(find.text('Provider configuration'));
+    await tester.tap(find.text('Provider configuration'));
+    await tester.pumpAndSettle();
+    expect(find.text('Apply').hitTestable(), findsOneWidget);
     expect(find.text('Access'), findsOneWidget);
     expect(find.text('Workspace'), findsNothing);
     expect(find.text('Full access'), findsNothing);
     expect(find.text('Unavailable'), findsNothing);
     expect(find.text('Ask for approval'), findsOneWidget);
     expect(find.text('Approve for me'), findsOneWidget);
-    expect(find.text('Provider configuration'), findsOneWidget);
+    expect(find.text('Provider configuration'), findsWidgets);
     expect(find.text('Permissions'), findsNothing);
     expect(find.text('File access'), findsNothing);
     expect(find.text('Internet access'), findsNothing);
@@ -1014,7 +1194,22 @@ void main() {
     await _pumpFrames(tester);
 
     expect(find.text('Build'), findsWidgets);
+    await tester.tap(find.byType(AppSelect<String?>));
+    await tester.pumpAndSettle();
     expect(find.text('Review'), findsOneWidget);
+    await tester.tap(find.text('Review'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Apply'));
+    await _pumpFrames(tester);
+    expect(
+      SessionTurnConfigStore.instance
+          .configFor(
+            _host('controls-mode-catalog'),
+            'controls-mode-catalog-session',
+          )
+          .mode,
+      'review',
+    );
     expect(find.text('Interactive'), findsNothing);
     expect(find.text('Plan'), findsNothing);
   });
@@ -1069,6 +1264,76 @@ void main() {
     expect(find.text('Unavailable'), findsOneWidget);
     expect(find.text('Restricted by the host administrator.'), findsOneWidget);
   });
+
+  for (final desktop in [true, false]) {
+    testWidgets(
+      'inline machine selection retains task and resets workspace: $desktop',
+      (tester) async {
+        await CreateSessionDefaultsStore.instance.ensureLoaded();
+        final api = _CapabilityFakeApi(
+          _nodeForCapabilities(_minimalCapabilities),
+        );
+        addTearDown(api.dispose);
+        const first = HostProfile(
+          id: 'first',
+          label: 'First machine',
+          baseUrl: 'http://localhost:4001',
+          token: 'test',
+        );
+        const second = HostProfile(
+          id: 'second',
+          label: 'Second machine',
+          baseUrl: 'http://localhost:4002',
+          token: 'test',
+        );
+        await _pumpApp(
+          tester,
+          CreateSessionHostForm(
+            hosts: const [first, second],
+            initialHost: first,
+            api: api,
+            initialCwd: '/first/workspace',
+            presentation: desktop
+                ? CreateSessionPresentation.pane
+                : CreateSessionPresentation.page,
+            onCreated: (_, _) {},
+            onCancel: () {},
+          ),
+          size: desktop ? const Size(1180, 900) : const Size(390, 844),
+        );
+        await _pumpFrames(tester);
+        final prompt = find.byKey(
+          const ValueKey('create-session-prompt-field'),
+        );
+        await tester.enterText(
+          prompt,
+          'Keep this task while I change machines.',
+        );
+        await tester.tap(
+          find.descendant(
+            of: find.byType(AppSelect<HostProfile>),
+            matching: find.byType(TextButton),
+          ),
+        );
+        await _pumpFrames(tester);
+        await tester.tap(find.text('Second machine'));
+        await _pumpFrames(tester);
+        final form = tester.widget<CreateSessionSheet>(
+          find.byType(CreateSessionSheet),
+        );
+        expect(form.host.id, second.id);
+        expect(form.initialCwd, isNull);
+        expect(
+          tester.widget<TextField>(prompt).controller!.text,
+          'Keep this task while I change machines.',
+        );
+        expect(find.text('/first/workspace'), findsNothing);
+        expect(find.byType(Dialog), findsNothing);
+        expect(find.byType(BottomSheet), findsNothing);
+        expect(tester.takeException(), isNull);
+      },
+    );
+  }
 
   testWidgets('create session sheet hides unsupported launch controls', (
     tester,
@@ -1610,7 +1875,7 @@ void main() {
 
     tester.view.viewInsets = const FakeViewPadding(bottom: 320);
     await _pumpFrames(tester);
-    expect(find.text('What should the agent work on?'), findsNothing);
+    expect(find.text('What should the agent work on?'), findsOneWidget);
     expect(
       tester.getRect(find.byKey(const ValueKey('new-session-composer'))).bottom,
       lessThanOrEqualTo(581),
@@ -1683,7 +1948,7 @@ void main() {
     await _pumpApp(tester, DesktopShell(api: api), size: const Size(1280, 760));
     await _pumpFrames(tester, count: 20);
 
-    expect(find.text('Sessions'), findsOneWidget);
+    expect(find.text('Sessions'), findsWidgets);
     await tester.tap(find.text('New'));
     await _pumpFrames(tester);
 
@@ -1691,12 +1956,87 @@ void main() {
       find.byKey(const ValueKey('desktop-new-session-pane')),
       findsOneWidget,
     );
-    expect(find.text('Sessions'), findsOneWidget);
+    expect(find.text('Sessions'), findsWidgets);
     expect(find.text('New session'), findsOneWidget);
     expect(find.byType(AppComposer), findsOneWidget);
 
     await tester.pumpWidget(const SizedBox.shrink());
     await tester.pump();
+  });
+
+  testWidgets(
+    'narrow desktop panels preserve conversation width and close with Escape',
+    (tester) async {
+      FlutterSecureStorage.setMockInitialValues(<String, String>{});
+      await HostStore().saveHosts([_host('panel-layout')]);
+      await OnboardingStore.instance.markCompleted();
+      final api = _CapabilityFakeApi(_nodeForCapabilities(_fullCapabilities));
+      addTearDown(api.dispose);
+      await _pumpApp(
+        tester,
+        DesktopShell(api: api),
+        size: const Size(1000, 760),
+      );
+      await _pumpFrames(tester, count: 20);
+      final area = find.byKey(const ValueKey('desktop-session-area'));
+      final before = tester.getSize(area).width;
+      final controller = tester
+          .widget<InspectorScope>(find.byType(InspectorScope))
+          .notifier!;
+      controller.show(
+        InspectorSurface(
+          kind: InspectorSurfaceKind.resources,
+          ownerKey: 'test',
+          title: 'Files',
+          bodyBuilder: (_) => const Text('Panel content'),
+        ),
+      );
+      await _pumpFrames(tester);
+      expect(tester.getSize(area).width, before);
+      expect(find.byKey(const ValueKey('inspector-barrier')), findsOneWidget);
+      await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+      await _pumpFrames(tester);
+      expect(controller.current, isNull);
+      expect(find.byKey(const ValueKey('inspector-barrier')), findsNothing);
+      expect(tester.takeException(), isNull);
+      await tester.pumpWidget(const SizedBox());
+    },
+  );
+
+  testWidgets('folder selection is direct and preserves an unsent draft', (
+    tester,
+  ) async {
+    final api = _WorkspaceBrowserCapabilityApi(
+      _nodeForCapabilities(_fullCapabilities),
+      files: const {'/repo/child/file.txt': 'hello'},
+    );
+    addTearDown(api.dispose);
+    await _pumpApp(
+      tester,
+      CreateSessionSheet(
+        host: _host('folder-choice'),
+        api: api,
+        initialCwd: '/repo',
+        presentation: CreateSessionPresentation.page,
+      ),
+      size: const Size(390, 840),
+    );
+    await _pumpFrames(tester);
+    final input = find.byKey(const ValueKey('create-session-prompt-field'));
+    await tester.enterText(input, 'Keep my draft');
+    await tester.runAsync(() async {
+      await tester.tap(find.byKey(const ValueKey('new-session-context-card')));
+      await Future<void>.delayed(const Duration(milliseconds: 100));
+    });
+    await _pumpFrames(tester);
+    expect(find.text('Choose a folder'), findsOneWidget);
+    expect(find.text('Session settings'), findsNothing);
+    expect(find.byType(BottomSheet), findsOneWidget);
+    await tester.tap(find.widgetWithText(FilledButton, 'Use folder'));
+    await _pumpFrames(tester);
+    expect(tester.widget<TextField>(input).controller!.text, 'Keep my draft');
+    expect(find.byType(BottomSheet), findsNothing);
+    expect(tester.takeException(), isNull);
   });
 
   testWidgets('desktop new session renders inline and reports creation', (
@@ -1729,10 +2069,10 @@ void main() {
       findsOneWidget,
     );
     expect(find.byTooltip('Close new session'), findsOneWidget);
-    expect(find.text('What should the agent work on?'), findsNothing);
+    expect(find.text('What should the agent work on?'), findsOneWidget);
     expect(
       find.text('Your session starts with the first message.'),
-      findsOneWidget,
+      findsNothing,
     );
     expect(find.byType(AppComposer), findsOneWidget);
 
@@ -1817,11 +2157,7 @@ void main() {
         const ValueKey('new-session-composer-thinking'),
       );
       expect(modelControl, findsOneWidget);
-      expect(thinkingControl, findsOneWidget);
-      expect(
-        tester.getCenter(modelControl).dy,
-        closeTo(tester.getCenter(thinkingControl).dy, 0.1),
-      );
+      expect(thinkingControl, findsNothing);
 
       await tester.tap(
         find.byKey(const ValueKey('new-session-settings-button')),
@@ -2049,7 +2385,7 @@ void main() {
     expect(find.text('Discard new session?'), findsOneWidget);
     await tester.tap(find.widgetWithText(TextButton, 'Cancel'));
     await _pumpFrames(tester);
-    expect(find.text('What should the agent work on?'), findsOneWidget);
+    expect(find.text('Keep this draft.'), findsOneWidget);
 
     await tester.pageBack();
     await _pumpFrames(tester);
@@ -2057,7 +2393,7 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(await launch, isNull);
-    expect(find.text('What should the agent work on?'), findsNothing);
+    expect(find.byKey(const ValueKey('new-session-composer')), findsNothing);
   });
 
   testWidgets('new session opens the model sheet before a folder is chosen', (
@@ -2202,7 +2538,7 @@ TextField _composerTextField(WidgetTester tester) {
   final finder = find.byWidgetPredicate(
     (widget) =>
         widget is TextField &&
-        widget.decoration?.hintText?.startsWith('Reply here') == true,
+        widget.decoration?.hintText?.startsWith('Reply') == true,
   );
   expect(finder, findsOneWidget);
   return tester.widget<TextField>(finder);
@@ -2212,6 +2548,7 @@ Future<void> _pumpApp(
   WidgetTester tester,
   Widget child, {
   required Size size,
+  ThemeMode themeMode = ThemeMode.system,
 }) async {
   tester.view
     ..devicePixelRatio = 1
@@ -2225,8 +2562,15 @@ Future<void> _pumpApp(
   final palette = ThemeVariant.codexAmber;
   await tester.pumpWidget(
     MaterialApp(
-      theme: buildLightTheme(palette.light),
-      darkTheme: buildDarkTheme(palette.dark),
+      themeMode: themeMode,
+      theme: buildLightTheme(
+        palette.light,
+        platform: size.width >= 760 ? TargetPlatform.macOS : TargetPlatform.iOS,
+      ),
+      darkTheme: buildDarkTheme(
+        palette.dark,
+        platform: size.width >= 760 ? TargetPlatform.macOS : TargetPlatform.iOS,
+      ),
       home: Scaffold(body: child),
     ),
   );
@@ -2972,4 +3316,14 @@ class _IdleWebSocketSink implements WebSocketSink {
   @override
   void addError(Object error, [StackTrace? stackTrace]) =>
       _delegate.addError(error, stackTrace);
+}
+
+class _DelayedHostStore extends HostStore {
+  final pending = Completer<List<HostProfile>>();
+  int calls = 0;
+  @override
+  Future<List<HostProfile>> loadHosts() {
+    calls++;
+    return calls == 1 ? pending.future : Future.value(<HostProfile>[]);
+  }
 }
