@@ -351,7 +351,6 @@ describe("fake test provider", () => {
     assert.equal(minimal.capabilities.sessions.archive, false);
     assert.equal(minimal.capabilities.sessions.compact, false);
     assert.equal(minimal.capabilities.sessions.interrupt, false);
-    assert.equal(minimal.capabilities.sessions.eventReplay, false);
     assert.equal(minimal.capabilities.input.text, true);
     assert.equal(minimal.capabilities.input.imageUrl, false);
     assert.equal(minimal.capabilities.configuration.models, false);

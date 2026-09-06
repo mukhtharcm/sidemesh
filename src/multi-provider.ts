@@ -105,9 +105,13 @@ export class MultiAgentProvider
   }
 
   public async close(): Promise<void> {
-    await Promise.all(
-      this.orderedEntries.map((entry) => entry.provider.close?.() ?? Promise.resolve()),
+    const results = await Promise.allSettled(
+      this.orderedEntries.map(async (entry) => { await entry.provider.close?.(); }),
     );
+    const errors = results.flatMap((result) => result.status === "rejected" ? [result.reason] : []);
+    if (errors.length > 0) {
+      throw new AggregateError(errors, "Failed to close one or more agent providers.");
+    }
   }
 
   public async restartProvider(kind: AgentProviderKind): Promise<void> {

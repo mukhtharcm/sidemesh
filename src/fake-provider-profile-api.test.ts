@@ -206,7 +206,7 @@ describe("fake provider capability profile API smoke", () => {
           expectation.capabilities,
         )) {
           assert.equal(
-            readCapability(node.providerCapabilities, path),
+            readCapability(node.defaultProviderCapabilities, path),
             supported,
             path,
           );

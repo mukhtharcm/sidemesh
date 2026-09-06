@@ -56,9 +56,10 @@ flutter analyze
   when the behavior does not require a specific agent provider.
 - Do not add new provider-specific fields to client models unless the provider
   abstraction cannot express the concept.
-- `providerCapabilities` in `/api/node` is a compatibility alias for
-  `defaultProviderCapabilities`. New clients should prefer
-  `defaultProviderCapabilities` or `supportedProviders[].capabilities`.
+- Use `/api/node.defaultProviderCapabilities` for default-provider features and
+  `supportedProviders[].capabilities` for a selected provider.
+- Session recovery uses a bounded snapshot, with live events for ongoing work.
+  See [session synchronization](docs/session-synchronization.md).
 - Provider adapters should not implement filesystem operations; local filesystem
   is daemon-owned in `src/fs-routes.ts` and advertised through `hostCapabilities`.
 - Keep terminal, filesystem, and approval changes conservative; these are

@@ -395,7 +395,6 @@ describe("provider registry", () => {
     assert.equal(provider.kind, "acpx");
     assert.equal(provider.displayName, "ACP via acpx (claude)");
     assert.equal(provider.capabilities.sessions.create, true);
-    assert.equal(provider.capabilities.sessions.eventReplay, false);
     assert.equal(provider.capabilities.approvals.command, true);
     assert.equal(provider.capabilities.runtimeControls.model, true);
   });

@@ -2,7 +2,6 @@ import { createServer } from "node:http";
 import type { Server } from "node:http";
 import { homedir, hostname, platform } from "node:os";
 import { createHash, randomUUID, timingSafeEqual } from "node:crypto";
-import { spawn } from "node:child_process";
 import {
   chmod,
   mkdir,
@@ -25,20 +24,19 @@ import { secureHeaders } from "hono/secure-headers";
 import type { ContentfulStatusCode } from "hono/utils/http-status";
 import { WebSocketServer, type WebSocket } from "ws";
 
+import { SessionStateStore } from "./session-state.js";
 import {
   AgentProviderRequestError,
   hasProviderMethod,
-  materializeAgentActivityDraft,
   requireProviderMethod,
   type AgentPendingAction,
   type AgentProvider,
   type AgentProviderMethodName,
-  type AgentSessionActivityDraft,
+  type AgentProviderLiveEvent,
   type AgentSessionInputItem,
   type AgentSessionOverrides,
 } from "./agent-provider.js";
 import type {
-  ActiveTurnState,
   AgentRunSummary,
   ApprovalLiveEvent,
   GitInfoSummary,
@@ -47,7 +45,6 @@ import type {
   LiveEvent,
   LivePlanStep,
   LiveThreadStatus,
-  SessionActivity,
   NodeConfig,
   PendingAction,
   UpdateChannel,
@@ -66,9 +63,6 @@ import type {
   WorkspaceSummary,
 } from "./types.js";
 import {
-  applyCommandTerminalInteraction,
-  appendCommandActivityOutput,
-  mergeActivity,
   mergeSessionActivities,
 } from "./activity.js";
 import {
@@ -76,7 +70,6 @@ import {
   toPublicPendingAction,
 } from "./approvals.js";
 import {
-  buildGitDiff,
   readGitCommonDir,
   readGitIdentity,
   readGitDiff,
@@ -120,7 +113,6 @@ import {
 } from "./session-input-dedupe-store.js";
 import { startupSummaryLines } from "./startup-summary.js";
 import { getCodexRpcAuditSnapshot } from "./codex-rpc-audit.js";
-import { SessionReplayIndex } from "./session-replay-index.js";
 import { SessionSearchIndex, type SearchFilter } from "./session-search-index.js";
 import { saveConfig } from "./config.js";
 import { detectInstallInfo } from "./install-info.js";
@@ -137,7 +129,6 @@ import {
   type JsonRouteResponse,
 } from "./hono-route-adapter.js";
 
-const SESSION_LOG_CACHE_LIMIT = 24;
 const SESSION_INPUT_DEDUPE_LIMIT = 500;
 const SESSION_INPUT_DEDUPE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const SESSION_INPUT_DEDUPE_FILE = "session-input-dedupe-v1.json";
@@ -151,8 +142,6 @@ const RECENT_LIVE_LIMIT = 40;
 const RECENT_SESSIONS_CACHE_TTL_MS = 1_500;
 const TERMINAL_LIVE_STATUS_GRACE_MS = 1_000;
 const RECENT_SESSION_RUNTIME_CONCURRENCY = 4;
-const SESSION_EVENT_DELTA_MAX_ITEMS = 220;
-const SESSION_EVENT_DELTA_MAX_BYTES = 256 * 1024;
 const INSTALL_INFO_REFRESH_TTL_MS = 60_000;
 type SessionRuntimeListMode = "all" | "active" | "none";
 const HOST_CAPABILITIES: HostCapabilities = {
@@ -167,22 +156,6 @@ const HOST_CAPABILITIES: HostCapabilities = {
     search: true,
   },
 };
-
-interface SessionRuntimeCacheEntry {
-  threadUpdatedAt: number;
-  runtime: SessionRuntimeSummary | null;
-  promise?: Promise<SessionRuntimeSummary | null>;
-}
-
-interface SessionLogCacheEntry {
-  threadUpdatedAt: number;
-  messages: SessionMessage[];
-  activities: SessionActivity[];
-  runtime: SessionRuntimeSummary | null;
-  history: SessionHistorySummary;
-  nextSeq: number;
-  latestPlanUpdate: LatestPlanUpdate | null;
-}
 
 interface SessionHistorySummary {
   isTruncated: boolean;
@@ -205,15 +178,9 @@ interface SessionInputReceipt {
 
 interface SessionInputDedupeEntry {
   signatureHash: string;
-  rawSignatureHash?: string;
   createdAt: number;
   promise?: Promise<SessionInputReceipt>;
   receipt?: SessionInputReceipt;
-}
-
-interface LiveActivityEntry {
-  activity: SessionActivity;
-  replaySeq: number;
 }
 
 interface InstallInfoRefreshResult {
@@ -279,23 +246,14 @@ export async function startServer(
     promise?: Promise<SessionSummary[]>;
     value?: SessionSummary[];
   }>();
-  const activeTurns = new Map<string, ActiveTurnState>();
-  const unverifiedActiveTurns = new Set<string>();
+  const sessionState = new SessionStateStore();
   const pendingActions = new Map<string, AgentPendingAction>();
-  const liveActivities = new Map<string, Map<string, LiveActivityEntry>>();
-  const liveThreadStatuses = new Map<string, LiveThreadStatus>();
-  const liveThreadStatusUpdatedAt = new Map<string, number>();
-  const recoveredTerminalThreadStatuses = new Map<string, LiveThreadStatus>();
-  const replayIndex = new SessionReplayIndex();
   const searchIndex = new SessionSearchIndex(
     nodePath.join(config.stateDir, "search-index-v1.db"),
   );
-  const runtimeCache = new Map<string, SessionRuntimeCacheEntry>();
-  const logCache = new Map<string, SessionLogCacheEntry>();
   const sessionRuntimeSignals = await loadSessionRuntimeSignalsState(
     nodePath.join(config.stateDir, SESSION_RUNTIME_SIGNALS_FILE),
   );
-  const sessionSeqCursor = new Map<string, number>();
   const sessionInputDedupe = new Map<string, SessionInputDedupeEntry>();
   let sessionRuntimeSignalsSaveChain = Promise.resolve();
   const sessionInputDedupeStore = await SessionInputDedupeStore.open(
@@ -311,9 +269,6 @@ export async function startServer(
   for (const entry of sessionInputDedupeStore.entries()) {
     sessionInputDedupe.set(entry.key, {
       signatureHash: entry.signatureHash,
-      ...(entry.rawSignatureHash
-        ? { rawSignatureHash: entry.rawSignatureHash }
-        : {}),
       createdAt: entry.createdAt,
       receipt: entry.receipt,
     });
@@ -411,7 +366,7 @@ export async function startServer(
     resolveCwd: (cwd, request) =>
       resolveTerminalCwd(
         provider,
-        runtimeCache,
+        sessionState,
         cwd,
         request.sessionId,
         config.workspaceRoots,
@@ -429,17 +384,17 @@ export async function startServer(
 
   function allocSeq(sessionId: string): number {
     const current = Math.max(
-      sessionSeqCursor.get(sessionId) ?? 0,
+      sessionState.get(sessionId).nextSeq ?? 0,
       nextSeqForLatestPlanUpdate(0, latestPlanUpdateForSession(sessionId)),
     );
-    sessionSeqCursor.set(sessionId, current + 1);
+    sessionState.get(sessionId).nextSeq = current + 1;
     return current;
   }
 
   function ensureSeqCursor(sessionId: string, minimum: number): void {
-    const current = sessionSeqCursor.get(sessionId) ?? 0;
+    const current = sessionState.get(sessionId).nextSeq ?? 0;
     if (minimum > current) {
-      sessionSeqCursor.set(sessionId, minimum);
+      sessionState.get(sessionId).nextSeq = minimum;
     }
   }
 
@@ -448,7 +403,7 @@ export async function startServer(
   }
 
   function latestThreadStatusForSession(sessionId: string): LiveThreadStatus | null {
-    return liveThreadStatuses.get(sessionId) ?? null;
+    return sessionState.get(sessionId).status ?? null;
   }
 
   function setLatestThreadStatusForSession(
@@ -456,18 +411,18 @@ export async function startServer(
     status: LiveThreadStatus | null,
   ): void {
     if (status == null) {
-      liveThreadStatuses.delete(sessionId);
-      liveThreadStatusUpdatedAt.delete(sessionId);
+      sessionState.get(sessionId).status = null;
+      sessionState.get(sessionId).statusUpdatedAt = 0;
       return;
     }
-    liveThreadStatuses.set(sessionId, status);
-    liveThreadStatusUpdatedAt.set(sessionId, Date.now());
+    sessionState.get(sessionId).status = status;
+    sessionState.get(sessionId).statusUpdatedAt = Date.now();
   }
 
   function sessionStatusOverrideForDisplay(
     sessionId: string,
   ): LiveThreadStatus | null {
-    const recoveredTerminalStatus = recoveredTerminalThreadStatuses.get(sessionId);
+    const recoveredTerminalStatus = sessionState.get(sessionId).recoveredStatus;
     if (recoveredTerminalStatus) {
       return recoveredTerminalStatus;
     }
@@ -481,15 +436,16 @@ export async function startServer(
     if (!isTerminalThreadStatus(status)) {
       return null;
     }
-    const updatedAt = liveThreadStatusUpdatedAt.get(sessionId) ?? 0;
+    const updatedAt = sessionState.get(sessionId).statusUpdatedAt ?? 0;
     return Date.now() - updatedAt <= TERMINAL_LIVE_STATUS_GRACE_MS ? status : null;
   }
 
   function clearConfirmedTerminalSessionState(sessionId: string): void {
-    activeTurns.delete(sessionId);
-    unverifiedActiveTurns.delete(sessionId);
-    liveActivities.delete(sessionId);
-    clearSessionLogCache(logCache, sessionId);
+    sessionState.get(sessionId).activeTurn = null;
+    sessionState.get(sessionId).unverifiedTurn = false;
+    sessionState.get(sessionId).activities.clear();
+    sessionState.clearDraft(sessionId);
+
     clearActionsForSession(
       pendingActions,
       sessionId,
@@ -499,8 +455,8 @@ export async function startServer(
   }
 
   function clearRecoveredTerminalSessionState(sessionId: string): void {
-    activeTurns.delete(sessionId);
-    unverifiedActiveTurns.delete(sessionId);
+    sessionState.get(sessionId).activeTurn = null;
+    sessionState.get(sessionId).unverifiedTurn = false;
     clearActionsForSession(
       pendingActions,
       sessionId,
@@ -515,7 +471,7 @@ export async function startServer(
   ): void {
     const nextStatus = reconciledThreadStatus(sessionId, observedStatus);
     if (isTerminalThreadStatus(observedStatus)) {
-      recoveredTerminalThreadStatuses.delete(sessionId);
+      sessionState.get(sessionId).recoveredStatus = null;
       clearConfirmedTerminalSessionState(sessionId);
     }
     const previousStatus = latestThreadStatusForSession(sessionId);
@@ -543,7 +499,7 @@ export async function startServer(
     if (isRunningThreadStatus(observedStatus)) {
       return observedStatus;
     }
-    if (observedStatus === "idle" && activeTurns.has(sessionId)) {
+    if (observedStatus === "idle" && (sessionState.get(sessionId).activeTurn != null)) {
       return "running";
     }
     return observedStatus;
@@ -563,7 +519,7 @@ export async function startServer(
       state = await loadFastRunState(
         agentProvider,
         sessionId,
-        new Map<string, ActiveTurnState>(),
+        new SessionStateStore(),
         isRunningThreadStatus(observedStatus) ? observedStatus : null,
       );
     } catch (error) {
@@ -574,13 +530,13 @@ export async function startServer(
           turnId,
         );
         if (turnState.kind === "terminal") {
-          unverifiedActiveTurns.delete(sessionId);
+          sessionState.get(sessionId).unverifiedTurn = false;
           return false;
         }
         if (turnState.kind === "missing" || turnState.kind === "unknown") {
-          unverifiedActiveTurns.add(sessionId);
+          sessionState.get(sessionId).unverifiedTurn = true;
         } else {
-          unverifiedActiveTurns.delete(sessionId);
+          sessionState.get(sessionId).unverifiedTurn = false;
         }
         return true;
       }
@@ -588,21 +544,21 @@ export async function startServer(
     }
     if (state.isRunning) {
       if (state.turnId == null) {
-        unverifiedActiveTurns.add(sessionId);
+        sessionState.get(sessionId).unverifiedTurn = true;
       } else {
-        unverifiedActiveTurns.delete(sessionId);
+        sessionState.get(sessionId).unverifiedTurn = false;
       }
       return state.turnId == null || state.turnId === turnId;
     }
     const turnState = await providerTurnState(agentProvider, sessionId, turnId);
     if (turnState.kind === "terminal") {
-      unverifiedActiveTurns.delete(sessionId);
+      sessionState.get(sessionId).unverifiedTurn = false;
       return false;
     }
     if (turnState.kind === "unknown") {
-      unverifiedActiveTurns.add(sessionId);
+      sessionState.get(sessionId).unverifiedTurn = true;
     } else {
-      unverifiedActiveTurns.delete(sessionId);
+      sessionState.get(sessionId).unverifiedTurn = false;
     }
     return true;
   }
@@ -611,12 +567,12 @@ export async function startServer(
     sessionId: string,
     agentProvider: AgentProvider,
   ): Promise<LiveThreadStatus | null> {
-    if (!unverifiedActiveTurns.has(sessionId)) {
+    if (!sessionState.get(sessionId).unverifiedTurn) {
       return null;
     }
-    const activeTurn = activeTurns.get(sessionId);
+    const activeTurn = sessionState.get(sessionId).activeTurn;
     if (!activeTurn) {
-      unverifiedActiveTurns.delete(sessionId);
+      sessionState.get(sessionId).unverifiedTurn = false;
       return null;
     }
     const turnState = await providerTurnState(
@@ -624,9 +580,9 @@ export async function startServer(
       sessionId,
       activeTurn.turnId,
     );
-    const currentActiveTurn = activeTurns.get(sessionId);
+    const currentActiveTurn = sessionState.get(sessionId).activeTurn;
     if (
-      !unverifiedActiveTurns.has(sessionId) ||
+      !sessionState.get(sessionId).unverifiedTurn ||
       !currentActiveTurn ||
       currentActiveTurn.turnId !== activeTurn.turnId ||
       currentActiveTurn.startedAt !== activeTurn.startedAt
@@ -634,14 +590,14 @@ export async function startServer(
       return null;
     }
     if (turnState.kind === "active") {
-      unverifiedActiveTurns.delete(sessionId);
+      sessionState.get(sessionId).unverifiedTurn = false;
       return null;
     }
     if (turnState.kind === "terminal") {
       clearRecoveredTerminalSessionState(sessionId);
       const status = turnState.status;
       if (isTerminalThreadStatus(status)) {
-        recoveredTerminalThreadStatuses.set(sessionId, status);
+        sessionState.get(sessionId).recoveredStatus = status;
       }
       setLatestThreadStatusForSession(sessionId, status);
       broadcastLive(sessionId, {
@@ -663,7 +619,7 @@ export async function startServer(
           ? turnState.threadStatus
           : "idle";
       if (isTerminalThreadStatus(status)) {
-        recoveredTerminalThreadStatuses.set(sessionId, status);
+        sessionState.get(sessionId).recoveredStatus = status;
       }
       setLatestThreadStatusForSession(sessionId, status);
       broadcastLive(sessionId, {
@@ -718,11 +674,6 @@ export async function startServer(
         updatedAt: Date.now(),
       });
     }
-    updateSessionLogCacheLatestPlanUpdate(
-      logCache,
-      sessionId,
-      latestPlanUpdateForSession(sessionId),
-    );
     persistSessionRuntimeSignalsEventually();
   }
 
@@ -782,38 +733,14 @@ export async function startServer(
     const isProviderSession = (sessionId: string): boolean =>
       providerEntryForSessionId(sessionId)?.kind === kind;
 
-    for (const sessionId of activeTurns.keys()) {
-      if (isProviderSession(sessionId)) {
-        sessionIds.add(sessionId);
+    for (const sessionId of sessionState.keys()) {
+      if (!isProviderSession(sessionId)) continue;
+      sessionIds.add(sessionId);
+      const activeTurn = sessionState.get(sessionId).activeTurn;
+      if (activeTurn || hasPendingActionForSession(pendingActions, sessionId)) {
         sessionIdsNeedingIdleBroadcast.add(sessionId);
-        const activeTurn = activeTurns.get(sessionId);
-        if (activeTurn?.turnId) {
-          interruptedTurnIds.set(sessionId, activeTurn.turnId);
-        }
       }
-    }
-    for (const action of pendingActions.values()) {
-      if (isProviderSession(action.sessionId)) {
-        sessionIds.add(action.sessionId);
-        sessionIdsNeedingIdleBroadcast.add(action.sessionId);
-      }
-    }
-    for (const sessionId of liveActivities.keys()) {
-      if (isProviderSession(sessionId)) {
-        sessionIds.add(sessionId);
-      }
-    }
-    for (const sessionId of runtimeCache.keys()) {
-      if (isProviderSession(sessionId)) {
-        sessionIds.add(sessionId);
-      }
-    }
-    for (const key of logCache.keys()) {
-      const delimiterIndex = key.indexOf("::");
-      const sessionId = delimiterIndex >= 0 ? key.slice(0, delimiterIndex) : key;
-      if (isProviderSession(sessionId)) {
-        sessionIds.add(sessionId);
-      }
+      if (activeTurn) interruptedTurnIds.set(sessionId, activeTurn.turnId);
     }
 
     await clearInterruptedSessionInputDedupe(interruptedTurnIds);
@@ -828,12 +755,13 @@ export async function startServer(
           status: "interrupted",
         });
       }
-      activeTurns.delete(sessionId);
-      unverifiedActiveTurns.delete(sessionId);
-      recoveredTerminalThreadStatuses.delete(sessionId);
-      liveActivities.delete(sessionId);
-      runtimeCache.delete(sessionId);
-      clearSessionLogCache(logCache, sessionId);
+      sessionState.get(sessionId).activeTurn = null;
+      sessionState.get(sessionId).unverifiedTurn = false;
+      sessionState.get(sessionId).recoveredStatus = null;
+      sessionState.get(sessionId).activities.clear();
+      sessionState.clearDraft(sessionId);
+      sessionState.get(sessionId).runtime = null;
+
       clearActionsForSession(
         pendingActions,
         sessionId,
@@ -910,12 +838,12 @@ export async function startServer(
     }
   }
 
-  // Wrap each broadcast so every live event carries a monotonically
-  // increasing `seq` — this lets clients detect gaps after a reconnect
-  // and decide whether they need a fresh snapshot.
+  // Sequence values order transcript items, not reconnect recovery.
   function broadcastLive(sessionId: string, event: LiveEvent): LiveEvent {
-    const stamped: LiveEvent =
-      event.seq === undefined ? { ...event, seq: allocSeq(sessionId) } : event;
+    const state = sessionState.get(sessionId);
+    const stamped: LiveEvent = {
+      ...event, seq: event.seq ?? allocSeq(sessionId), revision: ++state.revision,
+    };
     broadcast(socketsBySession, sessionId, stamped);
     return stamped;
   }
@@ -986,7 +914,7 @@ export async function startServer(
 
     const promise = listSessions(
       provider,
-      runtimeCache,
+      sessionState,
       limit,
       runtimeMode,
       sessionStatusOverrideForSnapshot,
@@ -1045,7 +973,7 @@ export async function startServer(
         }
         const session = await buildRecentSessionSummary(
           provider,
-          runtimeCache,
+          sessionState,
           thread,
           "active",
           sessionStatusOverrideForSnapshot,
@@ -1088,35 +1016,25 @@ export async function startServer(
     broadcastRecentSessionsLive({ type: "remove", sessionId });
   }
 
-  provider.on("stderr", (line) => {
-    process.stderr.write(line);
-  });
+  const onProviderStderr = (line: string): void => { process.stderr.write(line); };
+  provider.on("stderr", onProviderStderr);
 
   const fsWatchRegistry = new FsWatchRegistry();
 
-  async function listSessionsForProvider(
-    kind: string | null | undefined,
-  ): Promise<SessionSummary[]> {
-    const selected = providerEntryForKind(kind);
-    if (!selected) {
-      return [];
-    }
-    const sessions = await loadRecentSessions(null, "none");
-    return sessions.filter((session) => session.provider === selected.kind);
-  }
-
-  provider.on("liveEvent", (event) => {
+  const onProviderLiveEvent = (event: AgentProviderLiveEvent): void => {
     switch (event.type) {
       case "skills_changed":
         broadcastSkillsChanged(socketsBySession);
         return;
       case "turn_started":
-        unverifiedActiveTurns.delete(event.sessionId);
-        recoveredTerminalThreadStatuses.delete(event.sessionId);
-        activeTurns.set(event.sessionId, {
+        sessionState.get(event.sessionId).activities.clear();
+        sessionState.clearDraft(event.sessionId);
+        sessionState.get(event.sessionId).unverifiedTurn = false;
+        sessionState.get(event.sessionId).recoveredStatus = null;
+        sessionState.get(event.sessionId).activeTurn = {
           turnId: event.turnId,
           startedAt: Date.now(),
-        });
+        };
         setLatestThreadStatusForSession(event.sessionId, "running");
         broadcastLive(event.sessionId, {
           type: "turn_started",
@@ -1126,6 +1044,7 @@ export async function startServer(
         scheduleRecentSessionUpsert(event.sessionId, 0);
         return;
       case "assistant_delta":
+        sessionState.get(event.sessionId).assistantText += event.delta;
         broadcastLive(event.sessionId, {
           type: "assistant_delta",
           sessionId: event.sessionId,
@@ -1135,6 +1054,7 @@ export async function startServer(
         });
         return;
       case "assistant_message_completed": {
+        sessionState.clearDraft(event.sessionId);
         const seq = allocSeq(event.sessionId);
         broadcastLive(event.sessionId, {
           type: "assistant_message_completed",
@@ -1156,17 +1076,7 @@ export async function startServer(
         return;
       }
       case "activity_updated": {
-        const next = upsertLiveActivity(
-          liveActivities,
-          event.sessionId,
-          materializeLiveActivityDraft(
-            liveActivities,
-            event.sessionId,
-            event.activity,
-            () => allocSeq(event.sessionId),
-          ),
-          () => allocSeq(event.sessionId),
-        );
+        const next = sessionState.updateActivity(event.sessionId, event.activity, () => allocSeq(event.sessionId));
         broadcastLive(event.sessionId, {
           type: "activity_updated",
           sessionId: event.sessionId,
@@ -1176,12 +1086,10 @@ export async function startServer(
         return;
       }
       case "activity_output_delta": {
-        const next = updateLiveOutputActivity(
-          liveActivities,
+        const next = sessionState.appendOutput(
           event.sessionId,
           event.activityId,
           event.delta,
-          () => allocSeq(event.sessionId),
         );
         if (next) {
           broadcastLive(event.sessionId, {
@@ -1194,12 +1102,10 @@ export async function startServer(
         return;
       }
       case "activity_terminal_input": {
-        const next = updateLiveCommandTerminalInteraction(
-          liveActivities,
+        const next = sessionState.terminalInput(
           event.sessionId,
           event.activityId,
           event.stdin,
-          () => allocSeq(event.sessionId),
         );
         if (next) {
           broadcastLive(event.sessionId, {
@@ -1213,18 +1119,13 @@ export async function startServer(
       }
       case "runtime_updated": {
         const previousRuntime =
-          runtimeCache.get(event.sessionId)?.runtime ??
-          logCache.get(event.sessionId)?.runtime ??
+          sessionState.get(event.sessionId).runtime?.runtime ??
           null;
         const runtime = mergeRuntimeSummary(previousRuntime, event.runtime);
-        runtimeCache.set(event.sessionId, {
+        sessionState.get(event.sessionId).runtime = {
           threadUpdatedAt: Date.now() / 1000,
           runtime,
-        });
-        const cachedLog = logCache.get(event.sessionId);
-        if (cachedLog) {
-          cachedLog.runtime = runtime;
-        }
+        };
         broadcastLive(event.sessionId, {
           type: "runtime_updated",
           sessionId: event.sessionId,
@@ -1274,6 +1175,7 @@ export async function startServer(
         return;
       }
       case "reasoning_delta": {
+        sessionState.get(event.sessionId).assistantReasoning += event.delta;
         broadcastLive(event.sessionId, {
           type: "reasoning_delta",
           sessionId: event.sessionId,
@@ -1311,6 +1213,7 @@ export async function startServer(
         return;
       }
       case "turn_completed":
+        sessionState.clearDraft(event.sessionId);
         // Broadcast the completion first so any concurrent snapshot reader
         // sees both the provider-flushed history AND the live state still in
         // memory. Clearing liveActivities before the broadcast can briefly
@@ -1334,20 +1237,19 @@ export async function startServer(
           broadcastLive,
           broadcastApprovalLive,
         );
-        activeTurns.delete(event.sessionId);
-        unverifiedActiveTurns.delete(event.sessionId);
-        recoveredTerminalThreadStatuses.delete(event.sessionId);
+        sessionState.get(event.sessionId).activeTurn = null;
+        sessionState.get(event.sessionId).unverifiedTurn = false;
+        sessionState.get(event.sessionId).recoveredStatus = null;
         setLatestThreadStatusForSession(
           event.sessionId,
           event.status === "errored" ? "errored" : "idle",
         );
-        liveActivities.delete(event.sessionId);
-        clearSessionLogCache(logCache, event.sessionId);
+        // Keep the finished tool overlay until provider history catches up.
+        // A snapshot may have started reading just before this completion.
+
         scheduleRecentSessionUpsert(event.sessionId, 0);
         void indexSessionForSearch(searchIndex, providerRuntime, event.sessionId).catch(() => {});
-        // NOTE: do NOT reset sessionSeqCursor between turns — clients rely on
-        // a monotonically increasing seq across the whole session lifetime to
-        // detect gaps after a reconnect.
+        // Transcript order remains stable across turns.
         return;
       case "action_opened":
         pendingActions.set(event.action.id, event.action);
@@ -1377,7 +1279,8 @@ export async function startServer(
         scheduleRecentSessionUpsert(event.action.sessionId);
         return;
     }
-  });
+  };
+  provider.on("liveEvent", onProviderLiveEvent);
 
   for (const entry of providerRuntime.providers) {
     providerVersions.set(
@@ -1480,16 +1383,12 @@ export async function startServer(
       hostname: hostname(),
       platform: platform(),
       homeDirectory: homedir(),
-      codexVersion: providerVersion,
       provider: providerRuntime.defaultProviderKind,
       providerName:
         supportedProviders.find((item) => item.isDefault)?.displayName ??
         defaultProvider.provider.displayName,
       providerVersion,
       providerConfig: defaultProvider.configSummary,
-      // Compatibility alias for defaultProviderCapabilities.
-      // Retained until the minimum supported mobile client version no longer depends on it.
-      providerCapabilities: defaultProviderCapabilities,
       defaultProviderCapabilities,
       hostCapabilities,
       searchSessions: hostCapabilities.sessions.search,
@@ -1613,7 +1512,7 @@ export async function startServer(
       sessionLiveSockets += sockets.size;
     }
     let liveActivityItems = 0;
-    for (const activities of liveActivities.values()) {
+    for (const { activities } of sessionState.values()) {
       liveActivityItems += activities.size;
     }
 
@@ -1628,14 +1527,10 @@ export async function startServer(
       caches: {
         recentSessions: recentSessionsCache.size,
         recentSessionBroadcastTimers: recentSessionBroadcastTimers.size,
-        runtime: runtimeCache.size,
-        logs: logCache.size,
-        replay: replayIndex.getStats(),
-        activeTurns: activeTurns.size,
+        sessions: sessionState.size,
+        activeTurns: [...sessionState.values()].filter((state) => state.activeTurn).length,
         pendingActions: pendingActions.size,
-        liveActivitySessions: liveActivities.size,
         liveActivityItems,
-        sessionSeqCursors: sessionSeqCursor.size,
         inputDedupe: sessionInputDedupe.size,
       },
       sockets: {
@@ -1864,7 +1759,7 @@ export async function startServer(
             await searchIndex.remove(result.sessionId).catch(() => undefined);
             return null;
           }
-          const runtime = await loadCachedSessionRuntime(provider, thread, runtimeCache, "active");
+          const runtime = await loadCachedSessionRuntime(provider, thread, sessionState, "active");
           const session = mapSession(
             thread,
             runtime,
@@ -1962,7 +1857,7 @@ export async function startServer(
     listSessions: () =>
       listSessions(
         provider,
-        runtimeCache,
+        sessionState,
         null,
         "none",
         sessionStatusOverrideForDisplay,
@@ -1984,7 +1879,7 @@ export async function startServer(
       const resources = await readSessionResources(
         provider,
         sessionId,
-        liveActivities,
+        sessionState,
       );
       return resources.resources.some(
         (resource) =>
@@ -2178,273 +2073,43 @@ export async function startServer(
         return;
       }
       const query = request.query as Record<string, unknown>;
-      const messageLimit = asInteger(query.messageLimit);
-      const activityLimit = asInteger(query.activityLimit);
-      const cacheKey = buildSessionLogCacheKey(
-        sessionId,
-        messageLimit,
-        activityLimit,
-      );
+      const messageLimit = Math.max(1, asInteger(query.messageLimit) ?? 200);
+      const activityLimit = Math.max(1, asInteger(query.activityLimit) ?? 200);
+      const runtimeBeforeRead = sessionState.get(sessionId).runtime;
       const session = await readSession(provider, sessionId, false);
       reconcileObservedThreadStatus(session.id, threadStatusPhase(session));
       const log = await provider.readSessionLog!(session, {
         messageLimit,
         activityLimit,
       });
+      // Finish provider reads before taking the live overlay and its revision.
+      // Otherwise events delivered during an await could be marked as included
+      // in a snapshot that was assembled before they arrived.
+      const statusOverride = await sessionStatusOverrideForSnapshot(session.id);
+      const state = sessionState.get(sessionId);
+      if (state.runtime === runtimeBeforeRead) {
+        state.runtime = { threadUpdatedAt: session.updatedAt, runtime: log.runtime };
+      }
       const latestPlanUpdate = mergeLatestPlanUpdate(
-        sessionId,
-        log.latestPlanUpdate ?? null,
-        latestPlanUpdateForSession(sessionId),
+        sessionId, log.latestPlanUpdate ?? null, latestPlanUpdateForSession(sessionId),
       );
-      ensureSeqCursor(
-        sessionId,
-        nextSeqForLatestPlanUpdate(log.nextSeq, latestPlanUpdate),
-      );
-      const activities = mergeSessionActivities(
-        log.activities,
-        liveActivityValues(liveActivities.get(sessionId)),
-      );
+      ensureSeqCursor(sessionId, nextSeqForLatestPlanUpdate(log.nextSeq, latestPlanUpdate));
+      const mergedActivities = mergeSessionActivities(log.activities, [...state.activities.values()]);
+      const activities = mergedActivities.slice(-activityLimit);
+      sessionState.confirmActivities(sessionId, log.activities);
       const history = buildSessionHistorySummary(
-        log.totalMessages,
-        log.messages.length,
-        log.totalActivities,
-        log.activities.length,
+        log.totalMessages, log.messages.length, Math.max(log.totalActivities, mergedActivities.length), activities.length,
       );
-
-      setSessionLogCacheEntry(logCache, cacheKey, {
-        threadUpdatedAt: session.updatedAt,
-        messages: log.messages,
-        activities: log.activities,
-        runtime: log.runtime,
-        history,
-        nextSeq: log.nextSeq,
-        latestPlanUpdate,
-      });
-      runtimeCache.set(session.id, {
-        threadUpdatedAt: session.updatedAt,
-        runtime: log.runtime,
-      });
       response.json({
-        session: mapSession(
-          session,
-          log.runtime,
-          await sessionStatusOverrideForSnapshot(session.id),
-        ),
+        session: mapSession(session, state.runtime?.runtime ?? log.runtime, statusOverride),
+        revision: state.revision,
+        liveAssistantText: state.assistantText,
+        liveAssistantReasoning: state.assistantReasoning,
         messages: log.messages,
         activities,
         pendingAction: findPendingActionForSession(pendingActions, sessionId),
         history,
         latestPlanUpdate,
-      });
-    }),
-  );
-
-  // Replay endpoint for cheap reconnect / resume. Clients pass `since`
-  // (the highest seq they've already observed) and get only newer
-  // messages + activities — no re-downloading the full transcript.
-  app.get(
-    "/api/sessions/:sessionId/events",
-    asyncRoute(async (request, response) => {
-      const sessionId = pathParam(request.params.sessionId);
-      const sessionProvider = providerEntryForSessionId(sessionId);
-      if (!sessionProvider) {
-        response.status(400).json({ error: "unknown provider" });
-        return;
-      }
-      if (
-        !requireProviderCapability(
-          response,
-          sessionProvider.provider,
-          sessionProvider.provider.capabilities.sessions.eventReplay,
-          "session event replay",
-          "readSessionThread",
-        ) ||
-        !requireProviderCapability(
-          response,
-          sessionProvider.provider,
-          sessionProvider.provider.capabilities.sessions.eventReplay,
-          "session event replay",
-          "readSessionLog",
-        )
-      ) {
-        return;
-      }
-      const query = request.query as Record<string, unknown>;
-      const since = asInteger(query.since) ?? 0;
-      const baseUpdatedAt = asInteger(query.baseUpdatedAt);
-
-      const session = await readSession(provider, sessionId, false);
-      reconcileObservedThreadStatus(session.id, threadStatusPhase(session));
-
-      let newMessages: SessionMessage[];
-      let newActivities: SessionActivity[];
-      let nextSeq: number;
-      let logRuntime: SessionRuntimeSummary | null;
-      let logLatestPlanUpdate: LatestPlanUpdate | null;
-
-      if (session.path && session.path.endsWith(".jsonl")) {
-        try {
-          const entry = await replayIndex.load(sessionId, session.path);
-          const liveSessionActivities = liveActivities.get(sessionId);
-          if (hostCapabilities.sessions.search) {
-            void indexSessionForSearch(searchIndex, providerRuntime, sessionId).catch(() => {
-              // Ignore indexing errors for live sessions
-            });
-          }
-          ensureSeqCursor(sessionId, entry.nextSeq);
-          const delta = replayIndex.getDelta(entry, since);
-          newMessages = delta.messages;
-          const replayedActivities = filterActivitiesForReplay(
-            mergeSessionActivities(
-              delta.activities,
-              liveActivityValues(liveSessionActivities),
-            ),
-            liveSessionActivities,
-            since,
-          );
-          newActivities = replayedActivities.activities;
-          logLatestPlanUpdate = mergeLatestPlanUpdate(
-            sessionId,
-            latestPlanUpdateForSession(sessionId),
-          );
-          nextSeq = nextSeqForLatestPlanUpdate(
-            Math.max(delta.nextSeq, replayedActivities.highestSeq),
-            logLatestPlanUpdate,
-          );
-          logRuntime = delta.runtime;
-        } catch (error: unknown) {
-          const staleCursor = error && typeof error === "object"
-            ? (error as Record<string, unknown>)
-            : null;
-          if (staleCursor?.code === "STALE_CURSOR") {
-            response.status(410).json({
-              error: "stale_cursor",
-              since: staleCursor.staleSince,
-              oldestAvailableSeq: staleCursor.oldestAvailableSeq,
-            });
-            return;
-          }
-          // Fallback to provider readSessionLog on any other error
-          const log = await provider.readSessionLog!(session);
-          const latestPlanUpdate = mergeLatestPlanUpdate(
-            sessionId,
-            log.latestPlanUpdate ?? null,
-            latestPlanUpdateForSession(sessionId),
-          );
-          ensureSeqCursor(
-            sessionId,
-            nextSeqForLatestPlanUpdate(log.nextSeq, latestPlanUpdate),
-          );
-          const liveSessionActivities = liveActivities.get(sessionId);
-          const activities = mergeSessionActivities(
-            log.activities,
-            liveActivityValues(liveSessionActivities),
-          );
-          const replayedActivities = filterActivitiesForReplay(
-            activities,
-            liveSessionActivities,
-            since,
-          );
-          newMessages = log.messages.filter((m) => (m.seq ?? 0) > since);
-          newActivities = replayedActivities.activities;
-          let highestSeq = replayedActivities.highestSeq;
-          for (const m of newMessages) {
-            if ((m.seq ?? 0) > highestSeq) highestSeq = m.seq ?? highestSeq;
-          }
-          logLatestPlanUpdate = latestPlanUpdate;
-          nextSeq = nextSeqForLatestPlanUpdate(highestSeq, latestPlanUpdate);
-          logRuntime = log.runtime;
-        }
-      } else {
-        const log = await provider.readSessionLog!(session);
-        const latestPlanUpdate = mergeLatestPlanUpdate(
-          sessionId,
-          log.latestPlanUpdate ?? null,
-          latestPlanUpdateForSession(sessionId),
-        );
-        ensureSeqCursor(
-          sessionId,
-          nextSeqForLatestPlanUpdate(log.nextSeq, latestPlanUpdate),
-        );
-        const liveSessionActivities = liveActivities.get(sessionId);
-        const activities = mergeSessionActivities(
-          log.activities,
-          liveActivityValues(liveSessionActivities),
-        );
-        const replayedActivities = filterActivitiesForReplay(
-          activities,
-          liveSessionActivities,
-          since,
-        );
-        newMessages = log.messages.filter((m) => (m.seq ?? 0) > since);
-        newActivities = replayedActivities.activities;
-        let highestSeq = replayedActivities.highestSeq;
-        for (const m of newMessages) {
-          if ((m.seq ?? 0) > highestSeq) highestSeq = m.seq ?? highestSeq;
-        }
-        logLatestPlanUpdate = latestPlanUpdate;
-        nextSeq = nextSeqForLatestPlanUpdate(highestSeq, latestPlanUpdate);
-        logRuntime = log.runtime;
-      }
-
-      const latestPlanUpdate = isLatestPlanUpdateNewerThan(
-        logLatestPlanUpdate,
-        since,
-      )
-        ? logLatestPlanUpdate
-        : null;
-
-      if (
-        baseUpdatedAt != null &&
-        threadTimestampMillis(session.updatedAt) > baseUpdatedAt &&
-        newMessages.length === 0 &&
-        newActivities.length === 0 &&
-        latestPlanUpdate == null
-      ) {
-        response.status(409).json({
-          error: "stale_snapshot",
-          since,
-          baseUpdatedAt,
-          currentUpdatedAt: threadTimestampMillis(session.updatedAt),
-        });
-        return;
-      }
-
-      const eventDeltaSize = measureSessionEventDelta(
-        newMessages,
-        newActivities,
-        latestPlanUpdate,
-      );
-      if (
-        eventDeltaSize.items > SESSION_EVENT_DELTA_MAX_ITEMS ||
-        eventDeltaSize.bytes > SESSION_EVENT_DELTA_MAX_BYTES
-      ) {
-        response.status(410).json({
-          error: "stale_cursor",
-          reason: "delta_too_large",
-          since,
-          nextSeq,
-          maxItems: SESSION_EVENT_DELTA_MAX_ITEMS,
-          maxBytes: SESSION_EVENT_DELTA_MAX_BYTES,
-          actualItems: eventDeltaSize.items,
-          actualBytes: eventDeltaSize.bytes,
-        });
-        return;
-      }
-
-      response.json({
-        sessionId,
-        since,
-        nextSeq,
-        messages: newMessages,
-        activities: newActivities,
-        latestPlanUpdate,
-        pendingAction: findPendingActionForSession(pendingActions, sessionId),
-        session: mapSession(
-          session,
-          logRuntime,
-          await sessionStatusOverrideForSnapshot(session.id),
-        ),
       });
     }),
   );
@@ -2480,7 +2145,7 @@ export async function startServer(
         await readSessionResources(
           provider,
           sessionId,
-          liveActivities,
+          sessionState,
           reconcileObservedThreadStatus,
         ),
       );
@@ -2512,7 +2177,7 @@ export async function startServer(
       const state = await loadFastRunState(
         provider,
         sessionId,
-        activeTurns,
+        sessionState,
         statusOverride,
       );
       if (!isTerminalThreadStatus(statusOverride)) {
@@ -2797,34 +2462,6 @@ export async function startServer(
     }),
   );
 
-  app.get(
-    "/api/permission-profiles",
-    asyncRoute(async (request, response) => {
-      const query = request.query as Record<string, unknown>;
-      const agentProvider = asString(query.agentProvider) || null;
-      const selectedProvider = providerEntryForKind(agentProvider);
-      if (!selectedProvider) {
-        response.status(400).json({ error: "unknown provider" });
-        return;
-      }
-      if (
-        !requireProviderCapability(
-          response,
-          selectedProvider.provider,
-          selectedProvider.provider.capabilities.configuration.permissionProfiles,
-          "permission profile listing",
-          "listPermissionProfiles",
-        )
-      ) {
-        return;
-      }
-      const cwd = asString(query.cwd) || null;
-      response.json(
-        await selectedProvider.provider.listPermissionProfiles!({ cwd }),
-      );
-    }),
-  );
-
   app.post(
     "/api/sessions/create",
     asyncRoute(async (request, response) => {
@@ -2846,7 +2483,6 @@ export async function startServer(
         return;
       }
       const cwd = asString(request.body?.cwd);
-      const prompt = asString(request.body?.prompt);
       const input = parseInputItems(request.body?.input);
       const overrides = parseCreateSessionOverrides(request.body);
       if (!cwd) {
@@ -2862,18 +2498,16 @@ export async function startServer(
         return;
       }
 
-      const resolvedInput =
-        input.length > 0 ? input : buildLegacyTextInput(prompt);
       const unsupportedInput = unsupportedInputCapability(
         selectedProvider.provider,
-        resolvedInput,
+        input,
       );
       if (unsupportedInput) {
         response.status(501).json({ error: unsupportedInput });
         return;
       }
       const scopedInput = await resolveFileInputItemsForCwd(
-        resolvedInput,
+        input,
         cwd,
       );
       const started = await provider.createSession!({
@@ -2889,11 +2523,11 @@ export async function startServer(
           started.activeTurnId,
         )
       ) {
-        activeTurns.set(started.thread.id, {
+        sessionState.get(started.thread.id).activeTurn = {
           turnId: started.activeTurnId!,
           startedAt: Date.now(),
-        });
-        recoveredTerminalThreadStatuses.delete(started.thread.id);
+        };
+        sessionState.get(started.thread.id).recoveredStatus = null;
         setLatestThreadStatusForSession(
           started.thread.id,
           hasPendingActionForSession(pendingActions, started.thread.id)
@@ -2936,7 +2570,6 @@ export async function startServer(
       ) {
         return;
       }
-      const text = asString(request.body?.text);
       const input = parseInputItems(request.body?.input);
       const clientMessageId = asString(request.body?.clientMessageId);
       if (clientMessageId && !isValidClientMessageId(clientMessageId)) {
@@ -2945,15 +2578,13 @@ export async function startServer(
         });
         return;
       }
-      const resolvedInput =
-        input.length > 0 ? input : buildLegacyTextInput(text);
-      if (resolvedInput.length === 0) {
+      if (input.length === 0) {
         response.status(400).json({ error: "input is required" });
         return;
       }
       const unsupportedInput = unsupportedInputCapability(
         sessionProvider.provider,
-        resolvedInput,
+        input,
       );
       if (unsupportedInput) {
         response.status(501).json({ error: unsupportedInput });
@@ -2969,145 +2600,41 @@ export async function startServer(
         response.status(501).json({ error: unsupportedOverride });
         return;
       }
-      const rawInputSignatureHash = hashSessionInputSignature(
-        resolvedInput,
+      const inputSignatureHash = hashSessionInputSignature(
+        input,
         turnOverrides,
       );
       const dedupeKey = clientMessageId
         ? sessionInputDedupeKey(sessionId, clientMessageId)
         : null;
-      let existingDedupe: SessionInputDedupeEntry | undefined;
       if (dedupeKey) {
         pruneSessionInputDedupe();
-        existingDedupe = sessionInputDedupe.get(dedupeKey);
-        if (existingDedupe?.rawSignatureHash) {
-          const canMatchPreAccessModeSignature = !turnOverrides.accessMode;
-          const canMatchPrePermissionProfileSignature =
-            canMatchPreAccessModeSignature &&
-            !turnOverrides.permissionProfile &&
-            !turnOverrides.approvalsReviewer;
-          const matchesPreAccessModeSignature =
-            canMatchPreAccessModeSignature &&
-            existingDedupe.rawSignatureHash ===
-              hashPreAccessModeSessionInputSignature(
-                resolvedInput,
-                turnOverrides,
-              );
-          const matchesPrePermissionProfileSignature =
-            canMatchPrePermissionProfileSignature &&
-            existingDedupe.rawSignatureHash ===
-              hashPrePermissionProfileSessionInputSignature(
-                resolvedInput,
-                turnOverrides,
-              );
-          if (
-            existingDedupe.rawSignatureHash !== rawInputSignatureHash &&
-            !matchesPreAccessModeSignature &&
-            !matchesPrePermissionProfileSignature
-          ) {
+        const existing = sessionInputDedupe.get(dedupeKey);
+        if (existing) {
+          if (existing.signatureHash !== inputSignatureHash) {
             response.status(409).json({
               error: "clientMessageId was already used with different input",
             });
             return;
           }
-          const receipt =
-            existingDedupe.receipt ?? (await existingDedupe.promise);
+          const receipt = existing.receipt ?? (await existing.promise);
           if (receipt) {
             response.json({ ...receipt, replayed: true });
             return;
           }
-        }
-      }
-
-      let scopedInput: AgentSessionInputItem[] | null = null;
-      let inputSignatureHash: string | null = null;
-      const resolveScopedInput = async (): Promise<AgentSessionInputItem[]> => {
-        if (scopedInput) {
-          return scopedInput;
-        }
-        scopedInput = await resolveFileInputItemsForSession(
-          provider,
-          sessionId,
-          resolvedInput,
-        );
-        inputSignatureHash = hashSessionInputSignature(
-          scopedInput,
-          turnOverrides,
-        );
-        return scopedInput;
-      };
-
-      if (dedupeKey && existingDedupe && !existingDedupe.rawSignatureHash) {
-        const canMatchPreAccessModeSignature = !turnOverrides.accessMode;
-        const canMatchPrePermissionProfileSignature =
-          canMatchPreAccessModeSignature &&
-          !turnOverrides.permissionProfile &&
-          !turnOverrides.approvalsReviewer;
-        const legacySignatureHash = hashLegacySessionInputSignature(
-          resolvedInput,
-          turnOverrides,
-        );
-        const prePermissionProfileLegacySignatureHash =
-          hashPrePermissionProfileSessionInputSignature(
-            resolvedInput.filter((item) => item.type !== "file"),
-            turnOverrides,
-          );
-        const preAccessModeLegacySignatureHash =
-          hashPreAccessModeSessionInputSignature(
-            resolvedInput.filter((item) => item.type !== "file"),
-            turnOverrides,
-          );
-        if (
-          existingDedupe.signatureHash === legacySignatureHash ||
-          (canMatchPrePermissionProfileSignature &&
-            existingDedupe.signatureHash ===
-              prePermissionProfileLegacySignatureHash) ||
-          (canMatchPreAccessModeSignature &&
-            existingDedupe.signatureHash === preAccessModeLegacySignatureHash)
-        ) {
-          const receipt =
-            existingDedupe.receipt ?? (await existingDedupe.promise);
-          if (receipt) {
-            response.json({ ...receipt, replayed: true });
-            return;
-          }
-        }
-        await resolveScopedInput();
-        const prePermissionProfileSignatureHash =
-          hashPrePermissionProfileSessionInputSignature(
-            scopedInput!,
-            turnOverrides,
-          );
-        const preAccessModeSignatureHash =
-          hashPreAccessModeSessionInputSignature(scopedInput!, turnOverrides);
-        if (
-          existingDedupe.signatureHash !== inputSignatureHash &&
-          (!canMatchPrePermissionProfileSignature ||
-            existingDedupe.signatureHash !==
-              prePermissionProfileSignatureHash) &&
-          (!canMatchPreAccessModeSignature ||
-            existingDedupe.signatureHash !== preAccessModeSignatureHash)
-        ) {
-          response.status(409).json({
-            error: "clientMessageId was already used with different input",
-          });
-          return;
-        }
-        const receipt = existingDedupe.receipt ?? (await existingDedupe.promise);
-        if (receipt) {
-          response.json({ ...receipt, replayed: true });
-          return;
         }
       }
 
       const submit = async (): Promise<SessionInputReceipt> => {
-        const inputForSubmit = await resolveScopedInput();
+        const inputForSubmit = await resolveFileInputItemsForSession(
+          provider, sessionId, input,
+        );
         const submittedMessage = buildSubmittedUserMessage(
           inputForSubmit,
           clientMessageId,
           allocSeq(sessionId),
         );
-        const state = await loadRunState(provider, sessionId, activeTurns);
+        const state = await loadRunState(provider, sessionId, sessionState);
         const submitted = await provider.submitInput!({
           sessionId,
           input: inputForSubmit,
@@ -3122,13 +2649,13 @@ export async function startServer(
           )
         ) {
           const previousStartedAt = state.turnId
-            ? activeTurns.get(sessionId)?.startedAt
+            ? sessionState.get(sessionId).activeTurn?.startedAt
             : undefined;
-          activeTurns.set(sessionId, {
+          sessionState.get(sessionId).activeTurn = {
             turnId: submitted.turnId!,
             startedAt: previousStartedAt ?? Date.now(),
-          });
-          recoveredTerminalThreadStatuses.delete(sessionId);
+          };
+          sessionState.get(sessionId).recoveredStatus = null;
           setLatestThreadStatusForSession(
             sessionId,
             hasPendingActionForSession(pendingActions, sessionId)
@@ -3152,8 +2679,7 @@ export async function startServer(
       const promise = submit();
       if (dedupeKey) {
         sessionInputDedupe.set(dedupeKey, {
-          signatureHash: rawInputSignatureHash,
-          rawSignatureHash: rawInputSignatureHash,
+          signatureHash: inputSignatureHash,
           createdAt: Date.now(),
           promise,
         });
@@ -3163,20 +2689,17 @@ export async function startServer(
       try {
         const receipt = await promise;
         if (dedupeKey) {
-          const finalSignatureHash = inputSignatureHash ?? rawInputSignatureHash;
           const createdAt =
             sessionInputDedupe.get(dedupeKey)?.createdAt ?? Date.now();
           sessionInputDedupe.set(dedupeKey, {
-            signatureHash: finalSignatureHash,
-            rawSignatureHash: rawInputSignatureHash,
+            signatureHash: inputSignatureHash,
             createdAt,
             receipt,
           });
           await persistSessionInputDedupeReceipt(
             sessionInputDedupeStore,
             dedupeKey,
-            finalSignatureHash,
-            rawInputSignatureHash,
+            inputSignatureHash,
             createdAt,
             receipt,
           );
@@ -3216,15 +2739,15 @@ export async function startServer(
       ) {
         return;
       }
-      const state = await loadRunState(provider, sessionId, activeTurns);
+      const state = await loadRunState(provider, sessionId, sessionState);
       if (!state.turnId) {
         response.json({ stopped: false });
         return;
       }
       await provider.interruptTurn!(sessionId, state.turnId);
-      activeTurns.delete(sessionId);
-      unverifiedActiveTurns.delete(sessionId);
-      recoveredTerminalThreadStatuses.delete(sessionId);
+      sessionState.get(sessionId).activeTurn = null;
+      sessionState.get(sessionId).unverifiedTurn = false;
+      sessionState.get(sessionId).recoveredStatus = null;
       response.json({ stopped: true, turnId: state.turnId });
     }),
   );
@@ -3249,7 +2772,7 @@ export async function startServer(
       ) {
         return;
       }
-      const state = await loadRunState(provider, sessionId, activeTurns);
+      const state = await loadRunState(provider, sessionId, sessionState);
       if (state.turnId) {
         response.status(409).json({
           error: "Cannot compact while a turn is running",
@@ -3258,7 +2781,7 @@ export async function startServer(
         return;
       }
       const result = await provider.compactSession!(sessionId);
-      clearSessionLogCache(logCache, sessionId);
+
       response.json({ compacted: true, result: result ?? null });
       scheduleRecentSessionUpsert(sessionId, 0);
     }),
@@ -3349,13 +2872,14 @@ export async function startServer(
         return;
       }
       await provider.archiveSession!(sessionId);
-      activeTurns.delete(sessionId);
-      unverifiedActiveTurns.delete(sessionId);
-      recoveredTerminalThreadStatuses.delete(sessionId);
-      liveThreadStatuses.delete(sessionId);
-      liveActivities.delete(sessionId);
-      clearSessionLogCache(logCache, sessionId);
-      sessionSeqCursor.delete(sessionId);
+      sessionState.get(sessionId).activeTurn = null;
+      sessionState.get(sessionId).unverifiedTurn = false;
+      sessionState.get(sessionId).recoveredStatus = null;
+      sessionState.get(sessionId).status = null;
+      sessionState.get(sessionId).activities.clear();
+      sessionState.clearDraft(sessionId);
+
+      sessionState.get(sessionId).nextSeq = 0;
       response.json({ archived: true });
       broadcastRecentSessionRemove(sessionId);
       void indexSessionForSearch(searchIndex, providerRuntime, sessionId, true).catch(() => {});
@@ -3424,7 +2948,7 @@ export async function startServer(
       pendingActions.delete(actionId);
       setLatestThreadStatusForSession(
         action.sessionId,
-        activeTurns.has(action.sessionId) ? "running" : null,
+        (sessionState.get(action.sessionId).activeTurn != null) ? "running" : null,
       );
       scheduleRecentSessionUpsert(action.sessionId, 0);
       broadcastLive(action.sessionId, {
@@ -3515,7 +3039,7 @@ export async function startServer(
           listSessions: () =>
             listSessions(
               provider,
-              runtimeCache,
+              sessionState,
               null,
               "none",
               sessionStatusOverrideForDisplay,
@@ -3590,10 +3114,6 @@ export async function startServer(
         sendEvent(ws, {
           type: "hello",
           sessionId,
-          nextSeq: nextSeqForLatestPlanUpdate(
-            sessionSeqCursor.get(sessionId) ?? 0,
-            latestPlanUpdateForSession(sessionId),
-          ),
         });
         ws.on("close", () => {
           const current = socketsBySession.get(sessionId);
@@ -3782,11 +3302,18 @@ export async function startServer(
       }
       await closeWebSocketServer(wsServer);
       await closeHttpServer(server);
+      provider.off("liveEvent", onProviderLiveEvent);
+      for (const timer of recentSessionBroadcastTimers.values()) clearTimeout(timer);
+      recentSessionBroadcastTimers.clear();
       await searchIndexBackfill.catch(() => undefined);
       await searchIndex.close();
       await sessionRuntimeSignalsSaveChain.catch(() => undefined);
-      await provider.close?.();
-      await pushNotifications.close();
+      try {
+        await provider.close?.();
+      } finally {
+        provider.off("stderr", onProviderStderr);
+        await pushNotifications.close();
+      }
     },
   };
   return runningServerRef;
@@ -3913,10 +3440,6 @@ async function closeWebSocketServer(server: WebSocketServer): Promise<void> {
 }
 
 
-function getCodexHomePath(provider: AgentProvider): string | null {
-  const runtimeHome = (provider as { runtimeHome?: string }).runtimeHome;
-  return typeof runtimeHome === "string" ? runtimeHome : null;
-}
 function asyncRoute(
   handler: (
     request: JsonRouteRequest,
@@ -4055,18 +3578,6 @@ function unsupportedOverrideCapability(
   if (overrides.accessMode && !provider.capabilities.runtimeControls.accessMode) {
     return `${provider.displayName} does not support access mode overrides`;
   }
-  if (
-    overrides.permissionProfile &&
-    !provider.capabilities.runtimeControls.permissionProfile
-  ) {
-    return `${provider.displayName} does not support permission profile overrides`;
-  }
-  if (
-    overrides.approvalsReviewer &&
-    !provider.capabilities.runtimeControls.approvalsReviewer
-  ) {
-    return `${provider.displayName} does not support approval reviewer overrides`;
-  }
   if (overrides.profile && !provider.capabilities.configuration.profiles) {
     return `${provider.displayName} does not support profile overrides`;
   }
@@ -4075,7 +3586,7 @@ function unsupportedOverrideCapability(
 
 async function resolveTerminalCwd(
   provider: AgentProvider,
-  runtimeCache: Map<string, SessionRuntimeCacheEntry>,
+  sessionState: SessionStateStore,
   cwd: string,
   sessionId: string | null | undefined,
   configuredRoots: string[],
@@ -4094,7 +3605,7 @@ async function resolveTerminalCwd(
   return resolveWorkspacePath(
     cwd,
     await collectWorkspaceRoots(
-      () => listSessions(provider, runtimeCache, null, "none"),
+      () => listSessions(provider, sessionState, null, "none"),
       configuredRoots,
     ),
   );
@@ -4105,92 +3616,31 @@ async function resolveTerminalCwd(
 //
 // Providers (Codex, Copilot, etc.) report git context from their own agent
 // perspective. None of them run `git rev-parse --git-common-dir`, so
-// GitInfoSummary.gitCommonDir arrives as null from every provider.
-//
-// The daemon owns the host filesystem and already has git.ts. Rather than
-// asking every provider to add this, we enrich the session list here:
-//   1. Collect unique CWDs from the session list.
-//   2. Run readGitCommonDir() for any CWD not yet in the process-level cache.
-//      These run in parallel — typically a handful of fast local subprocesses.
-//   3. Patch each SessionSummary's gitInfo with the cached value.
-//
-// The cache is process-scoped and never expires. gitCommonDir is a stable
-// property of a path on disk — it doesn't change while the daemon is running.
-// If a repo is removed the CWD disappears from session lists, so the stale
-// cache entry becomes unreachable and harmless.
-// ─────────────────────────────────────────────────────────────────────────────
-
-/** Process-level CWD → gitCommonDir cache. null means "not a git repo". */
-const _gitCommonDirCache = new Map<string, string | null>();
-
-/**
- * Process-level CWD → lightweight git identity cache.
- * Populated for CWDs where the provider returned null gitInfo so the host
- * can backfill branch/sha/originUrl from the local filesystem.
- */
-type GitIdentityEntry = Awaited<ReturnType<typeof readGitIdentity>>;
-const _gitIdentityCache = new Map<string, GitIdentityEntry>();
-
-/** Applies gitCommonDir and backfills branch/sha/originUrl where the provider left them null. */
-function applyGitEnrichmentFromCache(session: SessionSummary): SessionSummary {
-  if (!session.cwd) return session;
-
-  const commonDir = _gitCommonDirCache.get(session.cwd) ?? null;
-  const identity = _gitIdentityCache.get(session.cwd) ?? null;
-
-  // Nothing to add — CWD not in a git repo or cache not warm yet.
-  if (!commonDir && !identity) return session;
-
-  const existing = session.gitInfo;
-
-  // Merge: provider values win; host fills whatever is missing.
-  const merged: GitInfoSummary = {
-    sha: existing?.sha ?? identity?.sha ?? null,
-    branch: existing?.branch ?? identity?.branch ?? null,
-    originUrl: existing?.originUrl ?? identity?.originUrl ?? null,
-    gitCommonDir: existing?.gitCommonDir ?? commonDir ?? null,
-  };
-
-  // Skip if nothing changed.
-  if (
-    merged.sha === existing?.sha &&
-    merged.branch === existing?.branch &&
-    merged.originUrl === existing?.originUrl &&
-    merged.gitCommonDir === existing?.gitCommonDir
-  ) {
-    return session;
-  }
-
-  return { ...session, gitInfo: merged };
-}
-
+// Git metadata is refreshed with each recent-list read. The short recent-list
+// cache bounds work without keeping branch names stale for the daemon lifetime.
 async function enrichSessionsWithGitCommonDir(
   sessions: SessionSummary[],
 ): Promise<SessionSummary[]> {
-  const uniqueCwds = [
-    ...new Set(sessions.map((s) => s.cwd).filter((cwd) => cwd.length > 0)),
-  ];
-  const uncachedCommonDir = uniqueCwds.filter((cwd) => !_gitCommonDirCache.has(cwd));
-  const needsIdentity = uniqueCwds.filter(
-    (cwd) =>
-      !_gitIdentityCache.has(cwd) &&
-      sessions.some((s) => s.cwd === cwd && !s.gitInfo?.branch),
-  );
-
-  // Populate caches in parallel. gitCommonDir and identity are independent
-  // git calls so we batch all of them together.
-  await Promise.allSettled([
-    ...uncachedCommonDir.map(async (cwd) => {
-      const dir = await readGitCommonDir(cwd);
-      _gitCommonDirCache.set(cwd, dir);
-    }),
-    ...needsIdentity.map(async (cwd) => {
-      const identity = await readGitIdentity(cwd);
-      _gitIdentityCache.set(cwd, identity);
-    }),
-  ]);
-
-  return sessions.map(applyGitEnrichmentFromCache);
+  const directories = [...new Set(sessions.map((session) => session.cwd).filter(Boolean))];
+  const entries = await Promise.all(directories.map(async (cwd) => {
+    const [commonDir, identity] = await Promise.all([
+      readGitCommonDir(cwd).catch(() => null),
+      readGitIdentity(cwd).catch(() => null),
+    ]);
+    return [cwd, { commonDir, identity }] as const;
+  }));
+  const metadata = new Map(entries);
+  return sessions.map((session) => {
+    const git = metadata.get(session.cwd);
+    if (!git) return session;
+    const existing = session.gitInfo;
+    return { ...session, gitInfo: {
+      sha: existing?.sha ?? git.identity?.sha ?? null,
+      branch: existing?.branch ?? git.identity?.branch ?? null,
+      originUrl: existing?.originUrl ?? git.identity?.originUrl ?? null,
+      gitCommonDir: git.commonDir,
+    } };
+  });
 }
 
 // Canonical recent-session projection used by /api/sessions and the recent
@@ -4198,7 +3648,7 @@ async function enrichSessionsWithGitCommonDir(
 // enrichment behavior.
 async function buildRecentSessionSummary(
   provider: AgentProvider,
-  runtimeCache: Map<string, SessionRuntimeCacheEntry>,
+  sessionState: SessionStateStore,
   thread: ThreadRecord,
   runtimeMode: SessionRuntimeListMode = "active",
   statusOverrideForSession?: (
@@ -4207,7 +3657,7 @@ async function buildRecentSessionSummary(
 ): Promise<SessionSummary> {
   const [session] = await buildRecentSessionSummaries(
     provider,
-    runtimeCache,
+    sessionState,
     [thread],
     runtimeMode,
     statusOverrideForSession,
@@ -4217,7 +3667,7 @@ async function buildRecentSessionSummary(
 
 async function buildRecentSessionSummaries(
   provider: AgentProvider,
-  runtimeCache: Map<string, SessionRuntimeCacheEntry>,
+  sessionState: SessionStateStore,
   threads: ThreadRecord[],
   runtimeMode: SessionRuntimeListMode = "active",
   statusOverrideForSession?: (
@@ -4239,7 +3689,7 @@ async function buildRecentSessionSummaries(
         await loadCachedSessionRuntime(
           provider,
           thread,
-          runtimeCache,
+          sessionState,
           runtimeMode,
         ),
         (await statusOverrideForSession?.(thread.id)) ?? null,
@@ -4250,7 +3700,7 @@ async function buildRecentSessionSummaries(
 
 async function listSessions(
   provider: AgentProvider,
-  runtimeCache: Map<string, SessionRuntimeCacheEntry>,
+  sessionState: SessionStateStore,
   limitOverride: number | null = null,
   runtimeMode: SessionRuntimeListMode = "active",
   statusOverrideForSession?: (
@@ -4267,7 +3717,7 @@ async function listSessions(
     );
     return buildRecentSessionSummaries(
       provider,
-      runtimeCache,
+      sessionState,
       threads,
       runtimeMode,
       statusOverrideForSession,
@@ -4290,7 +3740,7 @@ async function listSessions(
   );
   return buildRecentSessionSummaries(
     provider,
-    runtimeCache,
+    sessionState,
     mergedThreads,
     runtimeMode,
     statusOverrideForSession,
@@ -4623,9 +4073,9 @@ function chunkArray<T>(array: T[], size: number): T[][] {
 async function loadRunState(
   provider: AgentProvider,
   sessionId: string,
-  activeTurns: Map<string, ActiveTurnState>,
+  sessionState: SessionStateStore,
 ): Promise<{ turnId: string | null }> {
-  const known = activeTurns.get(sessionId);
+  const known = sessionState.get(sessionId).activeTurn;
   if (known) {
     return { turnId: known.turnId };
   }
@@ -4646,10 +4096,10 @@ async function loadRunState(
   for (let index = turns.length - 1; index >= 0; index -= 1) {
     const turn = turns[index] as TurnRecord;
     if (isActiveTurnStatus(turn.status)) {
-      activeTurns.set(sessionId, {
+      sessionState.get(sessionId).activeTurn = {
         turnId: turn.id,
         startedAt: Date.now(),
-      });
+      };
       return { turnId: turn.id };
     }
   }
@@ -4660,7 +4110,7 @@ async function loadRunState(
 async function loadFastRunState(
   provider: AgentProvider,
   sessionId: string,
-  activeTurns: Map<string, ActiveTurnState>,
+  sessionState: SessionStateStore,
   liveStatusOverride: LiveThreadStatus | null = null,
 ): Promise<{ status: LiveThreadStatus; isRunning: boolean; turnId: string | null }> {
   if (liveStatusOverride != null) {
@@ -4668,11 +4118,11 @@ async function loadFastRunState(
       status: liveStatusOverride,
       isRunning: isRunningThreadStatus(liveStatusOverride),
       turnId: isRunningThreadStatus(liveStatusOverride)
-        ? activeTurns.get(sessionId)?.turnId ?? null
+        ? sessionState.get(sessionId).activeTurn?.turnId ?? null
         : null,
     };
   }
-  const known = activeTurns.get(sessionId);
+  const known = sessionState.get(sessionId).activeTurn;
   if (known) {
     return { status: "running", isRunning: true, turnId: known.turnId };
   }
@@ -4761,140 +4211,6 @@ async function isThreadLoaded(
   }
   const data = await provider.listLoadedSessionIds();
   return data.includes(sessionId);
-}
-
-function upsertLiveActivity(
-  liveActivities: Map<string, Map<string, LiveActivityEntry>>,
-  sessionId: string,
-  activity: SessionActivity,
-  allocReplaySeq: () => number,
-): SessionActivity {
-  const sessionActivities =
-    liveActivities.get(sessionId) || new Map<string, LiveActivityEntry>();
-  const existing = sessionActivities.get(activity.id);
-  const merged = mergeActivity(existing?.activity, activity);
-  sessionActivities.set(activity.id, {
-    activity: merged,
-    replaySeq: existing ? allocReplaySeq() : merged.seq,
-  });
-  liveActivities.set(sessionId, sessionActivities);
-  return merged;
-}
-
-function materializeLiveActivityDraft(
-  liveActivities: Map<string, Map<string, LiveActivityEntry>>,
-  sessionId: string,
-  draft: AgentSessionActivityDraft,
-  allocSeq: () => number,
-): SessionActivity {
-  const existing = liveActivities.get(sessionId)?.get(draft.id)?.activity;
-  const activity = materializeAgentActivityDraft(draft, {
-    createdAt: existing?.createdAt ?? Date.now(),
-    seq: existing?.seq ?? allocSeq(),
-  });
-  if (
-    existing?.type === "file_change" &&
-    activity.type === "file_change" &&
-    activity.status === "in_progress"
-  ) {
-    return { ...activity, status: existing.status };
-  }
-  return activity;
-}
-
-function updateLiveOutputActivity(
-  liveActivities: Map<string, Map<string, LiveActivityEntry>>,
-  sessionId: string,
-  itemId: string,
-  delta: string,
-  allocReplaySeq: () => number,
-): SessionActivity | null {
-  const sessionActivities = liveActivities.get(sessionId);
-  if (!sessionActivities) {
-    return null;
-  }
-
-  const existing = sessionActivities.get(itemId);
-  const activity = existing?.activity;
-  if (!activity || (activity.type !== "command" && activity.type !== "tool")) {
-    return null;
-  }
-
-  const updated = appendCommandActivityOutput(activity, delta);
-  if (!updated) {
-    return null;
-  }
-
-  sessionActivities.set(itemId, {
-    activity: updated,
-    replaySeq: allocReplaySeq(),
-  });
-  return updated;
-}
-
-function updateLiveCommandTerminalInteraction(
-  liveActivities: Map<string, Map<string, LiveActivityEntry>>,
-  sessionId: string,
-  itemId: string,
-  stdin: string,
-  allocReplaySeq: () => number,
-): SessionActivity | null {
-  const sessionActivities = liveActivities.get(sessionId);
-  if (!sessionActivities) {
-    return null;
-  }
-
-  const existing = sessionActivities.get(itemId);
-  const activity = existing?.activity;
-  if (!activity || activity.type !== "command") {
-    return null;
-  }
-
-  const updated = applyCommandTerminalInteraction(activity, stdin);
-  if (!updated) {
-    return null;
-  }
-
-  sessionActivities.set(itemId, {
-    activity: updated,
-    replaySeq: allocReplaySeq(),
-  });
-  return updated;
-}
-
-function liveActivityValues(
-  sessionActivities: Map<string, LiveActivityEntry> | undefined,
-): SessionActivity[] {
-  if (!sessionActivities) {
-    return [];
-  }
-  return [...sessionActivities.values()].map((entry) => entry.activity);
-}
-
-function filterActivitiesForReplay(
-  activities: SessionActivity[],
-  sessionActivities: Map<string, LiveActivityEntry> | undefined,
-  since: number,
-): { activities: SessionActivity[]; highestSeq: number } {
-  const returned: SessionActivity[] = [];
-  let highestSeq = since;
-  for (const activity of activities) {
-    const replaySeq = Math.max(
-      activity.seq ?? 0,
-      sessionActivities?.get(activity.id)?.replaySeq ?? 0,
-    );
-    if (replaySeq <= since) {
-      continue;
-    }
-    returned.push(activity);
-    if (replaySeq > highestSeq) {
-      highestSeq = replaySeq;
-    }
-  }
-  return {
-    activities: returned,
-    highestSeq,
-  };
 }
 
 function mapSession(
@@ -5108,17 +4424,6 @@ function parseGitDiffKind(
   }
 }
 
-function normalizeGitSha(value: unknown): string | null {
-  if (typeof value === "string") {
-    return value || null;
-  }
-  if (value && typeof value === "object") {
-    const typed = value as Record<string, unknown>;
-    return asString(typed.sha ?? typed.value ?? typed["0"]) ?? null;
-  }
-  return null;
-}
-
 function sanitizeTitle(raw: string): string {
   const compact = raw.replace(/\s+/g, " ").trim();
   if (!compact) {
@@ -5135,80 +4440,10 @@ function hashSessionInputSignature(
     .update(
       JSON.stringify({
         input,
-        overrides: buildTurnInputSignatureOverrides(overrides),
+        overrides,
       }),
     )
     .digest("hex");
-}
-
-function hashLegacySessionInputSignature(
-  input: AgentSessionInputItem[],
-  overrides: AgentSessionOverrides,
-): string {
-  return hashSessionInputSignature(
-    input.filter((item) => item.type !== "file"),
-    overrides,
-  );
-}
-
-function hashPrePermissionProfileSessionInputSignature(
-  input: AgentSessionInputItem[],
-  overrides: AgentSessionOverrides,
-): string {
-  return createHash("sha256")
-    .update(
-      JSON.stringify({
-        input,
-        overrides: {
-          model: overrides.model,
-          reasoningEffort: overrides.reasoningEffort,
-          fastMode: overrides.fastMode,
-          approvalPolicy: overrides.approvalPolicy,
-          sandboxMode: overrides.sandboxMode,
-          networkAccess: overrides.networkAccess,
-        },
-      }),
-    )
-    .digest("hex");
-}
-
-function hashPreAccessModeSessionInputSignature(
-  input: AgentSessionInputItem[],
-  overrides: AgentSessionOverrides,
-): string {
-  return createHash("sha256")
-    .update(
-      JSON.stringify({
-        input,
-        overrides: {
-          model: overrides.model,
-          reasoningEffort: overrides.reasoningEffort,
-          fastMode: overrides.fastMode,
-          approvalPolicy: overrides.approvalPolicy,
-          sandboxMode: overrides.sandboxMode,
-          networkAccess: overrides.networkAccess,
-          permissionProfile: overrides.permissionProfile,
-          approvalsReviewer: overrides.approvalsReviewer,
-        },
-      }),
-    )
-    .digest("hex");
-}
-
-function buildTurnInputSignatureOverrides(
-  overrides: AgentSessionOverrides,
-): Record<string, unknown> {
-  return {
-    model: overrides.model,
-    reasoningEffort: overrides.reasoningEffort,
-    fastMode: overrides.fastMode,
-    approvalPolicy: overrides.approvalPolicy,
-    sandboxMode: overrides.sandboxMode,
-    networkAccess: overrides.networkAccess,
-    accessMode: overrides.accessMode,
-    permissionProfile: overrides.permissionProfile,
-    approvalsReviewer: overrides.approvalsReviewer,
-  };
 }
 
 function isValidClientMessageId(value: string): boolean {
@@ -5223,14 +4458,12 @@ async function persistSessionInputDedupeReceipt(
   store: SessionInputDedupeStore,
   key: string,
   signatureHash: string,
-  rawSignatureHash: string,
   createdAt: number,
   receipt: SessionInputReceipt,
 ): Promise<void> {
   const entry: StoredSessionInputDedupeEntry = {
     key,
     signatureHash,
-    rawSignatureHash,
     createdAt,
     updatedAt: Date.now(),
     receipt,
@@ -5294,13 +4527,13 @@ function buildSubmittedUserMessage(
 async function loadCachedSessionRuntime(
   provider: AgentProvider,
   thread: ThreadRecord,
-  runtimeCache: Map<string, SessionRuntimeCacheEntry>,
+  sessionState: SessionStateStore,
   runtimeMode: SessionRuntimeListMode,
 ): Promise<SessionRuntimeSummary | null> {
   if (runtimeMode === "none") {
     return null;
   }
-  const cached = runtimeCache.get(thread.id);
+  const cached = sessionState.get(thread.id).runtime;
   if (cached && cached.threadUpdatedAt === thread.updatedAt) {
     if (cached.promise) {
       return cached.promise;
@@ -5314,16 +4547,15 @@ async function loadCachedSessionRuntime(
   const promise = hasProviderMethod(provider, "readSessionRuntime")
     ? provider.readSessionRuntime(thread).catch(() => null)
     : Promise.resolve(null);
-  runtimeCache.set(thread.id, {
+  sessionState.get(thread.id).runtime = {
     threadUpdatedAt: thread.updatedAt,
     runtime: null,
     promise,
-  });
+  };
   const runtime = await promise;
-  runtimeCache.set(thread.id, {
-    threadUpdatedAt: thread.updatedAt,
-    runtime,
-  });
+  if (sessionState.get(thread.id).runtime?.promise === promise) {
+    sessionState.get(thread.id).runtime = { threadUpdatedAt: thread.updatedAt, runtime };
+  }
   return runtime;
 }
 
@@ -5427,52 +4659,6 @@ async function mapWithConcurrency<T, R>(
   return results;
 }
 
-function setSessionLogCacheEntry(
-  logCache: Map<string, SessionLogCacheEntry>,
-  cacheKey: string,
-  entry: SessionLogCacheEntry,
-): void {
-  if (logCache.has(cacheKey)) {
-    logCache.delete(cacheKey);
-  }
-  logCache.set(cacheKey, entry);
-
-  while (logCache.size > SESSION_LOG_CACHE_LIMIT) {
-    const oldest = logCache.keys().next().value;
-    if (!oldest) {
-      return;
-    }
-    logCache.delete(oldest);
-  }
-}
-
-function updateSessionLogCacheLatestPlanUpdate(
-  logCache: Map<string, SessionLogCacheEntry>,
-  sessionId: string,
-  latestPlanUpdate: LatestPlanUpdate | null,
-): void {
-  const prefix = `${sessionId}::`;
-  for (const [key, entry] of logCache) {
-    if (!key.startsWith(prefix)) {
-      continue;
-    }
-    entry.latestPlanUpdate = latestPlanUpdate;
-    entry.nextSeq = nextSeqForLatestPlanUpdate(entry.nextSeq, latestPlanUpdate);
-  }
-}
-
-function clearSessionLogCache(
-  logCache: Map<string, SessionLogCacheEntry>,
-  sessionId: string,
-): void {
-  const prefix = `${sessionId}::`;
-  for (const key of [...logCache.keys()]) {
-    if (key.startsWith(prefix)) {
-      logCache.delete(key);
-    }
-  }
-}
-
 function normalizeLatestPlanUpdate(
   latestPlanUpdate: LatestPlanUpdate | null | undefined,
   sessionId?: string,
@@ -5526,13 +4712,6 @@ function mergeLatestPlanUpdate(
     }
   }
   return best;
-}
-
-function isLatestPlanUpdateNewerThan(
-  latestPlanUpdate: LatestPlanUpdate | null,
-  since: number,
-): latestPlanUpdate is LatestPlanUpdate {
-  return latestPlanUpdate?.seq != null && latestPlanUpdate.seq > since;
 }
 
 function nextSeqForLatestPlanUpdate(
@@ -5628,14 +4807,6 @@ async function saveSessionRuntimeSignalsState(
   await rename(tmpPath, filePath);
 }
 
-function buildSessionLogCacheKey(
-  sessionId: string,
-  messageLimit: number | null,
-  activityLimit: number | null,
-): string {
-  return `${sessionId}::m${messageLimit ?? "all"}::a${activityLimit ?? "all"}`;
-}
-
 function buildSessionHistorySummary(
   totalMessages: number,
   returnedMessages: number,
@@ -5655,7 +4826,7 @@ function buildSessionHistorySummary(
 async function readSessionResources(
   provider: AgentProvider,
   sessionId: string,
-  liveActivities: Map<string, Map<string, LiveActivityEntry>>,
+  sessionState: SessionStateStore,
   reconcileStatus?: (
     sessionId: string,
     observedStatus: LiveThreadStatus,
@@ -5671,7 +4842,7 @@ async function readSessionResources(
   const log = await readLog.call(provider, session);
   const activities = mergeSessionActivities(
     log.activities,
-    liveActivityValues(liveActivities.get(sessionId)),
+    [...sessionState.get(sessionId).activities.values()],
   );
   const resources: SessionResource[] = buildSessionResources(
     log.messages,
@@ -5771,13 +4942,6 @@ function parseUpdateChannel(value: unknown): UpdateChannel | null {
     return channel;
   }
   return null;
-}
-
-function buildLegacyTextInput(text: string | null): AgentSessionInputItem[] {
-  if (!text) {
-    return [];
-  }
-  return [{ type: "text", text, text_elements: [] }];
 }
 
 function parseInputItems(value: unknown): AgentSessionInputItem[] {
@@ -5954,23 +5118,6 @@ function buildSubmittedUserMessageAttachments(
   return attachments;
 }
 
-function measureSessionEventDelta(
-  messages: SessionMessage[],
-  activities: SessionActivity[],
-  latestPlanUpdate: LatestPlanUpdate | null,
-): { items: number; bytes: number } {
-  return {
-    items:
-      messages.length +
-      activities.length +
-      (latestPlanUpdate == null ? 0 : 1),
-    bytes: Buffer.byteLength(
-      JSON.stringify({ messages, activities, latestPlanUpdate }),
-      "utf8",
-    ),
-  };
-}
-
 function parseCreateSessionOverrides(value: unknown): AgentSessionOverrides {
   const typed =
     value && typeof value === "object"
@@ -5987,8 +5134,6 @@ function parseCreateSessionOverrides(value: unknown): AgentSessionOverrides {
     webSearch: asString(typed.webSearch),
     profile: asString(typed.profile),
     accessMode: asString(typed.accessMode),
-    permissionProfile: asString(typed.permissionProfile),
-    approvalsReviewer: asString(typed.approvalsReviewer),
   };
 }
 
@@ -6003,13 +5148,11 @@ function parseTurnOverrides(value: unknown): AgentSessionOverrides {
     reasoningEffort: asString(typed.reasoningEffort),
     fastMode: parseOptionalBool(typed.fastMode),
     approvalPolicy: asString(typed.approvalPolicy),
-    sandboxMode: asString(typed.sandbox ?? typed.sandboxMode),
+    sandboxMode: asString(typed.sandboxMode),
     networkAccess: parseOptionalBool(typed.networkAccess),
     webSearch: null,
     profile: null,
     accessMode: asString(typed.accessMode),
-    permissionProfile: asString(typed.permissionProfile),
-    approvalsReviewer: asString(typed.approvalsReviewer),
   };
 }
 

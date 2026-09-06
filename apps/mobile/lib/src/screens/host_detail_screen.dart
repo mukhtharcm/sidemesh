@@ -1746,7 +1746,6 @@ String _capabilityFeatureLabel(String key) {
   return switch (key) {
     'imageUrl' => 'image URL',
     'localImage' => 'local image',
-    'eventReplay' => 'event replay',
     'recentFallback' => 'recent fallback',
     'skillManagement' => 'skills',
     'mode' => 'work style',

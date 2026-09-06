@@ -18,6 +18,32 @@ import { MultiAgentProvider } from "./multi-provider.js";
 import type { SessionLogSnapshot, SessionSubAgentInfo } from "./types.js";
 
 describe("MultiAgentProvider", () => {
+  it("finishes closing every provider before reporting a shutdown error", async () => {
+    const codex = new StubProvider("codex", "Codex");
+    const copilot = new StubProvider("copilot", "Copilot");
+    let release!: () => void;
+    const flushing = new Promise<void>((resolve) => { release = resolve; });
+    let flushed = false;
+    let reported = false;
+    Object.assign(codex, { close: async () => { throw new Error("SDK failed to stop"); } });
+    Object.assign(copilot, { close: async () => { await flushing; flushed = true; } });
+    const provider = new MultiAgentProvider([
+      { kind: "codex", config: { kind: "codex", bin: "codex" }, provider: codex },
+      { kind: "copilot", config: { kind: "copilot", bin: "copilot", stateDir: null, allowAll: false, configuredModel: null }, provider: copilot },
+    ], "codex");
+    const closing = provider.close().catch((error: unknown) => {
+      reported = true;
+      assert.equal(flushed, true, "shutdown returned before the other provider saved");
+      assert.ok(error instanceof AggregateError);
+      assert.equal(error.errors.length, 1);
+    });
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    assert.equal(reported, false);
+    release();
+    await closing;
+    assert.equal(reported, true);
+  });
+
   it("wraps session ids and routes reads and writes back to the owning provider", async () => {
     const codex = new StubProvider("codex", "Codex");
     const copilot = new StubProvider("copilot", "GitHub Copilot");
@@ -360,7 +386,6 @@ class StubProvider
       compact: true,
       interrupt: true,
       history: true,
-      eventReplay: true,
       recentFallback: true,
     searchSessions: true,
     },
@@ -386,7 +411,6 @@ class StubProvider
       models: true,
       profiles: false,
       accessModes: false,
-      permissionProfiles: false,
       skills: false,
       skillManagement: false,
     },
@@ -400,8 +424,6 @@ class StubProvider
       networkAccess: true,
       webSearch: false,
       accessMode: false,
-      permissionProfile: false,
-      approvalsReviewer: false,
     },
     lifecycle: {
       restart: true,

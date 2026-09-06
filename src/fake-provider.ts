@@ -89,7 +89,6 @@ export const FAKE_PROVIDER_CAPABILITIES: AgentProviderCapabilities = {
     compact: true,
     interrupt: true,
     history: true,
-    eventReplay: true,
     recentFallback: true,
     searchSessions: true,
   },
@@ -115,7 +114,6 @@ export const FAKE_PROVIDER_CAPABILITIES: AgentProviderCapabilities = {
     models: true,
     profiles: true,
     accessModes: false,
-    permissionProfiles: false,
     skills: true,
     skillManagement: true,
   },
@@ -129,8 +127,6 @@ export const FAKE_PROVIDER_CAPABILITIES: AgentProviderCapabilities = {
     networkAccess: true,
     webSearch: true,
     accessMode: false,
-    permissionProfile: false,
-    approvalsReviewer: false,
   },
   lifecycle: {
     restart: false,
@@ -179,7 +175,6 @@ function capabilitiesForFakeProfile(
       capabilities.sessions.archive = false;
       capabilities.sessions.compact = false;
       capabilities.sessions.interrupt = false;
-      capabilities.sessions.eventReplay = false;
       capabilities.sessions.recentFallback = false;
       disableInputAttachments(capabilities);
       disableApprovals(capabilities);
