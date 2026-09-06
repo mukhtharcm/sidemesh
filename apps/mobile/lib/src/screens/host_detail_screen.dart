@@ -57,6 +57,8 @@ class _HostDetailScreenState extends State<HostDetailScreen>
   final AppVersionStore _appVersionStore = AppVersionStore.instance;
   late Future<NodeInfo> _future;
   Timer? _refreshTimer;
+  bool _terminalOpen = false;
+  String _terminalCwd = '/';
   Future<void>? _updateInfoRefresh;
   bool _checkingUpdateInfo = false;
   AppLifecycleState? _lifecycleState;
@@ -211,6 +213,17 @@ class _HostDetailScreenState extends State<HostDetailScreen>
   @override
   Widget build(BuildContext context) {
     final colors = context.colors;
+    if (widget.embedded && _terminalOpen) {
+      return Padding(
+        padding: EdgeInsets.only(top: widget.topPadding),
+        child: TerminalScreen(
+          host: widget.host,
+          api: widget.api,
+          cwd: _terminalCwd,
+          onClose: () => setState(() => _terminalOpen = false),
+        ),
+      );
+    }
     if (widget.embedded) {
       return Container(
         color: colors.canvas,
@@ -218,11 +231,7 @@ class _HostDetailScreenState extends State<HostDetailScreen>
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             SizedBox(height: widget.topPadding),
-            _EmbeddedHostHeader(
-              host: widget.host,
-              onRefresh: _refresh,
-              onNewSession: () => _startSession(),
-            ),
+            _EmbeddedHostHeader(host: widget.host, onRefresh: _refresh),
             Expanded(child: _buildBody(context)),
           ],
         ),
@@ -239,11 +248,6 @@ class _HostDetailScreenState extends State<HostDetailScreen>
             icon: const Icon(Icons.refresh_rounded),
           ),
         ],
-      ),
-      floatingActionButton: FloatingActionButton.extended(
-        onPressed: () => _startSession(),
-        icon: const Icon(Icons.play_arrow_rounded),
-        label: const Text('New session'),
       ),
       body: _buildBody(context),
     );
@@ -268,17 +272,20 @@ class _HostDetailScreenState extends State<HostDetailScreen>
         }
         final node = snapshot.data!;
         return AppContentColumn(
+          maxWidth: AppSizes.readingMaxWidth,
           child: RefreshIndicator(
             color: colors.accent,
             onRefresh: _refresh,
             child: ListView(
               padding: widget.embedded
                   ? AppPadding.desktopPage
-                  : AppPadding.mobilePage.copyWith(
-                      bottom: AppSizes.floatingActionClearance,
-                    ),
+                  : AppPadding.mobilePage.copyWith(bottom: AppSpacing.xl),
               children: [
-                _NodeCard(host: widget.host, node: node),
+                _NodeCard(
+                  host: widget.host,
+                  node: node,
+                  showAddress: !widget.embedded,
+                ),
                 const SizedBox(height: AppSpacing.sm),
                 _MachineAgents(node: node),
                 if (_shouldShowMobileCompatibility(node)) ...[
@@ -290,11 +297,18 @@ class _HostDetailScreenState extends State<HostDetailScreen>
                 ],
                 const SizedBox(height: AppSpacing.xl),
                 _HostManagementCard(
+                  onNewSession: () => _startSession(),
                   host: widget.host,
                   api: widget.api,
                   node: node,
                   checkingUpdateInfo: _checkingUpdateInfo,
                   onRefresh: _refresh,
+                  onOpenTerminal: widget.embedded
+                      ? () => setState(() {
+                          _terminalCwd = node.homeDirectory ?? '/';
+                          _terminalOpen = true;
+                        })
+                      : null,
                 ),
               ],
             ),
@@ -306,19 +320,15 @@ class _HostDetailScreenState extends State<HostDetailScreen>
 }
 
 class _EmbeddedHostHeader extends StatelessWidget {
-  const _EmbeddedHostHeader({
-    required this.host,
-    required this.onRefresh,
-    required this.onNewSession,
-  });
+  const _EmbeddedHostHeader({required this.host, required this.onRefresh});
 
   final HostProfile host;
   final VoidCallback onRefresh;
-  final VoidCallback onNewSession;
 
   @override
   Widget build(BuildContext context) {
     return AppContentColumn(
+      maxWidth: AppSizes.readingMaxWidth,
       child: Padding(
         padding: const EdgeInsets.fromLTRB(
           AppSizes.desktopGutter,
@@ -331,11 +341,19 @@ class _EmbeddedHostHeader extends StatelessWidget {
           child: Row(
             children: [
               Expanded(
-                child: Text(
-                  host.label,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: Theme.of(context).textTheme.titleMedium,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      host.label,
+                      style: Theme.of(context).textTheme.titleMedium,
+                    ),
+                    const SizedBox(height: AppSpacing.xs),
+                    SelectableText(
+                      host.baseUrl,
+                      style: Theme.of(context).textTheme.bodySmall,
+                    ),
+                  ],
                 ),
               ),
               IconButton(
@@ -344,11 +362,6 @@ class _EmbeddedHostHeader extends StatelessWidget {
                 onPressed: onRefresh,
               ),
               const SizedBox(width: AppSpacing.sm),
-              FilledButton.icon(
-                onPressed: onNewSession,
-                icon: const Icon(Icons.add_rounded),
-                label: const Text('New session'),
-              ),
             ],
           ),
         ),
@@ -358,7 +371,13 @@ class _EmbeddedHostHeader extends StatelessWidget {
 }
 
 class _NodeCard extends StatelessWidget {
-  const _NodeCard({required this.host, required this.node});
+  const _NodeCard({
+    required this.host,
+    required this.node,
+    required this.showAddress,
+  });
+
+  final bool showAddress;
 
   final HostProfile host;
   final NodeInfo node;
@@ -375,7 +394,7 @@ class _NodeCard extends StatelessWidget {
       padding: const EdgeInsets.symmetric(horizontal: AppSpacing.md),
       child: SelectableText(
         [
-          host.baseUrl,
+          if (showAddress) host.baseUrl,
           platform,
           if (node.packageVersion != null) 'Sidemesh ${node.packageVersion}',
         ].join(' · '),
@@ -564,8 +583,12 @@ class _HostManagementCard extends StatefulWidget {
     required this.node,
     required this.checkingUpdateInfo,
     required this.onRefresh,
+    required this.onNewSession,
+    this.onOpenTerminal,
   });
 
+  final VoidCallback onNewSession;
+  final VoidCallback? onOpenTerminal;
   final HostProfile host;
   final ApiClient api;
   final NodeInfo node;
@@ -777,11 +800,8 @@ class _HostManagementCardState extends State<_HostManagementCard> {
       builder: (context) {
         final colors = context.colors;
         return MeshBottomSheetScaffold(
-          icon: Icons.system_update_rounded,
-          title: 'Choose release track',
-          description:
-              'Stable gets tagged releases. Early access gets the newest CI-verified changes.',
-          maxWidth: 560,
+          title: 'Release track',
+          maxWidth: AppSizes.pickerWidth,
           maxHeightFactor: 0.44,
           child: ListView(
             padding: EdgeInsets.zero,
@@ -791,7 +811,6 @@ class _HostManagementCardState extends State<_HostManagementCard> {
                 framed: false,
                 dense: true,
                 radius: AppRadii.control,
-                leading: Icon(Icons.verified_rounded, color: colors.accent),
                 title: const Text('Stable'),
                 subtitle: const Text('Tagged releases'),
                 trailing: _selectedUpdateChannel == 'stable'
@@ -803,7 +822,6 @@ class _HostManagementCardState extends State<_HostManagementCard> {
                 framed: false,
                 dense: true,
                 radius: AppRadii.control,
-                leading: Icon(Icons.science_rounded, color: colors.accent),
                 title: const Text('Early access'),
                 subtitle: const Text('Newest CI-verified changes'),
                 trailing: _selectedUpdateChannel == 'bleeding-edge'
@@ -958,6 +976,10 @@ class _HostManagementCardState extends State<_HostManagementCard> {
   }
 
   Future<void> _openTerminal() async {
+    if (widget.onOpenTerminal != null) {
+      widget.onOpenTerminal!();
+      return;
+    }
     final cwd = widget.node.homeDirectory ?? '/';
     await Navigator.of(context).push(
       MaterialPageRoute<void>(
@@ -965,7 +987,7 @@ class _HostManagementCardState extends State<_HostManagementCard> {
           host: widget.host,
           api: widget.api,
           cwd: cwd,
-          title: 'Terminal · ${widget.host.label}',
+          title: 'Terminal',
         ),
       ),
     );
@@ -1048,6 +1070,11 @@ class _HostManagementCardState extends State<_HostManagementCard> {
                 runSpacing: AppSpacing.sm,
                 crossAxisAlignment: WrapCrossAlignment.center,
                 children: [
+                  FilledButton.icon(
+                    onPressed: isOffline ? null : widget.onNewSession,
+                    icon: const Icon(Icons.add_rounded),
+                    label: const Text('New session'),
+                  ),
                   if (widget.node.supportsHostCapability(
                     'workspace',
                     'terminal',
@@ -1097,7 +1124,7 @@ class _HostManagementCardState extends State<_HostManagementCard> {
                 padding: const EdgeInsets.symmetric(horizontal: AppSpacing.md),
                 child: Row(
                   children: [
-                    Expanded(
+                    Flexible(
                       child: Text(
                         isOffline ? 'Machine offline' : _updateDetail(),
                         style: Theme.of(context).textTheme.bodySmall?.copyWith(
@@ -1105,6 +1132,7 @@ class _HostManagementCardState extends State<_HostManagementCard> {
                         ),
                       ),
                     ),
+                    const SizedBox(width: AppSpacing.sm),
                     if (_updating ||
                         widget.checkingUpdateInfo ||
                         (_updateOperation?.isInProgress ?? false))
@@ -1233,25 +1261,16 @@ class _UpdateProgressBanner extends StatelessWidget {
     AppColors colors,
     UpdateOperation operation,
   ) {
-    final (title, subtitle) = switch (operation.phase) {
-      'queued' => ('Update queued…', 'Waiting for the updater to start'),
-      'preflight' => ('Checking update…', 'Validating the installed daemon'),
-      'staging' => (
-        'Installing ${targetLabel ?? 'verified update'}…',
-        'The current daemon stays online during this step',
-      ),
-      'stopping' => ('Preparing cutover…', 'Stopping the previous daemon'),
-      'switching' => ('Switching releases…', 'Updating the service launcher'),
-      'starting' => ('Starting the new release…', 'Reconnecting shortly'),
-      'verifying' => (
-        'Verifying the new release…',
-        'Waiting for a health check',
-      ),
-      'rolling_back' => (
-        'Restoring the previous release…',
-        'The candidate did not pass verification',
-      ),
-      _ => ('Updating Sidemesh…', 'Current phase: ${operation.phase}'),
+    final title = switch (operation.phase) {
+      'queued' => 'Update queued…',
+      'preflight' => 'Checking update…',
+      'staging' => 'Installing update…',
+      'stopping' => 'Stopping Sidemesh…',
+      'switching' => 'Switching releases…',
+      'starting' => 'Starting Sidemesh…',
+      'verifying' => 'Verifying update…',
+      'rolling_back' => 'Restoring the previous release…',
+      _ => 'Updating Sidemesh…',
     };
     return _buildRow(
       context,
@@ -1263,7 +1282,6 @@ class _UpdateProgressBanner extends StatelessWidget {
           ? colors.warning
           : colors.accent,
       title: title,
-      subtitle: subtitle,
       showSpinner: true,
     );
   }
@@ -1312,7 +1330,6 @@ class _UpdateProgressBanner extends StatelessWidget {
       icon: Icons.update_rounded,
       iconColor: colors.accent,
       title: 'Installing ${targetLabel ?? 'latest update'}…',
-      subtitle: 'This usually takes 20 to 45 seconds',
       showSpinner: true,
     );
   }
