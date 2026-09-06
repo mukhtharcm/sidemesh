@@ -248,6 +248,11 @@ specific agent provider.
   sizes from the active platform. Use `TargetPlatformVariant` in widget tests;
   changing only `ThemeData.platform` after construction does not rebuild the
   input and button themes.
+- **Speedflight**: `scripts/speedflight.sh` builds the prod iOS workspace for
+  ad hoc distribution. Local `.env.speedflight` holds signing settings and the
+  upload secret; keep it out of Git. `FLUTTER_BIN` can select the Flutter SDK
+  used by CI. The script overrides manual App Store signing for both the app
+  and Live Activity extension, without editing the project signing settings.
 - **Flutter flavors**: Build/run commands must include `--flavor dev` or
   `--flavor prod`.
 - **Flutter control geometry**: shared button themes set platform-specific
