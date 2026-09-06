@@ -16,11 +16,20 @@ class _OfflineTranscriptStrip extends StatelessWidget {
     return MeshSurface(
       tone: MeshSurfaceTone.warning,
       radius: AppRadii.control,
-      padding: const EdgeInsets.fromLTRB(11, 5, 5, 5),
+      padding: const EdgeInsets.fromLTRB(
+        AppSpacing.md,
+        AppSpacing.xs,
+        AppSpacing.xs,
+        AppSpacing.xs,
+      ),
       child: Row(
         children: [
-          Icon(Icons.wifi_off_rounded, size: 15, color: colors.warning),
-          const SizedBox(width: 8),
+          Icon(
+            Icons.wifi_off_rounded,
+            size: AppSizes.compactIcon,
+            color: colors.warning,
+          ),
+          const SizedBox(width: AppSpacing.sm),
           Expanded(
             child: Text(
               text,
@@ -33,17 +42,10 @@ class _OfflineTranscriptStrip extends StatelessWidget {
             ),
           ),
           if (onRetry != null) ...[
-            const SizedBox(width: 8),
+            const SizedBox(width: AppSpacing.sm),
             TextButton(
               onPressed: onRetry,
-              style: TextButton.styleFrom(
-                foregroundColor: colors.warning,
-                minimumSize: const Size(48, 40),
-                padding: const EdgeInsets.symmetric(horizontal: 10),
-                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                visualDensity: VisualDensity.compact,
-                textStyle: const TextStyle(fontWeight: AppWeights.emphasis),
-              ),
+              style: AppControlStyles.foreground(colors.warning),
               child: const Text('Retry'),
             ),
           ],
@@ -66,7 +68,6 @@ class _SessionActionSpec {
     required this.icon,
     this.detail,
     this.tone = _SessionActionTone.neutral,
-    this.active = false,
   });
 
   final String value;
@@ -74,7 +75,6 @@ class _SessionActionSpec {
   final String? detail;
   final IconData icon;
   final _SessionActionTone tone;
-  final bool active;
 }
 
 class _SessionActionGroup {
@@ -85,251 +85,75 @@ class _SessionActionGroup {
 }
 
 class _SessionActionSheet extends StatelessWidget {
-  const _SessionActionSheet({
-    required this.session,
-    required this.groups,
-    this.desktop = false,
-  });
+  const _SessionActionSheet({required this.session, required this.groups});
 
   final SessionSummary session;
   final List<_SessionActionGroup> groups;
-  final bool desktop;
+
+  Widget _action(BuildContext context, _SessionActionSpec action) => ListTile(
+    minTileHeight: AppSizes.control,
+    leading: Icon(
+      action.icon,
+      size: AppSizes.icon,
+      color: action.tone == _SessionActionTone.danger
+          ? context.colors.danger
+          : context.colors.textSecondary,
+    ),
+    title: Text(action.label, style: Theme.of(context).textTheme.bodyLarge),
+    onTap: () => Navigator.of(context).pop(action.value),
+  );
 
   @override
   Widget build(BuildContext context) {
     final colors = context.colors;
-    final maxHeight = MediaQuery.sizeOf(context).height * 0.84;
-    final visibleGroups = groups
-        .where((group) => group.actions.isNotEmpty)
-        .toList(growable: false);
-    final shape = desktop ? AppShapes.dialog : AppShapes.sheet;
-    final panel = DecoratedBox(
-      decoration: BoxDecoration(
-        color: colors.surfaceElevated,
-        borderRadius: shape,
-        border: Border.all(color: colors.border),
-        boxShadow: desktop
-            ? AppShadows.dialog(colors.textPrimary)
-            : AppShadows.sheet(colors.textPrimary),
-      ),
-      child: ClipRRect(
-        borderRadius: shape,
-        child: SingleChildScrollView(
-          padding: EdgeInsets.fromLTRB(14, desktop ? 14 : 10, 14, 14),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.stretch,
+    return Material(
+      color: colors.surfaceElevated,
+      borderRadius: AppShapes.sheetTop,
+      clipBehavior: Clip.antiAlias,
+      child: SafeArea(
+        top: false,
+        child: ConstrainedBox(
+          constraints: BoxConstraints(
+            maxHeight: MediaQuery.sizeOf(context).height * 0.8,
+          ),
+          child: ListView(
+            shrinkWrap: true,
+            padding: const EdgeInsets.symmetric(vertical: AppSpacing.sm),
             children: [
-              if (!desktop) ...[
-                Center(
-                  child: Container(
-                    width: 38,
-                    height: 4,
-                    decoration: BoxDecoration(
-                      color: colors.borderStrong.withValues(alpha: 0.55),
-                      borderRadius: AppShapes.pill,
-                    ),
-                  ),
+              ListTile(
+                title: Text(
+                  'Session actions',
+                  style: Theme.of(context).textTheme.titleMedium,
                 ),
-                const SizedBox(height: 14),
-              ],
-              Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Container(
-                    width: desktop ? 34 : 38,
-                    height: desktop ? 34 : 38,
-                    decoration: BoxDecoration(
-                      color: colors.accentMuted,
-                      borderRadius: AppShapes.iconWell,
-                      border: Border.all(
-                        color: colors.accent.withValues(alpha: 0.24),
-                      ),
-                    ),
-                    alignment: Alignment.center,
-                    child: Icon(
-                      Icons.auto_awesome_mosaic_rounded,
-                      size: desktop ? 18 : 19,
-                      color: colors.accent,
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          'Session actions',
-                          style: Theme.of(context).textTheme.titleMedium
-                              ?.copyWith(
-                                color: colors.textPrimary,
-                                fontWeight: AppWeights.title,
-                                letterSpacing: -0.2,
-                              ),
-                        ),
-                        const SizedBox(height: 2),
-                        Text(
-                          session.title,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: Theme.of(context).textTheme.bodySmall
-                              ?.copyWith(
-                                color: colors.textSecondary,
-                                fontWeight: FontWeight.w600,
-                              ),
-                        ),
-                      ],
-                    ),
-                  ),
-                  if (!desktop)
-                    MeshIconButton(
-                      icon: Icons.close_rounded,
-                      tooltip: 'Close',
-                      color: colors.textSecondary,
-                      onTap: () => Navigator.of(context).pop(),
-                    ),
-                ],
+                trailing: IconButton(
+                  tooltip: 'Close',
+                  icon: const Icon(Icons.close_rounded),
+                  onPressed: () => Navigator.of(context).pop(),
+                ),
               ),
-              const SizedBox(height: 14),
-              for (var index = 0; index < visibleGroups.length; index++)
-                Padding(
-                  padding: EdgeInsets.only(
-                    bottom: index == visibleGroups.length - 1 ? 0 : 12,
+              // Primary actions stay visible; workspace and recovery tools expand in place.
+              for (final group in groups.where(
+                (group) =>
+                    group.label != 'Open' && group.label != 'Troubleshooting',
+              ))
+                for (final action in group.actions) _action(context, action),
+              for (final group in groups.where(
+                (group) =>
+                    group.label == 'Open' || group.label == 'Troubleshooting',
+              ))
+                ExpansionTile(
+                  title: Text(
+                    group.label == 'Open' ? 'Workspace tools' : group.label,
                   ),
-                  child: _SessionActionGroupCard(
-                    group: visibleGroups[index],
-                    compact: desktop,
-                  ),
+                  children: [
+                    for (final action in group.actions)
+                      _action(context, action),
+                  ],
                 ),
             ],
           ),
         ),
       ),
-    );
-    if (desktop) {
-      return panel;
-    }
-    return SafeArea(
-      child: Padding(
-        padding: const EdgeInsets.only(left: 10, top: 0, right: 10, bottom: 10),
-        child: Align(
-          alignment: Alignment.bottomCenter,
-          child: ConstrainedBox(
-            constraints: BoxConstraints(maxHeight: maxHeight),
-            child: panel,
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class _SessionActionGroupCard extends StatelessWidget {
-  const _SessionActionGroupCard({required this.group, this.compact = false});
-
-  final _SessionActionGroup group;
-  final bool compact;
-
-  @override
-  Widget build(BuildContext context) {
-    final colors = context.colors;
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Padding(
-          padding: const EdgeInsets.only(left: 4, bottom: 7),
-          child: Text(
-            group.label,
-            style: Theme.of(context).textTheme.labelSmall?.copyWith(
-              color: colors.textSecondary,
-              fontWeight: FontWeight.w700,
-              letterSpacing: 0.2,
-            ),
-          ),
-        ),
-        DecoratedBox(
-          decoration: BoxDecoration(
-            color: colors.surface,
-            borderRadius: BorderRadius.circular(AppRadii.control),
-            border: Border.all(color: colors.border),
-          ),
-          child: Column(
-            children: [
-              for (var index = 0; index < group.actions.length; index++) ...[
-                if (index > 0)
-                  Divider(
-                    height: 1,
-                    indent: compact ? 52 : 58,
-                    color: colors.border.withValues(alpha: 0.72),
-                  ),
-                _SessionActionRow(
-                  action: group.actions[index],
-                  compact: compact,
-                ),
-              ],
-            ],
-          ),
-        ),
-      ],
-    );
-  }
-}
-
-class _SessionActionRow extends StatelessWidget {
-  const _SessionActionRow({required this.action, this.compact = false});
-
-  final _SessionActionSpec action;
-  final bool compact;
-
-  Color _toneColor(AppColors colors) {
-    return switch (action.tone) {
-      _SessionActionTone.accent => colors.accent,
-      _SessionActionTone.warning => colors.warning,
-      _SessionActionTone.danger => colors.danger,
-      _ => colors.textSecondary,
-    };
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final colors = context.colors;
-    final tone = _toneColor(colors);
-    return MeshListRow(
-      framed: false,
-      dense: true,
-      radius: AppRadii.control,
-      onTap: () => Navigator.of(context).pop(action.value),
-      leading: Container(
-        width: compact ? 30 : 34,
-        height: compact ? 30 : 34,
-        decoration: BoxDecoration(
-          color: tone.withValues(alpha: action.active ? 0.14 : 0.08),
-          borderRadius: AppShapes.iconWell,
-          border: Border.all(color: tone.withValues(alpha: 0.18)),
-        ),
-        child: Icon(action.icon, size: compact ? 17 : 18, color: tone),
-      ),
-      title: Text(
-        action.label,
-        style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-          color: action.tone == _SessionActionTone.danger
-              ? colors.danger
-              : colors.textPrimary,
-          fontWeight: FontWeight.w800,
-          letterSpacing: -0.1,
-        ),
-      ),
-      subtitle: (action.detail ?? '').isEmpty
-          ? null
-          : Text(
-              action.detail!,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                color: colors.textSecondary,
-                fontWeight: FontWeight.w500,
-              ),
-            ),
     );
   }
 }
@@ -366,252 +190,37 @@ class _JumpToLatestPill extends StatelessWidget {
       color: colors.accent,
       shape: const StadiumBorder(),
       elevation: 4,
-      shadowColor: Colors.black.withValues(alpha: 0.25),
+      shadowColor: AppOverlayColors.shadow.withValues(
+        alpha: AppEmphasis.borderTint,
+      ),
       child: InkWell(
         customBorder: const StadiumBorder(),
         onTap: onTap,
         child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+          padding: const EdgeInsets.symmetric(
+            horizontal: AppSpacing.md,
+            vertical: AppSpacing.sm,
+          ),
           child: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Icon(Icons.arrow_downward_rounded, size: 16, color: foreground),
-              const SizedBox(width: 6),
+              Icon(
+                Icons.arrow_downward_rounded,
+                size: AppSizes.compactIcon,
+                color: foreground,
+              ),
+              const SizedBox(width: AppSpacing.tight),
               Text(
                 'Jump to latest',
                 style: Theme.of(context).textTheme.labelMedium?.copyWith(
                   color: foreground,
-                  fontWeight: FontWeight.w700,
+                  fontWeight: AppWeights.strong,
                 ),
               ),
             ],
           ),
         ),
       ),
-    );
-  }
-}
-
-/// Compact mobile header. It preserves orientation while keeping detailed
-/// session metadata behind the details and overflow surfaces.
-class _SessionAppBarSubtitle extends StatelessWidget {
-  const _SessionAppBarSubtitle({
-    required this.host,
-    required this.session,
-    required this.gitStatus,
-    required this.showGit,
-    required this.running,
-    required this.verifying,
-    required this.pinnedCount,
-    required this.pinnedActive,
-    required this.onPinnedTap,
-    required this.onDetails,
-    required this.onGitDetails,
-  });
-
-  final HostProfile host;
-  final SessionSummary session;
-  final SessionGitStatus? gitStatus;
-  final bool showGit;
-  final bool running;
-  final bool verifying;
-  final int pinnedCount;
-  final bool pinnedActive;
-  final VoidCallback onPinnedTap;
-  final VoidCallback onDetails;
-  final VoidCallback onGitDetails;
-
-  String _shortFolder(String cwd) {
-    if (cwd.isEmpty) return '~';
-    final trimmed = cwd.endsWith('/') ? cwd.substring(0, cwd.length - 1) : cwd;
-    final slash = trimmed.lastIndexOf('/');
-    if (slash < 0 || slash == trimmed.length - 1) return trimmed;
-    return trimmed.substring(slash + 1);
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final colors = context.colors;
-    final folder = _shortFolder(session.cwd);
-    final gitLabel = showGit ? _gitHeaderLabel(session, gitStatus) : null;
-    final contextLabel = _contextUsageShortLabel(session.runtime);
-    final contextTone = _contextUsageTone(session.runtime);
-    final gitDirty = gitStatus?.dirty ?? false;
-    return Material(
-      color: Colors.transparent,
-      child: InkWell(
-        onTap: onDetails,
-        child: Padding(
-          padding: const EdgeInsets.only(
-            left: 16,
-            top: 0,
-            right: 10,
-            bottom: 6,
-          ),
-          child: Row(
-            children: [
-              SizedBox.square(
-                dimension: 12,
-                child: verifying
-                    ? const MeshDelayedActivityIndicator(
-                        key: ValueKey('session-freshness-indicator'),
-                        active: true,
-                      )
-                    : Center(
-                        child: _HeaderStatusDot(
-                          color: running ? colors.success : colors.textTertiary,
-                        ),
-                      ),
-              ),
-              const SizedBox(width: 6),
-              Expanded(
-                child: Text(
-                  '${host.label} · $folder',
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                    color: colors.textSecondary,
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
-              ),
-              if (session.provider != null) ...[
-                const SizedBox(width: 8),
-                AgentProviderBadge(
-                  providerKind: session.provider,
-                  compact: true,
-                ),
-              ],
-              if (gitLabel != null && gitDirty) ...[
-                const SizedBox(width: 6),
-                _CompactMetaChip(
-                  label: '${gitStatus?.changed ?? 0}',
-                  icon: Icons.account_tree_rounded,
-                  color: colors.warning,
-                  onTap: onGitDetails,
-                ),
-              ],
-              if (contextLabel != null) ...[
-                const SizedBox(width: 6),
-                _CompactMetaChip(
-                  label: contextLabel,
-                  icon: Icons.data_usage_rounded,
-                  color: switch (contextTone) {
-                    MeshPillTone.danger => colors.danger,
-                    MeshPillTone.warning => colors.warning,
-                    _ => colors.textSecondary,
-                  },
-                ),
-              ],
-              if (pinnedCount > 0) ...[
-                const SizedBox(width: 6),
-                _CompactMetaChip(
-                  label: '$pinnedCount',
-                  icon: Icons.push_pin_rounded,
-                  color: pinnedActive ? colors.accent : colors.textSecondary,
-                  onTap: onPinnedTap,
-                ),
-              ],
-              const SizedBox(width: 6),
-              Icon(Icons.info_outline_rounded, size: 14, color: colors.accent),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class _CompactMetaChip extends StatelessWidget {
-  const _CompactMetaChip({
-    required this.label,
-    required this.icon,
-    required this.color,
-    this.onTap,
-  });
-
-  final String label;
-  final IconData icon;
-  final Color color;
-  final VoidCallback? onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    final colors = context.colors;
-    final content = Container(
-      height: 22,
-      padding: const EdgeInsets.symmetric(horizontal: 7),
-      decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.09),
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: color.withValues(alpha: 0.18)),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(icon, size: 12, color: color),
-          const SizedBox(width: 4),
-          Text(
-            label,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: monoStyle(
-              color: colors.textPrimary,
-              fontSize: 10.5,
-              fontWeight: FontWeight.w800,
-            ),
-          ),
-        ],
-      ),
-    );
-    if (onTap == null) {
-      return content;
-    }
-    return GestureDetector(onTap: onTap, child: content);
-  }
-}
-
-String? _contextUsageShortLabel(SessionRuntimeSummary? runtime) {
-  final context = runtime?.telemetry?.contextWindow;
-  if (context == null || context.tokenLimit <= 0) {
-    return null;
-  }
-  if (context.currentTokens == null) {
-    return '?%';
-  }
-  final usedPercent = ((context.currentTokens! / context.tokenLimit) * 100)
-      .clamp(0, 100)
-      .round();
-  return '$usedPercent%';
-}
-
-MeshPillTone _contextUsageTone(SessionRuntimeSummary? runtime) {
-  final context = runtime?.telemetry?.contextWindow;
-  if (context == null ||
-      context.tokenLimit <= 0 ||
-      context.currentTokens == null) {
-    return MeshPillTone.neutral;
-  }
-  final used = context.currentTokens! / context.tokenLimit;
-  if (used >= 0.9) {
-    return MeshPillTone.danger;
-  }
-  if (used >= 0.75) {
-    return MeshPillTone.warning;
-  }
-  return MeshPillTone.neutral;
-}
-
-class _HeaderStatusDot extends StatelessWidget {
-  const _HeaderStatusDot({required this.color});
-  final Color color;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      width: 7,
-      height: 7,
-      decoration: BoxDecoration(color: color, shape: BoxShape.circle),
     );
   }
 }
@@ -642,130 +251,92 @@ class _GitDetailsSheet extends StatelessWidget {
     final originUrl = status?.originUrl ?? gitInfo?.originUrl;
 
     return MeshBottomSheetScaffold(
-      icon: Icons.account_tree_rounded,
       title: 'Git details',
-      description:
-          'Review branch status, changed files, and the diffs available for this session.',
-      maxWidth: 920,
+      maxWidth: AppSizes.readingMaxWidth,
       maxHeightFactor: 0.88,
+      actions: [
+        if (loading)
+          const MeshDelayedActivityIndicator(active: true)
+        else
+          IconButton(
+            tooltip: 'Refresh Git status',
+            onPressed: onRefresh,
+            icon: const Icon(Icons.refresh_rounded),
+          ),
+      ],
       child: SingleChildScrollView(
-        padding: const EdgeInsets.only(bottom: 6),
         child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            Align(
-              alignment: Alignment.centerRight,
-              child: OutlinedButton.icon(
-                onPressed: loading ? null : onRefresh,
-                icon: const Icon(Icons.refresh_rounded, size: 18),
-                label: const Text('Refresh'),
-              ),
-            ),
-            const SizedBox(height: 12),
-            if (loading && status == null)
-              const _GitDetailsLoadingState()
-            else if (status != null && !status!.isRepo)
-              MeshEmptyState(
-                icon: Icons.account_tree_rounded,
-                title: 'No Git repo found',
-                body:
-                    'This session working directory is not inside a Git worktree.',
-              )
-            else ...[
-              Wrap(
-                spacing: 8,
-                runSpacing: 8,
-                children: [
-                  MeshPill(
-                    label: branch ?? 'detached',
-                    icon: Icons.account_tree_rounded,
-                    tone: MeshPillTone.accent,
-                    mono: true,
-                  ),
-                  if (shortSha != null)
-                    MeshPill(
-                      label: shortSha,
-                      icon: Icons.tag_rounded,
-                      tone: MeshPillTone.neutral,
-                      mono: true,
-                    ),
-                  if (status != null)
-                    MeshPill(
-                      label: status!.dirty
-                          ? '${status!.changed} changed'
-                          : 'clean',
-                      icon: status!.dirty
-                          ? Icons.warning_amber_rounded
-                          : Icons.check_rounded,
-                      tone: status!.dirty
-                          ? MeshPillTone.warning
-                          : MeshPillTone.success,
-                      mono: true,
-                    ),
-                  if ((status?.ahead ?? 0) > 0)
-                    MeshPill(
-                      label: 'ahead ${status!.ahead}',
-                      tone: MeshPillTone.info,
-                      mono: true,
-                    ),
-                  if ((status?.behind ?? 0) > 0)
-                    MeshPill(
-                      label: 'behind ${status!.behind}',
-                      tone: MeshPillTone.info,
-                      mono: true,
-                    ),
-                ],
-              ),
-              const SizedBox(height: 16),
-              MeshCard(
-                tone: MeshCardTone.muted,
-                padding: const EdgeInsets.all(14),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    _DetailRow(label: 'Working dir', value: session.cwd),
-                    if (status?.repoRoot != null)
-                      _DetailRow(label: 'Repo root', value: status!.repoRoot!),
-                    if (status?.upstream != null)
-                      _DetailRow(label: 'Upstream', value: status!.upstream!),
-                    if (originUrl != null)
-                      _DetailRow(label: 'Origin', value: originUrl),
-                    if (error != null)
-                      Text(
-                        error!,
-                        style: Theme.of(
-                          context,
-                        ).textTheme.bodySmall?.copyWith(color: colors.warning),
-                      ),
-                  ],
+            if (error != null)
+              Padding(
+                padding: const EdgeInsets.only(bottom: AppSpacing.md),
+                child: Text(
+                  error!,
+                  style: Theme.of(
+                    context,
+                  ).textTheme.bodySmall?.copyWith(color: colors.warning),
                 ),
               ),
-              const SizedBox(height: 14),
+            if (loading && status == null)
+              const MeshLoader(label: 'Loading changes')
+            else if (status != null && !status!.isRepo)
+              const MeshEmptyState.compact(
+                icon: Icons.account_tree_rounded,
+                title: 'No Git repository',
+                body: 'This folder is outside a Git repository.',
+              )
+            else ...[
+              if (branch != null) _DetailRow(label: 'Branch', value: branch),
+              if (shortSha != null)
+                _DetailRow(label: 'Commit', value: shortSha),
+              if (status != null)
+                _DetailRow(
+                  label: 'Changes',
+                  value: status!.dirty
+                      ? '${status!.changed} changed'
+                      : 'No changes',
+                ),
+              if ((status?.ahead ?? 0) > 0 || (status?.behind ?? 0) > 0)
+                _DetailRow(
+                  label: 'Sync',
+                  value: [
+                    if (status!.ahead > 0) '${status!.ahead} ahead',
+                    if (status!.behind > 0) '${status!.behind} behind',
+                  ].join(' · '),
+                ),
+              _DetailRow(label: 'Folder', value: session.cwd),
+              if (status?.repoRoot != null && status!.repoRoot != session.cwd)
+                _DetailRow(label: 'Repository', value: status!.repoRoot!),
+              if (status?.upstream != null)
+                _DetailRow(label: 'Upstream', value: status!.upstream!),
+              if (originUrl != null)
+                _DetailRow(label: 'Origin', value: originUrl),
               Wrap(
-                spacing: 8,
-                runSpacing: 8,
+                spacing: AppSpacing.sm,
+                runSpacing: AppSpacing.sm,
                 children: [
-                  OutlinedButton.icon(
+                  TextButton.icon(
                     onPressed: () => onShowDiff('working'),
-                    icon: const Icon(Icons.difference_rounded, size: 18),
+                    icon: const Icon(Icons.difference_rounded),
                     label: const Text('Working diff'),
                   ),
-                  OutlinedButton.icon(
+                  TextButton.icon(
                     onPressed: () => onShowDiff('staged'),
-                    icon: const Icon(Icons.inventory_2_rounded, size: 18),
+                    icon: const Icon(Icons.inventory_2_rounded),
                     label: const Text('Staged diff'),
                   ),
                 ],
               ),
               if (status != null && status!.files.isNotEmpty) ...[
-                const SizedBox(height: 20),
+                const SizedBox(height: AppSpacing.xl),
                 Text(
                   'Changed files',
                   style: Theme.of(context).textTheme.titleSmall?.copyWith(
                     fontWeight: AppWeights.title,
                   ),
                 ),
-                const SizedBox(height: 10),
+                const SizedBox(height: AppSpacing.compact),
                 MeshCard(
                   padding: EdgeInsets.zero,
                   child: Column(
@@ -774,14 +345,14 @@ class _GitDetailsSheet extends StatelessWidget {
                         _GitFileStatusRow(file: file),
                       if (status!.files.length > 40 || status!.filesTruncated)
                         Padding(
-                          padding: const EdgeInsets.all(12),
+                          padding: const EdgeInsets.all(AppSpacing.md),
                           child: Text(
                             status!.filesTruncated
                                 ? 'More files omitted by server cap.'
                                 : '${status!.files.length - 40} more files omitted.',
                             style: monoStyle(
                               color: colors.textSecondary,
-                              fontSize: 11.5,
+                              fontSize: AppFontSizes.caption,
                             ),
                           ),
                         ),
@@ -793,96 +364,6 @@ class _GitDetailsSheet extends StatelessWidget {
           ],
         ),
       ),
-    );
-  }
-}
-
-class _GitDetailsLoadingState extends StatelessWidget {
-  const _GitDetailsLoadingState();
-
-  @override
-  Widget build(BuildContext context) {
-    return const Padding(
-      padding: EdgeInsets.symmetric(vertical: 6),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            children: [
-              MeshSkeleton(width: 84, height: 24, radius: 999),
-              MeshSkeleton(width: 72, height: 24, radius: 999),
-              MeshSkeleton(width: 96, height: 24, radius: 999),
-            ],
-          ),
-          SizedBox(height: 16),
-          MeshCard(
-            tone: MeshCardTone.muted,
-            padding: EdgeInsets.all(14),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                MeshSkeleton(height: 12),
-                SizedBox(height: 10),
-                FractionallySizedBox(
-                  widthFactor: 0.76,
-                  alignment: Alignment.centerLeft,
-                  child: MeshSkeleton(height: 12),
-                ),
-                SizedBox(height: 10),
-                FractionallySizedBox(
-                  widthFactor: 0.58,
-                  alignment: Alignment.centerLeft,
-                  child: MeshSkeleton(height: 12),
-                ),
-              ],
-            ),
-          ),
-          SizedBox(height: 14),
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            children: [
-              MeshSkeleton(width: 122, height: 36, radius: 12),
-              MeshSkeleton(width: 118, height: 36, radius: 12),
-              MeshSkeleton(width: 116, height: 36, radius: 12),
-            ],
-          ),
-          SizedBox(height: 20),
-          MeshSectionHeadingSkeleton(
-            titleWidthFactor: 0.22,
-            subtitleWidthFactor: 0.4,
-          ),
-          SizedBox(height: 10),
-          MeshCard(
-            padding: EdgeInsets.zero,
-            child: Column(
-              children: [
-                _GitFileStatusRowSkeleton(),
-                _GitFileStatusRowSkeleton(),
-                _GitFileStatusRowSkeleton(),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _GitFileStatusRowSkeleton extends StatelessWidget {
-  const _GitFileStatusRowSkeleton();
-
-  @override
-  Widget build(BuildContext context) {
-    return const MeshListRowSkeleton(
-      dense: true,
-      framed: false,
-      showLeading: false,
-      showSubtitle: false,
-      showTrailing: false,
-      titleWidthFactor: 0.62,
     );
   }
 }
@@ -902,7 +383,10 @@ class _GitFileStatusRow extends StatelessWidget {
         ? file.path
         : '${file.originalPath} -> ${file.path}';
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      padding: const EdgeInsets.symmetric(
+        horizontal: AppSpacing.md,
+        vertical: AppSpacing.compact,
+      ),
       decoration: BoxDecoration(
         border: Border(bottom: BorderSide(color: colors.border)),
       ),
@@ -918,8 +402,8 @@ class _GitFileStatusRow extends StatelessWidget {
                     : file.isStaged
                     ? colors.success
                     : colors.textSecondary,
-                fontWeight: FontWeight.w800,
-                fontSize: 11.5,
+                fontWeight: AppWeights.body,
+                fontSize: AppFontSizes.caption,
               ),
             ),
           ),
@@ -928,7 +412,10 @@ class _GitFileStatusRow extends StatelessWidget {
               path,
               maxLines: 2,
               overflow: TextOverflow.ellipsis,
-              style: monoStyle(color: colors.textPrimary, fontSize: 12),
+              style: monoStyle(
+                color: colors.textPrimary,
+                fontSize: AppFontSizes.caption,
+              ),
             ),
           ),
         ],
@@ -954,13 +441,12 @@ class _GitDiffSheet extends StatelessWidget {
         return MeshBottomSheetScaffold(
           icon: Icons.difference_rounded,
           title: title,
-          description: 'Review the Git patch for this session.',
           maxWidth: 980,
           maxHeightFactor: 0.9,
           child: Builder(
             builder: (context) {
               if (snapshot.connectionState != ConnectionState.done) {
-                return const _GitDiffLoadingState();
+                return const MeshLoader(label: 'Loading diff');
               }
               if (snapshot.hasError) {
                 return MeshEmptyState(
@@ -983,7 +469,9 @@ class _GitDiffSheet extends StatelessWidget {
                   children: [
                     if (diff.truncated)
                       Padding(
-                        padding: const EdgeInsets.only(bottom: 10),
+                        padding: const EdgeInsets.only(
+                          bottom: AppSpacing.compact,
+                        ),
                         child: MeshPill(
                           label: 'Truncated after ${diff.maxChars} chars',
                           icon: Icons.content_cut_rounded,
@@ -993,12 +481,14 @@ class _GitDiffSheet extends StatelessWidget {
                       ),
                     if (diff.baseSha != null)
                       Padding(
-                        padding: const EdgeInsets.only(bottom: 10),
+                        padding: const EdgeInsets.only(
+                          bottom: AppSpacing.compact,
+                        ),
                         child: Text(
                           'Base ${diff.baseSha}',
                           style: monoStyle(
                             color: colors.textSecondary,
-                            fontSize: 11.5,
+                            fontSize: AppFontSizes.caption,
                           ),
                         ),
                       ),
@@ -1010,72 +500,6 @@ class _GitDiffSheet extends StatelessWidget {
           ),
         );
       },
-    );
-  }
-}
-
-class _GitDiffLoadingState extends StatelessWidget {
-  const _GitDiffLoadingState();
-
-  @override
-  Widget build(BuildContext context) {
-    return const SingleChildScrollView(
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          MeshSectionHeadingSkeleton(
-            titleWidthFactor: 0.2,
-            subtitleWidthFactor: 0.36,
-          ),
-          SizedBox(height: 12),
-          MeshCard(
-            tone: MeshCardTone.muted,
-            padding: EdgeInsets.all(14),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                MeshSkeleton(height: 12),
-                SizedBox(height: 8),
-                FractionallySizedBox(
-                  widthFactor: 0.78,
-                  alignment: Alignment.centerLeft,
-                  child: MeshSkeleton(height: 12),
-                ),
-                SizedBox(height: 8),
-                FractionallySizedBox(
-                  widthFactor: 0.64,
-                  alignment: Alignment.centerLeft,
-                  child: MeshSkeleton(height: 12),
-                ),
-                SizedBox(height: 16),
-                MeshSkeleton(height: 10),
-                SizedBox(height: 6),
-                MeshSkeleton(height: 10),
-                SizedBox(height: 6),
-                FractionallySizedBox(
-                  widthFactor: 0.7,
-                  alignment: Alignment.centerLeft,
-                  child: MeshSkeleton(height: 10),
-                ),
-                SizedBox(height: 14),
-                MeshSkeleton(height: 10),
-                SizedBox(height: 6),
-                FractionallySizedBox(
-                  widthFactor: 0.82,
-                  alignment: Alignment.centerLeft,
-                  child: MeshSkeleton(height: 10),
-                ),
-                SizedBox(height: 6),
-                FractionallySizedBox(
-                  widthFactor: 0.58,
-                  alignment: Alignment.centerLeft,
-                  child: MeshSkeleton(height: 10),
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
     );
   }
 }
@@ -1106,8 +530,6 @@ class _PinnedListSheet extends StatelessWidget {
     return MeshBottomSheetScaffold(
       icon: Icons.push_pin_rounded,
       title: 'Pinned messages',
-      description:
-          'Jump back to saved messages or remove them from the pinned list.',
       maxWidth: 760,
       maxHeightFactor: 0.78,
       child: ListenableBuilder(
@@ -1138,97 +560,72 @@ class _PinnedMessageSheet extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colors = context.colors;
-    final textStyle = Theme.of(
-      context,
-    ).textTheme.bodyMedium?.copyWith(color: colors.textPrimary, height: 1.45);
+    final textStyle = Theme.of(context).textTheme.bodyMedium?.copyWith(
+      color: colors.textPrimary,
+      height: AppLineHeights.reading,
+    );
     final pinnedLinkStyle = linkTextStyleForBackground(
-      background: colors.surfaceMuted,
+      background: colors.surfaceElevated,
       preferred: colors.accent,
       fallbacks: [colors.info, colors.textPrimary, colors.textSecondary],
       baseStyle: textStyle,
     );
     return MeshBottomSheetScaffold(
       icon: Icons.push_pin_rounded,
-      title: 'Pinned ${pin.roleLabel.toLowerCase()} message',
-      description:
-          'Keep an important message visible while you work through this session.',
-      maxWidth: 920,
+      title: 'Pinned message',
+      maxWidth: AppSizes.readingMaxWidth,
       maxHeightFactor: 0.84,
+      actions: [
+        if (pin.hasText)
+          IconButton(
+            tooltip: 'Copy message',
+            icon: const Icon(Icons.copy_rounded),
+            onPressed: () => Clipboard.setData(ClipboardData(text: pin.text)),
+          ),
+        IconButton(
+          tooltip: 'Unpin message',
+          icon: const Icon(Icons.push_pin_outlined),
+          onPressed: onUnpin,
+        ),
+      ],
       child: Column(
+        mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Row(
-            children: [
-              const Spacer(),
-              if (pin.hasText)
-                _MessageCopyButton(
-                  text: pin.text,
-                  tone: colors.textSecondary,
-                  accent: colors.accent,
-                ),
-              if (pin.hasText) const SizedBox(width: 6),
-              TextButton.icon(
-                onPressed: onUnpin,
-                icon: const Icon(Icons.push_pin_rounded, size: 17),
-                label: const Text('Unpin'),
-              ),
-            ],
-          ),
-          const SizedBox(height: 10),
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            children: [
-              MeshPill(
-                label: pin.roleLabel,
-                icon: pin.role == 'assistant'
-                    ? Icons.smart_toy_rounded
-                    : Icons.person_outline_rounded,
-              ),
-              MeshPill(
-                label: 'Pinned ${_formatPinnedTimestamp(pin.pinnedAt)}',
-                icon: Icons.schedule_rounded,
-              ),
+          Text(
+            [
+              '${pin.roleLabel} · Pinned ${_formatPinnedTimestamp(pin.pinnedAt)}',
               if (pin.attachmentCount > 0)
-                MeshPill(
-                  label:
-                      '${pin.attachmentCount} attachment${pin.attachmentCount == 1 ? '' : 's'}',
-                  icon: Icons.attachment_rounded,
-                ),
-              if (pin.textTruncated)
-                const MeshPill(
-                  label: 'Stored preview truncated',
-                  icon: Icons.content_cut_rounded,
-                  tone: MeshPillTone.warning,
-                ),
-            ],
+                '${pin.attachmentCount} attachment${pin.attachmentCount == 1 ? '' : 's'}',
+            ].join(' · '),
+            style: Theme.of(
+              context,
+            ).textTheme.bodySmall?.copyWith(color: colors.textSecondary),
           ),
-          const SizedBox(height: 14),
-          Expanded(
-            child: MeshCard(
-              tone: MeshCardTone.muted,
-              padding: const EdgeInsets.all(14),
-              child: SingleChildScrollView(
-                child: pin.hasText
-                    ? (pin.role == 'assistant'
-                          ? _MarkdownMessageBody(
-                              text: pin.text,
-                              textColor: colors.textPrimary,
-                              linkStyle: pinnedLinkStyle,
-                              onOpenFile: onOpenFile,
-                              onOpenHostUrl: onOpenHostUrl,
-                            )
-                          : _LinkifiedSelectableText(
-                              text: pin.text,
-                              style: textStyle,
-                              linkStyle: pinnedLinkStyle,
-                              onOpenHostUrl: onOpenHostUrl,
-                            ))
-                    : Text(
-                        pin.preview,
-                        style: textStyle?.copyWith(color: colors.textSecondary),
-                      ),
-              ),
+          if (pin.textTruncated)
+            const Text('This saved preview is incomplete.'),
+          const SizedBox(height: AppSpacing.md),
+          Flexible(
+            child: SingleChildScrollView(
+              child: pin.hasText
+                  ? (pin.role == 'assistant'
+                        ? _MarkdownMessageBody(
+                            text: pin.text,
+                            textColor: colors.textPrimary,
+                            linkStyle: pinnedLinkStyle,
+                            onOpenFile: onOpenFile,
+                            onOpenHostUrl: onOpenHostUrl,
+                          )
+                        : _LinkifiedSelectableText(
+                            text: pin.text,
+                            style: textStyle,
+                            linkStyle: pinnedLinkStyle,
+                            onOpenHostUrl: onOpenHostUrl,
+                          ))
+                  : Text(
+                      pin.preview,
+                      style: textStyle?.copyWith(color: colors.textSecondary),
+                    ),
             ),
           ),
         ],
@@ -1356,7 +753,7 @@ class _PendingActionCardState extends State<_PendingActionCard> {
     final maxHeight = mq.size.height * 0.5;
     return MeshCard(
       tone: MeshCardTone.surface,
-      borderColor: kindMeta.accent.withValues(alpha: 0.7),
+      borderColor: kindMeta.accent.withValues(alpha: AppEmphasis.secondary),
       child: ConstrainedBox(
         constraints: BoxConstraints(maxHeight: maxHeight),
         child: Column(
@@ -1373,7 +770,7 @@ class _PendingActionCardState extends State<_PendingActionCard> {
                 ),
               ],
             ),
-            const SizedBox(height: 8),
+            const SizedBox(height: AppSpacing.sm),
             Flexible(
               child: SingleChildScrollView(
                 child: Column(
@@ -1383,11 +780,11 @@ class _PendingActionCardState extends State<_PendingActionCard> {
                     Text(
                       action.title,
                       style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                        fontWeight: FontWeight.w700,
+                        fontWeight: AppWeights.strong,
                       ),
                     ),
                     if (action.detail.isNotEmpty) ...[
-                      const SizedBox(height: 8),
+                      const SizedBox(height: AppSpacing.sm),
                       Text(
                         action.detail,
                         style: Theme.of(context).textTheme.bodyMedium?.copyWith(
@@ -1396,17 +793,17 @@ class _PendingActionCardState extends State<_PendingActionCard> {
                       ),
                     ],
                     if (action.isUserInput) ...[
-                      const SizedBox(height: 12),
+                      const SizedBox(height: AppSpacing.md),
                       _buildUserInputBody(context, action.userInput!),
                     ] else if (action.isElicitation) ...[
-                      const SizedBox(height: 12),
+                      const SizedBox(height: AppSpacing.md),
                       _buildElicitationBody(context, action.elicitation!),
                     ],
                   ],
                 ),
               ),
             ),
-            const SizedBox(height: 14),
+            const SizedBox(height: AppSpacing.md),
             Wrap(
               spacing: 8,
               runSpacing: 8,
@@ -1449,7 +846,7 @@ class _PendingActionCardState extends State<_PendingActionCard> {
                 )
                 .toList(growable: false),
           ),
-          if (prompt.allowFreeform) const SizedBox(height: 12),
+          if (prompt.allowFreeform) const SizedBox(height: AppSpacing.md),
         ],
         if (prompt.allowFreeform || choices.isEmpty)
           TextField(
@@ -1462,14 +859,6 @@ class _PendingActionCardState extends State<_PendingActionCard> {
                   : 'Choose above or type your own answer',
               filled: true,
               fillColor: colors.surfaceMuted,
-              border: OutlineInputBorder(
-                borderRadius: AppShapes.input,
-                borderSide: BorderSide(color: colors.border),
-              ),
-              enabledBorder: OutlineInputBorder(
-                borderRadius: AppShapes.input,
-                borderSide: BorderSide(color: colors.border),
-              ),
             ),
             onChanged: (_) => setState(() {}),
           ),
@@ -1488,7 +877,7 @@ class _PendingActionCardState extends State<_PendingActionCard> {
       children: [
         if (source != null && source.isNotEmpty)
           Padding(
-            padding: const EdgeInsets.only(bottom: 8),
+            padding: const EdgeInsets.only(bottom: AppSpacing.sm),
             child: MeshPill(
               label: source,
               icon: Icons.extension_rounded,
@@ -1506,7 +895,7 @@ class _PendingActionCardState extends State<_PendingActionCard> {
             ),
           ),
         if (elicitation.mode == 'url' && (elicitation.url ?? '').isNotEmpty)
-          const SizedBox(height: 12),
+          const SizedBox(height: AppSpacing.md),
         if (elicitation.fields.isEmpty)
           Text(
             'No structured fields were provided for this request.',
@@ -1539,7 +928,12 @@ class _PendingActionCardState extends State<_PendingActionCard> {
           tone: MeshSurfaceTone.muted,
           selected: value,
           radius: AppRadii.control,
-          padding: const EdgeInsets.fromLTRB(12, 8, 8, 8),
+          padding: const EdgeInsets.fromLTRB(
+            AppSpacing.md,
+            AppSpacing.sm,
+            AppSpacing.sm,
+            AppSpacing.sm,
+          ),
           onTap: () => setState(() => _boolValues[field.key] = !value),
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.center,
@@ -1550,7 +944,7 @@ class _PendingActionCardState extends State<_PendingActionCard> {
                   children: [
                     Text(label),
                     if (field.description != null) ...[
-                      const SizedBox(height: 2),
+                      const SizedBox(height: AppSpacing.xxs),
                       Text(
                         field.description!,
                         style: Theme.of(context).textTheme.bodySmall?.copyWith(
@@ -1592,10 +986,10 @@ class _PendingActionCardState extends State<_PendingActionCard> {
               label,
               style: Theme.of(
                 context,
-              ).textTheme.labelLarge?.copyWith(fontWeight: FontWeight.w700),
+              ).textTheme.labelLarge?.copyWith(fontWeight: AppWeights.strong),
             ),
             if (field.description != null) ...[
-              const SizedBox(height: 4),
+              const SizedBox(height: AppSpacing.xs),
               Text(
                 field.description!,
                 style: Theme.of(
@@ -1603,7 +997,7 @@ class _PendingActionCardState extends State<_PendingActionCard> {
                 ).textTheme.bodySmall?.copyWith(color: colors.textSecondary),
               ),
             ],
-            const SizedBox(height: 8),
+            const SizedBox(height: AppSpacing.sm),
             Wrap(
               spacing: 8,
               runSpacing: 8,
@@ -1634,24 +1028,22 @@ class _PendingActionCardState extends State<_PendingActionCard> {
         final options =
             field.options ?? const <PendingActionElicitationOption>[];
         if (options.isNotEmpty) {
-          child = DropdownButtonFormField<String>(
-            key: ValueKey('${field.key}:${_singleValues[field.key] ?? ''}'),
-            initialValue: _singleValues[field.key],
+          child = InputDecorator(
             decoration: _fieldDecoration(colors, label, field.description),
-            items: options
-                .map(
-                  (option) => DropdownMenuItem<String>(
-                    value: option.value,
-                    child: Text(option.label),
-                  ),
-                )
-                .toList(growable: false),
-            onChanged: (value) {
-              setState(() {
+            child: AppSelect<String>(
+              value: _singleValues[field.key],
+              values: options.map((option) => option.value).toList(),
+              label: (value) =>
+                  options
+                      .where((option) => option.value == value)
+                      .firstOrNull
+                      ?.label ??
+                  value,
+              onChanged: (value) => setState(() {
                 _singleValues[field.key] = value;
-                _textControllers[field.key]?.text = value ?? '';
-              });
-            },
+                _textControllers[field.key]?.text = value;
+              }),
+            ),
           );
         } else {
           child = TextField(
@@ -1669,7 +1061,10 @@ class _PendingActionCardState extends State<_PendingActionCard> {
           );
         }
     }
-    return Padding(padding: const EdgeInsets.only(bottom: 12), child: child);
+    return Padding(
+      padding: const EdgeInsets.only(bottom: AppSpacing.md),
+      child: child,
+    );
   }
 
   InputDecoration _fieldDecoration(
@@ -1684,14 +1079,6 @@ class _PendingActionCardState extends State<_PendingActionCard> {
       hintText: hintText,
       filled: true,
       fillColor: colors.surfaceMuted,
-      border: OutlineInputBorder(
-        borderRadius: AppShapes.input,
-        borderSide: BorderSide(color: colors.border),
-      ),
-      enabledBorder: OutlineInputBorder(
-        borderRadius: AppShapes.input,
-        borderSide: BorderSide(color: colors.border),
-      ),
     );
   }
 
@@ -1720,7 +1107,7 @@ class _PendingActionCardState extends State<_PendingActionCard> {
       return [
         FilledButton.icon(
           onPressed: _responding ? null : _submitUserInput,
-          icon: const Icon(Icons.send_rounded, size: 18),
+          icon: const Icon(Icons.send_rounded, size: AppSizes.inlineIcon),
           label: const Text('Send answer'),
         ),
       ];
@@ -1729,7 +1116,7 @@ class _PendingActionCardState extends State<_PendingActionCard> {
       return [
         FilledButton.icon(
           onPressed: _responding ? null : _submitElicitation,
-          icon: const Icon(Icons.check_rounded, size: 18),
+          icon: const Icon(Icons.check_rounded, size: AppSizes.inlineIcon),
           label: Text(
             action.elicitation?.mode == 'url' ? 'Continue' : 'Submit',
           ),
@@ -1746,7 +1133,7 @@ class _PendingActionCardState extends State<_PendingActionCard> {
           onPressed: () => widget.onRespond(
             PendingActionResponseDraft.elicitation(action: 'cancel'),
           ),
-          icon: const Icon(Icons.close_rounded, size: 18),
+          icon: const Icon(Icons.close_rounded, size: AppSizes.inlineIcon),
           label: const Text('Cancel'),
         ),
       ];
@@ -1782,7 +1169,7 @@ class _PendingActionCardState extends State<_PendingActionCard> {
                         ),
                       );
                     },
-              icon: const Icon(Icons.check_rounded, size: 18),
+              icon: const Icon(Icons.check_rounded, size: AppSizes.inlineIcon),
               label: Text(providerOptions[index].label),
             )
           else
@@ -1797,7 +1184,7 @@ class _PendingActionCardState extends State<_PendingActionCard> {
                         ),
                       );
                     },
-              icon: const Icon(Icons.check_rounded, size: 18),
+              icon: const Icon(Icons.check_rounded, size: AppSizes.inlineIcon),
               label: Text(providerOptions[index].label),
             ),
       ];
@@ -1813,7 +1200,7 @@ class _PendingActionCardState extends State<_PendingActionCard> {
                     PendingActionResponseDraft.approval('accept'),
                   );
                 },
-          icon: const Icon(Icons.check_rounded, size: 18),
+          icon: const Icon(Icons.check_rounded, size: AppSizes.inlineIcon),
           label: const Text('Approve'),
         ),
       if (action.canApproveForSession)
@@ -1821,7 +1208,10 @@ class _PendingActionCardState extends State<_PendingActionCard> {
           onPressed: () => widget.onRespond(
             PendingActionResponseDraft.approval('acceptForSession'),
           ),
-          icon: const Icon(Icons.all_inclusive_rounded, size: 18),
+          icon: const Icon(
+            Icons.all_inclusive_rounded,
+            size: AppSizes.inlineIcon,
+          ),
           label: const Text('Approve for session'),
         ),
       if (action.canDecline)
@@ -2015,11 +1405,15 @@ class _HistoryTruncationCard extends StatelessWidget {
     }
 
     return Padding(
-      padding: const EdgeInsets.all(4),
+      padding: const EdgeInsets.all(AppSpacing.xs),
       child: Row(
         children: [
-          Icon(Icons.history_rounded, size: 14, color: colors.textSecondary),
-          const SizedBox(width: 8),
+          Icon(
+            Icons.history_rounded,
+            size: AppSizes.smallIcon,
+            color: colors.textSecondary,
+          ),
+          const SizedBox(width: AppSpacing.sm),
           Expanded(
             child: Text(
               hiddenParts.isEmpty
@@ -2029,42 +1423,45 @@ class _HistoryTruncationCard extends StatelessWidget {
               overflow: TextOverflow.ellipsis,
               style: Theme.of(context).textTheme.bodySmall?.copyWith(
                 color: colors.textSecondary,
-                fontSize: 11.5,
+                fontSize: AppFontSizes.caption,
               ),
             ),
           ),
-          const SizedBox(width: 8),
+          const SizedBox(width: AppSpacing.sm),
           if (loading)
             const SizedBox(
               width: 12,
               height: 12,
-              child: CircularProgressIndicator(strokeWidth: 1.5),
+              child: CircularProgressIndicator(strokeWidth: AppStrokes.focus),
             )
           else
             InkWell(
               onTap: onLoadOlderHistory,
-              borderRadius: BorderRadius.circular(6),
+              borderRadius: BorderRadius.circular(AppRadii.hover),
               child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: AppSpacing.sm,
+                  vertical: AppSpacing.xs,
+                ),
                 child: Text(
                   'Load older',
                   style: Theme.of(context).textTheme.bodySmall?.copyWith(
                     color: colors.accent,
-                    fontWeight: FontWeight.w600,
-                    fontSize: 11.5,
+                    fontWeight: AppWeights.title,
+                    fontSize: AppFontSizes.caption,
                   ),
                 ),
               ),
             ),
           if (onDismiss != null)
             InkResponse(
-              radius: 18,
+              radius: AppSizes.touchFeedbackRadius,
               onTap: onDismiss,
               child: Padding(
-                padding: const EdgeInsets.all(6),
+                padding: const EdgeInsets.all(AppSpacing.tight),
                 child: Icon(
                   Icons.close_rounded,
-                  size: 14,
+                  size: AppSizes.smallIcon,
                   color: colors.textTertiary,
                 ),
               ),
@@ -2074,8 +1471,3 @@ class _HistoryTruncationCard extends StatelessWidget {
     );
   }
 }
-
-/// Compact info strip shown just below the desktop AppBar, replacing the bare
-/// 1px divider. Surfaces CWD, git branch/dirty state, context-window usage,
-/// and pinned-message count — the same metadata that compact mobile shows in
-/// [_SessionAppBarSubtitle] — so desktop users always have session context

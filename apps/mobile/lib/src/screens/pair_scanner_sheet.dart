@@ -5,6 +5,7 @@ import 'package:mobile_scanner/mobile_scanner.dart';
 import '../pairing.dart';
 import '../theme/app_colors.dart';
 import '../widgets/app_sheets.dart';
+import '../theme/app_tokens.dart';
 
 bool get canScanPairingQr {
   if (kIsWeb) return false;
@@ -85,7 +86,7 @@ class _PairScannerSheetState extends State<PairScannerSheet> {
               child: ConstrainedBox(
                 constraints: const BoxConstraints(maxWidth: 420),
                 child: ClipRRect(
-                  borderRadius: BorderRadius.circular(18),
+                  borderRadius: BorderRadius.circular(AppRadii.surface),
                   child: AspectRatio(
                     aspectRatio: 1,
                     child: Stack(
@@ -111,13 +112,13 @@ class _PairScannerSheetState extends State<PairScannerSheet> {
             ),
           ),
           if (_message != null) ...[
-            const SizedBox(height: 12),
+            const SizedBox(height: AppSpacing.md),
             Text(
               _message!,
               textAlign: TextAlign.center,
               style: Theme.of(context).textTheme.bodySmall?.copyWith(
                 color: colors.warning,
-                fontWeight: FontWeight.w700,
+                fontWeight: AppWeights.strong,
               ),
             ),
           ],
@@ -137,14 +138,14 @@ class _ScannerError extends StatelessWidget {
     final colors = context.colors;
     return Container(
       color: colors.surfaceElevated,
-      padding: const EdgeInsets.all(18),
+      padding: const EdgeInsets.all(AppSpacing.lg),
       alignment: Alignment.center,
       child: Text(
         _cameraErrorMessage(error),
         textAlign: TextAlign.center,
         style: TextStyle(
           color: colors.textSecondary,
-          fontWeight: FontWeight.w700,
+          fontWeight: AppWeights.strong,
         ),
       ),
     );
@@ -166,7 +167,10 @@ class _ScanFramePainter extends CustomPainter {
 
   @override
   void paint(Canvas canvas, Size size) {
-    final dim = Paint()..color = Colors.black.withValues(alpha: 0.24);
+    final dim = Paint()
+      ..color = AppMediaColors.background.withValues(
+        alpha: AppEmphasis.borderTint,
+      );
     final windowSize = size.shortestSide * 0.66;
     final rect = Rect.fromCenter(
       center: Offset(size.width / 2, size.height / 2),
@@ -179,14 +183,14 @@ class _ScanFramePainter extends CustomPainter {
     canvas.saveLayer(Offset.zero & size, Paint());
     canvas.drawRect(Offset.zero & size, dim);
     canvas.drawRRect(
-      RRect.fromRectAndRadius(rect, const Radius.circular(22)),
+      RRect.fromRectAndRadius(rect, const Radius.circular(AppRadii.sheet)),
       clear,
     );
     canvas.restore();
 
     final stroke = Paint()
       ..color = colors.accent
-      ..strokeWidth = 4
+      ..strokeWidth = AppStrokes.scanner
       ..style = PaintingStyle.stroke
       ..strokeCap = StrokeCap.round;
     const corner = 30.0;

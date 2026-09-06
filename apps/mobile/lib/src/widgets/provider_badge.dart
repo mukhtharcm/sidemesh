@@ -27,16 +27,16 @@ class AgentProviderBadge extends StatelessWidget {
     final colors = context.colors;
     final fg = colors.textSecondary;
     final bg = colors.surfaceMuted;
-    final border = colors.borderStrong.withValues(alpha: 0.68);
-    final fontSize = compact ? 10.5 : 11.2;
-    final iconSize = compact ? 11.0 : 12.0;
+    final border = colors.borderStrong.withValues(alpha: AppEmphasis.secondary);
+    final fontSize = compact ? AppFontSizes.micro : AppFontSizes.metadata;
+    final iconSize = AppSizes.tinyIcon;
 
     if (compact) {
       return Row(
         mainAxisSize: MainAxisSize.min,
         children: [
           Icon(Icons.hub_rounded, size: iconSize, color: fg),
-          const SizedBox(width: 4),
+          const SizedBox(width: AppSpacing.xs),
           ConstrainedBox(
             constraints: const BoxConstraints(maxWidth: 92),
             child: Text(
@@ -55,7 +55,10 @@ class AgentProviderBadge extends StatelessWidget {
     }
 
     return Container(
-      padding: EdgeInsets.symmetric(horizontal: 8, vertical: 5),
+      padding: EdgeInsets.symmetric(
+        horizontal: AppSpacing.sm,
+        vertical: AppSpacing.xs,
+      ),
       decoration: BoxDecoration(
         color: bg,
         borderRadius: AppShapes.badge,
@@ -65,7 +68,7 @@ class AgentProviderBadge extends StatelessWidget {
         mainAxisSize: MainAxisSize.min,
         children: [
           Icon(Icons.hub_rounded, size: iconSize, color: fg),
-          const SizedBox(width: 5),
+          const SizedBox(width: AppSpacing.xs),
           ConstrainedBox(
             constraints: const BoxConstraints(maxWidth: 160),
             child: Text(

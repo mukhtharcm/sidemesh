@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import 'app_palettes.dart';
+import 'app_tokens.dart';
 
 /// Theme extension that carries Sidemesh-specific semantic colors.
 ///
@@ -217,10 +218,16 @@ class AppColors extends ThemeExtension<AppColors> {
       userBubble: Color.lerp(userBubble, other.userBubble, t)!,
       userBubbleOn: Color.lerp(userBubbleOn, other.userBubbleOn, t)!,
       assistantBubble: Color.lerp(assistantBubble, other.assistantBubble, t)!,
-      assistantBubbleBorder:
-          Color.lerp(assistantBubbleBorder, other.assistantBubbleBorder, t)!,
-      composerBackground:
-          Color.lerp(composerBackground, other.composerBackground, t)!,
+      assistantBubbleBorder: Color.lerp(
+        assistantBubbleBorder,
+        other.assistantBubbleBorder,
+        t,
+      )!,
+      composerBackground: Color.lerp(
+        composerBackground,
+        other.composerBackground,
+        t,
+      )!,
     );
   }
 }
@@ -228,4 +235,18 @@ class AppColors extends ThemeExtension<AppColors> {
 extension AppColorsX on BuildContext {
   AppColors get colors =>
       Theme.of(this).extension<AppColors>() ?? ThemeVariant.nord.dark;
+}
+
+/// Media is shown on black in both modes; controls must keep fixed contrast.
+abstract final class AppMediaColors {
+  static const background = Colors.black;
+  static const foreground = Colors.white;
+  static const secondary = Colors.white70;
+  static final overlay = background.withValues(alpha: AppEmphasis.secondary);
+}
+
+/// Scrims and shadows use a neutral source, independent of the selected palette.
+abstract final class AppOverlayColors {
+  static const shadow = Colors.black;
+  static final modalBarrier = Colors.black.withValues(alpha: 0.28);
 }

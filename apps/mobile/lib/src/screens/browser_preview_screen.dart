@@ -3,6 +3,7 @@ import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import '../widgets/app_menu.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/services.dart' hide Uint8List;
 import 'package:web_socket_channel/web_socket_channel.dart';
@@ -10,6 +11,7 @@ import 'package:web_socket_channel/web_socket_channel.dart';
 import '../api_client.dart';
 import '../models.dart';
 import '../theme/app_colors.dart';
+import '../theme/app_control_styles.dart';
 import '../theme/app_theme.dart';
 import '../theme/app_tokens.dart';
 import '../widgets/app_dialogs.dart';
@@ -21,9 +23,12 @@ import '../host_status_store.dart';
 
 // Keep drag/tap gestures on the legacy device set so a desktop trackpad pan
 // does not double-trigger the canvas drag recognizers.
-final Set<PointerDeviceKind> _browserPreviewNonTrackpadDevices = Set.unmodifiable(
-  PointerDeviceKind.values.where((kind) => kind != PointerDeviceKind.trackpad),
-);
+final Set<PointerDeviceKind> _browserPreviewNonTrackpadDevices =
+    Set.unmodifiable(
+      PointerDeviceKind.values.where(
+        (kind) => kind != PointerDeviceKind.trackpad,
+      ),
+    );
 
 class BrowserPreviewScreen extends StatelessWidget {
   const BrowserPreviewScreen({
@@ -127,6 +132,7 @@ class _BrowserPreviewPaneState extends State<BrowserPreviewPane>
   bool _hasLivePreviewSnapshot = false;
   int _firstFrameReconnects = 0;
   bool _devToolsOpen = false;
+  late bool _fitViewport = widget.autoResizeViewport;
   int _devToolsTabIndex = 0;
   bool _pageLoading = false;
   final List<_ConsoleEntry> _consoleEntries = [];
@@ -292,7 +298,7 @@ class _BrowserPreviewPaneState extends State<BrowserPreviewPane>
   }
 
   void _scheduleAutoResize(Size size) {
-    if (!widget.autoResizeViewport || !_hasLivePreviewSnapshot) {
+    if (!_fitViewport || !_hasLivePreviewSnapshot) {
       _autoResizeTimer?.cancel();
       return;
     }
@@ -838,10 +844,7 @@ class _BrowserPreviewPaneState extends State<BrowserPreviewPane>
     );
     if (confirmed != true || !mounted) return;
     try {
-      await widget.api.stopBrowserPreview(
-        widget.host,
-        _preview.id,
-      );
+      await widget.api.stopBrowserPreview(widget.host, _preview.id);
       if (!mounted) return;
       widget.onStopped?.call(_preview);
       if (widget.onStopped == null) {
@@ -849,10 +852,7 @@ class _BrowserPreviewPaneState extends State<BrowserPreviewPane>
       }
     } catch (error) {
       if (!mounted) return;
-      showAppSnackBar(
-        context,
-        'Could not close tab: ${friendlyError(error)}',
-      );
+      showAppSnackBar(context, 'Could not close tab: ${friendlyError(error)}');
     }
   }
 
@@ -873,6 +873,7 @@ class _BrowserPreviewPaneState extends State<BrowserPreviewPane>
     // snap to the new dimensions immediately, before the server's `preview`
     // message round-trips back.
     setState(() {
+      _fitViewport = result.label == 'Fit pane';
       _preview = _preview.copyWith(width: result.width, height: result.height);
       _frameWidth = result.width;
       _frameHeight = result.height;
@@ -1342,233 +1343,252 @@ class _BrowserPreviewPaneState extends State<BrowserPreviewPane>
     final desktopLike = MediaQuery.sizeOf(context).shortestSide >= 700;
     final reconnecting =
         _frameBytes != null && _status != null && !_clientPaused;
-    return Column(
-      children: [
-        _BrowserChromeBar(
-          preview: _preview,
-          urlController: _urlController,
-          urlFocusNode: _urlFocusNode,
-          pageLoading: _pageLoading,
-          desktopLike: desktopLike,
-          streamPaused: _clientPaused,
-          devToolsOpen: _devToolsOpen,
-          inputRailOpen: _inputRailOpen,
-          onBack: widget.onBack,
-          onMinimize: widget.onMinimize,
-          onNavigate: _sendNavigate,
-          onBackNavigation: () => _sendNavigation('back'),
-          onForwardNavigation: () => _sendNavigation('forward'),
-          onReload: () => _sendNavigation('reload'),
-          onResize: () => unawaited(_showViewportSheet()),
-          onToggleInput: _toggleInputRail,
-          onToggleDevTools: _toggleDevTools,
-          onTogglePause: () =>
-              _clientPaused ? _resumeStream() : _pauseStream(manual: true),
-          onOpenInWindow: widget.onOpenInWindow,
-          onStop: widget.showHeader
-              ? () => unawaited(_stopRemoteBrowser())
-              : null,
-        ),
-        Expanded(
-          child: Stack(
-            children: [
-              Positioned.fill(
-                child: Container(
-                  color: colors.canvas,
-                  child: LayoutBuilder(
-                    builder: (context, constraints) {
-                      final size = constraints.biggest;
-                      _lastPreviewBoxSize = size;
-                      _scheduleAutoResize(size);
-                      return Focus(
-                        focusNode: _browserFocusNode,
-                        autofocus: desktopLike,
-                        onKeyEvent: _handleHardwareKey,
-                        child: MouseRegion(
-                          onHover: desktopLike
-                              ? (event) => _sendHover(event, size)
-                              : null,
-                          child: Listener(
-                            onPointerSignal: (event) =>
-                                _handlePointerSignal(event, size),
-                            child: RawGestureDetector(
-                              gestures:
-                                  <Type, GestureRecognizerFactory<GestureRecognizer>>{
-                                    PanGestureRecognizer:
-                                        GestureRecognizerFactoryWithHandlers<
-                                          PanGestureRecognizer
-                                        >(
-                                          () => PanGestureRecognizer(
-                                            supportedDevices: const <PointerDeviceKind>{
-                                              PointerDeviceKind.trackpad,
-                                            },
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final wideToolbar = constraints.maxWidth >= 760;
+        return Column(
+          children: [
+            _BrowserChromeBar(
+              preview: _preview,
+              urlController: _urlController,
+              urlFocusNode: _urlFocusNode,
+              pageLoading: _pageLoading,
+              desktopLike: wideToolbar,
+              streamPaused: _clientPaused,
+              devToolsOpen: _devToolsOpen,
+              inputRailOpen: _inputRailOpen,
+              onBack: widget.onBack,
+              onMinimize: widget.onMinimize,
+              onNavigate: _sendNavigate,
+              onBackNavigation: () => _sendNavigation('back'),
+              onForwardNavigation: () => _sendNavigation('forward'),
+              onReload: () => _sendNavigation('reload'),
+              onResize: () => unawaited(_showViewportSheet()),
+              onToggleInput: _toggleInputRail,
+              onToggleDevTools: _toggleDevTools,
+              onTogglePause: () =>
+                  _clientPaused ? _resumeStream() : _pauseStream(manual: true),
+              onOpenInWindow: widget.onOpenInWindow,
+              onStop: widget.showHeader
+                  ? () => unawaited(_stopRemoteBrowser())
+                  : null,
+            ),
+            Expanded(
+              child: Stack(
+                children: [
+                  Positioned.fill(
+                    child: Container(
+                      color: colors.canvas,
+                      child: LayoutBuilder(
+                        builder: (context, constraints) {
+                          final size = constraints.biggest;
+                          _lastPreviewBoxSize = size;
+                          _scheduleAutoResize(size);
+                          return Focus(
+                            focusNode: _browserFocusNode,
+                            autofocus: desktopLike,
+                            onKeyEvent: _handleHardwareKey,
+                            child: MouseRegion(
+                              onHover: desktopLike
+                                  ? (event) => _sendHover(event, size)
+                                  : null,
+                              child: Listener(
+                                onPointerSignal: (event) =>
+                                    _handlePointerSignal(event, size),
+                                child: RawGestureDetector(
+                                  gestures:
+                                      <
+                                        Type,
+                                        GestureRecognizerFactory<
+                                          GestureRecognizer
+                                        >
+                                      >{
+                                        PanGestureRecognizer:
+                                            GestureRecognizerFactoryWithHandlers<
+                                              PanGestureRecognizer
+                                            >(
+                                              () => PanGestureRecognizer(
+                                                supportedDevices:
+                                                    const <PointerDeviceKind>{
+                                                      PointerDeviceKind
+                                                          .trackpad,
+                                                    },
+                                              ),
+                                              (PanGestureRecognizer instance) {
+                                                instance.onStart = (_) {
+                                                  _browserFocusNode
+                                                      .requestFocus();
+                                                };
+                                                instance.onUpdate = (details) =>
+                                                    _sendTrackpadScroll(
+                                                      details,
+                                                      size,
+                                                    );
+                                              },
+                                            ),
+                                      },
+                                  behavior: HitTestBehavior.opaque,
+                                  child: GestureDetector(
+                                    key: const ValueKey('browserPreviewCanvas'),
+                                    behavior: HitTestBehavior.opaque,
+                                    supportedDevices:
+                                        _browserPreviewNonTrackpadDevices,
+                                    onTapDown: (details) =>
+                                        _sendTapDown(details, size),
+                                    onTapUp: (details) =>
+                                        _sendTapUp(details, size),
+                                    onVerticalDragUpdate: (details) =>
+                                        _sendScroll(details, size),
+                                    onHorizontalDragUpdate: (details) =>
+                                        _sendScroll(details, size),
+                                    child: Stack(
+                                      children: [
+                                        Positioned.fill(
+                                          child: _buildPreviewBody(colors),
+                                        ),
+                                        Positioned.fill(
+                                          child: IgnorePointer(
+                                            child: _InspectorSelectionOverlay(
+                                              highlightRect:
+                                                  _inspectorHighlightRect(size),
+                                              pickMode: _inspectorPickActive,
+                                              hasSelection:
+                                                  _inspectorSnapshot
+                                                      ?.selectedNode !=
+                                                  null,
+                                            ),
                                           ),
-                                          (PanGestureRecognizer instance) {
-                                            instance.onStart = (_) {
-                                              _browserFocusNode.requestFocus();
-                                            };
-                                            instance.onUpdate = (details) =>
-                                                _sendTrackpadScroll(
-                                                  details,
-                                                  size,
-                                                );
-                                          },
                                         ),
-                                  },
-                              behavior: HitTestBehavior.opaque,
-                              child: GestureDetector(
-                                key: const ValueKey('browserPreviewCanvas'),
-                                behavior: HitTestBehavior.opaque,
-                                supportedDevices:
-                                    _browserPreviewNonTrackpadDevices,
-                                onTapDown: (details) =>
-                                    _sendTapDown(details, size),
-                                onTapUp: (details) =>
-                                    _sendTapUp(details, size),
-                                onVerticalDragUpdate: (details) =>
-                                    _sendScroll(details, size),
-                                onHorizontalDragUpdate: (details) =>
-                                    _sendScroll(details, size),
-                                child: Stack(
-                                  children: [
-                                    Positioned.fill(
-                                      child: _buildPreviewBody(colors),
+                                      ],
                                     ),
-                                    Positioned.fill(
-                                      child: IgnorePointer(
-                                        child: _InspectorSelectionOverlay(
-                                          highlightRect:
-                                              _inspectorHighlightRect(size),
-                                          pickMode: _inspectorPickActive,
-                                          hasSelection:
-                                              _inspectorSnapshot
-                                                  ?.selectedNode !=
-                                              null,
-                                        ),
-                                      ),
-                                    ),
-                                  ],
+                                  ),
                                 ),
                               ),
                             ),
-                          ),
-                        ),
-                      );
-                    },
+                          );
+                        },
+                      ),
+                    ),
                   ),
-                ),
+                  if (_pageLoading && _frameBytes != null)
+                    Positioned(
+                      top: 0,
+                      left: 0,
+                      right: 0,
+                      child: LinearProgressIndicator(
+                        minHeight: 2,
+                        backgroundColor: Colors.transparent,
+                        color: colors.accent,
+                      ),
+                    ),
+                  if (reconnecting)
+                    Positioned(
+                      top: 8,
+                      left: 0,
+                      right: 0,
+                      child: Center(
+                        child: _ReconnectingChip(message: _status!),
+                      ),
+                    ),
+                  if (_clientPaused)
+                    Positioned.fill(
+                      child: _PausedPreviewOverlay(
+                        manualPause: _manualPause,
+                        onResume: _resumeStream,
+                      ),
+                    ),
+                ],
               ),
-              if (_pageLoading && _frameBytes != null)
-                Positioned(
-                  top: 0,
-                  left: 0,
-                  right: 0,
-                  child: LinearProgressIndicator(
-                    minHeight: 2,
-                    backgroundColor: Colors.transparent,
-                    color: colors.accent,
-                  ),
-                ),
-              if (reconnecting)
-                Positioned(
-                  top: 8,
-                  left: 0,
-                  right: 0,
-                  child: Center(child: _ReconnectingChip(message: _status!)),
-                ),
-              if (_clientPaused)
-                Positioned.fill(
-                  child: _PausedPreviewOverlay(
-                    manualPause: _manualPause,
-                    onResume: _resumeStream,
-                  ),
-                ),
-            ],
-          ),
-        ),
-        if (!desktopLike)
-          _BrowserBottomToolbar(
-            preview: _preview,
-            streamPaused: _clientPaused,
-            inputRailOpen: _inputRailOpen,
-            devToolsOpen: _devToolsOpen,
-            onBack: () => _sendNavigation('back'),
-            onForward: () => _sendNavigation('forward'),
-            onReload: () => _sendNavigation('reload'),
-            onHome: () => _send({'type': 'navigate', 'url': _preview.url}),
-            onResize: () => unawaited(_showViewportSheet()),
-            onToggleInput: _toggleInputRail,
-            onToggleDevTools: _toggleDevTools,
-            onTogglePause: () =>
-                _clientPaused ? _resumeStream() : _pauseStream(manual: true),
-          ),
-        if (_inputRailOpen)
-          _InputRail(
-            controller: _textController,
-            focusNode: _inputFocusNode,
-            onSendText: _sendText,
-            onKey: _sendKey,
-            onFocusInput: _focusInputRail,
-            onClose: _closeInputRail,
-            showSpecialKeys: !desktopLike,
-          ),
-        if (_devToolsOpen)
-          _DevToolsPanel(
-            tabIndex: _devToolsTabIndex,
-            onTabChanged: _setDevToolsTab,
-            consoleEntries: _consoleEntries,
-            networkEntries: _filteredNetworkEntries,
-            networkAvailable: _networkAvailable,
-            networkUnavailableMessage: _networkUnavailableMessage,
-            networkFilter: _networkFilter,
-            networkSearchController: _networkSearchController,
-            networkSearchQuery: _networkSearchQuery,
-            networkSort: _networkSort,
-            inspectorSnapshot: _inspectorSnapshot,
-            inspectorLoading: _inspectorLoading,
-            inspectorError: _inspectorError,
-            inspectorPickMode: _inspectorPickMode,
-            storageSnapshot: _storageSnapshot,
-            storageLoading: _storageLoading,
-            storageError: _storageError,
-            onNetworkFilterChanged: (value) =>
-                setState(() => _networkFilter = value),
-            onNetworkSearchChanged: (value) {
-              if (_networkSearchController.text == value) return;
-              _networkSearchController.value = TextEditingValue(
-                text: value,
-                selection: TextSelection.collapsed(offset: value.length),
-              );
-            },
-            onNetworkSortChanged: (value) =>
-                setState(() => _networkSort = value),
-            onClearConsole: _clearConsole,
-            onClearNetwork: _clearNetworkLog,
-            onRefreshInspector: () => _requestInspectorSnapshot(force: true),
-            onToggleInspectorPickMode: _toggleInspectorPickMode,
-            onSelectInspectorPath: _selectInspectorPath,
-            onRefreshStorage: () => _requestStorageSnapshot(force: true),
-            onAddStorageEntry: (area) =>
-                unawaited(_showStorageEntryEditor(area)),
-            onEditStorageEntry: (area, entry) =>
-                unawaited(_showStorageEntryEditor(area, existing: entry)),
-            onDeleteStorageEntry: (area, entry) =>
-                unawaited(_confirmDeleteStorageEntry(area, entry)),
-            onClearStorageArea: (area) =>
-                unawaited(_confirmClearStorageArea(area)),
-            onDeleteCookie: (cookie) => unawaited(_confirmDeleteCookie(cookie)),
-            onClearCookies: () => unawaited(_confirmClearCookies()),
-            onOpenNetworkDetail: _showNetworkDetail,
-            preview: _preview,
-          ),
-      ],
+            ),
+            if (!wideToolbar)
+              _BrowserBottomToolbar(
+                preview: _preview,
+                streamPaused: _clientPaused,
+                inputRailOpen: _inputRailOpen,
+                devToolsOpen: _devToolsOpen,
+                onBack: () => _sendNavigation('back'),
+                onForward: () => _sendNavigation('forward'),
+                onReload: () => _sendNavigation('reload'),
+                onHome: () => _send({'type': 'navigate', 'url': _preview.url}),
+                onResize: () => unawaited(_showViewportSheet()),
+                onToggleInput: _toggleInputRail,
+                onToggleDevTools: _toggleDevTools,
+                onTogglePause: () => _clientPaused
+                    ? _resumeStream()
+                    : _pauseStream(manual: true),
+              ),
+            if (_inputRailOpen)
+              _InputRail(
+                controller: _textController,
+                focusNode: _inputFocusNode,
+                onSendText: _sendText,
+                onKey: _sendKey,
+                onFocusInput: _focusInputRail,
+                onClose: _closeInputRail,
+                showSpecialKeys: !desktopLike,
+              ),
+            if (_devToolsOpen)
+              _DevToolsPanel(
+                height: (constraints.maxHeight * 0.45).clamp(0, 380).toDouble(),
+                tabIndex: _devToolsTabIndex,
+                onTabChanged: _setDevToolsTab,
+                consoleEntries: _consoleEntries,
+                networkEntries: _filteredNetworkEntries,
+                networkAvailable: _networkAvailable,
+                networkUnavailableMessage: _networkUnavailableMessage,
+                networkFilter: _networkFilter,
+                networkSearchController: _networkSearchController,
+                networkSearchQuery: _networkSearchQuery,
+                networkSort: _networkSort,
+                inspectorSnapshot: _inspectorSnapshot,
+                inspectorLoading: _inspectorLoading,
+                inspectorError: _inspectorError,
+                inspectorPickMode: _inspectorPickMode,
+                storageSnapshot: _storageSnapshot,
+                storageLoading: _storageLoading,
+                storageError: _storageError,
+                onNetworkFilterChanged: (value) =>
+                    setState(() => _networkFilter = value),
+                onNetworkSearchChanged: (value) {
+                  if (_networkSearchController.text == value) return;
+                  _networkSearchController.value = TextEditingValue(
+                    text: value,
+                    selection: TextSelection.collapsed(offset: value.length),
+                  );
+                },
+                onNetworkSortChanged: (value) =>
+                    setState(() => _networkSort = value),
+                onClearConsole: _clearConsole,
+                onClearNetwork: _clearNetworkLog,
+                onRefreshInspector: () =>
+                    _requestInspectorSnapshot(force: true),
+                onToggleInspectorPickMode: _toggleInspectorPickMode,
+                onSelectInspectorPath: _selectInspectorPath,
+                onRefreshStorage: () => _requestStorageSnapshot(force: true),
+                onAddStorageEntry: (area) =>
+                    unawaited(_showStorageEntryEditor(area)),
+                onEditStorageEntry: (area, entry) =>
+                    unawaited(_showStorageEntryEditor(area, existing: entry)),
+                onDeleteStorageEntry: (area, entry) =>
+                    unawaited(_confirmDeleteStorageEntry(area, entry)),
+                onClearStorageArea: (area) =>
+                    unawaited(_confirmClearStorageArea(area)),
+                onDeleteCookie: (cookie) =>
+                    unawaited(_confirmDeleteCookie(cookie)),
+                onClearCookies: () => unawaited(_confirmClearCookies()),
+                onOpenNetworkDetail: _showNetworkDetail,
+                preview: _preview,
+              ),
+          ],
+        );
+      },
     );
   }
 
   Widget _buildPreviewBody(AppColors colors) {
     if (_error != null) {
       return Padding(
-        padding: const EdgeInsets.all(24),
+        padding: const EdgeInsets.all(AppSpacing.xl),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
@@ -1577,7 +1597,7 @@ class _BrowserPreviewPaneState extends State<BrowserPreviewPane>
               textAlign: TextAlign.center,
               style: TextStyle(color: colors.danger),
             ),
-            const SizedBox(height: 14),
+            const SizedBox(height: AppSpacing.md),
             OutlinedButton.icon(
               onPressed: _retryPreviewStream,
               icon: const Icon(Icons.refresh_rounded),
@@ -1607,176 +1627,11 @@ class _PreviewViewportLoadingState extends StatelessWidget {
   final String? status;
 
   @override
-  Widget build(BuildContext context) {
-    final colors = context.colors;
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        final compact = constraints.maxWidth < 520;
-        final horizontalPadding = compact ? 16.0 : 22.0;
-        return Padding(
-          padding: EdgeInsets.fromLTRB(
-            horizontalPadding,
-            compact ? 16 : 20,
-            horizontalPadding,
-            16,
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Wrap(
-                spacing: 10,
-                runSpacing: 10,
-                children: [
-                  SizedBox(
-                    width: compact ? constraints.maxWidth - 32 : 180,
-                    child: const MeshCard(
-                      tone: MeshCardTone.muted,
-                      padding: EdgeInsets.all(12),
-                      child: MeshSectionHeadingSkeleton(
-                        titleWidthFactor: 0.34,
-                        subtitleWidthFactor: 0.62,
-                      ),
-                    ),
-                  ),
-                  SizedBox(
-                    width: compact ? constraints.maxWidth - 32 : 156,
-                    child: const MeshCard(
-                      tone: MeshCardTone.muted,
-                      padding: EdgeInsets.all(12),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          FractionallySizedBox(
-                            widthFactor: 0.48,
-                            alignment: Alignment.centerLeft,
-                            child: MeshSkeleton(height: 10),
-                          ),
-                          SizedBox(height: 10),
-                          FractionallySizedBox(
-                            widthFactor: 0.72,
-                            alignment: Alignment.centerLeft,
-                            child: MeshSkeleton(height: 14),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 14),
-              Expanded(
-                child: MeshCard(
-                  tone: MeshCardTone.muted,
-                  padding: const EdgeInsets.all(14),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      const Row(
-                        children: [
-                          MeshSkeleton(width: 86, height: 12, radius: 999),
-                          SizedBox(width: 8),
-                          MeshSkeleton(width: 64, height: 12, radius: 999),
-                        ],
-                      ),
-                      const SizedBox(height: 14),
-                      Expanded(
-                        child: LayoutBuilder(
-                          builder: (context, viewport) {
-                            final wide = viewport.maxWidth >= 560;
-                            return Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                const MeshSkeleton(height: 12),
-                                const SizedBox(height: 8),
-                                const FractionallySizedBox(
-                                  widthFactor: 0.58,
-                                  alignment: Alignment.centerLeft,
-                                  child: MeshSkeleton(height: 12),
-                                ),
-                                const SizedBox(height: 18),
-                                if (wide)
-                                  Expanded(
-                                    child: Row(
-                                      children: const [
-                                        Expanded(
-                                          flex: 3,
-                                          child: MeshSkeleton(
-                                            width: double.infinity,
-                                            height: double.infinity,
-                                            radius: 18,
-                                          ),
-                                        ),
-                                        SizedBox(width: 14),
-                                        Expanded(
-                                          flex: 2,
-                                          child: Column(
-                                            children: [
-                                              Expanded(
-                                                child: MeshSkeleton(
-                                                  width: double.infinity,
-                                                  height: double.infinity,
-                                                  radius: 18,
-                                                ),
-                                              ),
-                                              SizedBox(height: 14),
-                                              Expanded(
-                                                child: MeshSkeleton(
-                                                  width: double.infinity,
-                                                  height: double.infinity,
-                                                  radius: 18,
-                                                ),
-                                              ),
-                                            ],
-                                          ),
-                                        ),
-                                      ],
-                                    ),
-                                  )
-                                else
-                                  const Expanded(
-                                    child: Column(
-                                      children: [
-                                        Expanded(
-                                          child: MeshSkeleton(
-                                            width: double.infinity,
-                                            height: double.infinity,
-                                            radius: 18,
-                                          ),
-                                        ),
-                                        SizedBox(height: 14),
-                                        Expanded(
-                                          child: MeshSkeleton(
-                                            width: double.infinity,
-                                            height: double.infinity,
-                                            radius: 18,
-                                          ),
-                                        ),
-                                      ],
-                                    ),
-                                  ),
-                              ],
-                            );
-                          },
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-              if ((status ?? '').trim().isNotEmpty) ...[
-                const SizedBox(height: 12),
-                Text(
-                  status!,
-                  textAlign: TextAlign.center,
-                  style: TextStyle(color: colors.textSecondary),
-                ),
-              ],
-            ],
-          ),
-        );
-      },
-    );
-  }
+  Widget build(BuildContext context) => MeshLoader(
+    label: status?.trim().isNotEmpty == true
+        ? status!
+        : 'Connecting to browser',
+  );
 }
 
 class _BrowserChromeBar extends StatelessWidget {
@@ -1835,7 +1690,10 @@ class _BrowserChromeBar extends StatelessWidget {
   Widget build(BuildContext context) {
     final colors = context.colors;
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+      padding: const EdgeInsets.symmetric(
+        horizontal: AppSpacing.sm,
+        vertical: AppSpacing.sm,
+      ),
       decoration: BoxDecoration(
         color: colors.surface,
         border: Border(bottom: BorderSide(color: colors.border)),
@@ -1850,7 +1708,7 @@ class _BrowserChromeBar extends StatelessWidget {
                 tooltip: 'Close browser',
                 onTap: onBack!,
               ),
-              const SizedBox(width: 4),
+              const SizedBox(width: AppSpacing.xs),
             ],
             if (desktopLike) ...[
               _ChromeButton(
@@ -1858,93 +1716,105 @@ class _BrowserChromeBar extends StatelessWidget {
                 tooltip: 'Back',
                 onTap: onBackNavigation,
               ),
-              const SizedBox(width: 2),
+              const SizedBox(width: AppSpacing.xxs),
               _ChromeButton(
                 icon: Icons.arrow_forward_rounded,
                 tooltip: 'Forward',
                 onTap: onForwardNavigation,
               ),
-              const SizedBox(width: 2),
+              const SizedBox(width: AppSpacing.xxs),
               _ChromeButton(
                 icon: Icons.refresh_rounded,
                 tooltip: 'Reload',
                 onTap: onReload,
               ),
-              const SizedBox(width: 6),
+              const SizedBox(width: AppSpacing.tight),
             ],
             Expanded(
-              child: Container(
-                height: 36,
-                padding: const EdgeInsets.symmetric(horizontal: 12),
-                decoration: BoxDecoration(
-                  color: colors.canvas,
-                  borderRadius: BorderRadius.circular(10),
-                  border: Border.all(color: colors.border),
-                ),
-                child: Row(
-                  children: [
-                    if (pageLoading)
-                      SizedBox(
-                        width: 14,
-                        height: 14,
-                        child: CircularProgressIndicator(
-                          strokeWidth: 2,
-                          color: colors.accent,
-                        ),
-                      )
-                    else
-                      Tooltip(
-                        message: _isHttps
-                            ? 'Connection is secure (HTTPS)'
-                            : 'Connection is not secure (HTTP)',
-                        child: Icon(
-                          _isHttps
-                              ? Icons.lock_rounded
-                              : Icons.info_outline_rounded,
-                          size: 14,
-                          color: _isHttps
-                              ? colors.textTertiary
-                              : colors.warning,
-                        ),
-                      ),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: TextField(
-                        controller: urlController,
-                        focusNode: urlFocusNode,
-                        style: TextStyle(
-                          color: colors.textPrimary,
-                          fontSize: 13,
-                        ),
-                        decoration: InputDecoration(
-                          isDense: true,
-                          border: InputBorder.none,
-                          hintText: preview.url,
-                          hintStyle: TextStyle(
-                            color: colors.textSecondary,
-                            fontSize: 13,
-                          ),
-                          contentPadding: EdgeInsets.zero,
-                        ),
-                        textInputAction: TextInputAction.go,
-                        autocorrect: false,
-                        enableSuggestions: false,
-                        keyboardType: TextInputType.url,
-                        onSubmitted: (_) => onNavigate(),
-                      ),
+              child: AnimatedBuilder(
+                animation: urlFocusNode,
+                builder: (context, _) => Container(
+                  key: const ValueKey('browserAddressSurface'),
+                  height:
+                      AppSizes.usesPointerControls(Theme.of(context).platform)
+                      ? AppSizes.compactControl
+                      : AppSizes.control,
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: AppSpacing.md,
+                  ),
+                  decoration: BoxDecoration(
+                    color: colors.canvas,
+                    borderRadius: AppShapes.input,
+                    border: Border.all(
+                      color: urlFocusNode.hasFocus
+                          ? colors.accent
+                          : colors.border,
                     ),
-                  ],
+                  ),
+                  child: Row(
+                    children: [
+                      if (pageLoading)
+                        SizedBox(
+                          width: 14,
+                          height: 14,
+                          child: CircularProgressIndicator(
+                            strokeWidth: AppStrokes.indicator,
+                            color: colors.accent,
+                          ),
+                        )
+                      else
+                        Tooltip(
+                          message: _isHttps
+                              ? 'Connection is secure (HTTPS)'
+                              : 'Connection is not secure (HTTP)',
+                          child: Icon(
+                            _isHttps
+                                ? Icons.lock_rounded
+                                : Icons.info_outline_rounded,
+                            size: AppSizes.smallIcon,
+                            color: _isHttps
+                                ? colors.textTertiary
+                                : colors.warning,
+                          ),
+                        ),
+                      const SizedBox(width: AppSpacing.sm),
+                      Expanded(
+                        child: TextField(
+                          controller: urlController,
+                          focusNode: urlFocusNode,
+                          style: TextStyle(
+                            color: colors.textPrimary,
+                            fontSize: AppFontSizes.compact,
+                          ),
+                          decoration: AppInputDecorations.borderless.copyWith(
+                            isDense: true,
+                            hintText: preview.url,
+                            hintStyle: TextStyle(
+                              color: colors.textSecondary,
+                              fontSize: AppFontSizes.compact,
+                            ),
+                            contentPadding: EdgeInsets.zero,
+                          ),
+                          textInputAction: TextInputAction.go,
+                          autocorrect: false,
+                          enableSuggestions: false,
+                          keyboardType: TextInputType.url,
+                          onSubmitted: (_) => onNavigate(),
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
               ),
             ),
-            const SizedBox(width: 8),
+            const SizedBox(width: AppSpacing.sm),
             if (desktopLike) ...[
               _ViewportChip(
                 width: preview.width,
                 height: preview.height,
                 onTap: onResize,
               ),
-              const SizedBox(width: 6),
+              const SizedBox(width: AppSpacing.tight),
               _ChromeButton(
                 icon: inputRailOpen
                     ? Icons.keyboard_hide_rounded
@@ -1953,7 +1823,7 @@ class _BrowserChromeBar extends StatelessWidget {
                 color: inputRailOpen ? colors.accent : null,
                 onTap: onToggleInput,
               ),
-              const SizedBox(width: 2),
+              const SizedBox(width: AppSpacing.xxs),
               _ChromeButton(
                 icon: devToolsOpen
                     ? Icons.construction_rounded
@@ -1962,7 +1832,7 @@ class _BrowserChromeBar extends StatelessWidget {
                 color: devToolsOpen ? colors.accent : null,
                 onTap: onToggleDevTools,
               ),
-              const SizedBox(width: 2),
+              const SizedBox(width: AppSpacing.xxs),
               _ChromeButton(
                 icon: streamPaused
                     ? Icons.play_circle_outline_rounded
@@ -1972,7 +1842,7 @@ class _BrowserChromeBar extends StatelessWidget {
                 onTap: onTogglePause,
               ),
               if (onOpenInWindow != null) ...[
-                const SizedBox(width: 2),
+                const SizedBox(width: AppSpacing.xxs),
                 _ChromeButton(
                   icon: Icons.open_in_new_rounded,
                   tooltip: 'Open in its own window',
@@ -1980,7 +1850,7 @@ class _BrowserChromeBar extends StatelessWidget {
                   onTap: onOpenInWindow!,
                 ),
               ],
-              const SizedBox(width: 4),
+              const SizedBox(width: AppSpacing.xs),
             ],
             if (onMinimize != null) ...[
               _ChromeButton(
@@ -1988,7 +1858,7 @@ class _BrowserChromeBar extends StatelessWidget {
                 tooltip: 'Minimize',
                 onTap: onMinimize!,
               ),
-              const SizedBox(width: 2),
+              const SizedBox(width: AppSpacing.xxs),
             ],
             if (onStop != null)
               _ChromeButton(
@@ -2019,22 +1889,11 @@ class _ChromeButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final colors = context.colors;
-    return Tooltip(
-      message: tooltip,
-      child: Material(
-        color: Colors.transparent,
-        child: InkWell(
-          borderRadius: BorderRadius.circular(8),
-          onTap: onTap,
-          child: Container(
-            width: 32,
-            height: 32,
-            alignment: Alignment.center,
-            child: Icon(icon, size: 18, color: color ?? colors.textSecondary),
-          ),
-        ),
-      ),
+    return IconButton(
+      tooltip: tooltip,
+      onPressed: onTap,
+      icon: Icon(icon, size: AppSizes.compactIcon),
+      color: color,
     );
   }
 }
@@ -2072,75 +1931,67 @@ class _BrowserBottomToolbar extends StatelessWidget {
   Widget build(BuildContext context) {
     final colors = context.colors;
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+      padding: const EdgeInsets.symmetric(
+        horizontal: AppSpacing.sm,
+        vertical: AppSpacing.tight,
+      ),
       decoration: BoxDecoration(
         color: colors.surface,
         border: Border(top: BorderSide(color: colors.border)),
       ),
       child: SafeArea(
         top: false,
-        child: SingleChildScrollView(
-          scrollDirection: Axis.horizontal,
-          child: Row(
-            children: [
-              _ChromeButton(
-                icon: Icons.arrow_back_rounded,
-                tooltip: 'Back',
-                onTap: onBack,
-              ),
-              const SizedBox(width: 4),
-              _ChromeButton(
-                icon: Icons.arrow_forward_rounded,
-                tooltip: 'Forward',
-                onTap: onForward,
-              ),
-              const SizedBox(width: 4),
-              _ChromeButton(
-                icon: Icons.refresh_rounded,
-                tooltip: 'Reload',
-                onTap: onReload,
-              ),
-              const SizedBox(width: 4),
-              _ChromeButton(
-                icon: Icons.home_rounded,
-                tooltip: 'Home',
-                onTap: onHome,
-              ),
-              const SizedBox(width: 8),
-              _ViewportChip(
-                width: preview.width,
-                height: preview.height,
-                onTap: onResize,
-              ),
-              const SizedBox(width: 6),
-              _ChromeButton(
-                icon: inputRailOpen
-                    ? Icons.keyboard_hide_rounded
-                    : Icons.keyboard_alt_rounded,
-                tooltip: inputRailOpen ? 'Hide keyboard' : 'Keyboard',
-                color: inputRailOpen ? colors.accent : null,
-                onTap: onToggleInput,
-              ),
-              const SizedBox(width: 4),
-              _ChromeButton(
-                icon: devToolsOpen
-                    ? Icons.construction_rounded
-                    : Icons.construction_outlined,
-                tooltip: 'Tools',
-                color: devToolsOpen ? colors.accent : null,
-                onTap: onToggleDevTools,
-              ),
-              const SizedBox(width: 4),
-              _ChromeButton(
-                icon: streamPaused
-                    ? Icons.play_circle_outline_rounded
-                    : Icons.pause_circle_outline_rounded,
-                tooltip: streamPaused ? 'Resume' : 'Pause',
-                color: streamPaused ? colors.success : null,
-                onTap: onTogglePause,
-              ),
-            ],
-          ),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            _ChromeButton(
+              icon: Icons.arrow_back_rounded,
+              tooltip: 'Back',
+              onTap: onBack,
+            ),
+            _ChromeButton(
+              icon: Icons.arrow_forward_rounded,
+              tooltip: 'Forward',
+              onTap: onForward,
+            ),
+            _ChromeButton(
+              icon: Icons.refresh_rounded,
+              tooltip: 'Reload',
+              onTap: onReload,
+            ),
+            _ChromeButton(
+              icon: Icons.keyboard_alt_rounded,
+              tooltip: inputRailOpen ? 'Hide keyboard' : 'Keyboard',
+              onTap: onToggleInput,
+            ),
+            AppMenuButton(
+              tooltip: 'Browser options',
+              children: [
+                AppMenuItem(
+                  label: 'Viewport · ${preview.width} × ${preview.height}',
+                  leadingIcon: Icons.aspect_ratio_rounded,
+                  onPressed: onResize,
+                ),
+                AppMenuItem(
+                  label: devToolsOpen ? 'Hide tools' : 'Tools',
+                  leadingIcon: Icons.build_outlined,
+                  onPressed: onToggleDevTools,
+                ),
+                AppMenuItem(
+                  label: streamPaused ? 'Resume' : 'Pause',
+                  leadingIcon: streamPaused
+                      ? Icons.play_arrow_rounded
+                      : Icons.pause_rounded,
+                  onPressed: onTogglePause,
+                ),
+                AppMenuItem(
+                  label: 'Home',
+                  leadingIcon: Icons.home_outlined,
+                  onPressed: onHome,
+                ),
+              ],
+            ),
+          ],
         ),
       ),
     );
@@ -2149,6 +2000,7 @@ class _BrowserBottomToolbar extends StatelessWidget {
 
 class _DevToolsPanel extends StatelessWidget {
   const _DevToolsPanel({
+    required this.height,
     required this.tabIndex,
     required this.onTabChanged,
     required this.consoleEntries,
@@ -2220,6 +2072,8 @@ class _DevToolsPanel extends StatelessWidget {
   final void Function(_NetworkEntry entry) onOpenNetworkDetail;
   final HostBrowserPreviewInfo preview;
 
+  final double height;
+
   @override
   Widget build(BuildContext context) {
     final colors = context.colors;
@@ -2227,7 +2081,7 @@ class _DevToolsPanel extends StatelessWidget {
     final showingInspector = tabIndex == 3;
     final showingStorage = tabIndex == 2;
     return Container(
-      height: 380,
+      height: height,
       decoration: BoxDecoration(
         color: colors.surface,
         border: Border(top: BorderSide(color: colors.border)),
@@ -2239,67 +2093,81 @@ class _DevToolsPanel extends StatelessWidget {
             decoration: BoxDecoration(
               border: Border(bottom: BorderSide(color: colors.border)),
             ),
-            child: Row(
-              children: [
-                _DevTab(
-                  label: 'Page log',
-                  active: showingConsole,
-                  onTap: () => onTabChanged(0),
-                ),
-                _DevTab(
-                  label: 'Requests',
-                  active: tabIndex == 1,
-                  onTap: () => onTabChanged(1),
-                ),
-                _DevTab(
-                  label: 'Site data',
-                  active: showingStorage,
-                  onTap: () => onTabChanged(2),
-                ),
-                _DevTab(
-                  label: 'Page details',
-                  active: showingInspector,
-                  onTap: () => onTabChanged(3),
-                ),
-                const Spacer(),
-                if (showingInspector)
-                  IconButton(
-                    key: const ValueKey('browserPreviewInspectorPickButton'),
-                    icon: const Icon(Icons.ads_click_rounded, size: 18),
-                    tooltip: inspectorPickMode
-                        ? 'Stop selecting from page'
-                        : 'Select from page',
-                    color: inspectorPickMode ? colors.accent : null,
-                    onPressed: onToggleInspectorPickMode,
-                    visualDensity: VisualDensity.compact,
+            child: SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              child: Row(
+                children: [
+                  _DevTab(
+                    label: 'Page log',
+                    active: showingConsole,
+                    onTap: () => onTabChanged(0),
                   ),
-                if (showingStorage || showingInspector)
-                  IconButton(
-                    key: ValueKey(
-                      showingStorage
-                          ? 'browserPreviewStorageRefreshButton'
-                          : 'browserPreviewInspectorRefreshButton',
+                  _DevTab(
+                    label: 'Requests',
+                    active: tabIndex == 1,
+                    onTap: () => onTabChanged(1),
+                  ),
+                  _DevTab(
+                    label: 'Site data',
+                    active: showingStorage,
+                    onTap: () => onTabChanged(2),
+                  ),
+                  _DevTab(
+                    label: 'Page details',
+                    active: showingInspector,
+                    onTap: () => onTabChanged(3),
+                  ),
+                  const SizedBox(width: AppSpacing.md),
+                  if (showingInspector)
+                    IconButton(
+                      key: const ValueKey('browserPreviewInspectorPickButton'),
+                      icon: const Icon(
+                        Icons.ads_click_rounded,
+                        size: AppSizes.inlineIcon,
+                      ),
+                      tooltip: inspectorPickMode
+                          ? 'Stop selecting from page'
+                          : 'Select from page',
+                      color: inspectorPickMode ? colors.accent : null,
+                      onPressed: onToggleInspectorPickMode,
+                      visualDensity: VisualDensity.compact,
                     ),
-                    icon: const Icon(Icons.refresh_rounded, size: 18),
-                    tooltip: showingStorage
-                        ? 'Refresh site data'
-                        : 'Refresh page details',
-                    onPressed: showingStorage
-                        ? onRefreshStorage
-                        : onRefreshInspector,
-                    visualDensity: VisualDensity.compact,
-                  )
-                else
-                  IconButton(
-                    icon: const Icon(Icons.delete_outline_rounded, size: 18),
-                    tooltip: showingConsole
-                        ? 'Clear messages'
-                        : 'Clear requests',
-                    onPressed: showingConsole ? onClearConsole : onClearNetwork,
-                    visualDensity: VisualDensity.compact,
-                  ),
-                const SizedBox(width: 4),
-              ],
+                  if (showingStorage || showingInspector)
+                    IconButton(
+                      key: ValueKey(
+                        showingStorage
+                            ? 'browserPreviewStorageRefreshButton'
+                            : 'browserPreviewInspectorRefreshButton',
+                      ),
+                      icon: const Icon(
+                        Icons.refresh_rounded,
+                        size: AppSizes.inlineIcon,
+                      ),
+                      tooltip: showingStorage
+                          ? 'Refresh site data'
+                          : 'Refresh page details',
+                      onPressed: showingStorage
+                          ? onRefreshStorage
+                          : onRefreshInspector,
+                      visualDensity: VisualDensity.compact,
+                    )
+                  else
+                    IconButton(
+                      icon: const Icon(
+                        Icons.delete_outline_rounded,
+                        size: AppSizes.inlineIcon,
+                      ),
+                      tooltip: showingConsole
+                          ? 'Clear messages'
+                          : 'Clear requests',
+                      onPressed: showingConsole
+                          ? onClearConsole
+                          : onClearNetwork,
+                      visualDensity: VisualDensity.compact,
+                    ),
+                  const SizedBox(width: AppSpacing.xs),
+                ],
+              ),
             ),
           ),
           Expanded(
@@ -2365,12 +2233,12 @@ class _DevTab extends StatelessWidget {
     return InkWell(
       onTap: onTap,
       child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 16),
+        padding: const EdgeInsets.symmetric(horizontal: AppSpacing.lg),
         decoration: BoxDecoration(
           border: Border(
             bottom: BorderSide(
               color: active ? colors.accent : Colors.transparent,
-              width: 2,
+              width: AppStrokes.indicator,
             ),
           ),
         ),
@@ -2379,8 +2247,8 @@ class _DevTab extends StatelessWidget {
           label,
           style: TextStyle(
             color: active ? colors.accent : colors.textSecondary,
-            fontSize: 12,
-            fontWeight: active ? FontWeight.w700 : FontWeight.w500,
+            fontSize: AppFontSizes.caption,
+            fontWeight: active ? AppWeights.strong : AppWeights.emphasis,
           ),
         ),
       ),
@@ -2407,7 +2275,7 @@ class _ConsoleTab extends StatelessWidget {
     }
     return ListView.builder(
       reverse: true,
-      padding: const EdgeInsets.symmetric(vertical: 8),
+      padding: const EdgeInsets.symmetric(vertical: AppSpacing.sm),
       itemCount: entries.length,
       itemBuilder: (context, index) {
         final entry = entries[entries.length - 1 - index];
@@ -2427,7 +2295,7 @@ class _ConsoleRow extends StatelessWidget {
   Widget build(BuildContext context) {
     final levelColor = switch (entry.level) {
       'error' => colors.danger,
-      'warning' => Colors.orange,
+      'warning' => colors.warning,
       'info' => colors.accent,
       'debug' => colors.textTertiary,
       _ => colors.textPrimary,
@@ -2439,14 +2307,20 @@ class _ConsoleRow extends StatelessWidget {
         '${entry.url}:${entry.lineNumber ?? 0}',
     ];
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 3),
+      padding: const EdgeInsets.symmetric(
+        horizontal: AppSpacing.md,
+        vertical: AppSpacing.xs,
+      ),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Container(
             width: 8,
             height: 8,
-            margin: const EdgeInsets.only(top: 4, right: 8),
+            margin: const EdgeInsets.only(
+              top: AppSpacing.xs,
+              right: AppSpacing.sm,
+            ),
             decoration: BoxDecoration(
               color: levelColor,
               shape: BoxShape.circle,
@@ -2460,14 +2334,17 @@ class _ConsoleRow extends StatelessWidget {
                   entry.text,
                   style: TextStyle(
                     color: colors.textPrimary,
-                    fontSize: 12,
-                    fontFamily: 'monospace',
+                    fontSize: AppFontSizes.caption,
+                    fontFamily: AppFonts.code,
                   ),
                 ),
                 if (metadata.isNotEmpty)
                   Text(
                     metadata.join(' · '),
-                    style: TextStyle(color: colors.textTertiary, fontSize: 10),
+                    style: TextStyle(
+                      color: colors.textTertiary,
+                      fontSize: AppFontSizes.micro,
+                    ),
                   ),
               ],
             ),
@@ -2502,9 +2379,12 @@ class _InspectorSelectionOverlay extends StatelessWidget {
             rect: highlightRect!,
             child: DecoratedBox(
               decoration: BoxDecoration(
-                color: colors.accent.withValues(alpha: 0.12),
-                borderRadius: BorderRadius.circular(6),
-                border: Border.all(color: colors.accent, width: 2),
+                color: colors.accent.withValues(alpha: AppEmphasis.tint),
+                borderRadius: AppShapes.hover,
+                border: Border.all(
+                  color: colors.accent,
+                  width: AppStrokes.indicator,
+                ),
               ),
             ),
           ),
@@ -2512,19 +2392,24 @@ class _InspectorSelectionOverlay extends StatelessWidget {
           Align(
             alignment: Alignment.topCenter,
             child: Container(
-              margin: const EdgeInsets.only(top: 12),
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              margin: const EdgeInsets.only(top: AppSpacing.md),
+              padding: const EdgeInsets.symmetric(
+                horizontal: AppSpacing.md,
+                vertical: AppSpacing.sm,
+              ),
               decoration: BoxDecoration(
-                color: Colors.black.withValues(alpha: 0.74),
-                borderRadius: BorderRadius.circular(999),
+                color: AppMediaColors.background.withValues(
+                  alpha: AppEmphasis.secondary,
+                ),
+                borderRadius: AppShapes.badge,
                 border: Border.all(color: colors.border),
               ),
               child: Text(
                 'Tap the page to select something',
                 style: const TextStyle(
-                  color: Colors.white,
-                  fontSize: 12,
-                  fontWeight: FontWeight.w600,
+                  color: AppMediaColors.foreground,
+                  fontSize: AppFontSizes.caption,
+                  fontWeight: AppWeights.title,
                 ),
               ),
             ),
@@ -2557,12 +2442,12 @@ class _InspectorTab extends StatelessWidget {
   Widget build(BuildContext context) {
     final colors = context.colors;
     if (loading && snapshot == null) {
-      return const _InspectorLoadingState();
+      return const MeshLoader(label: 'Loading page details');
     }
     if (snapshot == null) {
       return Center(
         child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 20),
+          padding: const EdgeInsets.symmetric(horizontal: AppSpacing.xl),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
@@ -2571,7 +2456,7 @@ class _InspectorTab extends StatelessWidget {
                 textAlign: TextAlign.center,
                 style: TextStyle(color: colors.textSecondary),
               ),
-              const SizedBox(height: 12),
+              const SizedBox(height: AppSpacing.md),
               Wrap(
                 spacing: 8,
                 runSpacing: 8,
@@ -2601,7 +2486,12 @@ class _InspectorTab extends StatelessWidget {
     final selectedNode = snapshot!.selectedNode;
     return ListView(
       key: const ValueKey('browserPreviewInspectorList'),
-      padding: const EdgeInsets.fromLTRB(12, 12, 12, 18),
+      padding: const EdgeInsets.fromLTRB(
+        AppSpacing.md,
+        AppSpacing.md,
+        AppSpacing.md,
+        AppSpacing.lg,
+      ),
       children: [
         Wrap(
           spacing: 8,
@@ -2622,64 +2512,79 @@ class _InspectorTab extends StatelessWidget {
           ],
         ),
         if (pickMode) ...[
-          const SizedBox(height: 14),
+          const SizedBox(height: AppSpacing.md),
           Container(
             width: double.infinity,
-            padding: const EdgeInsets.all(12),
+            padding: const EdgeInsets.all(AppSpacing.md),
             decoration: BoxDecoration(
-              color: colors.accent.withValues(alpha: 0.10),
-              borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: colors.accent.withValues(alpha: 0.28)),
+              color: colors.accent.withValues(alpha: AppEmphasis.tint),
+              borderRadius: AppShapes.panel,
+              border: Border.all(
+                color: colors.accent.withValues(alpha: AppEmphasis.borderTint),
+              ),
             ),
             child: Text(
               'Tap anywhere on the page above to select something.',
-              style: TextStyle(color: colors.textSecondary, fontSize: 11),
+              style: TextStyle(
+                color: colors.textSecondary,
+                fontSize: AppFontSizes.metadata,
+              ),
             ),
           ),
         ],
         if (loading) ...[
-          const SizedBox(height: 10),
+          const SizedBox(height: AppSpacing.compact),
           const LinearProgressIndicator(minHeight: 2),
         ],
         if (error != null && error!.trim().isNotEmpty) ...[
-          const SizedBox(height: 14),
+          const SizedBox(height: AppSpacing.md),
           Container(
             width: double.infinity,
-            padding: const EdgeInsets.all(12),
+            padding: const EdgeInsets.all(AppSpacing.md),
             decoration: BoxDecoration(
-              color: colors.danger.withValues(alpha: 0.10),
-              borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: colors.danger.withValues(alpha: 0.24)),
+              color: colors.danger.withValues(alpha: AppEmphasis.tint),
+              borderRadius: AppShapes.panel,
+              border: Border.all(
+                color: colors.danger.withValues(alpha: AppEmphasis.borderTint),
+              ),
             ),
             child: Text(
               error!,
-              style: TextStyle(color: colors.textSecondary, fontSize: 11),
+              style: TextStyle(
+                color: colors.textSecondary,
+                fontSize: AppFontSizes.metadata,
+              ),
             ),
           ),
         ],
         if (snapshot!.warnings.isNotEmpty) ...[
-          const SizedBox(height: 14),
+          const SizedBox(height: AppSpacing.md),
           for (final warning in snapshot!.warnings)
             Padding(
-              padding: const EdgeInsets.only(bottom: 8),
+              padding: const EdgeInsets.only(bottom: AppSpacing.sm),
               child: Container(
                 width: double.infinity,
-                padding: const EdgeInsets.all(12),
+                padding: const EdgeInsets.all(AppSpacing.md),
                 decoration: BoxDecoration(
-                  color: Colors.orange.withValues(alpha: 0.10),
-                  borderRadius: BorderRadius.circular(12),
+                  color: colors.warning.withValues(alpha: AppEmphasis.tint),
+                  borderRadius: AppShapes.panel,
                   border: Border.all(
-                    color: Colors.orange.withValues(alpha: 0.28),
+                    color: colors.warning.withValues(
+                      alpha: AppEmphasis.borderTint,
+                    ),
                   ),
                 ),
                 child: Text(
                   warning,
-                  style: TextStyle(color: colors.textSecondary, fontSize: 11),
+                  style: TextStyle(
+                    color: colors.textSecondary,
+                    fontSize: AppFontSizes.metadata,
+                  ),
                 ),
               ),
             ),
         ],
-        const SizedBox(height: 14),
+        const SizedBox(height: AppSpacing.md),
         _StorageSection(
           title: 'Current selection',
           child: selectedNode == null
@@ -2736,10 +2641,10 @@ class _InspectorSelectedNodeCard extends StatelessWidget {
     ];
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.all(12),
+      padding: const EdgeInsets.all(AppSpacing.md),
       decoration: BoxDecoration(
         color: colors.canvas,
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: AppShapes.panel,
         border: Border.all(color: colors.border),
       ),
       child: Column(
@@ -2749,20 +2654,26 @@ class _InspectorSelectedNodeCard extends StatelessWidget {
             node.selector,
             style: monoStyle(
               color: colors.textPrimary,
-              fontSize: 11,
-              fontWeight: FontWeight.w800,
+              fontSize: AppFontSizes.metadata,
+              fontWeight: AppWeights.strong,
             ),
           ),
-          const SizedBox(height: 4),
+          const SizedBox(height: AppSpacing.xs),
           Text(
             metadata.join(' · '),
-            style: TextStyle(color: colors.textTertiary, fontSize: 10),
+            style: TextStyle(
+              color: colors.textTertiary,
+              fontSize: AppFontSizes.micro,
+            ),
           ),
           if (node.textPreview != null && node.textPreview!.isNotEmpty) ...[
-            const SizedBox(height: 8),
+            const SizedBox(height: AppSpacing.sm),
             SelectableText(
               node.textPreview!,
-              style: monoStyle(color: colors.textSecondary, fontSize: 11),
+              style: monoStyle(
+                color: colors.textSecondary,
+                fontSize: AppFontSizes.metadata,
+              ),
             ),
           ],
         ],
@@ -2789,21 +2700,24 @@ class _InspectorTreeNodeView extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Padding(
-          padding: EdgeInsets.only(left: depth * 14.0, bottom: 8),
+          padding: EdgeInsets.only(
+            left: depth * AppSpacing.md,
+            bottom: AppSpacing.sm,
+          ),
           child: InkWell(
             key: ValueKey(
               'browserPreviewInspectorNode-${_inspectorPathKey(node.path)}',
             ),
-            borderRadius: BorderRadius.circular(10),
+            borderRadius: AppShapes.input,
             onTap: () => onSelectPath(node.path),
             child: Container(
               width: double.infinity,
-              padding: const EdgeInsets.all(10),
+              padding: const EdgeInsets.all(AppSpacing.compact),
               decoration: BoxDecoration(
                 color: node.isSelected
-                    ? colors.accent.withValues(alpha: 0.12)
+                    ? colors.accent.withValues(alpha: AppEmphasis.tint)
                     : colors.canvas,
-                borderRadius: BorderRadius.circular(10),
+                borderRadius: AppShapes.input,
                 border: Border.all(
                   color: node.isSelected ? colors.accent : colors.border,
                 ),
@@ -2818,49 +2732,54 @@ class _InspectorTreeNodeView extends StatelessWidget {
                           node.selector,
                           style: monoStyle(
                             color: colors.textPrimary,
-                            fontSize: 11,
+                            fontSize: AppFontSizes.metadata,
                             fontWeight: node.isSelected
-                                ? FontWeight.w800
-                                : FontWeight.w700,
+                                ? AppWeights.strong
+                                : AppWeights.strong,
                           ),
                         ),
                       ),
                       if (node.isSelected)
                         Container(
                           padding: const EdgeInsets.symmetric(
-                            horizontal: 6,
-                            vertical: 2,
+                            horizontal: AppSpacing.tight,
+                            vertical: AppSpacing.xxs,
                           ),
                           decoration: BoxDecoration(
-                            color: colors.accent.withValues(alpha: 0.18),
-                            borderRadius: BorderRadius.circular(999),
+                            color: colors.accent.withValues(
+                              alpha: AppEmphasis.soft,
+                            ),
+                            borderRadius: AppShapes.badge,
                           ),
                           child: Text(
                             'Selected',
                             style: TextStyle(
                               color: colors.accent,
-                              fontSize: 10,
-                              fontWeight: FontWeight.w700,
+                              fontSize: AppFontSizes.micro,
+                              fontWeight: AppWeights.strong,
                             ),
                           ),
                         ),
                     ],
                   ),
-                  const SizedBox(height: 4),
+                  const SizedBox(height: AppSpacing.xs),
                   Text(
                     _inspectorPathLabel(node.path),
-                    style: TextStyle(color: colors.textTertiary, fontSize: 10),
+                    style: TextStyle(
+                      color: colors.textTertiary,
+                      fontSize: AppFontSizes.micro,
+                    ),
                   ),
                   if (node.textPreview != null &&
                       node.textPreview!.isNotEmpty) ...[
-                    const SizedBox(height: 6),
+                    const SizedBox(height: AppSpacing.tight),
                     Text(
                       node.textPreview!,
                       maxLines: 2,
                       overflow: TextOverflow.ellipsis,
                       style: TextStyle(
                         color: colors.textSecondary,
-                        fontSize: 11,
+                        fontSize: AppFontSizes.metadata,
                       ),
                     ),
                   ],
@@ -2877,10 +2796,16 @@ class _InspectorTreeNodeView extends StatelessWidget {
           ),
         if (node.truncatedChildren)
           Padding(
-            padding: EdgeInsets.only(left: (depth + 1) * 14.0, bottom: 8),
+            padding: EdgeInsets.only(
+              left: (depth + AppSpacing.hairline) * AppSpacing.md,
+              bottom: AppSpacing.sm,
+            ),
             child: Text(
               'More items exist, but this snapshot does not show them.',
-              style: TextStyle(color: colors.textTertiary, fontSize: 10),
+              style: TextStyle(
+                color: colors.textTertiary,
+                fontSize: AppFontSizes.micro,
+              ),
             ),
           ),
       ],
@@ -2901,11 +2826,11 @@ class _InspectorNameValueList extends StatelessWidget {
           .map((entry) {
             return Container(
               width: double.infinity,
-              margin: const EdgeInsets.only(bottom: 10),
-              padding: const EdgeInsets.all(12),
+              margin: const EdgeInsets.only(bottom: AppSpacing.compact),
+              padding: const EdgeInsets.all(AppSpacing.md),
               decoration: BoxDecoration(
                 color: colors.canvas,
-                borderRadius: BorderRadius.circular(12),
+                borderRadius: AppShapes.panel,
                 border: Border.all(color: colors.border),
               ),
               child: Column(
@@ -2915,14 +2840,17 @@ class _InspectorNameValueList extends StatelessWidget {
                     entry.name,
                     style: monoStyle(
                       color: colors.textPrimary,
-                      fontSize: 11,
-                      fontWeight: FontWeight.w800,
+                      fontSize: AppFontSizes.metadata,
+                      fontWeight: AppWeights.strong,
                     ),
                   ),
-                  const SizedBox(height: 6),
+                  const SizedBox(height: AppSpacing.tight),
                   SelectableText(
                     entry.value,
-                    style: monoStyle(color: colors.textSecondary, fontSize: 11),
+                    style: monoStyle(
+                      color: colors.textSecondary,
+                      fontSize: AppFontSizes.metadata,
+                    ),
                   ),
                 ],
               ),
@@ -2962,12 +2890,12 @@ class _StorageTab extends StatelessWidget {
   Widget build(BuildContext context) {
     final colors = context.colors;
     if (loading && snapshot == null) {
-      return const _StorageLoadingState();
+      return const MeshLoader(label: 'Loading storage');
     }
     if (snapshot == null) {
       return Center(
         child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 20),
+          padding: const EdgeInsets.symmetric(horizontal: AppSpacing.xl),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
@@ -2976,7 +2904,7 @@ class _StorageTab extends StatelessWidget {
                 textAlign: TextAlign.center,
                 style: TextStyle(color: colors.textSecondary),
               ),
-              const SizedBox(height: 12),
+              const SizedBox(height: AppSpacing.md),
               OutlinedButton.icon(
                 onPressed: onRefresh,
                 icon: const Icon(Icons.refresh_rounded),
@@ -2989,7 +2917,12 @@ class _StorageTab extends StatelessWidget {
     }
     return ListView(
       key: const ValueKey('browserPreviewStorageList'),
-      padding: const EdgeInsets.fromLTRB(12, 12, 12, 18),
+      padding: const EdgeInsets.fromLTRB(
+        AppSpacing.md,
+        AppSpacing.md,
+        AppSpacing.md,
+        AppSpacing.lg,
+      ),
       children: [
         Wrap(
           spacing: 8,
@@ -3022,56 +2955,66 @@ class _StorageTab extends StatelessWidget {
           ],
         ),
         if (loading) ...[
-          const SizedBox(height: 10),
+          const SizedBox(height: AppSpacing.compact),
           const LinearProgressIndicator(minHeight: 2),
         ],
         if (error != null && error!.trim().isNotEmpty) ...[
-          const SizedBox(height: 14),
+          const SizedBox(height: AppSpacing.md),
           Container(
             width: double.infinity,
-            padding: const EdgeInsets.all(12),
+            padding: const EdgeInsets.all(AppSpacing.md),
             decoration: BoxDecoration(
-              color: colors.danger.withValues(alpha: 0.10),
-              borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: colors.danger.withValues(alpha: 0.24)),
+              color: colors.danger.withValues(alpha: AppEmphasis.tint),
+              borderRadius: AppShapes.panel,
+              border: Border.all(
+                color: colors.danger.withValues(alpha: AppEmphasis.borderTint),
+              ),
             ),
             child: Text(
               error!,
-              style: TextStyle(color: colors.textSecondary, fontSize: 11),
+              style: TextStyle(
+                color: colors.textSecondary,
+                fontSize: AppFontSizes.metadata,
+              ),
             ),
           ),
         ],
         if (snapshot!.warnings.isNotEmpty) ...[
-          const SizedBox(height: 14),
+          const SizedBox(height: AppSpacing.md),
           for (final warning in snapshot!.warnings)
             Padding(
-              padding: const EdgeInsets.only(bottom: 8),
+              padding: const EdgeInsets.only(bottom: AppSpacing.sm),
               child: Container(
                 width: double.infinity,
-                padding: const EdgeInsets.all(12),
+                padding: const EdgeInsets.all(AppSpacing.md),
                 decoration: BoxDecoration(
-                  color: Colors.orange.withValues(alpha: 0.10),
-                  borderRadius: BorderRadius.circular(12),
+                  color: colors.warning.withValues(alpha: AppEmphasis.tint),
+                  borderRadius: AppShapes.panel,
                   border: Border.all(
-                    color: Colors.orange.withValues(alpha: 0.28),
+                    color: colors.warning.withValues(
+                      alpha: AppEmphasis.borderTint,
+                    ),
                   ),
                 ),
                 child: Text(
                   warning,
-                  style: TextStyle(color: colors.textSecondary, fontSize: 11),
+                  style: TextStyle(
+                    color: colors.textSecondary,
+                    fontSize: AppFontSizes.metadata,
+                  ),
                 ),
               ),
             ),
         ],
         if (snapshot!.usageBreakdown.isNotEmpty) ...[
-          const SizedBox(height: 14),
+          const SizedBox(height: AppSpacing.md),
           _StorageSection(
             title: 'Storage use',
             child: Column(
               children: snapshot!.usageBreakdown
                   .map((entry) {
                     return Padding(
-                      padding: const EdgeInsets.only(bottom: 8),
+                      padding: const EdgeInsets.only(bottom: AppSpacing.sm),
                       child: Row(
                         children: [
                           Expanded(
@@ -3079,7 +3022,7 @@ class _StorageTab extends StatelessWidget {
                               _storageUsageTypeLabel(entry.storageType),
                               style: TextStyle(
                                 color: colors.textSecondary,
-                                fontSize: 11,
+                                fontSize: AppFontSizes.metadata,
                               ),
                             ),
                           ),
@@ -3087,8 +3030,8 @@ class _StorageTab extends StatelessWidget {
                             _formatNetworkBytes(entry.usage),
                             style: monoStyle(
                               color: colors.textPrimary,
-                              fontSize: 11,
-                              fontWeight: FontWeight.w700,
+                              fontSize: AppFontSizes.metadata,
+                              fontWeight: AppWeights.strong,
                             ),
                           ),
                         ],
@@ -3111,7 +3054,7 @@ class _StorageTab extends StatelessWidget {
                       .toList(growable: false),
                 ),
         ),
-        const SizedBox(height: 14),
+        const SizedBox(height: AppSpacing.md),
         _StorageSection(
           title: 'Cookies',
           actions: [
@@ -3216,246 +3159,6 @@ class _StorageTab extends StatelessWidget {
   }
 }
 
-class _InspectorLoadingState extends StatelessWidget {
-  const _InspectorLoadingState();
-
-  @override
-  Widget build(BuildContext context) {
-    return ListView(
-      key: const ValueKey('browserPreviewInspectorLoadingList'),
-      padding: const EdgeInsets.fromLTRB(12, 12, 12, 18),
-      children: const [
-        Wrap(
-          spacing: 8,
-          runSpacing: 8,
-          children: [
-            _DevToolsSummarySkeletonCard(),
-            _DevToolsSummarySkeletonCard(),
-            _DevToolsSummarySkeletonCard(),
-          ],
-        ),
-        SizedBox(height: 14),
-        _StorageSection(
-          title: 'Current selection',
-          child: _DevToolsCardSkeleton(lineCount: 3),
-        ),
-        _StorageSection(title: 'Page outline', child: _DevToolsTreeSkeleton()),
-        _StorageSection(
-          title: 'Attributes',
-          child: _DevToolsNameValueSkeleton(itemCount: 2),
-        ),
-        _StorageSection(
-          title: 'Styles',
-          child: _DevToolsNameValueSkeleton(itemCount: 3),
-        ),
-        _StorageSection(
-          title: 'Inline styles',
-          child: _DevToolsNameValueSkeleton(itemCount: 2),
-        ),
-      ],
-    );
-  }
-}
-
-class _StorageLoadingState extends StatelessWidget {
-  const _StorageLoadingState();
-
-  @override
-  Widget build(BuildContext context) {
-    return ListView(
-      key: const ValueKey('browserPreviewStorageLoadingList'),
-      padding: const EdgeInsets.fromLTRB(12, 12, 12, 18),
-      children: const [
-        Wrap(
-          spacing: 8,
-          runSpacing: 8,
-          children: [
-            _DevToolsSummarySkeletonCard(),
-            _DevToolsSummarySkeletonCard(),
-            _DevToolsSummarySkeletonCard(),
-            _DevToolsSummarySkeletonCard(),
-            _DevToolsSummarySkeletonCard(),
-            _DevToolsSummarySkeletonCard(),
-          ],
-        ),
-        SizedBox(height: 14),
-        _StorageSection(
-          title: 'Storage use',
-          child: _DevToolsCardSkeleton(lineCount: 3),
-        ),
-        _StorageSection(
-          title: 'Cookies',
-          child: _DevToolsNameValueSkeleton(itemCount: 3),
-        ),
-        _StorageSection(
-          title: 'Local storage',
-          child: _DevToolsNameValueSkeleton(itemCount: 2),
-        ),
-        _StorageSection(
-          title: 'Session storage',
-          child: _DevToolsNameValueSkeleton(itemCount: 2),
-        ),
-      ],
-    );
-  }
-}
-
-class _DevToolsSummarySkeletonCard extends StatelessWidget {
-  const _DevToolsSummarySkeletonCard();
-
-  @override
-  Widget build(BuildContext context) {
-    return const SizedBox(
-      width: 124,
-      child: MeshCard(
-        tone: MeshCardTone.muted,
-        padding: EdgeInsets.all(12),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            FractionallySizedBox(
-              widthFactor: 0.56,
-              alignment: Alignment.centerLeft,
-              child: MeshSkeleton(height: 10),
-            ),
-            SizedBox(height: 10),
-            FractionallySizedBox(
-              widthFactor: 0.74,
-              alignment: Alignment.centerLeft,
-              child: MeshSkeleton(height: 14),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _DevToolsCardSkeleton extends StatelessWidget {
-  const _DevToolsCardSkeleton({required this.lineCount});
-
-  final int lineCount;
-
-  @override
-  Widget build(BuildContext context) {
-    return MeshCard(
-      padding: const EdgeInsets.all(12),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: List<Widget>.generate(lineCount * 2 - 1, (index) {
-          if (index.isOdd) {
-            return const SizedBox(height: 8);
-          }
-          final step = index ~/ 2;
-          final widthFactor = switch (step % 3) {
-            0 => 1.0,
-            1 => 0.76,
-            _ => 0.58,
-          };
-          return FractionallySizedBox(
-            widthFactor: widthFactor,
-            alignment: Alignment.centerLeft,
-            child: const MeshSkeleton(height: 12),
-          );
-        }),
-      ),
-    );
-  }
-}
-
-class _DevToolsNameValueSkeleton extends StatelessWidget {
-  const _DevToolsNameValueSkeleton({required this.itemCount});
-
-  final int itemCount;
-
-  @override
-  Widget build(BuildContext context) {
-    return Column(
-      children: List<Widget>.generate(itemCount * 2 - 1, (index) {
-        if (index.isOdd) {
-          return const SizedBox(height: 10);
-        }
-        return const MeshCard(
-          tone: MeshCardTone.muted,
-          padding: EdgeInsets.all(12),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              FractionallySizedBox(
-                widthFactor: 0.32,
-                alignment: Alignment.centerLeft,
-                child: MeshSkeleton(height: 10),
-              ),
-              SizedBox(height: 8),
-              MeshSkeleton(height: 12),
-              SizedBox(height: 8),
-              FractionallySizedBox(
-                widthFactor: 0.68,
-                alignment: Alignment.centerLeft,
-                child: MeshSkeleton(height: 12),
-              ),
-            ],
-          ),
-        );
-      }),
-    );
-  }
-}
-
-class _DevToolsTreeSkeleton extends StatelessWidget {
-  const _DevToolsTreeSkeleton();
-
-  @override
-  Widget build(BuildContext context) {
-    return const Column(
-      children: [
-        _DevToolsTreeNodeSkeleton(depth: 0, titleWidthFactor: 0.44),
-        SizedBox(height: 8),
-        _DevToolsTreeNodeSkeleton(depth: 1, titleWidthFactor: 0.38),
-        SizedBox(height: 8),
-        _DevToolsTreeNodeSkeleton(depth: 1, titleWidthFactor: 0.52),
-      ],
-    );
-  }
-}
-
-class _DevToolsTreeNodeSkeleton extends StatelessWidget {
-  const _DevToolsTreeNodeSkeleton({
-    required this.depth,
-    required this.titleWidthFactor,
-  });
-
-  final int depth;
-  final double titleWidthFactor;
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: EdgeInsets.only(left: depth * 14.0),
-      child: MeshCard(
-        tone: MeshCardTone.muted,
-        padding: const EdgeInsets.all(10),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            FractionallySizedBox(
-              widthFactor: titleWidthFactor,
-              alignment: Alignment.centerLeft,
-              child: const MeshSkeleton(height: 11),
-            ),
-            const SizedBox(height: 6),
-            const FractionallySizedBox(
-              widthFactor: 0.3,
-              alignment: Alignment.centerLeft,
-              child: MeshSkeleton(height: 10),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
 class _StorageSummaryCard extends StatelessWidget {
   const _StorageSummaryCard({required this.label, required this.value});
 
@@ -3467,10 +3170,10 @@ class _StorageSummaryCard extends StatelessWidget {
     final colors = context.colors;
     return Container(
       constraints: const BoxConstraints(minWidth: 120),
-      padding: const EdgeInsets.all(12),
+      padding: const EdgeInsets.all(AppSpacing.md),
       decoration: BoxDecoration(
         color: colors.canvas,
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: AppShapes.panel,
         border: Border.all(color: colors.border),
       ),
       child: Column(
@@ -3480,17 +3183,17 @@ class _StorageSummaryCard extends StatelessWidget {
             label,
             style: TextStyle(
               color: colors.textTertiary,
-              fontSize: 10,
-              fontWeight: FontWeight.w700,
+              fontSize: AppFontSizes.micro,
+              fontWeight: AppWeights.strong,
             ),
           ),
-          const SizedBox(height: 4),
+          const SizedBox(height: AppSpacing.xs),
           SelectableText(
             value,
             style: monoStyle(
               color: colors.textPrimary,
-              fontSize: 11,
-              fontWeight: FontWeight.w700,
+              fontSize: AppFontSizes.metadata,
+              fontWeight: AppWeights.strong,
             ),
           ),
         ],
@@ -3514,7 +3217,7 @@ class _StorageSection extends StatelessWidget {
   Widget build(BuildContext context) {
     final colors = context.colors;
     return Padding(
-      padding: const EdgeInsets.only(bottom: 16),
+      padding: const EdgeInsets.only(bottom: AppSpacing.lg),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -3532,7 +3235,7 @@ class _StorageSection extends StatelessWidget {
               if (actions.isNotEmpty) ...actions,
             ],
           ),
-          const SizedBox(height: 8),
+          const SizedBox(height: AppSpacing.sm),
           child,
         ],
       ),
@@ -3557,7 +3260,7 @@ class _StorageSectionButton extends StatelessWidget {
   Widget build(BuildContext context) {
     return IconButton(
       key: buttonKey,
-      icon: Icon(icon, size: 18),
+      icon: Icon(icon, size: AppSizes.inlineIcon),
       tooltip: tooltip,
       onPressed: onTap,
       visualDensity: VisualDensity.compact,
@@ -3588,11 +3291,11 @@ class _IndexedDbDatabaseCard extends StatelessWidget {
     final storeCount = database.objectStores.length;
     return Container(
       width: double.infinity,
-      margin: const EdgeInsets.only(bottom: 10),
-      padding: const EdgeInsets.all(12),
+      margin: const EdgeInsets.only(bottom: AppSpacing.compact),
+      padding: const EdgeInsets.all(AppSpacing.md),
       decoration: BoxDecoration(
         color: colors.canvas,
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: AppShapes.panel,
         border: Border.all(color: colors.border),
       ),
       child: Column(
@@ -3602,20 +3305,23 @@ class _IndexedDbDatabaseCard extends StatelessWidget {
             database.name,
             style: monoStyle(
               color: colors.textPrimary,
-              fontSize: 11,
-              fontWeight: FontWeight.w800,
+              fontSize: AppFontSizes.metadata,
+              fontWeight: AppWeights.strong,
             ),
           ),
-          const SizedBox(height: 4),
+          const SizedBox(height: AppSpacing.xs),
           Text(
             'Version ${database.version ?? '?'} · $storeCount ${storeCount == 1 ? 'object store' : 'object stores'}',
-            style: TextStyle(color: colors.textTertiary, fontSize: 10),
+            style: TextStyle(
+              color: colors.textTertiary,
+              fontSize: AppFontSizes.micro,
+            ),
           ),
           if (database.objectStores.isNotEmpty) ...[
-            const SizedBox(height: 10),
+            const SizedBox(height: AppSpacing.compact),
             for (final store in database.objectStores)
               Padding(
-                padding: const EdgeInsets.only(bottom: 10),
+                padding: const EdgeInsets.only(bottom: AppSpacing.compact),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
@@ -3623,11 +3329,11 @@ class _IndexedDbDatabaseCard extends StatelessWidget {
                       store.name,
                       style: TextStyle(
                         color: colors.textPrimary,
-                        fontSize: 11,
-                        fontWeight: FontWeight.w700,
+                        fontSize: AppFontSizes.metadata,
+                        fontWeight: AppWeights.strong,
                       ),
                     ),
-                    const SizedBox(height: 2),
+                    const SizedBox(height: AppSpacing.xxs),
                     Text(
                       [
                         if (store.keyPath != null &&
@@ -3637,14 +3343,16 @@ class _IndexedDbDatabaseCard extends StatelessWidget {
                       ].join(' · '),
                       style: TextStyle(
                         color: colors.textSecondary,
-                        fontSize: 10,
+                        fontSize: AppFontSizes.micro,
                       ),
                     ),
                     if (store.indexes.isNotEmpty) ...[
-                      const SizedBox(height: 4),
+                      const SizedBox(height: AppSpacing.xs),
                       for (final index in store.indexes)
                         Padding(
-                          padding: const EdgeInsets.only(bottom: 2),
+                          padding: const EdgeInsets.only(
+                            bottom: AppSpacing.xxs,
+                          ),
                           child: Text(
                             [
                               'Index ${index.name}',
@@ -3656,7 +3364,7 @@ class _IndexedDbDatabaseCard extends StatelessWidget {
                             ].join(' · '),
                             style: TextStyle(
                               color: colors.textTertiary,
-                              fontSize: 10,
+                              fontSize: AppFontSizes.micro,
                             ),
                           ),
                         ),
@@ -3691,11 +3399,11 @@ class _StorageCookieRow extends StatelessWidget {
     ];
     return Container(
       width: double.infinity,
-      margin: const EdgeInsets.only(bottom: 10),
-      padding: const EdgeInsets.all(12),
+      margin: const EdgeInsets.only(bottom: AppSpacing.compact),
+      padding: const EdgeInsets.all(AppSpacing.md),
       decoration: BoxDecoration(
         color: colors.canvas,
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: AppShapes.panel,
         border: Border.all(color: colors.border),
       ),
       child: Column(
@@ -3709,13 +3417,16 @@ class _StorageCookieRow extends StatelessWidget {
                   cookie.name,
                   style: monoStyle(
                     color: colors.textPrimary,
-                    fontSize: 11,
-                    fontWeight: FontWeight.w800,
+                    fontSize: AppFontSizes.metadata,
+                    fontWeight: AppWeights.strong,
                   ),
                 ),
               ),
               IconButton(
-                icon: const Icon(Icons.delete_outline_rounded, size: 18),
+                icon: const Icon(
+                  Icons.delete_outline_rounded,
+                  size: AppSizes.inlineIcon,
+                ),
                 tooltip: 'Delete cookie',
                 onPressed: onDelete,
                 visualDensity: VisualDensity.compact,
@@ -3724,15 +3435,21 @@ class _StorageCookieRow extends StatelessWidget {
               ),
             ],
           ),
-          const SizedBox(height: 4),
+          const SizedBox(height: AppSpacing.xs),
           SelectableText(
             cookie.value,
-            style: monoStyle(color: colors.textSecondary, fontSize: 11),
+            style: monoStyle(
+              color: colors.textSecondary,
+              fontSize: AppFontSizes.metadata,
+            ),
           ),
-          const SizedBox(height: 6),
+          const SizedBox(height: AppSpacing.tight),
           Text(
             metadata.join(' · '),
-            style: TextStyle(color: colors.textTertiary, fontSize: 10),
+            style: TextStyle(
+              color: colors.textTertiary,
+              fontSize: AppFontSizes.micro,
+            ),
           ),
         ],
       ),
@@ -3756,11 +3473,11 @@ class _StorageEntryRow extends StatelessWidget {
     final colors = context.colors;
     return Container(
       width: double.infinity,
-      margin: const EdgeInsets.only(bottom: 10),
-      padding: const EdgeInsets.all(12),
+      margin: const EdgeInsets.only(bottom: AppSpacing.compact),
+      padding: const EdgeInsets.all(AppSpacing.md),
       decoration: BoxDecoration(
         color: colors.canvas,
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: AppShapes.panel,
         border: Border.all(color: colors.border),
       ),
       child: Column(
@@ -3774,22 +3491,28 @@ class _StorageEntryRow extends StatelessWidget {
                   entry.key,
                   style: monoStyle(
                     color: colors.textPrimary,
-                    fontSize: 11,
-                    fontWeight: FontWeight.w800,
+                    fontSize: AppFontSizes.metadata,
+                    fontWeight: AppWeights.strong,
                   ),
                 ),
               ),
               IconButton(
-                icon: const Icon(Icons.edit_outlined, size: 18),
+                icon: const Icon(
+                  Icons.edit_outlined,
+                  size: AppSizes.inlineIcon,
+                ),
                 tooltip: 'Edit storage entry',
                 onPressed: onEdit,
                 visualDensity: VisualDensity.compact,
                 constraints: const BoxConstraints(),
                 padding: EdgeInsets.zero,
               ),
-              const SizedBox(width: 6),
+              const SizedBox(width: AppSpacing.tight),
               IconButton(
-                icon: const Icon(Icons.delete_outline_rounded, size: 18),
+                icon: const Icon(
+                  Icons.delete_outline_rounded,
+                  size: AppSizes.inlineIcon,
+                ),
                 tooltip: 'Delete storage entry',
                 onPressed: onDelete,
                 visualDensity: VisualDensity.compact,
@@ -3798,10 +3521,13 @@ class _StorageEntryRow extends StatelessWidget {
               ),
             ],
           ),
-          const SizedBox(height: 6),
+          const SizedBox(height: AppSpacing.tight),
           SelectableText(
             entry.value,
-            style: monoStyle(color: colors.textSecondary, fontSize: 11),
+            style: monoStyle(
+              color: colors.textSecondary,
+              fontSize: AppFontSizes.metadata,
+            ),
           ),
         ],
       ),
@@ -3878,7 +3604,7 @@ class _StorageEntryEditorDialogState extends State<_StorageEntryEditorDialog> {
             decoration: const InputDecoration(labelText: 'Key'),
             onSubmitted: (_) => _submit(),
           ),
-          const SizedBox(height: 12),
+          const SizedBox(height: AppSpacing.md),
           TextField(
             controller: _valueController,
             maxLines: 4,
@@ -3925,7 +3651,12 @@ class _NetworkTab extends StatelessWidget {
     return Column(
       children: [
         Container(
-          padding: const EdgeInsets.fromLTRB(8, 8, 8, 6),
+          padding: const EdgeInsets.fromLTRB(
+            AppSpacing.sm,
+            AppSpacing.sm,
+            AppSpacing.sm,
+            AppSpacing.tight,
+          ),
           decoration: BoxDecoration(
             border: Border(bottom: BorderSide(color: colors.border)),
           ),
@@ -3937,52 +3668,38 @@ class _NetworkTab extends StatelessWidget {
                     child: TextField(
                       controller: searchController,
                       onChanged: onSearchChanged,
-                      decoration: InputDecoration(
-                        isDense: true,
-                        hintText: 'Search requests',
-                        prefixIcon: const Icon(Icons.search_rounded, size: 18),
-                        border: const OutlineInputBorder(),
-                        contentPadding: const EdgeInsets.symmetric(
-                          horizontal: 10,
-                          vertical: 10,
-                        ),
-                      ),
+                      style: AppControlStyles.searchText(context),
+                      decoration: AppControlStyles.search(
+                        context,
+                      ).copyWith(hintText: 'Search requests'),
                     ),
                   ),
-                  const SizedBox(width: 8),
+                  const SizedBox(width: AppSpacing.sm),
                   Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 10),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: AppSpacing.compact,
+                    ),
                     decoration: BoxDecoration(
-                      borderRadius: BorderRadius.circular(8),
+                      borderRadius: AppShapes.input,
                       border: Border.all(color: colors.border),
                     ),
-                    child: DropdownButtonHideUnderline(
-                      child: DropdownButton<String>(
-                        value: sort,
-                        onChanged: (value) {
-                          if (value != null) onSortChanged(value);
-                        },
-                        items: _networkSortOptions
-                            .map(
-                              (option) => DropdownMenuItem<String>(
-                                value: option,
-                                child: Text(option),
-                              ),
-                            )
-                            .toList(growable: false),
-                      ),
+                    child: AppSelect<String>(
+                      value: sort,
+                      values: _networkSortOptions,
+                      label: (option) => option,
+                      onChanged: onSortChanged,
                     ),
                   ),
                 ],
               ),
-              const SizedBox(height: 8),
+              const SizedBox(height: AppSpacing.sm),
               SingleChildScrollView(
                 scrollDirection: Axis.horizontal,
                 child: Row(
                   children: [
                     for (final option in _networkFilterOptions)
                       Padding(
-                        padding: const EdgeInsets.only(right: 6),
+                        padding: const EdgeInsets.only(right: AppSpacing.tight),
                         child: FilterChip(
                           label: Text(option),
                           selected: filter == option,
@@ -4000,7 +3717,9 @@ class _NetworkTab extends StatelessWidget {
           child: !networkAvailable
               ? Center(
                   child: Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 20),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: AppSpacing.xl,
+                    ),
                     child: Text(
                       networkUnavailableMessage ??
                           'Request details are unavailable in this browser.',
@@ -4019,7 +3738,7 @@ class _NetworkTab extends StatelessWidget {
                   ),
                 )
               : ListView.builder(
-                  padding: const EdgeInsets.symmetric(vertical: 4),
+                  padding: const EdgeInsets.symmetric(vertical: AppSpacing.xs),
                   itemCount: entries.length,
                   itemBuilder: (context, index) {
                     final entry = entries[index];
@@ -4059,20 +3778,23 @@ class _NetworkRow extends StatelessWidget {
     return InkWell(
       onTap: onTap,
       child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        padding: const EdgeInsets.symmetric(
+          horizontal: AppSpacing.md,
+          vertical: AppSpacing.sm,
+        ),
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Container(
               width: 8,
               height: 8,
-              margin: const EdgeInsets.only(top: 5),
+              margin: const EdgeInsets.only(top: AppSpacing.xs),
               decoration: BoxDecoration(
                 color: statusColor,
                 shape: BoxShape.circle,
               ),
             ),
-            const SizedBox(width: 10),
+            const SizedBox(width: AppSpacing.compact),
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -4081,24 +3803,24 @@ class _NetworkRow extends StatelessWidget {
                     children: [
                       Container(
                         padding: const EdgeInsets.symmetric(
-                          horizontal: 6,
-                          vertical: 2,
+                          horizontal: AppSpacing.tight,
+                          vertical: AppSpacing.xxs,
                         ),
                         decoration: BoxDecoration(
                           color: colors.canvas,
-                          borderRadius: BorderRadius.circular(6),
+                          borderRadius: AppShapes.hover,
                           border: Border.all(color: colors.border),
                         ),
                         child: Text(
                           entry.method,
                           style: monoStyle(
                             color: colors.textSecondary,
-                            fontSize: 10,
-                            fontWeight: FontWeight.w800,
+                            fontSize: AppFontSizes.micro,
+                            fontWeight: AppWeights.strong,
                           ),
                         ),
                       ),
-                      const SizedBox(width: 8),
+                      const SizedBox(width: AppSpacing.sm),
                       Expanded(
                         child: Text(
                           _networkDisplayName(entry.url),
@@ -4106,104 +3828,47 @@ class _NetworkRow extends StatelessWidget {
                           overflow: TextOverflow.ellipsis,
                           style: TextStyle(
                             color: colors.textPrimary,
-                            fontSize: 12,
-                            fontWeight: FontWeight.w700,
+                            fontSize: AppFontSizes.caption,
+                            fontWeight: AppWeights.strong,
                           ),
                         ),
                       ),
                     ],
                   ),
-                  const SizedBox(height: 3),
+                  const SizedBox(height: AppSpacing.xs),
                   Text(
                     _networkDisplayLocation(entry.url),
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
-                    style: TextStyle(color: colors.textSecondary, fontSize: 11),
+                    style: TextStyle(
+                      color: colors.textSecondary,
+                      fontSize: AppFontSizes.metadata,
+                    ),
                   ),
-                  const SizedBox(height: 3),
+                  const SizedBox(height: AppSpacing.xs),
                   Text(
                     subtitleParts.join(' · '),
                     maxLines: 2,
                     overflow: TextOverflow.ellipsis,
-                    style: TextStyle(color: colors.textTertiary, fontSize: 10),
+                    style: TextStyle(
+                      color: colors.textTertiary,
+                      fontSize: AppFontSizes.micro,
+                    ),
                   ),
                 ],
               ),
             ),
-            const SizedBox(width: 8),
+            const SizedBox(width: AppSpacing.sm),
             Text(
               statusLabel,
               style: monoStyle(
                 color: statusColor,
-                fontSize: 11,
-                fontWeight: FontWeight.w800,
+                fontSize: AppFontSizes.metadata,
+                fontWeight: AppWeights.strong,
               ),
             ),
           ],
         ),
-      ),
-    );
-  }
-}
-
-class _NetworkDetailLoadingState extends StatelessWidget {
-  const _NetworkDetailLoadingState();
-
-  @override
-  Widget build(BuildContext context) {
-    return ListView(
-      padding: EdgeInsets.zero,
-      children: const [
-        _NetworkSection(
-          title: 'Request headers',
-          child: _NetworkSectionSkeleton(lineCount: 4),
-        ),
-        _NetworkSection(
-          title: 'Request body',
-          child: _NetworkSectionSkeleton(lineCount: 3),
-        ),
-        _NetworkSection(
-          title: 'Response headers',
-          child: _NetworkSectionSkeleton(lineCount: 4),
-        ),
-        _NetworkSection(
-          title: 'Response body',
-          child: _NetworkSectionSkeleton(lineCount: 5),
-        ),
-      ],
-    );
-  }
-}
-
-class _NetworkSectionSkeleton extends StatelessWidget {
-  const _NetworkSectionSkeleton({required this.lineCount});
-
-  final int lineCount;
-
-  @override
-  Widget build(BuildContext context) {
-    return MeshCard(
-      tone: MeshCardTone.muted,
-      padding: const EdgeInsets.all(12),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: List<Widget>.generate(lineCount * 2 - 1, (index) {
-          if (index.isOdd) {
-            return const SizedBox(height: 8);
-          }
-          final step = index ~/ 2;
-          final widthFactor = switch (step % 4) {
-            0 => 1.0,
-            1 => 0.82,
-            2 => 0.68,
-            _ => 0.54,
-          };
-          return FractionallySizedBox(
-            widthFactor: widthFactor,
-            alignment: Alignment.centerLeft,
-            child: const MeshSkeleton(height: 11),
-          );
-        }),
       ),
     );
   }
@@ -4224,8 +3889,6 @@ class _NetworkDetailSheet extends StatelessWidget {
     return MeshBottomSheetScaffold(
       icon: Icons.travel_explore_rounded,
       title: _networkDisplayName(entry.url),
-      description:
-          'Review request details, headers, and captured payloads for this page request.',
       maxWidth: 960,
       maxHeightFactor: 0.86,
       child: ValueListenableBuilder<_NetworkDetail?>(
@@ -4242,15 +3905,15 @@ class _NetworkDetailSheet extends StatelessWidget {
                       entry.url,
                       style: monoStyle(
                         color: colors.textSecondary,
-                        fontSize: 11,
+                        fontSize: AppFontSizes.metadata,
                       ),
                     ),
                   ),
-                  const SizedBox(width: 8),
+                  const SizedBox(width: AppSpacing.sm),
                   _NetworkDetailActionsButton(entry: entry, detail: detail),
                 ],
               ),
-              const SizedBox(height: 10),
+              const SizedBox(height: AppSpacing.compact),
               Wrap(
                 spacing: 8,
                 runSpacing: 8,
@@ -4281,12 +3944,12 @@ class _NetworkDetailSheet extends StatelessWidget {
                     const _NetworkMetaChip(label: 'cache'),
                 ],
               ),
-              const SizedBox(height: 12),
+              const SizedBox(height: AppSpacing.md),
               Divider(height: 1, color: colors.border),
-              const SizedBox(height: 12),
+              const SizedBox(height: AppSpacing.md),
               Expanded(
                 child: detail == null
-                    ? const _NetworkDetailLoadingState()
+                    ? const MeshLoader(label: 'Loading request')
                     : ListView(
                         padding: EdgeInsets.zero,
                         children: [
@@ -4364,18 +4027,21 @@ class _NetworkMetaChip extends StatelessWidget {
   Widget build(BuildContext context) {
     final colors = context.colors;
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      padding: const EdgeInsets.symmetric(
+        horizontal: AppSpacing.sm,
+        vertical: AppSpacing.xs,
+      ),
       decoration: BoxDecoration(
         color: colors.canvas,
-        borderRadius: BorderRadius.circular(999),
+        borderRadius: AppShapes.badge,
         border: Border.all(color: colors.border),
       ),
       child: Text(
         label,
         style: monoStyle(
           color: colors.textSecondary,
-          fontSize: 10,
-          fontWeight: FontWeight.w700,
+          fontSize: AppFontSizes.micro,
+          fontWeight: AppWeights.strong,
         ),
       ),
     );
@@ -4392,7 +4058,7 @@ class _NetworkSection extends StatelessWidget {
   Widget build(BuildContext context) {
     final colors = context.colors;
     return Padding(
-      padding: const EdgeInsets.only(bottom: 16),
+      padding: const EdgeInsets.only(bottom: AppSpacing.lg),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -4403,7 +4069,7 @@ class _NetworkSection extends StatelessWidget {
               fontWeight: AppWeights.title,
             ),
           ),
-          const SizedBox(height: 8),
+          const SizedBox(height: AppSpacing.sm),
           child,
         ],
       ),
@@ -4421,55 +4087,27 @@ class _NetworkDetailActionsButton extends StatelessWidget {
   final _NetworkDetail? detail;
 
   @override
-  Widget build(BuildContext context) {
-    return PopupMenuButton<_NetworkCopyAction>(
-      tooltip: 'Copy request details',
-      icon: const Icon(Icons.copy_all_rounded, size: 18),
-      onSelected: (action) =>
-          _copyNetworkDetailAction(context, action, entry, detail),
-      itemBuilder: (context) {
-        final items = <PopupMenuEntry<_NetworkCopyAction>>[
-          const PopupMenuItem<_NetworkCopyAction>(
-            value: _NetworkCopyAction.url,
-            child: Text('Copy URL'),
-          ),
-          const PopupMenuItem<_NetworkCopyAction>(
-            value: _NetworkCopyAction.requestHeaders,
-            child: Text('Copy request headers'),
-          ),
-          const PopupMenuItem<_NetworkCopyAction>(
-            value: _NetworkCopyAction.responseHeaders,
-            child: Text('Copy response headers'),
-          ),
-        ];
-        if (detail?.requestBody != null) {
-          items.add(
-            const PopupMenuItem<_NetworkCopyAction>(
-              value: _NetworkCopyAction.requestBody,
-              child: Text('Copy request body'),
-            ),
-          );
-        }
-        if (detail?.body != null) {
-          items.add(
-            const PopupMenuItem<_NetworkCopyAction>(
-              value: _NetworkCopyAction.responseBody,
-              child: Text('Copy response body'),
-            ),
-          );
-        }
-        if (detail != null) {
-          items.add(
-            const PopupMenuItem<_NetworkCopyAction>(
-              value: _NetworkCopyAction.curl,
-              child: Text('Copy as cURL'),
-            ),
-          );
-        }
-        return items;
-      },
-    );
-  }
+  Widget build(BuildContext context) => AppMenuButton(
+    tooltip: 'Copy request details',
+    icon: Icons.copy_all_rounded,
+    children: [
+      for (final (action, label) in [
+        (_NetworkCopyAction.url, 'Copy URL'),
+        (_NetworkCopyAction.requestHeaders, 'Copy request headers'),
+        (_NetworkCopyAction.responseHeaders, 'Copy response headers'),
+        if (detail?.requestBody != null)
+          (_NetworkCopyAction.requestBody, 'Copy request body'),
+        if (detail?.body != null)
+          (_NetworkCopyAction.responseBody, 'Copy response body'),
+        if (detail != null) (_NetworkCopyAction.curl, 'Copy as cURL'),
+      ])
+        AppMenuItem(
+          label: label,
+          onPressed: () =>
+              _copyNetworkDetailAction(context, action, entry, detail),
+        ),
+    ],
+  );
 }
 
 class _HeaderList extends StatelessWidget {
@@ -4484,7 +4122,7 @@ class _HeaderList extends StatelessWidget {
       children: headers.entries
           .map((entry) {
             return Padding(
-              padding: const EdgeInsets.only(bottom: 6),
+              padding: const EdgeInsets.only(bottom: AppSpacing.tight),
               child: Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
@@ -4494,17 +4132,20 @@ class _HeaderList extends StatelessWidget {
                       entry.key,
                       style: monoStyle(
                         color: colors.textSecondary,
-                        fontSize: 11,
-                        fontWeight: FontWeight.w700,
+                        fontSize: AppFontSizes.metadata,
+                        fontWeight: AppWeights.strong,
                       ),
                     ),
                   ),
-                  const SizedBox(width: 10),
+                  const SizedBox(width: AppSpacing.compact),
                   Expanded(
                     flex: 3,
                     child: SelectableText(
                       entry.value,
-                      style: monoStyle(color: colors.textPrimary, fontSize: 11),
+                      style: monoStyle(
+                        color: colors.textPrimary,
+                        fontSize: AppFontSizes.metadata,
+                      ),
                     ),
                   ),
                 ],
@@ -4546,7 +4187,7 @@ class _NetworkPayloadView extends StatelessWidget {
     if (bodyBase64Encoded && mimeType.startsWith('image/')) {
       try {
         return ClipRRect(
-          borderRadius: BorderRadius.circular(12),
+          borderRadius: AppShapes.panel,
           child: Image.memory(base64Decode(body!)),
         );
       } catch (_) {
@@ -4564,15 +4205,18 @@ class _NetworkPayloadView extends StatelessWidget {
     }
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.all(12),
+      padding: const EdgeInsets.all(AppSpacing.md),
       decoration: BoxDecoration(
         color: colors.canvas,
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: AppShapes.panel,
         border: Border.all(color: colors.border),
       ),
       child: SelectableText(
         _prettyNetworkBody(body!, mimeType),
-        style: monoStyle(color: colors.textPrimary, fontSize: 11),
+        style: monoStyle(
+          color: colors.textPrimary,
+          fontSize: AppFontSizes.metadata,
+        ),
       ),
     );
   }
@@ -4615,11 +4259,11 @@ class _NetworkWebSocketMessagesView extends StatelessWidget {
             ];
             return Container(
               width: double.infinity,
-              margin: const EdgeInsets.only(bottom: 10),
-              padding: const EdgeInsets.all(12),
+              margin: const EdgeInsets.only(bottom: AppSpacing.compact),
+              padding: const EdgeInsets.all(AppSpacing.md),
               decoration: BoxDecoration(
                 color: colors.canvas,
-                borderRadius: BorderRadius.circular(12),
+                borderRadius: AppShapes.panel,
                 border: Border.all(color: colors.border),
               ),
               child: Column(
@@ -4629,42 +4273,44 @@ class _NetworkWebSocketMessagesView extends StatelessWidget {
                     children: [
                       Container(
                         padding: const EdgeInsets.symmetric(
-                          horizontal: 8,
-                          vertical: 3,
+                          horizontal: AppSpacing.sm,
+                          vertical: AppSpacing.xs,
                         ),
                         decoration: BoxDecoration(
-                          color: directionColor.withValues(alpha: 0.14),
-                          borderRadius: BorderRadius.circular(999),
+                          color: directionColor.withValues(
+                            alpha: AppEmphasis.tint,
+                          ),
+                          borderRadius: AppShapes.badge,
                         ),
                         child: Text(
                           directionLabel,
                           style: monoStyle(
                             color: directionColor,
-                            fontSize: 10,
-                            fontWeight: FontWeight.w800,
+                            fontSize: AppFontSizes.micro,
+                            fontWeight: AppWeights.strong,
                           ),
                         ),
                       ),
-                      const SizedBox(width: 8),
+                      const SizedBox(width: AppSpacing.sm),
                       Expanded(
                         child: Text(
                           meta.join(' · '),
                           style: TextStyle(
                             color: colors.textTertiary,
-                            fontSize: 10,
+                            fontSize: AppFontSizes.micro,
                           ),
                         ),
                       ),
                     ],
                   ),
-                  const SizedBox(height: 8),
+                  const SizedBox(height: AppSpacing.sm),
                   SelectableText(
                     payloadText,
                     style: monoStyle(
                       color: message.direction == 'error'
                           ? colors.danger
                           : colors.textPrimary,
-                      fontSize: 11,
+                      fontSize: AppFontSizes.metadata,
                     ),
                   ),
                 ],
@@ -5799,10 +5445,13 @@ class _ReconnectingChip extends StatelessWidget {
     final colors = context.colors;
     return Container(
       constraints: const BoxConstraints(maxWidth: 360),
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+      padding: const EdgeInsets.symmetric(
+        horizontal: AppSpacing.md,
+        vertical: AppSpacing.tight,
+      ),
       decoration: BoxDecoration(
-        color: Colors.black.withValues(alpha: 0.62),
-        borderRadius: BorderRadius.circular(999),
+        color: AppMediaColors.background.withValues(alpha: AppEmphasis.medium),
+        borderRadius: AppShapes.badge,
         border: Border.all(color: colors.border),
       ),
       child: Row(
@@ -5812,20 +5461,20 @@ class _ReconnectingChip extends StatelessWidget {
             width: 12,
             height: 12,
             child: CircularProgressIndicator(
-              strokeWidth: 2,
+              strokeWidth: AppStrokes.indicator,
               color: colors.accent,
             ),
           ),
-          const SizedBox(width: 8),
+          const SizedBox(width: AppSpacing.sm),
           Flexible(
             child: Text(
               message,
               maxLines: 2,
               overflow: TextOverflow.ellipsis,
               style: const TextStyle(
-                color: Colors.white,
-                fontSize: 12,
-                fontWeight: FontWeight.w600,
+                color: AppMediaColors.foreground,
+                fontSize: AppFontSizes.caption,
+                fontWeight: AppWeights.title,
               ),
             ),
           ),
@@ -5848,7 +5497,9 @@ class _PausedPreviewOverlay extends StatelessWidget {
   Widget build(BuildContext context) {
     final colors = context.colors;
     return DecoratedBox(
-      decoration: BoxDecoration(color: Colors.black.withValues(alpha: 0.42)),
+      decoration: BoxDecoration(
+        color: AppMediaColors.background.withValues(alpha: AppEmphasis.muted),
+      ),
       child: Center(
         child: ConstrainedBox(
           constraints: const BoxConstraints(maxWidth: 360),
@@ -5859,28 +5510,31 @@ class _PausedPreviewOverlay extends StatelessWidget {
               children: [
                 Icon(
                   Icons.pause_circle_filled_rounded,
-                  size: 34,
+                  size: AppSizes.iconWell,
                   color: colors.textSecondary,
                 ),
-                const SizedBox(height: 10),
+                const SizedBox(height: AppSpacing.compact),
                 Text(
                   manualPause
                       ? 'Browser paused'
                       : 'Browser paused in background',
                   style: Theme.of(context).textTheme.titleMedium?.copyWith(
                     color: colors.textPrimary,
-                    fontWeight: FontWeight.w800,
+                    fontWeight: AppWeights.strong,
                   ),
                 ),
-                const SizedBox(height: 6),
+                const SizedBox(height: AppSpacing.tight),
                 Text(
                   manualPause
                       ? 'The browser is still open. Resume when you want live updates again.'
                       : 'Sidemesh paused the live view while the app was in the background. Resume to reconnect.',
                   textAlign: TextAlign.center,
-                  style: TextStyle(color: colors.textSecondary, height: 1.35),
+                  style: TextStyle(
+                    color: colors.textSecondary,
+                    height: AppLineHeights.caption,
+                  ),
                 ),
-                const SizedBox(height: 14),
+                const SizedBox(height: AppSpacing.md),
                 FilledButton.icon(
                   onPressed: onResume,
                   icon: const Icon(Icons.play_arrow_rounded),
@@ -5920,7 +5574,12 @@ class _InputRail extends StatelessWidget {
     return SafeArea(
       top: false,
       child: Padding(
-        padding: const EdgeInsets.fromLTRB(10, 0, 10, 10),
+        padding: const EdgeInsets.fromLTRB(
+          AppSpacing.compact,
+          0,
+          AppSpacing.compact,
+          AppSpacing.compact,
+        ),
         child: MeshCard(
           tone: MeshCardTone.surface,
           child: Column(
@@ -5930,25 +5589,28 @@ class _InputRail extends StatelessWidget {
                 children: [
                   Icon(
                     Icons.keyboard_alt_rounded,
-                    size: 18,
+                    size: AppSizes.inlineIcon,
                     color: colors.textSecondary,
                   ),
-                  const SizedBox(width: 8),
+                  const SizedBox(width: AppSpacing.sm),
                   Expanded(
                     child: Text(
                       showSpecialKeys ? 'Type into page' : 'Send keys',
                       style: TextStyle(
                         color: colors.textSecondary,
-                        fontWeight: FontWeight.w700,
+                        fontWeight: AppWeights.strong,
                       ),
                     ),
                   ),
                   TextButton.icon(
                     onPressed: onFocusInput,
-                    icon: const Icon(Icons.keyboard_rounded, size: 17),
+                    icon: const Icon(
+                      Icons.keyboard_rounded,
+                      size: AppSizes.inlineIcon,
+                    ),
                     label: const Text('Focus'),
                   ),
-                  const SizedBox(width: 4),
+                  const SizedBox(width: AppSpacing.xs),
                   IconButton(
                     tooltip: 'Hide keyboard',
                     onPressed: onClose,
@@ -5957,7 +5619,7 @@ class _InputRail extends StatelessWidget {
                   ),
                 ],
               ),
-              const SizedBox(height: 6),
+              const SizedBox(height: AppSpacing.tight),
               if (showSpecialKeys)
                 SingleChildScrollView(
                   scrollDirection: Axis.horizontal,
@@ -5979,10 +5641,13 @@ class _InputRail extends StatelessWidget {
                   alignment: Alignment.centerLeft,
                   child: Text(
                     'Desktop mode: click the page and type normally. Use this box for paste-heavy input.',
-                    style: TextStyle(color: colors.textSecondary, height: 1.35),
+                    style: TextStyle(
+                      color: colors.textSecondary,
+                      height: AppLineHeights.caption,
+                    ),
                   ),
                 ),
-              const SizedBox(height: 10),
+              const SizedBox(height: AppSpacing.compact),
               Row(
                 children: [
                   Expanded(
@@ -5999,12 +5664,10 @@ class _InputRail extends StatelessWidget {
                       onSubmitted: (_) => onSendText(),
                     ),
                   ),
-                  const SizedBox(width: 10),
+                  const SizedBox(width: AppSpacing.compact),
                   FilledButton(
                     onPressed: onSendText,
-                    style: FilledButton.styleFrom(
-                      backgroundColor: colors.accent,
-                    ),
+
                     child: const Text('Send'),
                   ),
                 ],
@@ -6026,7 +5689,7 @@ class _KeyButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.only(right: 8),
+      padding: const EdgeInsets.only(right: AppSpacing.sm),
       child: OutlinedButton(onPressed: onTap, child: Text(label)),
     );
   }
@@ -6047,26 +5710,35 @@ class _ViewportChip extends StatelessWidget {
   Widget build(BuildContext context) {
     final colors = context.colors;
     return InkWell(
-      borderRadius: BorderRadius.circular(999),
+      borderRadius: AppShapes.badge,
       onTap: onTap,
       child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+        padding: const EdgeInsets.symmetric(
+          horizontal: AppSpacing.compact,
+          vertical: AppSpacing.tight,
+        ),
         decoration: BoxDecoration(
-          color: colors.accent.withValues(alpha: 0.18),
-          borderRadius: BorderRadius.circular(999),
-          border: Border.all(color: colors.accent.withValues(alpha: 0.55)),
+          color: colors.accent.withValues(alpha: AppEmphasis.soft),
+          borderRadius: AppShapes.badge,
+          border: Border.all(
+            color: colors.accent.withValues(alpha: AppEmphasis.medium),
+          ),
         ),
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(Icons.aspect_ratio_rounded, size: 14, color: colors.accent),
-            const SizedBox(width: 6),
+            Icon(
+              Icons.aspect_ratio_rounded,
+              size: AppSizes.smallIcon,
+              color: colors.accent,
+            ),
+            const SizedBox(width: AppSpacing.tight),
             Text(
               '$width x $height',
               style: monoStyle(
                 color: colors.accent,
-                fontSize: 11,
-                fontWeight: FontWeight.w800,
+                fontSize: AppFontSizes.metadata,
+                fontWeight: AppWeights.strong,
               ),
             ),
           ],
@@ -6164,7 +5836,7 @@ class _ViewportResizeSheetState extends State<_ViewportResizeSheet> {
                   ),
               ],
             ),
-            const SizedBox(height: 18),
+            const SizedBox(height: AppSpacing.lg),
             Row(
               children: [
                 Expanded(
@@ -6175,7 +5847,7 @@ class _ViewportResizeSheetState extends State<_ViewportResizeSheet> {
                     decoration: const InputDecoration(labelText: 'Width'),
                   ),
                 ),
-                const SizedBox(width: 10),
+                const SizedBox(width: AppSpacing.compact),
                 Expanded(
                   child: TextField(
                     controller: _heightController,
@@ -6186,7 +5858,7 @@ class _ViewportResizeSheetState extends State<_ViewportResizeSheet> {
                 ),
               ],
             ),
-            const SizedBox(height: 14),
+            const SizedBox(height: AppSpacing.md),
             SizedBox(
               width: double.infinity,
               child: FilledButton.icon(
@@ -6235,16 +5907,16 @@ class _ViewportPresetButton extends StatelessWidget {
       onTap: onTap,
       child: Container(
         width: 150,
-        padding: const EdgeInsets.all(12),
+        padding: const EdgeInsets.all(AppSpacing.md),
         decoration: BoxDecoration(
           color: selected
-              ? colors.accent.withValues(alpha: 0.14)
-              : colors.canvas.withValues(alpha: 0.72),
+              ? colors.accent.withValues(alpha: AppEmphasis.tint)
+              : colors.canvas.withValues(alpha: AppEmphasis.secondary),
           borderRadius: AppShapes.input,
           border: Border.all(
             color: selected
-                ? colors.accent.withValues(alpha: 0.52)
-                : colors.border.withValues(alpha: 0.82),
+                ? colors.accent.withValues(alpha: AppEmphasis.disabled)
+                : colors.border.withValues(alpha: AppEmphasis.strong),
           ),
         ),
         child: Column(
@@ -6255,24 +5927,27 @@ class _ViewportPresetButton extends StatelessWidget {
               preset.label,
               style: TextStyle(
                 color: selected ? colors.accent : colors.textPrimary,
-                fontWeight: FontWeight.w800,
+                fontWeight: AppWeights.strong,
               ),
             ),
-            const SizedBox(height: 4),
+            const SizedBox(height: AppSpacing.xs),
             Text(
               '${preset.width} x ${preset.height}',
               style: monoStyle(
                 color: colors.textSecondary,
-                fontSize: 12,
-                fontWeight: FontWeight.w800,
+                fontSize: AppFontSizes.caption,
+                fontWeight: AppWeights.strong,
               ),
             ),
-            const SizedBox(height: 5),
+            const SizedBox(height: AppSpacing.xs),
             Text(
               preset.description,
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
-              style: TextStyle(color: colors.textSecondary, fontSize: 11),
+              style: TextStyle(
+                color: colors.textSecondary,
+                fontSize: AppFontSizes.metadata,
+              ),
             ),
           ],
         ),

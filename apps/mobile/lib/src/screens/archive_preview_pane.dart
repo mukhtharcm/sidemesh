@@ -200,7 +200,7 @@ class _ArchivePreviewPaneState extends State<ArchivePreviewPane> {
   @override
   Widget build(BuildContext context) {
     if (_loading) {
-      return _ArchivePreviewLoadingState(dense: widget.dense);
+      return MeshLoader(label: 'Loading archive');
     }
     if (_skippedForSize) {
       return MeshEmptyState.compact(
@@ -215,6 +215,7 @@ class _ArchivePreviewPaneState extends State<ArchivePreviewPane> {
         icon: Icons.archive_outlined,
         title: 'Could not preview archive',
         body: _archivePreviewErrorMessage(_error!),
+        action: TextButton(onPressed: _load, child: const Text('Retry')),
       );
     }
 
@@ -223,14 +224,10 @@ class _ArchivePreviewPaneState extends State<ArchivePreviewPane> {
       return const MeshEmptyState.compact(
         icon: Icons.archive_outlined,
         title: 'Archive is empty',
-        body: 'No entries were found in this ZIP archive.',
       );
     }
 
     final colors = context.colors;
-    final titleStyle = Theme.of(
-      context,
-    ).textTheme.titleSmall?.copyWith(fontWeight: AppWeights.title);
     final subtitleStyle = Theme.of(context).textTheme.bodySmall?.copyWith(
       color: colors.textSecondary,
       fontWeight: AppWeights.body,
@@ -239,88 +236,24 @@ class _ArchivePreviewPaneState extends State<ArchivePreviewPane> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        MeshCard(
-          tone: MeshCardTone.surface,
-          padding: widget.dense ? AppPadding.cardSm : AppPadding.card,
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Container(
-                    width: widget.dense ? 36 : 42,
-                    height: widget.dense ? 36 : 42,
-                    decoration: BoxDecoration(
-                      color: colors.accentMuted,
-                      borderRadius: BorderRadius.circular(AppRadii.control),
-                      border: Border.all(
-                        color: colors.accent.withValues(alpha: 0.26),
-                      ),
-                    ),
-                    child: Icon(
-                      Icons.archive_outlined,
-                      size: widget.dense ? 18 : 20,
-                      color: colors.accent,
-                    ),
-                  ),
-                  const SizedBox(width: AppSpacing.md),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text('ZIP contents', style: titleStyle),
-                        const SizedBox(height: 4),
-                        Text(
-                          '${_formatBytes(widget.fileSize)} archive on ${widget.host.label}',
-                          style: subtitleStyle,
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: AppSpacing.md),
-              Wrap(
-                spacing: AppSpacing.sm,
-                runSpacing: AppSpacing.sm,
-                children: [
-                  MeshPill(
-                    label: _countLabel(preview.totalEntries, 'entry'),
-                    icon: Icons.list_alt_rounded,
-                  ),
-                  MeshPill(
-                    label: _countLabel(preview.fileCount, 'file'),
-                    icon: Icons.insert_drive_file_rounded,
-                  ),
-                  MeshPill(
-                    label: _countLabel(preview.directoryCount, 'folder'),
-                    icon: Icons.folder_rounded,
-                  ),
-                  if (preview.symbolicLinkCount > 0)
-                    MeshPill(
-                      label: _countLabel(preview.symbolicLinkCount, 'link'),
-                      icon: Icons.shortcut_rounded,
-                    ),
-                  if (preview.totalUncompressedBytes > 0)
-                    MeshPill(
-                      label:
-                          '${_formatBytes(preview.totalUncompressedBytes)} unpacked',
-                      icon: Icons.unarchive_rounded,
-                    ),
-                ],
-              ),
-              if (preview.truncated) ...[
-                const SizedBox(height: AppSpacing.md),
-                _ArchiveLimitBanner(
-                  dense: widget.dense,
-                  message:
-                      'Showing the first ${preview.displayedEntries} of ${preview.totalEntries} entries.',
-                ),
-              ],
-            ],
-          ),
+        Text(
+          [
+            _countLabel(preview.fileCount, 'file'),
+            _countLabel(preview.directoryCount, 'folder'),
+            if (preview.symbolicLinkCount > 0)
+              _countLabel(preview.symbolicLinkCount, 'link'),
+            '${_formatBytes(preview.totalUncompressedBytes)} unpacked',
+          ].join(' · '),
+          style: subtitleStyle,
         ),
+        if (preview.truncated) ...[
+          const SizedBox(height: AppSpacing.sm),
+          _ArchiveLimitBanner(
+            dense: widget.dense,
+            message:
+                'Showing the first ${preview.displayedEntries} of ${preview.totalEntries} entries.',
+          ),
+        ],
         const SizedBox(height: AppSpacing.md),
         Expanded(
           child: MeshCard(
@@ -344,7 +277,9 @@ class _ArchivePreviewPaneState extends State<ArchivePreviewPane> {
                     overflow: TextOverflow.ellipsis,
                     style: monoStyle(
                       color: colors.textPrimary,
-                      fontSize: widget.dense ? 12 : 12.5,
+                      fontSize: widget.dense
+                          ? AppFontSizes.caption
+                          : AppFontSizes.code,
                       fontWeight: AppWeights.emphasis,
                     ),
                   ),
@@ -360,7 +295,7 @@ class _ArchivePreviewPaneState extends State<ArchivePreviewPane> {
                           _formatBytes(entry.size),
                           style: monoStyle(
                             color: colors.textSecondary,
-                            fontSize: 11.5,
+                            fontSize: AppFontSizes.caption,
                             fontWeight: AppWeights.emphasis,
                           ),
                         ),
@@ -403,9 +338,9 @@ class _ArchiveEntryIcon extends StatelessWidget {
       decoration: BoxDecoration(
         color: fill,
         borderRadius: BorderRadius.circular(AppRadii.control),
-        border: Border.all(color: tint.withValues(alpha: 0.2)),
+        border: Border.all(color: tint.withValues(alpha: AppEmphasis.soft)),
       ),
-      child: Icon(icon, size: 18, color: tint),
+      child: Icon(icon, size: AppSizes.inlineIcon, color: tint),
     );
   }
 }
@@ -422,17 +357,23 @@ class _ArchiveLimitBanner extends StatelessWidget {
     return Container(
       padding: EdgeInsets.symmetric(
         horizontal: dense ? AppSpacing.sm : AppSpacing.md,
-        vertical: dense ? AppSpacing.sm : 10,
+        vertical: dense ? AppSpacing.sm : AppSpacing.compact,
       ),
       decoration: BoxDecoration(
         color: colors.warningMuted,
         borderRadius: BorderRadius.circular(AppRadii.control),
-        border: Border.all(color: colors.warning.withValues(alpha: 0.32)),
+        border: Border.all(
+          color: colors.warning.withValues(alpha: AppEmphasis.borderTint),
+        ),
       ),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Icon(Icons.info_outline_rounded, size: 16, color: colors.warning),
+          Icon(
+            Icons.info_outline_rounded,
+            size: AppSizes.compactIcon,
+            color: colors.warning,
+          ),
           const SizedBox(width: AppSpacing.sm),
           Expanded(
             child: Text(
@@ -444,85 +385,6 @@ class _ArchiveLimitBanner extends StatelessWidget {
           ),
         ],
       ),
-    );
-  }
-}
-
-class _ArchivePreviewLoadingState extends StatelessWidget {
-  const _ArchivePreviewLoadingState({required this.dense});
-
-  final bool dense;
-
-  @override
-  Widget build(BuildContext context) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        MeshCard(
-          tone: MeshCardTone.muted,
-          padding: dense ? AppPadding.cardSm : AppPadding.card,
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: const [
-              FractionallySizedBox(
-                widthFactor: 0.28,
-                alignment: Alignment.centerLeft,
-                child: MeshSkeleton(height: 16, radius: AppRadii.badge),
-              ),
-              SizedBox(height: AppSpacing.sm),
-              FractionallySizedBox(
-                widthFactor: 0.42,
-                alignment: Alignment.centerLeft,
-                child: MeshSkeleton(height: 12, radius: AppRadii.badge),
-              ),
-              SizedBox(height: AppSpacing.md),
-              Wrap(
-                spacing: AppSpacing.sm,
-                runSpacing: AppSpacing.sm,
-                children: [
-                  MeshSkeleton(width: 84, height: 28, radius: 999),
-                  MeshSkeleton(width: 76, height: 28, radius: 999),
-                  MeshSkeleton(width: 90, height: 28, radius: 999),
-                ],
-              ),
-            ],
-          ),
-        ),
-        const SizedBox(height: AppSpacing.md),
-        Expanded(
-          child: MeshCard(
-            tone: MeshCardTone.muted,
-            padding: const EdgeInsets.all(AppSpacing.xs),
-            child: Column(
-              children: [
-                MeshListRowSkeleton(
-                  dense: dense,
-                  framed: false,
-                  showMeta: true,
-                  titleWidthFactor: 0.72,
-                  subtitleWidthFactor: 0.0,
-                ),
-                Divider(height: 1),
-                MeshListRowSkeleton(
-                  dense: dense,
-                  framed: false,
-                  showMeta: true,
-                  titleWidthFactor: 0.54,
-                  subtitleWidthFactor: 0.0,
-                ),
-                Divider(height: 1),
-                MeshListRowSkeleton(
-                  dense: dense,
-                  framed: false,
-                  showMeta: true,
-                  titleWidthFactor: 0.66,
-                  subtitleWidthFactor: 0.0,
-                ),
-              ],
-            ),
-          ),
-        ),
-      ],
     );
   }
 }

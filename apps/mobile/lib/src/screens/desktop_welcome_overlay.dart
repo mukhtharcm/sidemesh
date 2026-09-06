@@ -1,6 +1,8 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 
+import '../theme/app_tokens.dart';
+
 import '../onboarding_store.dart';
 import '../theme/app_colors.dart';
 import '../theme/app_theme.dart';
@@ -38,10 +40,8 @@ class _DesktopWelcomeOverlayState extends State<DesktopWelcomeOverlay>
   @override
   void initState() {
     super.initState();
-    _anim = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 500),
-    )..forward();
+    _anim = AnimationController(vsync: this, duration: AppMotion.page)
+      ..forward();
   }
 
   @override
@@ -73,7 +73,7 @@ class _DesktopWelcomeOverlayState extends State<DesktopWelcomeOverlay>
           onTap: _dismiss,
           child: Container(
             constraints: const BoxConstraints.expand(),
-            color: colors.canvas.withValues(alpha: 0.55 * t),
+            color: colors.canvas.withValues(alpha: AppEmphasis.medium * t),
             child: Center(
               child: GestureDetector(
                 onTap: () {},
@@ -82,7 +82,7 @@ class _DesktopWelcomeOverlayState extends State<DesktopWelcomeOverlay>
                   child: Transform.translate(
                     offset: Offset(0, lift),
                     child: Padding(
-                      padding: const EdgeInsets.all(28),
+                      padding: const EdgeInsets.all(AppSpacing.xxl),
                       child: ConstrainedBox(
                         constraints: const BoxConstraints(
                           maxWidth: 880,
@@ -91,7 +91,7 @@ class _DesktopWelcomeOverlayState extends State<DesktopWelcomeOverlay>
                         ),
                         child: MeshCard(
                           tone: MeshCardTone.elevated,
-                          padding: const EdgeInsets.all(28),
+                          padding: const EdgeInsets.all(AppSpacing.xxl),
                           child: _Content(
                             colors: colors,
                             onDismiss: _dismiss,
@@ -148,25 +148,25 @@ class _Content extends StatelessWidget {
                   height: 32,
                   decoration: BoxDecoration(
                     color: colors.accentMuted,
-                    borderRadius: BorderRadius.circular(10),
+                    borderRadius: AppShapes.input,
                     border: Border.all(
-                      color: colors.accent.withValues(alpha: 0.35),
+                      color: colors.accent.withValues(alpha: AppEmphasis.muted),
                     ),
                   ),
                   alignment: Alignment.center,
                   child: Icon(
                     Icons.hub_rounded,
-                    size: 16,
+                    size: AppSizes.compactIcon,
                     color: colors.accent,
                   ),
                 ),
-                const SizedBox(width: 10),
+                const SizedBox(width: AppSpacing.compact),
                 Text(
                   'Sidemesh',
                   style: Theme.of(context).textTheme.labelLarge?.copyWith(
-                    fontWeight: FontWeight.w700,
+                    fontWeight: AppWeights.strong,
                     color: colors.textSecondary,
-                    letterSpacing: 0.5,
+                    letterSpacing: AppLetterSpacing.caps,
                   ),
                 ),
               ],
@@ -179,13 +179,9 @@ class _Content extends StatelessWidget {
             ),
           ],
         ),
-        const SizedBox(height: 20),
+        const SizedBox(height: AppSpacing.xl),
         // Tabs
-        _TabBar(
-          active: activeTab,
-          onTap: onTabChanged,
-          colors: colors,
-        ),
+        _TabBar(active: activeTab, onTap: onTabChanged, colors: colors),
         Divider(height: 24, color: colors.border),
         // Body
         Expanded(
@@ -236,23 +232,25 @@ class _TabBar extends StatelessWidget {
       children: tabs.map((entry) {
         final isActive = active == entry.$1;
         return Padding(
-          padding: const EdgeInsets.only(right: 8),
+          padding: const EdgeInsets.only(right: AppSpacing.sm),
           child: Material(
             color: Colors.transparent,
             child: InkWell(
-              borderRadius: BorderRadius.circular(10),
+              borderRadius: AppShapes.input,
               onTap: () => onTap(entry.$1),
               child: Container(
                 padding: const EdgeInsets.symmetric(
-                  horizontal: 14,
-                  vertical: 8,
+                  horizontal: AppSpacing.md,
+                  vertical: AppSpacing.sm,
                 ),
                 decoration: BoxDecoration(
                   color: isActive ? colors.accentMuted : Colors.transparent,
-                  borderRadius: BorderRadius.circular(10),
+                  borderRadius: AppShapes.input,
                   border: isActive
                       ? Border.all(
-                          color: colors.accent.withValues(alpha: 0.4),
+                          color: colors.accent.withValues(
+                            alpha: AppEmphasis.muted,
+                          ),
                         )
                       : null,
                 ),
@@ -261,17 +259,17 @@ class _TabBar extends StatelessWidget {
                   children: [
                     Icon(
                       entry.$3,
-                      size: 16,
+                      size: AppSizes.compactIcon,
                       color: isActive ? colors.accent : colors.textTertiary,
                     ),
-                    const SizedBox(width: 8),
+                    const SizedBox(width: AppSpacing.sm),
                     Text(
                       entry.$2,
                       style: Theme.of(context).textTheme.labelLarge?.copyWith(
-                        fontWeight:
-                            isActive ? FontWeight.w700 : FontWeight.w500,
-                        color:
-                            isActive ? colors.accent : colors.textTertiary,
+                        fontWeight: isActive
+                            ? AppWeights.strong
+                            : AppWeights.emphasis,
+                        color: isActive ? colors.accent : colors.textTertiary,
                       ),
                     ),
                   ],
@@ -308,24 +306,24 @@ class _WelcomeTab extends StatelessWidget {
         Text(
           'Connect one machine, then keep working from here.',
           style: Theme.of(context).textTheme.headlineMedium?.copyWith(
-            fontWeight: FontWeight.w800,
+            fontWeight: AppWeights.strong,
             color: colors.textPrimary,
-            height: 1.15,
-            letterSpacing: -0.6,
+            height: AppLineHeights.tight,
+            letterSpacing: AppLetterSpacing.headline,
           ),
         ),
-        const SizedBox(height: 16),
+        const SizedBox(height: AppSpacing.lg),
         ConstrainedBox(
           constraints: const BoxConstraints(maxWidth: 520),
           child: Text(
             'Sidemesh is easiest to learn once one machine is paired. After that, you can watch sessions, approvals, files, and terminals without leaving this app.',
             style: Theme.of(context).textTheme.bodyLarge?.copyWith(
               color: colors.textSecondary,
-              height: 1.5,
+              height: AppLineHeights.code,
             ),
           ),
         ),
-        const SizedBox(height: 32),
+        const SizedBox(height: AppSpacing.xxl),
         // Quick feature chips
         Wrap(
           spacing: 8,
@@ -353,19 +351,19 @@ class _WelcomeTab extends StatelessWidget {
             ),
           ],
         ),
-        const SizedBox(height: 32),
+        const SizedBox(height: AppSpacing.xxl),
         // Shortcut pills
         _ShortcutHint(colors: colors),
-        const SizedBox(height: 32),
+        const SizedBox(height: AppSpacing.xxl),
         // CTA
         Row(
           children: [
             FilledButton.icon(
               onPressed: onOpenSetup,
-              icon: const Icon(Icons.link_rounded, size: 18),
+              icon: const Icon(Icons.link_rounded, size: AppSizes.inlineIcon),
               label: const Text('Connect a machine'),
             ),
-            const SizedBox(width: 12),
+            const SizedBox(width: AppSpacing.md),
             OutlinedButton(
               onPressed: onMarkCompleteAndDismiss,
               child: const Text('Close'),
@@ -391,22 +389,25 @@ class _FeatureChip extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      padding: const EdgeInsets.symmetric(
+        horizontal: AppSpacing.md,
+        vertical: AppSpacing.sm,
+      ),
       decoration: BoxDecoration(
         color: colors.surfaceMuted,
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: AppShapes.panel,
         border: Border.all(color: colors.border),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(icon, size: 16, color: colors.textSecondary),
-          const SizedBox(width: 6),
+          Icon(icon, size: AppSizes.compactIcon, color: colors.textSecondary),
+          const SizedBox(width: AppSpacing.tight),
           Text(
             label,
             style: Theme.of(context).textTheme.labelMedium?.copyWith(
               color: colors.textSecondary,
-              fontWeight: FontWeight.w600,
+              fontWeight: AppWeights.title,
             ),
           ),
         ],
@@ -438,44 +439,35 @@ class _SetupTab extends StatelessWidget {
         Text(
           'Connect a machine',
           style: Theme.of(context).textTheme.titleLarge?.copyWith(
-            fontWeight: FontWeight.w800,
+            fontWeight: AppWeights.strong,
             color: colors.textPrimary,
           ),
         ),
-        const SizedBox(height: 8),
+        const SizedBox(height: AppSpacing.sm),
         ConstrainedBox(
           constraints: const BoxConstraints(maxWidth: 520),
           child: Text(
             'Run these commands on the machine you want to manage, then use the add-machine flow in this app.',
             style: Theme.of(context).textTheme.bodyMedium?.copyWith(
               color: colors.textSecondary,
-              height: 1.5,
+              height: AppLineHeights.code,
             ),
           ),
         ),
-        const SizedBox(height: 24),
-        _CommandBlock(
-          text: 'npm install -g sidemesh',
-          colors: colors,
-        ),
-        const SizedBox(height: 6),
-        _CommandBlock(
-          text: 'sidemesh setup',
-          colors: colors,
-        ),
-        const SizedBox(height: 6),
-        _CommandBlock(
-          text: 'sidemesh pair',
-          colors: colors,
-        ),
-        const SizedBox(height: 24),
+        const SizedBox(height: AppSpacing.xl),
+        _CommandBlock(text: 'npm install -g sidemesh', colors: colors),
+        const SizedBox(height: AppSpacing.tight),
+        _CommandBlock(text: 'sidemesh setup', colors: colors),
+        const SizedBox(height: AppSpacing.tight),
+        _CommandBlock(text: 'sidemesh pair', colors: colors),
+        const SizedBox(height: AppSpacing.xl),
         Text(
           'If Sidemesh is already running there, you can skip straight to adding the machine here.',
-          style: Theme.of(context).textTheme.bodySmall?.copyWith(
-            color: colors.textTertiary,
-          ),
+          style: Theme.of(
+            context,
+          ).textTheme.bodySmall?.copyWith(color: colors.textTertiary),
         ),
-        const SizedBox(height: 20),
+        const SizedBox(height: AppSpacing.xl),
         if (onAddHost != null)
           Row(
             children: [
@@ -484,14 +476,11 @@ class _SetupTab extends StatelessWidget {
                   onAddHost!();
                   onDismiss();
                 },
-                icon: const Icon(Icons.add_rounded, size: 18),
+                icon: const Icon(Icons.add_rounded, size: AppSizes.inlineIcon),
                 label: const Text('Add a machine'),
               ),
-              const SizedBox(width: 12),
-              OutlinedButton(
-                onPressed: onDismiss,
-                child: const Text('Close'),
-              ),
+              const SizedBox(width: AppSpacing.md),
+              OutlinedButton(onPressed: onDismiss, child: const Text('Close')),
             ],
           ),
       ],
@@ -500,10 +489,7 @@ class _SetupTab extends StatelessWidget {
 }
 
 class _CommandBlock extends StatelessWidget {
-  const _CommandBlock({
-    required this.text,
-    required this.colors,
-  });
+  const _CommandBlock({required this.text, required this.colors});
 
   final String text;
   final AppColors colors;
@@ -511,10 +497,13 @@ class _CommandBlock extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+      padding: const EdgeInsets.symmetric(
+        horizontal: AppSpacing.md,
+        vertical: AppSpacing.compact,
+      ),
       decoration: BoxDecoration(
         color: colors.codeBackground,
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: AppShapes.panel,
         border: Border.all(color: colors.codeBorder),
       ),
       child: Row(
@@ -523,16 +512,16 @@ class _CommandBlock extends StatelessWidget {
             r'$',
             style: monoStyle(
               color: colors.accent,
-              fontSize: 12,
+              fontSize: AppFontSizes.caption,
             ),
           ),
-          const SizedBox(width: 8),
+          const SizedBox(width: AppSpacing.sm),
           Expanded(
             child: Text(
               text,
               style: monoStyle(
                 color: colors.codeForeground,
-                fontSize: 12,
+                fontSize: AppFontSizes.caption,
               ),
             ),
           ),
@@ -571,18 +560,18 @@ class _ShortcutsTab extends StatelessWidget {
         Text(
           'Keyboard shortcuts',
           style: Theme.of(context).textTheme.titleLarge?.copyWith(
-            fontWeight: FontWeight.w800,
+            fontWeight: AppWeights.strong,
             color: colors.textPrimary,
           ),
         ),
-        const SizedBox(height: 8),
+        const SizedBox(height: AppSpacing.sm),
         Text(
           'A few shortcuts are enough to move around quickly. You can learn the rest as you go.',
-          style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-            color: colors.textSecondary,
-          ),
+          style: Theme.of(
+            context,
+          ).textTheme.bodyMedium?.copyWith(color: colors.textSecondary),
         ),
-        const SizedBox(height: 20),
+        const SizedBox(height: AppSpacing.xl),
         Wrap(
           spacing: 16,
           runSpacing: 12,
@@ -592,14 +581,13 @@ class _ShortcutsTab extends StatelessWidget {
               child: Row(
                 children: [
                   _Kbd(text: s.keys, colors: colors),
-                  const SizedBox(width: 12),
+                  const SizedBox(width: AppSpacing.md),
                   Expanded(
                     child: Text(
                       s.label,
-                      style: Theme.of(context)
-                          .textTheme
-                          .bodyMedium
-                          ?.copyWith(color: colors.textSecondary),
+                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                        color: colors.textSecondary,
+                      ),
                     ),
                   ),
                 ],
@@ -631,12 +619,12 @@ class _ShortcutHint extends StatelessWidget {
         _Kbd(text: '⌘R', colors: colors),
         _Kbd(text: '⌘1/2/3', colors: colors),
         _Kbd(text: '⌘/', colors: colors),
-        const SizedBox(width: 4),
+        const SizedBox(width: AppSpacing.xs),
         Text(
           'search · refresh · panes · help',
-          style: Theme.of(context).textTheme.labelSmall?.copyWith(
-            color: colors.textTertiary,
-          ),
+          style: Theme.of(
+            context,
+          ).textTheme.labelSmall?.copyWith(color: colors.textTertiary),
         ),
       ],
     );
@@ -652,25 +640,22 @@ class _Kbd extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+      padding: const EdgeInsets.symmetric(
+        horizontal: AppSpacing.sm,
+        vertical: AppSpacing.xs,
+      ),
       decoration: BoxDecoration(
         color: colors.surfaceMuted,
-        borderRadius: BorderRadius.circular(6),
+        borderRadius: AppShapes.badge,
         border: Border.all(color: colors.border),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.04),
-            blurRadius: 0,
-            offset: const Offset(0, 1),
-          ),
-        ],
+        boxShadow: [AppShadows.surface(colors.textPrimary)],
       ),
       child: Text(
         text,
         style: monoStyle(
           color: colors.textSecondary,
-          fontSize: 11,
-          fontWeight: FontWeight.w600,
+          fontSize: AppFontSizes.metadata,
+          fontWeight: AppWeights.title,
         ),
       ),
     );
@@ -693,15 +678,18 @@ class _SubtleButton extends StatelessWidget {
     return Material(
       color: Colors.transparent,
       child: InkWell(
-        borderRadius: BorderRadius.circular(8),
+        borderRadius: AppShapes.hover,
         onTap: onTap,
         child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+          padding: const EdgeInsets.symmetric(
+            horizontal: AppSpacing.compact,
+            vertical: AppSpacing.tight,
+          ),
           child: Text(
             label,
             style: Theme.of(context).textTheme.labelLarge?.copyWith(
               color: colors.textTertiary,
-              fontWeight: FontWeight.w600,
+              fontWeight: AppWeights.title,
             ),
           ),
         ),

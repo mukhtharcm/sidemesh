@@ -119,15 +119,15 @@ const _codexAmberDark = AppColors(
 );
 
 const _codexAmberLight = AppColors(
-  canvas: Color(0xFFF6EFE2),
-  surface: Color(0xFFFFFBF3),
+  canvas: Color(0xFFF8F7F4),
+  surface: Color(0xFFF8F7F4),
   surfaceElevated: Color(0xFFFFFFFF),
-  surfaceMuted: Color(0xFFF1E7D3),
-  border: Color(0xFFE6D9BF),
-  borderStrong: Color(0xFFD1BF9E),
+  surfaceMuted: Color(0xFFEEEDE8),
+  border: Color(0xFFE2E0DA),
+  borderStrong: Color(0xFFC6C3BA),
   textPrimary: Color(0xFF1C1812),
-  textSecondary: Color(0xFF6D5B49),
-  textTertiary: Color(0xFF9A8A75),
+  textSecondary: Color(0xFF66645E),
+  textTertiary: Color(0xFF828078),
   accent: Color(0xFFCA6B1F),
   accentMuted: Color(0xFFF4DCC0),
   accentOn: Color(0xFF1C1812),
@@ -139,8 +139,8 @@ const _codexAmberLight = AppColors(
   warningMuted: Color(0xFFFBEAC0),
   info: Color(0xFF0969DA),
   infoMuted: Color(0xFFDDEAFA),
-  codeBackground: Color(0xFFF6EEDD),
-  codeBorder: Color(0xFFE6D9BF),
+  codeBackground: Color(0xFFF0EFEA),
+  codeBorder: Color(0xFFE2E0DA),
   codeForeground: Color(0xFF1C1812),
   diffAddLine: Color(0xFFDAFBE1),
   diffAddGutter: Color(0xFFACEEBB),
@@ -148,14 +148,14 @@ const _codexAmberLight = AppColors(
   diffDelLine: Color(0xFFFFEBE9),
   diffDelGutter: Color(0xFFFFCECB),
   diffDelGlyph: Color(0xFFCF222E),
-  diffMetaLine: Color(0xFF6D5B49),
+  diffMetaLine: Color(0xFF66645E),
   diffHunkLine: Color(0xFF0969DA),
   diffGutterText: Color(0xFF1F2328),
   userBubble: Color(0xFFF4DCC0),
   userBubbleOn: Color(0xFF1C1812),
   assistantBubble: Color(0xFFFBF3E1),
   assistantBubbleBorder: Color(0xFFD9C8A8),
-  composerBackground: Color(0xFFFFFBF3),
+  composerBackground: Color(0xFFF8F7F4),
 );
 
 // ---------------------------------------------------------------------------
@@ -164,57 +164,57 @@ const _codexAmberLight = AppColors(
 // ---------------------------------------------------------------------------
 
 const _nordDark = AppColors(
-  canvas: Color(0xFF242933), // darker than nord0 for contrast
-  surface: Color(0xFF2E3440), // nord0
-  surfaceElevated: Color(0xFF3B4252), // nord1
-  surfaceMuted: Color(0xFF353B48),
-  border: Color(0xFF434C5E), // nord2
-  borderStrong: Color(0xFF4C566A), // nord3
-  textPrimary: Color(0xFFECEFF4), // nord6
-  textSecondary: Color(0xFFD8DEE9), // nord4
+  canvas: Color(0xFF202122),
+  surface: Color(0xFF292B2D),
+  surfaceElevated: Color(0xFF333638),
+  surfaceMuted: Color(0xFF383B3E),
+  border: Color(0xFF42464A),
+  borderStrong: Color(0xFF60666D),
+  textPrimary: Color(0xFFF7F7F5),
+  textSecondary: Color(0xFFDDE0E2),
   textTertiary: Color(0xFF8892A6),
-  accent: Color(0xFF88C0D0), // nord8 (frost)
+  accent: Color(0xFF88C0D0),
   accentMuted: Color(0xFF2A3A44),
   accentOn: Color(0xFF1C232D),
-  success: Color(0xFFA3BE8C), // nord14
+  success: Color(0xFFA3BE8C),
   successMuted: Color(0xFF2A3528),
-  danger: Color(0xFFBF616A), // nord11
+  danger: Color(0xFFBF616A),
   dangerMuted: Color(0xFF3A2226),
-  warning: Color(0xFFEBCB8B), // nord13
+  warning: Color(0xFFEBCB8B),
   warningMuted: Color(0xFF3A331E),
-  info: Color(0xFF81A1C1), // nord9
+  info: Color(0xFF81A1C1),
   infoMuted: Color(0xFF233040),
-  codeBackground: Color(0xFF292E39),
-  codeBorder: Color(0xFF434C5E),
-  codeForeground: Color(0xFFE5E9F0), // nord5
+  codeBackground: Color(0xFF26282A),
+  codeBorder: Color(0xFF42464A),
+  codeForeground: Color(0xFFE7E9E6),
   diffAddLine: Color(0xFF2E3C2C),
   diffAddGutter: Color(0xFF3A4C34),
   diffAddGlyph: Color(0xFFA3BE8C),
   diffDelLine: Color(0xFF3E2A2E),
   diffDelGutter: Color(0xFF4E3238),
   diffDelGlyph: Color(0xFFBF616A),
-  diffMetaLine: Color(0xFFD8DEE9),
+  diffMetaLine: Color(0xFFDDE0E2),
   diffHunkLine: Color(0xFF81A1C1),
   diffGutterText: Color(0xFF8892A6),
   userBubble: Color(0xFF2A3A44),
-  userBubbleOn: Color(0xFFECEFF4),
-  assistantBubble: Color(0xFF2E3440),
-  assistantBubbleBorder: Color(0xFF434C5E),
-  composerBackground: Color(0xFF2E3440),
+  userBubbleOn: Color(0xFFF7F7F5),
+  assistantBubble: Color(0xFF292B2D),
+  assistantBubbleBorder: Color(0xFF42464A),
+  composerBackground: Color(0xFF292B2D),
 );
 
 const _nordLight = AppColors(
-  canvas: Color(0xFFECEFF4), // nord6
-  surface: Color(0xFFF8F9FB),
+  canvas: Color(0xFFF7F7F5),
+  surface: Color(0xFFF0F1EF),
   surfaceElevated: Color(0xFFFFFFFF),
-  surfaceMuted: Color(0xFFE5E9F0), // nord5
-  border: Color(0xFFD8DEE9), // nord4
-  borderStrong: Color(0xFFB9C1CF),
-  textPrimary: Color(0xFF2E3440), // nord0
-  textSecondary: Color(0xFF4C566A), // nord3
+  surfaceMuted: Color(0xFFE7E9E6),
+  border: Color(0xFFDDE0E2),
+  borderStrong: Color(0xFFBFC4C6),
+  textPrimary: Color(0xFF292B2D),
+  textSecondary: Color(0xFF60666D),
   textTertiary: Color(0xFF7B8594),
-  accent: Color(0xFF5E81AC), // nord10
-  accentMuted: Color(0xFFD7E1EE),
+  accent: Color(0xFF5E81AC),
+  accentMuted: Color(0xFFE7EBEF),
   accentOn: Color(0xFF0B0F14),
   success: Color(0xFF4A7A3F),
   successMuted: Color(0xFFDDEBD3),
@@ -224,22 +224,22 @@ const _nordLight = AppColors(
   warningMuted: Color(0xFFF5E8C7),
   info: Color(0xFF4C6E8D),
   infoMuted: Color(0xFFD9E3ED),
-  codeBackground: Color(0xFFE5E9F0),
-  codeBorder: Color(0xFFD8DEE9),
-  codeForeground: Color(0xFF2E3440),
+  codeBackground: Color(0xFFE7E9E6),
+  codeBorder: Color(0xFFDDE0E2),
+  codeForeground: Color(0xFF292B2D),
   diffAddLine: Color(0xFFE2EED8),
   diffAddGutter: Color(0xFFC9DDB7),
   diffAddGlyph: Color(0xFF4A7A3F),
   diffDelLine: Color(0xFFF4DEE1),
   diffDelGutter: Color(0xFFE8BFC5),
   diffDelGlyph: Color(0xFF8B3A43),
-  diffMetaLine: Color(0xFF4C566A),
+  diffMetaLine: Color(0xFF60666D),
   diffHunkLine: Color(0xFF5E81AC),
   diffGutterText: Color(0xFF7B8594),
-  userBubble: Color(0xFFD7E1EE),
-  userBubbleOn: Color(0xFF2E3440),
-  assistantBubble: Color(0xFFF8F9FB),
-  assistantBubbleBorder: Color(0xFFD8DEE9),
+  userBubble: Color(0xFFE7EBEF),
+  userBubbleOn: Color(0xFF292B2D),
+  assistantBubble: Color(0xFFF0F1EF),
+  assistantBubbleBorder: Color(0xFFDDE0E2),
   composerBackground: Color(0xFFFFFFFF),
 );
 

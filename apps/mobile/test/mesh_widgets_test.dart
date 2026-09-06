@@ -1,10 +1,39 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/cupertino.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sidemesh_mobile/src/theme/app_palettes.dart';
 import 'package:sidemesh_mobile/src/theme/app_theme.dart';
 import 'package:sidemesh_mobile/src/widgets/mesh_widgets.dart';
+import 'package:sidemesh_mobile/src/theme/app_status_styles.dart';
 
 void main() {
+  testWidgets('page loading shows the native spinner on the first frame', (
+    tester,
+  ) async {
+    for (final mode in [ThemeMode.light, ThemeMode.dark]) {
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: buildLightTheme(
+            ThemeVariant.codexAmber.light,
+            platform: TargetPlatform.iOS,
+          ),
+          darkTheme: buildDarkTheme(
+            ThemeVariant.codexAmber.dark,
+            platform: TargetPlatform.iOS,
+          ),
+          themeMode: mode,
+          home: const Scaffold(body: MeshLoader(label: 'Loading conversation')),
+        ),
+      );
+      expect(find.text('Loading conversation'), findsOneWidget);
+      expect(find.byType(CupertinoActivityIndicator), findsOneWidget);
+      expect(
+        tester.getSize(find.byType(CupertinoActivityIndicator)),
+        const Size(20, 20),
+      );
+    }
+  });
+
   testWidgets('delayed activity indicator ignores short refreshes', (
     tester,
   ) async {

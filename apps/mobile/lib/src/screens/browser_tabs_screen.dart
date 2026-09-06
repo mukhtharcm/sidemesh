@@ -12,6 +12,7 @@ import '../widgets/app_primitives.dart';
 import '../widgets/app_snackbar.dart';
 import '../widgets/mesh_widgets.dart';
 import 'browser_preview_screen.dart';
+import '../theme/app_status_styles.dart';
 
 class BrowserTabsScreen extends StatelessWidget {
   const BrowserTabsScreen({
@@ -261,7 +262,7 @@ class _BrowserTabsPaneState extends State<BrowserTabsPane> {
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
                   if (_loading)
-                    const _BrowserTabsLoadingState()
+                    const MeshLoader(label: 'Loading tabs')
                   else if (_error != null)
                     MeshEmptyState(
                       icon: Icons.warning_amber_rounded,
@@ -368,28 +369,14 @@ class _BrowserUrlCard extends StatelessWidget {
                 ? const SizedBox(
                     width: 14,
                     height: 14,
-                    child: CircularProgressIndicator(strokeWidth: 2),
+                    child: CircularProgressIndicator(
+                      strokeWidth: AppStrokes.indicator,
+                    ),
                   )
                 : const Icon(Icons.open_in_browser_rounded),
             label: const Text('Open'),
           ),
         ),
-      ],
-    );
-  }
-}
-
-class _BrowserTabsLoadingState extends StatelessWidget {
-  const _BrowserTabsLoadingState();
-
-  @override
-  Widget build(BuildContext context) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: const [
-        MeshListRowSkeleton(framed: false),
-        Divider(height: 1, indent: AppSizes.iconWell + AppSpacing.sm),
-        MeshListRowSkeleton(framed: false),
       ],
     );
   }
@@ -420,7 +407,10 @@ class _BrowserTabRow extends StatelessWidget {
       title: Text(_tabTitle(tab), maxLines: 1, overflow: TextOverflow.ellipsis),
       subtitle: Text(
         tab.url,
-        style: monoStyle(color: colors.textSecondary, fontSize: 12),
+        style: monoStyle(
+          color: colors.textSecondary,
+          fontSize: AppFontSizes.caption,
+        ),
         maxLines: 1,
         overflow: TextOverflow.ellipsis,
       ),

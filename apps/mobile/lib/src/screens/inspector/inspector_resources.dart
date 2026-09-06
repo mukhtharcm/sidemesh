@@ -13,10 +13,12 @@ import '../../theme/app_colors.dart';
 import '../../theme/app_theme.dart';
 import '../../theme/app_tokens.dart';
 import '../../widgets/app_primitives.dart';
+import '../../widgets/app_menu.dart';
 import '../../widgets/app_snackbar.dart';
 import '../../widgets/mesh_widgets.dart';
 import '../image_viewer_screen.dart';
 import 'inspector_controller.dart';
+import '../../theme/app_status_styles.dart';
 
 InspectorSurface buildInspectorResourcesSurface({
   required String ownerKey,
@@ -50,7 +52,6 @@ class SessionResourcesPanel extends StatefulWidget {
     this.onOpenFile,
     this.onOpenHostUrl,
     this.onClose,
-    this.showDragHandle = false,
   });
 
   final HostProfile host;
@@ -59,7 +60,6 @@ class SessionResourcesPanel extends StatefulWidget {
   final void Function(String path)? onOpenFile;
   final void Function(String url)? onOpenHostUrl;
   final VoidCallback? onClose;
-  final bool showDragHandle;
 
   @override
   State<SessionResourcesPanel> createState() => _SessionResourcesPanelState();
@@ -72,7 +72,6 @@ class _SessionResourcesPanelState extends State<SessionResourcesPanel> {
   bool _loading = true;
   Object? _error;
   _ResourceFilter _filter = _ResourceFilter.all;
-  DateTime? _updatedAt;
   int _loadGeneration = 0;
 
   @override
@@ -112,7 +111,6 @@ class _SessionResourcesPanelState extends State<SessionResourcesPanel> {
       if (!mounted || gen != _loadGeneration) return;
       setState(() {
         _resources = payload.resources;
-        _updatedAt = payload.updatedAt;
         _loading = false;
       });
     } catch (error) {
@@ -202,7 +200,7 @@ class _SessionResourcesPanelState extends State<SessionResourcesPanel> {
     if ((path ?? '').isNotEmpty) {
       return ImageViewerSource.loader(
         heroTag: 'session-resource:${widget.host.id}:${resource.id}',
-        title: resource.title,
+        title: _resourceTitle(resource),
         subtitle: _gallerySubtitle(resource),
         imageProviderLoader: () async {
           try {
@@ -220,10 +218,7 @@ class _SessionResourcesPanelState extends State<SessionResourcesPanel> {
               source: path!,
             );
             return MemoryImage(
-              await widget.api.fetchSessionArtifact(
-                widget.host,
-                artifact.id,
-              ),
+              await widget.api.fetchSessionArtifact(widget.host, artifact.id),
             );
           }
         },
@@ -234,11 +229,10 @@ class _SessionResourcesPanelState extends State<SessionResourcesPanel> {
     if (isHostLoopbackUrl(url)) {
       return ImageViewerSource.loader(
         heroTag: 'session-resource:${widget.host.id}:${resource.id}',
-        title: resource.title,
+        title: _resourceTitle(resource),
         subtitle: _gallerySubtitle(resource),
-        imageProviderLoader: () async => MemoryImage(
-          await widget.api.fetchHostResource(widget.host, url),
-        ),
+        imageProviderLoader: () async =>
+            MemoryImage(await widget.api.fetchHostResource(widget.host, url)),
       );
     }
     final provider = _imageProviderForUrl(url);
@@ -246,14 +240,14 @@ class _SessionResourcesPanelState extends State<SessionResourcesPanel> {
       return ImageViewerSource(
         imageProvider: provider,
         heroTag: 'session-resource:${widget.host.id}:${resource.id}',
-        title: resource.title,
+        title: _resourceTitle(resource),
         subtitle: _gallerySubtitle(resource),
       );
     }
 
     return ImageViewerSource.loader(
       heroTag: 'session-resource:${widget.host.id}:${resource.id}',
-      title: resource.title,
+      title: _resourceTitle(resource),
       subtitle: _gallerySubtitle(resource),
       imageProviderLoader: () async {
         throw StateError('Unsupported image source');
@@ -263,66 +257,28 @@ class _SessionResourcesPanelState extends State<SessionResourcesPanel> {
 
   Widget _buildToolbar(BuildContext context) {
     final colors = context.colors;
-    final updatedAt = _updatedAt;
+    const labels = ['All', 'Media', 'Links', 'Files'];
     return Padding(
-      padding: const EdgeInsets.fromLTRB(14, 12, 14, 10),
+      padding: const EdgeInsets.all(AppSpacing.compact),
       child: Row(
         children: [
           Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  '${_resources.length} items',
-                  style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                    fontWeight: AppWeights.emphasis,
-                  ),
-                ),
-                const SizedBox(height: 2),
-                Text(
-                  updatedAt == null
-                      ? widget.session.title
-                      : 'Updated ${_formatTimestamp(updatedAt)}',
-                  style: Theme.of(
-                    context,
-                  ).textTheme.bodySmall?.copyWith(color: colors.textSecondary),
-                ),
-              ],
+            child: AppSelect<_ResourceFilter>(
+              value: _filter,
+              values: _ResourceFilter.values,
+              expanded: true,
+              label: (filter) =>
+                  '${labels[filter.index]} (${_countFor(filter)})',
+              onChanged: (filter) => setState(() => _filter = filter),
             ),
           ),
-          MeshIconButton(
-            icon: Icons.refresh_rounded,
-            tooltip: 'Refresh',
+          IconButton(
+            icon: const Icon(Icons.refresh_rounded),
+            tooltip: 'Refresh resources',
             color: colors.textSecondary,
-            onTap: _load,
+            onPressed: _loading ? null : _load,
           ),
         ],
-      ),
-    );
-  }
-
-  Widget _buildFilters(BuildContext context) {
-    final labels = <(_ResourceFilter, String)>[
-      (_ResourceFilter.all, 'All'),
-      (_ResourceFilter.media, 'Media'),
-      (_ResourceFilter.links, 'Links'),
-      (_ResourceFilter.files, 'Files'),
-    ];
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(14, 0, 14, 10),
-      child: Wrap(
-        spacing: 8,
-        runSpacing: 8,
-        children: labels
-            .map((entry) {
-              final selected = entry.$1 == _filter;
-              return ChoiceChip(
-                label: Text('${entry.$2} ${_countFor(entry.$1)}'),
-                selected: selected,
-                onSelected: (_) => setState(() => _filter = entry.$1),
-              );
-            })
-            .toList(growable: false),
       ),
     );
   }
@@ -330,28 +286,25 @@ class _SessionResourcesPanelState extends State<SessionResourcesPanel> {
   Widget _buildBody(BuildContext context) {
     final resources = _filteredResources();
     if (_loading && _resources.isEmpty) {
-      return _ResourcesLoadingState(filter: _filter);
+      return MeshLoader(label: 'Loading resources');
     }
     if (_error != null && _resources.isEmpty) {
-      return _ResourcesEmptyState(
+      return MeshEmptyState.compact(
         icon: Icons.error_outline_rounded,
         title: 'Could not load items',
-        detail: _error.toString(),
-        actionLabel: 'Retry',
-        onAction: _load,
+        body: _error.toString(),
+        action: TextButton(onPressed: _load, child: const Text('Retry')),
       );
     }
     if (resources.isEmpty) {
-      final detail = switch (_filter) {
-        _ResourceFilter.all => 'Nothing from this session has been saved yet.',
-        _ResourceFilter.media => 'No images yet.',
-        _ResourceFilter.links => 'No links yet.',
-        _ResourceFilter.files => 'No files yet.',
-      };
-      return _ResourcesEmptyState(
+      return MeshEmptyState.compact(
         icon: Icons.perm_media_rounded,
-        title: 'Nothing saved yet',
-        detail: detail,
+        title: switch (_filter) {
+          _ResourceFilter.all => 'No resources yet',
+          _ResourceFilter.media => 'No images yet',
+          _ResourceFilter.links => 'No links yet',
+          _ResourceFilter.files => 'No files yet',
+        },
       );
     }
 
@@ -359,7 +312,12 @@ class _SessionResourcesPanelState extends State<SessionResourcesPanel> {
       return RefreshIndicator(
         onRefresh: _load,
         child: GridView.builder(
-          padding: const EdgeInsets.fromLTRB(14, 4, 14, 18),
+          padding: const EdgeInsets.fromLTRB(
+            AppSpacing.md,
+            AppSpacing.xs,
+            AppSpacing.md,
+            AppSpacing.lg,
+          ),
           gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
             crossAxisCount: 2,
             crossAxisSpacing: 10,
@@ -382,7 +340,12 @@ class _SessionResourcesPanelState extends State<SessionResourcesPanel> {
       return RefreshIndicator(
         onRefresh: _load,
         child: ListView.separated(
-          padding: const EdgeInsets.fromLTRB(14, 4, 14, 18),
+          padding: const EdgeInsets.fromLTRB(
+            AppSpacing.md,
+            AppSpacing.xs,
+            AppSpacing.md,
+            AppSpacing.lg,
+          ),
           itemCount: resources.length,
           separatorBuilder: (context, index) {
             if (resources[index].isImage || resources[index + 1].isImage) {
@@ -424,7 +387,12 @@ class _SessionResourcesPanelState extends State<SessionResourcesPanel> {
     return RefreshIndicator(
       onRefresh: _load,
       child: ListView.separated(
-        padding: const EdgeInsets.fromLTRB(14, 4, 14, 18),
+        padding: const EdgeInsets.fromLTRB(
+          AppSpacing.md,
+          AppSpacing.xs,
+          AppSpacing.md,
+          AppSpacing.lg,
+        ),
         itemCount: resources.length,
         separatorBuilder: (context, _) => Divider(
           height: 1,
@@ -444,36 +412,12 @@ class _SessionResourcesPanelState extends State<SessionResourcesPanel> {
 
   @override
   Widget build(BuildContext context) {
-    final colors = context.colors;
-    return Material(
-      color: colors.canvas,
-      shape: widget.showDragHandle
-          ? const RoundedRectangleBorder(
-              borderRadius: BorderRadius.vertical(top: Radius.circular(18)),
-            )
-          : null,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          if (widget.showDragHandle)
-            Padding(
-              padding: const EdgeInsets.only(top: 8),
-              child: Center(
-                child: Container(
-                  width: 44,
-                  height: 4,
-                  decoration: BoxDecoration(
-                    color: colors.border,
-                    borderRadius: BorderRadius.circular(2),
-                  ),
-                ),
-              ),
-            ),
-          _buildToolbar(context),
-          _buildFilters(context),
-          Expanded(child: _buildBody(context)),
-        ],
-      ),
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        _buildToolbar(context),
+        Expanded(child: _buildBody(context)),
+      ],
     );
   }
 }
@@ -538,7 +482,10 @@ class _ResourceListCard extends StatelessWidget {
               location,
               maxLines: 2,
               overflow: TextOverflow.ellipsis,
-              style: monoStyle(color: colors.textTertiary, fontSize: 10.5),
+              style: monoStyle(
+                color: colors.textTertiary,
+                fontSize: AppFontSizes.metadata,
+              ),
             ),
       trailing: onTap == null
           ? null
@@ -547,92 +494,6 @@ class _ResourceListCard extends StatelessWidget {
               size: AppSizes.icon,
               color: colors.textTertiary,
             ),
-    );
-  }
-}
-
-class _ResourcesLoadingState extends StatelessWidget {
-  const _ResourcesLoadingState({required this.filter});
-
-  final _ResourceFilter filter;
-
-  @override
-  Widget build(BuildContext context) {
-    if (filter == _ResourceFilter.media) {
-      return GridView.count(
-        physics: const AlwaysScrollableScrollPhysics(),
-        padding: const EdgeInsets.fromLTRB(14, 4, 14, 18),
-        crossAxisCount: 2,
-        crossAxisSpacing: 10,
-        mainAxisSpacing: 10,
-        childAspectRatio: 0.92,
-        children: const [
-          _ResourceMediaTileSkeleton(),
-          _ResourceMediaTileSkeleton(),
-          _ResourceMediaTileSkeleton(),
-          _ResourceMediaTileSkeleton(),
-        ],
-      );
-    }
-
-    return ListView(
-      physics: const AlwaysScrollableScrollPhysics(),
-      padding: const EdgeInsets.fromLTRB(14, 4, 14, 18),
-      children: [
-        if (filter == _ResourceFilter.all) ...[
-          const SizedBox(height: 250, child: _ResourceMediaTileSkeleton()),
-          const SizedBox(height: 10),
-        ],
-        const MeshListRowSkeleton(
-          titleWidthFactor: 0.52,
-          subtitleWidthFactor: 0.76,
-          showMeta: true,
-        ),
-        const SizedBox(height: 10),
-        MeshListRowSkeleton(
-          titleWidthFactor: 0.44,
-          subtitleWidthFactor: 0.68,
-          showMeta: filter == _ResourceFilter.files,
-          showTrailing: filter != _ResourceFilter.links,
-        ),
-        const SizedBox(height: 10),
-        const MeshListRowSkeleton(
-          titleWidthFactor: 0.6,
-          subtitleWidthFactor: 0.72,
-          showMeta: true,
-        ),
-      ],
-    );
-  }
-}
-
-class _ResourceMediaTileSkeleton extends StatelessWidget {
-  const _ResourceMediaTileSkeleton();
-
-  @override
-  Widget build(BuildContext context) {
-    return MeshCard(
-      padding: const EdgeInsets.all(12),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: const [
-          Expanded(
-            child: MeshSkeleton(
-              width: double.infinity,
-              height: double.infinity,
-              radius: 16,
-            ),
-          ),
-          SizedBox(height: 12),
-          MeshSkeleton(height: 12),
-          SizedBox(height: 8),
-          FractionallySizedBox(
-            widthFactor: 0.66,
-            alignment: Alignment.centerLeft,
-            child: MeshSkeleton(height: 10),
-          ),
-        ],
-      ),
     );
   }
 }
@@ -675,7 +536,12 @@ class _ResourceMediaCard extends StatelessWidget {
                 ),
               ),
               Container(
-                padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
+                padding: const EdgeInsets.fromLTRB(
+                  AppSpacing.md,
+                  AppSpacing.compact,
+                  AppSpacing.md,
+                  AppSpacing.compact,
+                ),
                 decoration: BoxDecoration(
                   color: colors.surface,
                   border: Border(top: BorderSide(color: colors.border)),
@@ -684,21 +550,11 @@ class _ResourceMediaCard extends StatelessWidget {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      resource.title,
+                      _resourceTitle(resource),
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: Theme.of(context).textTheme.labelLarge?.copyWith(
                         fontWeight: AppWeights.emphasis,
-                      ),
-                    ),
-                    const SizedBox(height: 4),
-                    Text(
-                      _sourceLabel(resource),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: monoStyle(
-                        color: colors.textTertiary,
-                        fontSize: 10.5,
                       ),
                     ),
                   ],
@@ -735,11 +591,7 @@ class _ResourceImagePreview extends StatelessWidget {
         path: resource.path!,
       );
     }
-    return _RemoteResourceImage(
-      host: host,
-      api: api,
-      url: resource.url ?? '',
-    );
+    return _RemoteResourceImage(host: host, api: api, url: resource.url ?? '');
   }
 }
 
@@ -761,6 +613,7 @@ class _RemoteResourceImage extends StatefulWidget {
 class _RemoteResourceImageState extends State<_RemoteResourceImage> {
   Uint8List? _dataUrlBytes;
   Uint8List? _hostUrlBytes;
+  Object? _hostUrlError;
   int _loadGeneration = 0;
 
   @override
@@ -785,17 +638,27 @@ class _RemoteResourceImageState extends State<_RemoteResourceImage> {
   Future<void> _loadHostUrlIfNeeded() async {
     final gen = ++_loadGeneration;
     if (!isHostLoopbackUrl(widget.url)) {
-      if (mounted) setState(() => _hostUrlBytes = null);
+      if (mounted) {
+        setState(() {
+          _hostUrlBytes = null;
+          _hostUrlError = null;
+        });
+      }
       return;
     }
-    if (mounted) setState(() => _hostUrlBytes = null);
+    if (mounted) {
+      setState(() {
+        _hostUrlBytes = null;
+        _hostUrlError = null;
+      });
+    }
     try {
       final bytes = await widget.api.fetchHostResource(widget.host, widget.url);
       if (!mounted || gen != _loadGeneration) return;
       setState(() => _hostUrlBytes = bytes);
-    } catch (_) {
+    } catch (error) {
       if (!mounted || gen != _loadGeneration) return;
-      setState(() => _hostUrlBytes = null);
+      setState(() => _hostUrlError = error);
     }
   }
 
@@ -826,12 +689,21 @@ class _RemoteResourceImageState extends State<_RemoteResourceImage> {
 
   @override
   Widget build(BuildContext context) {
-    final colors = context.colors;
     final provider = _provider();
     if (provider == null) {
-      return _MediaFallback(title: 'Image', detail: widget.url, colors: colors);
+      if (isHostLoopbackUrl(widget.url) && _hostUrlError == null) {
+        return const MeshLoader(label: 'Loading image');
+      }
+      return MeshEmptyState.compact(
+        icon: Icons.broken_image_rounded,
+        title: 'Could not load image',
+        action: TextButton(
+          onPressed: _loadHostUrlIfNeeded,
+          child: const Text('Retry'),
+        ),
+      );
     }
-    return _MediaPreview(provider: provider, fallbackLabel: widget.url);
+    return _MediaPreview(provider: provider);
   }
 }
 
@@ -911,144 +783,47 @@ class _LocalResourceImageState extends State<_LocalResourceImage> {
 
   @override
   Widget build(BuildContext context) {
-    final colors = context.colors;
     final imageProvider = _imageProvider;
     if (imageProvider == null) {
-      return _MediaFallback(
-        title: _basename(widget.path),
-        detail: _error == null ? 'Loading image...' : widget.path,
-        colors: colors,
+      if (_error == null) return const MeshLoader(label: 'Loading image');
+      return MeshEmptyState.compact(
+        icon: Icons.broken_image_rounded,
+        title: 'Could not load image',
+        body: friendlyError(_error!),
+        action: TextButton(onPressed: _load, child: const Text('Retry')),
       );
     }
-    return _MediaPreview(provider: imageProvider, fallbackLabel: widget.path);
+    return _MediaPreview(provider: imageProvider);
   }
 }
 
-class _MediaPreview extends StatelessWidget {
-  const _MediaPreview({required this.provider, required this.fallbackLabel});
-
+class _MediaPreview extends StatefulWidget {
+  const _MediaPreview({required this.provider});
   final ImageProvider<Object> provider;
-  final String fallbackLabel;
-
   @override
-  Widget build(BuildContext context) {
-    return Image(
-      image: provider,
-      fit: BoxFit.cover,
-      gaplessPlayback: true,
-      errorBuilder: (context, error, stackTrace) => _MediaFallback(
-        title: 'Image',
-        detail: fallbackLabel,
-        colors: context.colors,
-      ),
-    );
-  }
+  State<_MediaPreview> createState() => _MediaPreviewState();
 }
 
-class _MediaFallback extends StatelessWidget {
-  const _MediaFallback({
-    required this.title,
-    required this.detail,
-    required this.colors,
-  });
-
-  final String title;
-  final String detail;
-  final AppColors colors;
+class _MediaPreviewState extends State<_MediaPreview> {
+  int _retry = 0;
+  Future<void> _reload() async {
+    await widget.provider.evict();
+    if (mounted) setState(() => _retry++);
+  }
 
   @override
-  Widget build(BuildContext context) {
-    return Container(
-      color: colors.surfaceMuted,
-      padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
-      child: Row(
-        children: [
-          Icon(Icons.image_rounded, color: colors.accent, size: 18),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  title,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: Theme.of(context).textTheme.labelLarge?.copyWith(
-                    fontWeight: AppWeights.emphasis,
-                  ),
-                ),
-                const SizedBox(height: 2),
-                Text(
-                  detail,
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                  style: monoStyle(color: colors.textTertiary, fontSize: 10.5),
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _ResourcesEmptyState extends StatelessWidget {
-  const _ResourcesEmptyState({
-    required this.icon,
-    required this.title,
-    required this.detail,
-    this.actionLabel,
-    this.onAction,
-  });
-
-  final IconData icon;
-  final String title;
-  final String detail;
-  final String? actionLabel;
-  final VoidCallback? onAction;
-
-  @override
-  Widget build(BuildContext context) {
-    final colors = context.colors;
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 28),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(icon, size: 34, color: colors.textTertiary),
-            const SizedBox(height: 14),
-            Text(
-              title,
-              textAlign: TextAlign.center,
-              style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                fontWeight: AppWeights.emphasis,
-              ),
-            ),
-            const SizedBox(height: 8),
-            Text(
-              detail,
-              textAlign: TextAlign.center,
-              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                color: colors.textSecondary,
-                height: 1.45,
-              ),
-            ),
-            if (actionLabel != null && onAction != null) ...[
-              const SizedBox(height: 14),
-              TextButton.icon(
-                onPressed: onAction,
-                icon: const Icon(Icons.refresh_rounded),
-                label: Text(actionLabel!),
-              ),
-            ],
-          ],
-        ),
-      ),
-    );
-  }
+  Widget build(BuildContext context) => Image(
+    key: ValueKey(_retry),
+    image: widget.provider,
+    fit: BoxFit.cover,
+    frameBuilder: (context, child, frame, _) =>
+        frame == null ? const MeshLoader(label: 'Loading image') : child,
+    errorBuilder: (context, error, stackTrace) => MeshEmptyState.compact(
+      icon: Icons.broken_image_rounded,
+      title: 'Could not load image',
+      action: TextButton(onPressed: _reload, child: const Text('Retry')),
+    ),
+  );
 }
 
 IconData _resourceIcon(
@@ -1078,6 +853,15 @@ String _sourceLabel(SessionResource resource) {
     _ => resource.source.replaceAll('_', ' '),
   };
   return _titleCaseWords(label);
+}
+
+String _resourceTitle(SessionResource resource) {
+  final title = resource.title.trim();
+  if (title.isNotEmpty && title != 'Tool output image' && title != 'Image') {
+    return title;
+  }
+  if (resource.hasPath) return _basename(resource.path!);
+  return 'Image · ${_formatTimestamp(resource.createdAt)}';
 }
 
 String _gallerySubtitle(SessionResource resource) {

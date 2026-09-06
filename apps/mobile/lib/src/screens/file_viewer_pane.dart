@@ -16,6 +16,7 @@ import '../widgets/app_dialogs.dart';
 import '../widgets/app_snackbar.dart';
 import '../widgets/markdown_content.dart';
 import '../widgets/mesh_widgets.dart';
+import '../widgets/app_menu.dart';
 import '../widgets/syntax_code_block.dart';
 import 'archive_preview_pane.dart';
 import 'audio_viewer_pane.dart';
@@ -202,10 +203,13 @@ class FileViewerPaneState extends State<FileViewerPane> {
                   dialogContext,
                 ).textTheme.labelLarge?.copyWith(fontWeight: AppWeights.title),
               ),
-              const SizedBox(height: 4),
+              const SizedBox(height: AppSpacing.xs),
               SelectableText(
                 widget.path,
-                style: monoStyle(color: colors.textSecondary, fontSize: 12),
+                style: monoStyle(
+                  color: colors.textSecondary,
+                  fontSize: AppFontSizes.caption,
+                ),
               ),
             ],
           );
@@ -402,7 +406,9 @@ class FileViewerPaneState extends State<FileViewerPane> {
     final canPreviewArchive = looksLikeZipArchiveFile(file.path, file.mimeHint);
     if (autoEnterPreview) {
       _clearPreviewModes();
-      if (canPreviewImage) {
+      if (!file.binary && isMarkdownFile) {
+        _markdownPreview = true;
+      } else if (canPreviewImage) {
         _imagePreview = true;
       } else if (canPreviewAudio) {
         _audioPreview = true;
@@ -483,15 +489,16 @@ class FileViewerPaneState extends State<FileViewerPane> {
   @override
   Widget build(BuildContext context) {
     if (_loading && _file == null) {
-      return _FileViewerLoadingState(dense: widget.dense);
+      return MeshLoader(label: 'Loading file');
     }
     if (_error != null && _file == null) {
       return Padding(
-        padding: const EdgeInsets.all(24),
+        padding: const EdgeInsets.all(AppSpacing.xl),
         child: MeshEmptyState(
           icon: Icons.error_outline_rounded,
           title: 'Could not open file',
           body: friendlyError(_error!),
+          action: TextButton(onPressed: _load, child: const Text('Retry')),
         ),
       );
     }
@@ -502,8 +509,18 @@ class FileViewerPaneState extends State<FileViewerPane> {
   Widget _buildBody(BuildContext context, FsFile file) {
     final colors = context.colors;
     final outerPadding = widget.dense
-        ? const EdgeInsets.fromLTRB(10, 8, 10, 12)
-        : const EdgeInsets.fromLTRB(12, 10, 12, 24);
+        ? const EdgeInsets.fromLTRB(
+            AppSpacing.compact,
+            AppSpacing.sm,
+            AppSpacing.compact,
+            AppSpacing.md,
+          )
+        : const EdgeInsets.fromLTRB(
+            AppSpacing.md,
+            AppSpacing.compact,
+            AppSpacing.md,
+            AppSpacing.xl,
+          );
 
     if (supportsImagePreview && _imagePreview) {
       final mimeLabel = _displayMimeLabel(
@@ -611,7 +628,7 @@ class FileViewerPaneState extends State<FileViewerPane> {
     }
     if (file.binary) {
       return Padding(
-        padding: const EdgeInsets.all(24),
+        padding: const EdgeInsets.all(AppSpacing.xl),
         child: MeshEmptyState(
           icon: isImageFile
               ? Icons.image_rounded
@@ -659,31 +676,38 @@ class FileViewerPaneState extends State<FileViewerPane> {
               MeshCard(
                 tone: MeshCardTone.muted,
                 padding: const EdgeInsets.symmetric(
-                  horizontal: 12,
-                  vertical: 10,
+                  horizontal: AppSpacing.md,
+                  vertical: AppSpacing.compact,
                 ),
                 child: Text(
                   'This file changed on the host. Reload it before saving to avoid overwriting newer work.',
                   style: Theme.of(context).textTheme.bodySmall,
                 ),
               ),
-              const SizedBox(height: 8),
+              const SizedBox(height: AppSpacing.sm),
             ],
             Expanded(
               child: Container(
                 decoration: BoxDecoration(
                   color: colors.surface,
-                  borderRadius: BorderRadius.circular(12),
+                  borderRadius: BorderRadius.circular(AppRadii.panel),
                   border: Border.all(color: colors.border),
                 ),
-                padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
+                padding: const EdgeInsets.fromLTRB(
+                  AppSpacing.md,
+                  AppSpacing.compact,
+                  AppSpacing.md,
+                  AppSpacing.compact,
+                ),
                 child: TextField(
                   controller: _editController,
                   maxLines: null,
                   expands: true,
-                  style: monoStyle(color: colors.textPrimary, fontSize: 13),
-                  decoration: const InputDecoration(
-                    border: InputBorder.none,
+                  style: monoStyle(
+                    color: colors.textPrimary,
+                    fontSize: AppFontSizes.compact,
+                  ),
+                  decoration: AppInputDecorations.borderless.copyWith(
                     isCollapsed: true,
                   ),
                 ),
@@ -700,21 +724,21 @@ class FileViewerPaneState extends State<FileViewerPane> {
         children: [
           if (file.truncated)
             Padding(
-              padding: const EdgeInsets.only(bottom: 10),
+              padding: const EdgeInsets.only(bottom: AppSpacing.compact),
               child: MeshCard(
                 tone: MeshCardTone.surface,
                 padding: const EdgeInsets.symmetric(
-                  horizontal: 14,
-                  vertical: 10,
+                  horizontal: AppSpacing.md,
+                  vertical: AppSpacing.compact,
                 ),
                 child: Row(
                   children: [
                     Icon(
                       Icons.warning_amber_rounded,
-                      size: 16,
+                      size: AppSizes.compactIcon,
                       color: colors.warning,
                     ),
-                    const SizedBox(width: 8),
+                    const SizedBox(width: AppSpacing.sm),
                     Expanded(
                       child: Text(
                         'Showing the first 2 MiB of this ${formatBytes(file.size)} file.',
@@ -729,10 +753,15 @@ class FileViewerPaneState extends State<FileViewerPane> {
             Container(
               decoration: BoxDecoration(
                 color: colors.surface,
-                borderRadius: BorderRadius.circular(12),
+                borderRadius: BorderRadius.circular(AppRadii.panel),
                 border: Border.all(color: colors.border),
               ),
-              padding: const EdgeInsets.fromLTRB(16, 12, 16, 14),
+              padding: const EdgeInsets.fromLTRB(
+                AppSpacing.lg,
+                AppSpacing.md,
+                AppSpacing.lg,
+                AppSpacing.md,
+              ),
               child: MarkdownContent(
                 text: file.contents,
                 textColor: colors.textPrimary,
@@ -764,7 +793,12 @@ class FileViewerPaneState extends State<FileViewerPane> {
                 text: file.contents,
                 language: languageForPath(file.path),
                 showLanguageBadge: false,
-                padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+                padding: const EdgeInsets.fromLTRB(
+                  AppSpacing.md,
+                  AppSpacing.md,
+                  AppSpacing.md,
+                  AppSpacing.md,
+                ),
               ),
             ),
         ],
@@ -816,23 +850,12 @@ class FileViewerActions extends StatelessWidget {
                 ? const SizedBox(
                     width: 16,
                     height: 16,
-                    child: CircularProgressIndicator(strokeWidth: 2),
+                    child: CircularProgressIndicator(
+                      strokeWidth: AppStrokes.indicator,
+                    ),
                   )
-                : const Icon(Icons.save_rounded, size: 20),
+                : const Icon(Icons.save_rounded, size: AppSizes.icon),
           ),
-        IconButton(
-          tooltip: editing ? 'Done editing' : 'Edit',
-          onPressed: canUseTextContents ? () => s?.toggleEdit() : null,
-          icon: Icon(
-            editing ? Icons.visibility_rounded : Icons.edit_rounded,
-            size: 18,
-          ),
-        ),
-        IconButton(
-          tooltip: 'Copy',
-          onPressed: canUseTextContents ? () => s?.copyContents() : null,
-          icon: const Icon(Icons.content_copy_rounded, size: 18),
-        ),
         if (canPreviewTable)
           IconButton(
             tooltip: tablePreview ? 'View file' : 'Preview table',
@@ -843,7 +866,7 @@ class FileViewerActions extends StatelessWidget {
               tablePreview
                   ? Icons.description_rounded
                   : Icons.table_chart_rounded,
-              size: 18,
+              size: AppSizes.inlineIcon,
             ),
           ),
         if (canPreviewStructured)
@@ -856,7 +879,7 @@ class FileViewerActions extends StatelessWidget {
               structuredPreview
                   ? Icons.description_rounded
                   : Icons.account_tree_rounded,
-              size: 18,
+              size: AppSizes.inlineIcon,
             ),
           ),
         if (canPreviewMarkdown)
@@ -867,7 +890,7 @@ class FileViewerActions extends StatelessWidget {
                 : null,
             icon: Icon(
               markdownPreview ? Icons.code_rounded : Icons.article_rounded,
-              size: 18,
+              size: AppSizes.inlineIcon,
             ),
           ),
         if (canPreviewImage)
@@ -878,7 +901,7 @@ class FileViewerActions extends StatelessWidget {
                 : null,
             icon: Icon(
               imagePreview ? Icons.description_rounded : Icons.image_rounded,
-              size: 18,
+              size: AppSizes.inlineIcon,
             ),
           ),
         if (canPreviewAudio)
@@ -891,7 +914,7 @@ class FileViewerActions extends StatelessWidget {
               audioPreview
                   ? Icons.description_rounded
                   : Icons.graphic_eq_rounded,
-              size: 18,
+              size: AppSizes.inlineIcon,
             ),
           ),
         if (canPreviewVideo)
@@ -904,7 +927,7 @@ class FileViewerActions extends StatelessWidget {
               videoPreview
                   ? Icons.description_rounded
                   : Icons.play_circle_outline_rounded,
-              size: 18,
+              size: AppSizes.inlineIcon,
             ),
           ),
         if (canPreviewPdf)
@@ -915,7 +938,7 @@ class FileViewerActions extends StatelessWidget {
               pdfPreview
                   ? Icons.description_rounded
                   : Icons.picture_as_pdf_rounded,
-              size: 18,
+              size: AppSizes.inlineIcon,
             ),
           ),
         if (canPreviewArchive)
@@ -928,89 +951,32 @@ class FileViewerActions extends StatelessWidget {
               archivePreview
                   ? Icons.description_rounded
                   : Icons.archive_outlined,
-              size: 18,
+              size: AppSizes.inlineIcon,
             ),
           ),
-        IconButton(
-          tooltip: 'Refresh',
-          onPressed: hasFile ? () => s?.refresh() : null,
-          icon: const Icon(Icons.refresh_rounded, size: 18),
+        AppMenuButton(
+          tooltip: 'File actions',
+          children: [
+            AppMenuItem(
+              label: editing ? 'Done editing' : 'Edit',
+              leadingIcon: Icons.edit_rounded,
+              onPressed: canUseTextContents && !saving
+                  ? () => s?.toggleEdit()
+                  : null,
+            ),
+            AppMenuItem(
+              label: 'Copy',
+              leadingIcon: Icons.content_copy_rounded,
+              onPressed: canUseTextContents ? () => s?.copyContents() : null,
+            ),
+            AppMenuItem(
+              label: 'Refresh',
+              leadingIcon: Icons.refresh_rounded,
+              onPressed: !editing && !saving ? () => s?.refresh() : null,
+            ),
+          ],
         ),
       ],
-    );
-  }
-}
-
-class _FileViewerLoadingState extends StatelessWidget {
-  const _FileViewerLoadingState({required this.dense});
-
-  final bool dense;
-
-  @override
-  Widget build(BuildContext context) {
-    final outerPadding = dense
-        ? const EdgeInsets.fromLTRB(10, 8, 10, 12)
-        : const EdgeInsets.fromLTRB(12, 10, 12, 24);
-    return SingleChildScrollView(
-      padding: outerPadding,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: const [
-          Row(
-            children: [
-              MeshSkeleton(width: 68, height: 20, radius: 999),
-              SizedBox(width: 8),
-              MeshSkeleton(width: 54, height: 20, radius: 999),
-            ],
-          ),
-          SizedBox(height: 12),
-          MeshCard(
-            tone: MeshCardTone.muted,
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                FractionallySizedBox(
-                  widthFactor: 0.24,
-                  alignment: Alignment.centerLeft,
-                  child: MeshSkeleton(height: 14, radius: AppRadii.badge),
-                ),
-                SizedBox(height: 14),
-                MeshSkeleton(height: 14, radius: AppRadii.badge),
-                SizedBox(height: 8),
-                FractionallySizedBox(
-                  widthFactor: 0.92,
-                  alignment: Alignment.centerLeft,
-                  child: MeshSkeleton(height: 14, radius: AppRadii.badge),
-                ),
-                SizedBox(height: 8),
-                FractionallySizedBox(
-                  widthFactor: 0.78,
-                  alignment: Alignment.centerLeft,
-                  child: MeshSkeleton(height: 14, radius: AppRadii.badge),
-                ),
-                SizedBox(height: 8),
-                FractionallySizedBox(
-                  widthFactor: 0.86,
-                  alignment: Alignment.centerLeft,
-                  child: MeshSkeleton(height: 14, radius: AppRadii.badge),
-                ),
-                SizedBox(height: 8),
-                FractionallySizedBox(
-                  widthFactor: 0.58,
-                  alignment: Alignment.centerLeft,
-                  child: MeshSkeleton(height: 14, radius: AppRadii.badge),
-                ),
-                SizedBox(height: 8),
-                FractionallySizedBox(
-                  widthFactor: 0.72,
-                  alignment: Alignment.centerLeft,
-                  child: MeshSkeleton(height: 14, radius: AppRadii.badge),
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
     );
   }
 }

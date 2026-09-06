@@ -46,8 +46,8 @@ class _TerminalKeyBarState extends State<TerminalKeyBar> {
       child: Container(
         height: widget.compact ? 46 : 52,
         padding: EdgeInsets.symmetric(
-          horizontal: widget.compact ? 6 : 8,
-          vertical: widget.compact ? 5 : 6,
+          horizontal: widget.compact ? AppSpacing.tight : AppSpacing.sm,
+          vertical: widget.compact ? AppSpacing.xs : AppSpacing.tight,
         ),
         decoration: BoxDecoration(
           color: colors.surfaceElevated,
@@ -160,7 +160,9 @@ class _KeyButton extends StatelessWidget {
       borderRadius: AppShapes.input,
       child: Container(
         constraints: const BoxConstraints(minWidth: 40),
-        padding: EdgeInsets.symmetric(horizontal: compact ? 10 : 14),
+        padding: EdgeInsets.symmetric(
+          horizontal: compact ? AppSpacing.compact : AppSpacing.md,
+        ),
         decoration: BoxDecoration(
           color: colors.surface,
           border: Border.all(
@@ -173,7 +175,7 @@ class _KeyButton extends StatelessWidget {
           label,
           style: Theme.of(context).textTheme.labelLarge?.copyWith(
             color: colors.textPrimary,
-            fontSize: compact ? 12 : 13,
+            fontSize: compact ? AppFontSizes.caption : AppFontSizes.compact,
             fontWeight: AppWeights.emphasis,
           ),
         ),
@@ -202,10 +204,10 @@ class _ModifierPill extends StatelessWidget {
       onTap: onTap,
       borderRadius: AppShapes.pill,
       child: AnimatedContainer(
-        duration: const Duration(milliseconds: 120),
+        duration: AppMotion.quick,
         padding: EdgeInsets.symmetric(
-          horizontal: compact ? 9 : 12,
-          vertical: compact ? 5 : 6,
+          horizontal: compact ? AppSpacing.sm : AppSpacing.md,
+          vertical: compact ? AppSpacing.xs : AppSpacing.tight,
         ),
         decoration: BoxDecoration(
           color: active ? colors.accentMuted : colors.surface,
@@ -218,7 +220,7 @@ class _ModifierPill extends StatelessWidget {
           style: Theme.of(context).textTheme.labelSmall?.copyWith(
             color: active ? colors.accent : colors.textSecondary,
             fontWeight: AppWeights.emphasis,
-            fontSize: compact ? 11 : 12,
+            fontSize: compact ? AppFontSizes.metadata : AppFontSizes.caption,
           ),
         ),
       ),
@@ -240,8 +242,8 @@ class _MoreButton extends StatelessWidget {
       borderRadius: AppShapes.pill,
       child: Container(
         padding: EdgeInsets.symmetric(
-          horizontal: compact ? 9 : 12,
-          vertical: compact ? 5 : 6,
+          horizontal: compact ? AppSpacing.sm : AppSpacing.md,
+          vertical: compact ? AppSpacing.xs : AppSpacing.tight,
         ),
         decoration: BoxDecoration(
           color: colors.surface,
@@ -254,16 +256,18 @@ class _MoreButton extends StatelessWidget {
           children: [
             Icon(
               Icons.more_horiz_rounded,
-              size: compact ? 16 : 18,
+              size: compact ? AppSizes.compactIcon : AppSizes.inlineIcon,
               color: colors.textSecondary,
             ),
-            const SizedBox(width: 4),
+            const SizedBox(width: AppSpacing.xs),
             Text(
               'More',
               style: Theme.of(context).textTheme.labelSmall?.copyWith(
                 color: colors.textSecondary,
                 fontWeight: AppWeights.emphasis,
-                fontSize: compact ? 11 : 12,
+                fontSize: compact
+                    ? AppFontSizes.metadata
+                    : AppFontSizes.caption,
               ),
             ),
           ],

@@ -10,6 +10,8 @@ import 'package:sidemesh_mobile/src/models.dart';
 import 'package:sidemesh_mobile/src/screens/browser_preview_screen.dart';
 import 'package:sidemesh_mobile/src/theme/app_palettes.dart';
 import 'package:sidemesh_mobile/src/theme/app_theme.dart';
+import 'package:sidemesh_mobile/src/theme/app_tokens.dart';
+import 'package:sidemesh_mobile/src/widgets/app_menu.dart';
 import 'package:stream_channel/stream_channel.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
 
@@ -21,6 +23,50 @@ void main() {
   tearDown(() {
     _clearClipboardMock();
   });
+
+  for (final mode in [ThemeMode.light, ThemeMode.dark]) {
+    for (final desktop in [true, false]) {
+      testWidgets('address field has one focus border: $desktop $mode', (
+        tester,
+      ) async {
+        final api = _BrowserPreviewFakeApi();
+        addTearDown(api.dispose);
+        await _pumpApp(
+          tester,
+          BrowserPreviewScreen(host: _host(), api: api, preview: _preview()),
+          size: desktop ? const Size(1180, 900) : const Size(390, 844),
+          themeMode: mode,
+        );
+        await _pumpFrames(tester);
+        final surface = find.byKey(const ValueKey('browserAddressSurface'));
+        final field = find.descendant(
+          of: surface,
+          matching: find.byType(TextField),
+        );
+        final before =
+            (tester.widget<Container>(surface).decoration as BoxDecoration)
+                .border;
+        await tester.tap(field);
+        await _pumpFrames(tester);
+        final input = tester.widget<InputDecorator>(
+          find.descendant(of: field, matching: find.byType(InputDecorator)),
+        );
+        expect(input.decoration.enabledBorder, InputBorder.none);
+        expect(input.decoration.focusedBorder, InputBorder.none);
+        expect(input.decoration.filled, isFalse);
+        expect(
+          (tester.widget<Container>(surface).decoration as BoxDecoration)
+              .border,
+          isNot(before),
+        );
+        expect(
+          tester.getSize(surface).height,
+          desktop ? AppSizes.compactControl : AppSizes.control,
+        );
+        expect(tester.takeException(), isNull);
+      });
+    }
+  }
 
   testWidgets(
     'browser preview keeps cleared console rows hidden across reconnect snapshots',
@@ -126,6 +172,51 @@ void main() {
     expect(api.sentMessages.last['height'] as int, greaterThan(700));
   });
 
+  for (final mode in [ThemeMode.light, ThemeMode.dark]) {
+    testWidgets('narrow browser pane uses compact controls in $mode', (
+      tester,
+    ) async {
+      final api = _BrowserPreviewFakeApi();
+      addTearDown(api.dispose);
+      await _pumpApp(
+        tester,
+        Scaffold(
+          body: Align(
+            alignment: Alignment.centerRight,
+            child: SizedBox(
+              width: 320,
+              height: 500,
+              child: BrowserPreviewPane(
+                host: _host(),
+                api: api,
+                preview: _preview(),
+                showHeader: false,
+                autoResizeViewport: true,
+              ),
+            ),
+          ),
+        ),
+        size: const Size(1180, 900),
+        themeMode: mode,
+      );
+      api.emit({'type': 'hello', 'preview': _previewJson()});
+      await _pumpFrames(tester);
+      expect(tester.takeException(), isNull);
+      expect(api.sentMessages.last['width'], 320);
+      await tester.tap(
+        find.byWidgetPredicate(
+          (widget) =>
+              widget is AppMenuButton && widget.tooltip == 'Browser options',
+        ),
+      );
+      await _pumpFrames(tester);
+      await tester.tap(find.text('Tools'));
+      await _pumpFrames(tester);
+      expect(find.text('Page log'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    });
+  }
+
   testWidgets('browser preview forwards trackpad pan gestures as scroll', (
     tester,
   ) async {
@@ -156,10 +247,7 @@ void main() {
       kind: PointerDeviceKind.trackpad,
     );
     await gesture.panZoomStart(previewRect.center);
-    await gesture.panZoomUpdate(
-      previewRect.center,
-      pan: const Offset(12, -18),
-    );
+    await gesture.panZoomUpdate(previewRect.center, pan: const Offset(12, -18));
     await tester.pump();
     await gesture.up();
     await _pumpFrames(tester);
@@ -210,7 +298,9 @@ void main() {
     expect(scrollMessages.single['deltaY'], 42.0);
   });
 
-  testWidgets('browser preview keeps canvas tap gestures working', (tester) async {
+  testWidgets('browser preview keeps canvas tap gestures working', (
+    tester,
+  ) async {
     final api = _BrowserPreviewFakeApi();
     addTearDown(api.dispose);
 
@@ -922,10 +1012,7 @@ void main() {
         find.byKey(const ValueKey('browserPreviewInspectorPickButton')),
       );
       await _pumpFrames(tester);
-      expect(
-        find.text('Tap the page to select something'),
-        findsOneWidget,
-      );
+      expect(find.text('Tap the page to select something'), findsOneWidget);
 
       final previewRect = tester.getRect(
         find.byKey(const ValueKey('browserPreviewCanvas')),
@@ -1427,6 +1514,7 @@ Future<void> _pumpApp(
   WidgetTester tester,
   Widget child, {
   required Size size,
+  ThemeMode themeMode = ThemeMode.light,
 }) async {
   tester.view
     ..devicePixelRatio = 1
@@ -1439,8 +1527,15 @@ Future<void> _pumpApp(
   final palette = ThemeVariant.codexAmber;
   await tester.pumpWidget(
     MaterialApp(
-      theme: buildLightTheme(palette.light),
-      darkTheme: buildDarkTheme(palette.dark),
+      theme: buildLightTheme(
+        palette.light,
+        platform: size.width >= 760 ? TargetPlatform.macOS : TargetPlatform.iOS,
+      ),
+      darkTheme: buildDarkTheme(
+        palette.dark,
+        platform: size.width >= 760 ? TargetPlatform.macOS : TargetPlatform.iOS,
+      ),
+      themeMode: themeMode,
       home: TooltipVisibility(visible: false, child: child),
     ),
   );

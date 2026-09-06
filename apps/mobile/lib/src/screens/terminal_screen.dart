@@ -13,8 +13,8 @@ import '../terminal_key_models.dart';
 import '../terminal_modifier_state.dart';
 import '../terminal_soft_input_transform.dart';
 import '../theme/app_colors.dart';
-import '../theme/color_contrast.dart';
 import '../theme/app_tokens.dart';
+import '../theme/app_code_theme.dart';
 import '../widgets/app_snackbar.dart';
 import '../widgets/terminal_keybar.dart';
 import '../host_reconnect_scheduler.dart';
@@ -83,7 +83,7 @@ class _TerminalScreenState extends State<TerminalScreen> {
                       width: 18,
                       height: 18,
                       child: CircularProgressIndicator(
-                        strokeWidth: 2,
+                        strokeWidth: AppStrokes.indicator,
                         color: colors.danger,
                       ),
                     )
@@ -550,12 +550,18 @@ class _TerminalPaneState extends State<TerminalPane> {
     if (viewHeight <= 0) return;
     _terminalController.setSelection(
       _terminal.buffer.createAnchor(0, _terminal.buffer.height - viewHeight),
-      _terminal.buffer.createAnchor(_terminal.viewWidth, _terminal.buffer.height - 1),
+      _terminal.buffer.createAnchor(
+        _terminal.viewWidth,
+        _terminal.buffer.height - 1,
+      ),
       mode: xterm.SelectionMode.line,
     );
   }
 
-  void _updateSelectionHandle(_TerminalSelectionHandleSide side, Offset globalPosition) {
+  void _updateSelectionHandle(
+    _TerminalSelectionHandleSide side,
+    Offset globalPosition,
+  ) {
     final selection = _terminalController.selection?.normalized;
     final viewState = _terminalViewKey.currentState;
     if (selection == null || viewState == null) return;
@@ -711,15 +717,17 @@ class _TerminalPaneState extends State<TerminalPane> {
             color: colors.codeBackground,
             child: Container(
               margin: EdgeInsets.fromLTRB(
-                widget.compact ? 4 : 6,
-                widget.compact ? 2 : 4,
-                widget.compact ? 4 : 6,
-                widget.compact ? 4 : 6,
+                widget.compact ? AppSpacing.xs : AppSpacing.tight,
+                widget.compact ? AppSpacing.xxs : AppSpacing.xs,
+                widget.compact ? AppSpacing.xs : AppSpacing.tight,
+                widget.compact ? AppSpacing.xs : AppSpacing.tight,
               ),
               decoration: BoxDecoration(
                 color: colors.codeBackground,
                 border: Border.all(color: colors.codeBorder),
-                borderRadius: BorderRadius.circular(widget.compact ? 10 : 12),
+                borderRadius: BorderRadius.circular(
+                  widget.compact ? AppRadii.action : AppRadii.control,
+                ),
               ),
               clipBehavior: Clip.antiAlias,
               child: Stack(
@@ -733,12 +741,16 @@ class _TerminalPaneState extends State<TerminalPane> {
                     autofocus: true,
                     keyboardType: TextInputType.text,
                     deleteDetection: true,
-                    theme: _terminalTheme(colors),
+                    theme: buildTerminalTheme(colors),
                     textStyle: xterm.TerminalStyle(
-                      fontSize: widget.compact ? 12 : 13,
+                      fontSize: widget.compact
+                          ? AppFontSizes.caption
+                          : AppFontSizes.compact,
                       height: 1.22,
                     ),
-                    padding: EdgeInsets.all(widget.compact ? 10 : 12),
+                    padding: EdgeInsets.all(
+                      widget.compact ? AppSpacing.compact : AppSpacing.md,
+                    ),
                   ),
                   Positioned.fill(
                     child: Listener(
@@ -831,44 +843,6 @@ HostTerminalInfo _stoppedTerminal(HostTerminalInfo terminal) {
   );
 }
 
-xterm.TerminalTheme _terminalTheme(AppColors colors) {
-  Color terminalColor(Color color) =>
-      readableTerminalColorOn(colors, preferred: color);
-
-  return xterm.TerminalTheme(
-    cursor: visibleUiColorOn(
-      colors,
-      background: colors.codeBackground,
-      preferred: colors.accent,
-    ),
-    selection: colors.accentMuted.withValues(alpha: 0.7),
-    foreground: colors.codeForeground,
-    background: colors.codeBackground,
-    black: colors.textTertiary,
-    red: terminalColor(colors.danger),
-    green: terminalColor(colors.success),
-    yellow: terminalColor(colors.warning),
-    blue: terminalColor(colors.accent),
-    magenta: terminalColor(colors.info),
-    cyan: terminalColor(colors.info),
-    white: colors.codeForeground,
-    brightBlack: terminalColor(colors.textSecondary),
-    brightRed: terminalColor(_brightTerminalColor(colors.danger)),
-    brightGreen: terminalColor(_brightTerminalColor(colors.success)),
-    brightYellow: terminalColor(_brightTerminalColor(colors.warning)),
-    brightBlue: terminalColor(_brightTerminalColor(colors.accent)),
-    brightMagenta: terminalColor(_brightTerminalColor(colors.info)),
-    brightCyan: terminalColor(_brightTerminalColor(colors.info)),
-    brightWhite: colors.textPrimary,
-    searchHitBackground: colors.warningMuted,
-    searchHitBackgroundCurrent: colors.accentMuted,
-    searchHitForeground: colors.textPrimary,
-  );
-}
-
-Color _brightTerminalColor(Color color) =>
-    Color.lerp(color, const Color(0xFFD8D8D8), 0.18)!;
-
 class _TerminalNoticeBanner extends StatelessWidget {
   const _TerminalNoticeBanner({
     required this.starting,
@@ -886,24 +860,29 @@ class _TerminalNoticeBanner extends StatelessWidget {
   Widget build(BuildContext context) {
     final state = _bannerState(context);
     return AnimatedSwitcher(
-      duration: const Duration(milliseconds: 140),
+      duration: AppMotion.quick,
       child: state == null
           ? const SizedBox.shrink()
           : Padding(
               key: ValueKey(state.label),
-              padding: const EdgeInsets.fromLTRB(10, 8, 10, 0),
+              padding: const EdgeInsets.fromLTRB(
+                AppSpacing.compact,
+                AppSpacing.sm,
+                AppSpacing.compact,
+                0,
+              ),
               child: Align(
                 alignment: Alignment.centerLeft,
                 child: DecoratedBox(
                   decoration: BoxDecoration(
                     color: state.background,
                     border: Border.all(color: state.border),
-                    borderRadius: BorderRadius.circular(999),
+                    borderRadius: BorderRadius.circular(AppRadii.capsule),
                   ),
                   child: Padding(
                     padding: const EdgeInsets.symmetric(
-                      horizontal: 10,
-                      vertical: 5,
+                      horizontal: AppSpacing.compact,
+                      vertical: AppSpacing.xs,
                     ),
                     child: Row(
                       mainAxisSize: MainAxisSize.min,
@@ -913,17 +892,17 @@ class _TerminalNoticeBanner extends StatelessWidget {
                             width: 10,
                             height: 10,
                             child: CircularProgressIndicator(
-                              strokeWidth: 1.8,
+                              strokeWidth: AppStrokes.indicator,
                               color: state.foreground,
                             ),
                           )
                         else
                           Icon(
                             state.icon,
-                            size: 12,
+                            size: AppSizes.tinyIcon,
                             color: state.foreground,
                           ),
-                        const SizedBox(width: 6),
+                        const SizedBox(width: AppSpacing.tight),
                         Text(
                           state.label,
                           style: Theme.of(context).textTheme.labelSmall
@@ -950,7 +929,7 @@ class _TerminalNoticeBanner extends StatelessWidget {
         icon: Icons.error_outline_rounded,
         label: error!,
         background: colors.dangerMuted,
-        border: colors.danger.withValues(alpha: 0.25),
+        border: colors.danger.withValues(alpha: AppEmphasis.borderTint),
         foreground: colors.danger,
       );
     }
@@ -988,7 +967,7 @@ class _TerminalNoticeBanner extends StatelessWidget {
         icon: Icons.info_outline_rounded,
         label: 'Limited terminal access',
         background: colors.infoMuted,
-        border: colors.info.withValues(alpha: 0.24),
+        border: colors.info.withValues(alpha: AppEmphasis.borderTint),
         foreground: colors.info,
       );
     }
@@ -1163,10 +1142,7 @@ class _TerminalSelectionOverlay extends StatelessWidget {
     required Offset startOffset,
     required Offset endOffset,
   }) {
-    return Offset(
-      (startOffset.dx + endOffset.dx) / 2,
-      startOffset.dy - 8,
-    );
+    return Offset((startOffset.dx + endOffset.dx) / 2, startOffset.dy - 8);
   }
 
   Offset _secondaryToolbarAnchor({
@@ -1210,14 +1186,11 @@ class _TerminalSelectionHandle extends StatelessWidget {
             decoration: BoxDecoration(
               color: colors.accent,
               shape: BoxShape.circle,
-              border: Border.all(color: colors.canvas, width: 2),
-              boxShadow: [
-                BoxShadow(
-                  color: colors.canvas.withValues(alpha: 0.16),
-                  blurRadius: 8,
-                  offset: const Offset(0, 2),
-                ),
-              ],
+              border: Border.all(
+                color: colors.canvas,
+                width: AppStrokes.indicator,
+              ),
+              boxShadow: [AppShadows.surface(colors.textPrimary)],
             ),
           ),
         ),

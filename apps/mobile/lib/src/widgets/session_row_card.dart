@@ -1,14 +1,15 @@
 import 'package:flutter/material.dart';
+import 'app_menu.dart';
 
 import '../models.dart';
+import '../provider_labels.dart';
 import '../relative_time_ticker.dart';
 import '../search_query.dart';
 import '../session_read_store.dart';
 import '../theme/app_colors.dart';
-import '../theme/app_theme.dart';
 import '../theme/app_tokens.dart';
 import 'mesh_widgets.dart';
-import 'provider_badge.dart';
+import '../theme/app_status_styles.dart';
 
 /// Returns a short human-readable label for how long ago [updatedAt] was.
 String sessionTimeLabel(DateTime updatedAt) {
@@ -87,310 +88,200 @@ class SessionRowCard extends StatelessWidget {
     bool unread,
   ) {
     final theme = Theme.of(context);
-    final workspaceLabel = _workspaceLabel(session.cwd);
-    final supportingText = session.matchSnippet?.isNotEmpty == true
-        ? session.matchSnippet!
-        : session.preview;
-    if (dense) {
-      // Compact variant for the desktop sidebar — plain InkWell with tinted
-      // selection fill, no card chrome.
-      final bgColor = selected
-          ? colors.accentMuted.withValues(alpha: 0.48)
-          : Colors.transparent;
-      return Material(
-        color: Colors.transparent,
-        child: InkWell(
-          onTap: onTap,
-          borderRadius: AppShapes.badge,
-          child: AnimatedContainer(
-            duration: const Duration(milliseconds: 120),
-            padding: const EdgeInsets.fromLTRB(10, 9, 8, 10),
-            decoration: BoxDecoration(
-              color: bgColor,
-              borderRadius: AppShapes.badge,
-            ),
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Padding(
-                  padding: const EdgeInsets.only(top: 5),
-                  child: running
-                      ? LivePulse(color: colors.success)
-                      : Container(
-                          width: 6,
-                          height: 6,
-                          decoration: BoxDecoration(
-                            color: selected
-                                ? colors.accent
-                                : colors.textTertiary.withValues(alpha: 0.35),
-                            shape: BoxShape.circle,
+    final contextLabel =
+        secondaryLabel ??
+        [
+          if (showHost) host.label,
+          _workspaceLabel(session.cwd),
+          if (agentProviderDisplayLabel(session.provider)
+              case final String label)
+            label,
+        ].join(' · ');
+    final status = _sessionStatusBadge(session);
+    if (dense && query.trim().isEmpty) {
+      return Tooltip(
+        message:
+            '${session.title}\n$contextLabel · ${sessionTimeLabel(session.updatedAt)}',
+        child: Semantics(
+          selected: selected,
+          label: unread ? 'Unread session' : null,
+          child: Material(
+            color: selected ? colors.surfaceMuted : Colors.transparent,
+            borderRadius: AppShapes.input,
+            child: InkWell(
+              onTap: onTap,
+              borderRadius: AppShapes.input,
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(minHeight: 32),
+                child: Padding(
+                  padding: const EdgeInsets.only(
+                    left: AppSpacing.compact,
+                    right: AppSpacing.xs,
+                  ),
+                  child: Row(
+                    children: [
+                      if (running)
+                        LivePulse(color: colors.success)
+                      else
+                        Icon(
+                          favorite ? Icons.star_rounded : Icons.circle,
+                          size: favorite
+                              ? AppSizes.tinyIcon
+                              : AppSizes.statusDot,
+                          color: unread ? colors.accent : colors.textTertiary,
+                        ),
+                      const SizedBox(width: AppSpacing.compact),
+                      Expanded(
+                        child: Text(
+                          session.title,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: theme.textTheme.bodyMedium?.copyWith(
+                            fontWeight: AppWeights.body,
                           ),
                         ),
-                ),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Row(
-                        children: [
-                          Expanded(
-                            child: Text(
-                              session.title,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: theme.textTheme.bodyMedium?.copyWith(
-                                fontWeight: AppWeights.body,
-                                height: 1.25,
-                                color: colors.textPrimary,
-                              ),
-                            ),
-                          ),
-                        ],
                       ),
-                      const SizedBox(height: 3),
-                      Row(
-                        children: [
-                          Expanded(
-                            child: Text(
-                              // secondaryLabel overrides the default
-                              // "host · workspace" line when we're inside a
-                              // grouped view (e.g. show branch name instead).
-                              secondaryLabel ??
-                                  (showHost
-                                      ? '${host.label} · $workspaceLabel'
-                                      : workspaceLabel),
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: theme.textTheme.bodySmall?.copyWith(
-                                color: colors.textSecondary,
-                                fontSize: 11.5,
-                                height: 1.25,
-                              ),
-                            ),
-                          ),
-                          const SizedBox(width: 8),
-                          ListenableBuilder(
-                            listenable: RelativeTimeTicker.minutes,
-                            builder: (_, _) => Text(
-                              sessionTimeLabel(session.updatedAt),
-                              style: theme.textTheme.bodySmall?.copyWith(
-                                color: colors.textTertiary,
-                                fontSize: 10.5,
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-                      if (session.provider != null || session.isSubAgent) ...[
-                        const SizedBox(height: 4),
-                        Wrap(
-                          spacing: 6,
-                          runSpacing: 4,
+                      ?status,
+                      SizedBox(
+                        width: 28,
+                        height: 32,
+                        child: AppMenuButton(
+                          tooltip: 'Session options',
                           children: [
-                            if (session.provider != null)
-                              AgentProviderBadge(
-                                providerKind: session.provider,
-                                compact: true,
-                              ),
-                            if (session.isSubAgent) const _SubAgentBadge(),
+                            AppMenuItem(
+                              label: favorite
+                                  ? 'Remove favorite'
+                                  : 'Add favorite',
+                              leadingIcon: favorite
+                                  ? Icons.star_rounded
+                                  : Icons.star_outline_rounded,
+                              onPressed: onToggleFavorite,
+                            ),
                           ],
                         ),
-                      ],
-                      if (supportingText.isNotEmpty) ...[
-                        const SizedBox(height: 4),
-                        if (session.matchSnippet?.isNotEmpty == true)
-                          _HighlightedSnippet(
-                            text: supportingText,
-                            query: query,
-                            style: theme.textTheme.bodySmall!.copyWith(
-                              color: colors.textSecondary,
-                              height: 1.3,
-                              fontSize: 11.5,
-                            ),
-                          )
-                        else
-                          Text(
-                            supportingText,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: theme.textTheme.bodySmall?.copyWith(
-                              color: colors.textSecondary,
-                              height: 1.3,
-                              fontSize: 11.5,
-                            ),
-                          ),
-                      ],
+                      ),
                     ],
                   ),
                 ),
-                if (unread) ...[
-                  const SizedBox(width: 4),
-                  Padding(
-                    padding: const EdgeInsets.only(top: 4),
-                    child: _UnreadDot(color: colors.accent),
-                  ),
-                  const SizedBox(width: 2),
-                ],
-                InkWell(
-                  onTap: onToggleFavorite,
-                  borderRadius: AppShapes.badge,
-                  child: SizedBox(
-                    width: 30,
-                    height: 30,
-                    child: Icon(
-                      favorite
-                          ? Icons.star_rounded
-                          : Icons.star_outline_rounded,
-                      size: 15,
-                      color: favorite ? colors.warning : colors.textTertiary,
-                    ),
-                  ),
-                ),
-              ],
+              ),
             ),
           ),
         ),
       );
     }
-
-    // ── Mobile / full-width variant ──────────────────────────────────────────
-    final statusBadge = _sessionStatusBadge(session);
-    final content = AnimatedContainer(
-      duration: AppMotion.quick,
-      curve: AppMotion.standard,
-      padding: const EdgeInsets.fromLTRB(12, 11, 4, 11),
-      decoration: BoxDecoration(
-        color: selected
-            ? colors.accentMuted.withValues(alpha: 0.52)
-            : Colors.transparent,
-        border: Border(bottom: BorderSide(color: colors.border)),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Expanded(
-                child: Text(
-                  session.title,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                    fontWeight: unread ? AppWeights.title : AppWeights.emphasis,
+    return Semantics(
+      selected: selected,
+      label: [
+        if (unread) 'Unread session',
+        if (running) 'Running session',
+      ].join(', '),
+      child: Material(
+        color: selected ? colors.surfaceMuted : colors.surfaceElevated,
+        borderRadius: AppShapes.card,
+        child: InkWell(
+          onTap: onTap,
+          borderRadius: AppShapes.card,
+          child: Padding(
+            padding: const EdgeInsets.only(
+              left: AppSpacing.lg,
+              right: AppSpacing.xs,
+              top: AppSpacing.sm,
+              bottom: AppSpacing.md,
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    if (running) ...[
+                      LivePulse(color: colors.success),
+                      const SizedBox(width: AppSpacing.sm),
+                    ] else if (unread) ...[
+                      _UnreadDot(color: colors.accent),
+                      const SizedBox(width: AppSpacing.sm),
+                    ],
+                    Expanded(
+                      child: Text(
+                        session.title,
+                        maxLines: dense ? 1 : 2,
+                        overflow: TextOverflow.ellipsis,
+                        style:
+                            (dense
+                                    ? theme.textTheme.bodyMedium
+                                    : theme.textTheme.bodyLarge)
+                                ?.copyWith(
+                                  fontWeight: unread
+                                      ? AppWeights.emphasis
+                                      : AppWeights.body,
+                                ),
+                      ),
+                    ),
+                    if (favorite)
+                      Icon(
+                        Icons.star_rounded,
+                        size: AppSizes.compactIcon,
+                        color: colors.warning,
+                      ),
+                    AppMenuButton(
+                      tooltip: 'Session options',
+                      children: [
+                        AppMenuItem(
+                          label: favorite ? 'Remove favorite' : 'Add favorite',
+                          leadingIcon: favorite
+                              ? Icons.star_rounded
+                              : Icons.star_outline_rounded,
+                          onPressed: onToggleFavorite,
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+                Padding(
+                  padding: const EdgeInsets.only(right: AppSpacing.md),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          contextLabel,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: theme.textTheme.bodySmall?.copyWith(
+                            color: colors.textSecondary,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: AppSpacing.sm),
+                      ListenableBuilder(
+                        listenable: RelativeTimeTicker.minutes,
+                        builder: (_, _) => Text(
+                          sessionTimeLabel(session.updatedAt),
+                          style: theme.textTheme.bodySmall?.copyWith(
+                            color: colors.textSecondary,
+                          ),
+                        ),
+                      ),
+                    ],
                   ),
                 ),
-              ),
-              if (statusBadge != null) ...[
-                const SizedBox(width: AppSpacing.sm),
-                statusBadge,
-              ],
-              if (unread) ...[
-                const SizedBox(width: 6),
-                _UnreadDot(color: colors.accent),
-                const SizedBox(width: 4),
-              ],
-              IconButton(
-                onPressed: onToggleFavorite,
-                tooltip: favorite ? 'Remove favorite' : 'Add favorite',
-                visualDensity: VisualDensity.compact,
-                iconSize: 20,
-                constraints: const BoxConstraints(minWidth: 44, minHeight: 44),
-                icon: Icon(
-                  favorite ? Icons.star_rounded : Icons.star_outline_rounded,
-                  color: favorite ? colors.warning : colors.textTertiary,
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 6),
-          Row(
-            children: [
-              if (showHost) ...[
-                Icon(Icons.dns_rounded, size: 14, color: colors.textTertiary),
-                const SizedBox(width: 4),
-                Flexible(
-                  child: Text(
-                    host.label,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: theme.textTheme.bodySmall?.copyWith(
+                if (status != null) ...[
+                  const SizedBox(height: AppSpacing.xs),
+                  status,
+                ],
+                if (query.trim().isNotEmpty &&
+                    (session.matchSnippet ?? session.preview).isNotEmpty) ...[
+                  const SizedBox(height: AppSpacing.xs),
+                  _HighlightedSnippet(
+                    text: session.matchSnippet ?? session.preview,
+                    query: query,
+                    style: theme.textTheme.bodySmall!.copyWith(
                       color: colors.textSecondary,
-                      fontWeight: AppWeights.emphasis,
                     ),
                   ),
-                ),
-                const SizedBox(width: 10),
+                ],
               ],
-              Icon(Icons.folder_outlined, size: 14, color: colors.textTertiary),
-              const SizedBox(width: 4),
-              Expanded(
-                child: Text(
-                  workspaceLabel,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: theme.textTheme.bodySmall?.copyWith(
-                    color: colors.textSecondary,
-                  ),
-                ),
-              ),
-              if (session.provider != null) ...[
-                const SizedBox(width: 8),
-                AgentProviderBadge(
-                  providerKind: session.provider,
-                  compact: true,
-                ),
-              ],
-              if (session.isSubAgent) ...[
-                const SizedBox(width: 6),
-                const _SubAgentBadge(),
-              ],
-              const SizedBox(width: 8),
-              ListenableBuilder(
-                listenable: RelativeTimeTicker.minutes,
-                builder: (_, _) => Text(
-                  sessionTimeLabel(session.updatedAt),
-                  style: theme.textTheme.bodySmall?.copyWith(
-                    color: colors.textTertiary,
-                    fontSize: 11,
-                  ),
-                ),
-              ),
-            ],
+            ),
           ),
-          if (supportingText.isNotEmpty) ...[
-            const SizedBox(height: 6),
-            if (session.matchSnippet?.isNotEmpty == true)
-              _HighlightedSnippet(
-                text: supportingText,
-                query: query,
-                style: theme.textTheme.bodySmall!.copyWith(
-                  color: colors.textSecondary,
-                  height: 1.35,
-                ),
-              )
-            else
-              Text(
-                supportingText,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: theme.textTheme.bodySmall?.copyWith(
-                  color: colors.textSecondary,
-                  height: 1.35,
-                ),
-              ),
-          ],
-        ],
-      ),
-    );
-    return Material(
-      color: Colors.transparent,
-      child: InkWell(
-        onTap: onTap,
-        hoverColor: colors.surfaceMuted.withValues(alpha: 0.62),
-        splashColor: colors.accent.withValues(alpha: 0.08),
-        child: content,
+        ),
       ),
     );
   }
@@ -469,7 +360,7 @@ class _SessionStatusLabel extends StatelessWidget {
         if (live)
           LivePulse(color: color)
         else if (icon != null)
-          Icon(icon, size: 13, color: color),
+          Icon(icon, size: AppSizes.smallIcon, color: color),
         const SizedBox(width: AppSpacing.xs),
         Text(
           label,
@@ -479,31 +370,6 @@ class _SessionStatusLabel extends StatelessWidget {
           ),
         ),
       ],
-    );
-  }
-}
-
-class _SubAgentBadge extends StatelessWidget {
-  const _SubAgentBadge();
-
-  @override
-  Widget build(BuildContext context) {
-    final colors = context.colors;
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-      decoration: BoxDecoration(
-        color: colors.info.withValues(alpha: 0.12),
-        borderRadius: BorderRadius.circular(6),
-        border: Border.all(color: colors.info.withValues(alpha: 0.3)),
-      ),
-      child: Text(
-        'Sub-agent',
-        style: monoStyle(
-          color: colors.info,
-          fontSize: 9,
-          fontWeight: AppWeights.emphasis,
-        ),
-      ),
     );
   }
 }
@@ -560,7 +426,7 @@ class _HighlightedSnippet extends StatelessWidget {
           text: text.substring(match.start, match.end),
           style: style.copyWith(
             color: colors.accent,
-            fontWeight: FontWeight.w600,
+            fontWeight: AppWeights.title,
           ),
         ),
       );

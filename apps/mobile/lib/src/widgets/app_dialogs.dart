@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../theme/app_colors.dart';
 import '../theme/color_contrast.dart';
 import '../theme/app_tokens.dart';
+import '../theme/app_control_styles.dart';
 
 class MeshDialogScaffold extends StatelessWidget {
   const MeshDialogScaffold({
@@ -14,7 +15,7 @@ class MeshDialogScaffold extends StatelessWidget {
     this.actions = const <Widget>[],
     this.maxWidth = 440,
     this.danger = false,
-    this.padding = const EdgeInsets.all(18),
+    this.padding = const EdgeInsets.all(AppSpacing.lg),
     this.showCloseButton = false,
     this.onClose,
   });
@@ -43,9 +44,11 @@ class MeshDialogScaffold extends StatelessWidget {
     final narrowScreen = MediaQuery.sizeOf(context).width < 420;
     return Dialog(
       backgroundColor: Colors.transparent,
+      shape: const RoundedRectangleBorder(),
+      elevation: 0,
       insetPadding: EdgeInsets.symmetric(
-        horizontal: narrowScreen ? 18 : 32,
-        vertical: 24,
+        horizontal: narrowScreen ? AppSpacing.lg : AppSpacing.xxl,
+        vertical: AppSpacing.xl,
       ),
       child: ConstrainedBox(
         constraints: BoxConstraints(maxWidth: maxWidth),
@@ -77,39 +80,38 @@ class MeshDialogScaffold extends StatelessWidget {
                               color: muted,
                               borderRadius: AppShapes.iconWell,
                               border: Border.all(
-                                color: accent.withValues(alpha: 0.24),
+                                color: accent.withValues(
+                                  alpha: AppEmphasis.borderTint,
+                                ),
                               ),
                             ),
                             alignment: Alignment.center,
                             child: Icon(
                               icon,
-                              size: 18,
+                              size: AppSizes.inlineIcon,
                               color: iconForeground,
                             ),
                           ),
-                          const SizedBox(width: 12),
+                          const SizedBox(width: AppSpacing.md),
                           Expanded(
                             child: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
                                 Text(
                                   title,
-                                  style: Theme.of(context)
-                                      .textTheme
-                                      .titleMedium
+                                  style: Theme.of(context).textTheme.titleMedium
                                       ?.copyWith(
                                         color: colors.textPrimary,
                                         fontWeight: AppWeights.title,
-                                        letterSpacing: -0.2,
+                                        letterSpacing:
+                                            AppLetterSpacing.headline,
                                       ),
                                 ),
                                 if (description != null) ...[
-                                  const SizedBox(height: 3),
+                                  const SizedBox(height: AppSpacing.xs),
                                   Text(
                                     description!,
-                                    style: Theme.of(context)
-                                        .textTheme
-                                        .bodySmall
+                                    style: Theme.of(context).textTheme.bodySmall
                                         ?.copyWith(
                                           color: colors.textSecondary,
                                           height: 1.38,
@@ -120,9 +122,12 @@ class MeshDialogScaffold extends StatelessWidget {
                             ),
                           ),
                           if (showCloseButton) ...[
-                            const SizedBox(width: 8),
+                            const SizedBox(width: AppSpacing.sm),
                             IconButton(
-                              icon: const Icon(Icons.close_rounded, size: 18),
+                              icon: const Icon(
+                                Icons.close_rounded,
+                                size: AppSizes.inlineIcon,
+                              ),
                               tooltip: 'Close',
                               visualDensity: VisualDensity.compact,
                               onPressed:
@@ -132,9 +137,12 @@ class MeshDialogScaffold extends StatelessWidget {
                           ],
                         ],
                       ),
-                      if (child != null) ...[const SizedBox(height: 16), child!],
+                      if (child != null) ...[
+                        const SizedBox(height: AppSpacing.lg),
+                        child!,
+                      ],
                       if (actions.isNotEmpty) ...[
-                        const SizedBox(height: 18),
+                        const SizedBox(height: AppSpacing.lg),
                         if (compactActions)
                           Column(
                             crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -184,11 +192,6 @@ Future<bool> showMeshConfirmDialog(
     context: context,
     builder: (dialogContext) {
       final colors = dialogContext.colors;
-      final dangerForeground = readableTextOn(
-        colors,
-        background: colors.danger,
-        preferred: colors.accentOn,
-      );
       return MeshDialogScaffold(
         icon: icon,
         title: title,
@@ -201,12 +204,7 @@ Future<bool> showMeshConfirmDialog(
             child: Text(cancelLabel),
           ),
           FilledButton(
-            style: danger
-                ? FilledButton.styleFrom(
-                    backgroundColor: colors.danger,
-                    foregroundColor: dangerForeground,
-                  )
-                : null,
+            style: danger ? AppControlStyles.confirmDanger(colors) : null,
             onPressed: () => Navigator.of(dialogContext).pop(true),
             child: Text(confirmLabel),
           ),

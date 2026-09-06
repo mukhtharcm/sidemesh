@@ -92,6 +92,7 @@ class _TimelineEntry {
     this.message,
     this.activity,
     this.runtimeEvent,
+    this.repeatCount = 1,
   });
 
   factory _TimelineEntry.message(SessionMessage message) => _TimelineEntry._(
@@ -138,6 +139,7 @@ class _TimelineEntry {
   final SessionMessage? message;
   final SessionActivity? activity;
   final _TimelineLiveEventRecord? runtimeEvent;
+  final int repeatCount;
 }
 
 class _LiveAssistantBubble extends StatelessWidget {
@@ -166,7 +168,7 @@ class _LiveAssistantBubble extends StatelessWidget {
           return const SizedBox.shrink();
         }
         return Padding(
-          padding: const EdgeInsets.only(bottom: 4),
+          padding: const EdgeInsets.only(bottom: AppSpacing.xs),
           child: _MessageBubble(
             host: host,
             api: api,
@@ -252,21 +254,26 @@ class _ReasoningBlockState extends State<_ReasoningBlock> {
             onTap: _toggle,
             borderRadius: AppShapes.action,
             child: Padding(
-              padding: const EdgeInsets.fromLTRB(0, 6, 0, 6),
+              padding: const EdgeInsets.fromLTRB(
+                0,
+                AppSpacing.tight,
+                0,
+                AppSpacing.tight,
+              ),
               child: Row(
                 children: [
                   if (widget.live)
                     Padding(
-                      padding: const EdgeInsets.only(right: 6),
+                      padding: const EdgeInsets.only(right: AppSpacing.tight),
                       child: LivePulse(color: colors.textSecondary),
                     )
                   else ...[
                     Icon(
                       Icons.psychology_outlined,
-                      size: 16,
+                      size: AppSizes.compactIcon,
                       color: colors.textSecondary,
                     ),
-                    const SizedBox(width: 6),
+                    const SizedBox(width: AppSpacing.tight),
                   ],
                   Expanded(
                     child: Text(
@@ -278,12 +285,12 @@ class _ReasoningBlockState extends State<_ReasoningBlock> {
                       ),
                     ),
                   ),
-                  const SizedBox(width: 4),
+                  const SizedBox(width: AppSpacing.xs),
                   Icon(
                     _expanded
                         ? Icons.expand_less_rounded
                         : Icons.expand_more_rounded,
-                    size: 16,
+                    size: AppSizes.compactIcon,
                     color: colors.textSecondary,
                   ),
                 ],
@@ -292,7 +299,12 @@ class _ReasoningBlockState extends State<_ReasoningBlock> {
           ),
           if (_expanded)
             Padding(
-              padding: const EdgeInsets.fromLTRB(22, 2, 0, 10),
+              padding: const EdgeInsets.fromLTRB(
+                AppSpacing.xl,
+                AppSpacing.xxs,
+                0,
+                AppSpacing.compact,
+              ),
               child: _ReasoningTextBody(
                 text: widget.reasoning.trimRight(),
                 textColor: colors.textPrimary,
@@ -320,7 +332,12 @@ class _ComposerStatusStrip extends StatelessWidget {
         }
         final colors = context.colors;
         return Padding(
-          padding: const EdgeInsets.fromLTRB(16, 0, 16, 10),
+          padding: const EdgeInsets.fromLTRB(
+            AppSpacing.lg,
+            0,
+            AppSpacing.lg,
+            AppSpacing.compact,
+          ),
           child: DecoratedBox(
             decoration: BoxDecoration(
               color: colors.surface,
@@ -328,11 +345,14 @@ class _ComposerStatusStrip extends StatelessWidget {
               border: Border.all(color: colors.border),
             ),
             child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+              padding: const EdgeInsets.symmetric(
+                horizontal: AppSpacing.md,
+                vertical: AppSpacing.compact,
+              ),
               child: Row(
                 children: [
                   const LivePulse(),
-                  const SizedBox(width: 10),
+                  const SizedBox(width: AppSpacing.compact),
                   Text(
                     'Working',
                     style: Theme.of(context).textTheme.labelLarge?.copyWith(
@@ -340,7 +360,7 @@ class _ComposerStatusStrip extends StatelessWidget {
                       fontWeight: AppWeights.emphasis,
                     ),
                   ),
-                  const SizedBox(width: 10),
+                  const SizedBox(width: AppSpacing.compact),
                   Expanded(
                     child: Text(
                       'Waiting for assistant output…',
@@ -360,19 +380,14 @@ class _ComposerStatusStrip extends StatelessWidget {
 }
 
 class _ProviderWarningRow extends StatelessWidget {
-  const _ProviderWarningRow({required this.event});
-
+  const _ProviderWarningRow({required this.event, this.repeatCount = 1});
   final LiveEvent event;
+  final int repeatCount;
 
   @override
   Widget build(BuildContext context) {
     final colors = context.colors;
     final level = (event.level ?? 'warning').toLowerCase();
-    final tone = switch (level) {
-      'error' => MeshPillTone.danger,
-      'info' => MeshPillTone.info,
-      _ => MeshPillTone.warning,
-    };
     final icon = switch (level) {
       'error' => Icons.error_outline_rounded,
       'info' => Icons.info_outline_rounded,
@@ -380,55 +395,75 @@ class _ProviderWarningRow extends StatelessWidget {
     };
     final accent = switch (level) {
       'error' => colors.danger,
-      'info' => colors.info,
+      'info' => colors.textSecondary,
       _ => colors.warning,
     };
-    return Padding(
-      padding: const EdgeInsets.only(left: 4, right: 4, bottom: 8),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
+    final details = [
+      event.source,
+      event.code,
+    ].whereType<String>().where((value) => value.isNotEmpty).join(' · ');
+    if (level == 'info') {
+      return ExpansionTile(
+        title: Text(
+          repeatCount > 1
+              ? 'Provider notice · $repeatCount occurrences'
+              : 'Provider notice',
+          style: Theme.of(
+            context,
+          ).textTheme.bodySmall?.copyWith(color: colors.textSecondary),
+        ),
         children: [
           Padding(
-            padding: const EdgeInsets.only(top: 2),
-            child: Icon(icon, size: 16, color: accent),
+            padding: const EdgeInsets.all(AppSpacing.sm),
+            child: SelectableText(
+              [
+                event.message ?? '',
+                details,
+              ].where((text) => text.isNotEmpty).join('\n'),
+              style: Theme.of(context).textTheme.bodySmall,
+            ),
           ),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Wrap(
-                  spacing: 8,
-                  runSpacing: 6,
-                  crossAxisAlignment: WrapCrossAlignment.center,
-                  children: [
-                    MeshPill(label: 'Agent notice', tone: tone, icon: icon),
-                    if ((event.source ?? '').isNotEmpty)
-                      MeshPill(
-                        label: event.source!,
-                        tone: MeshPillTone.neutral,
-                        mono: true,
-                      ),
-                    if ((event.code ?? '').isNotEmpty)
-                      MeshPill(
-                        label: event.code!,
-                        tone: MeshPillTone.neutral,
-                        mono: true,
-                      ),
-                  ],
-                ),
-                const SizedBox(height: 6),
-                Text(
+        ],
+      );
+    }
+    return Padding(
+      padding: const EdgeInsets.only(bottom: AppSpacing.sm),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Icon(icon, size: AppSizes.compactIcon, color: accent),
+              const SizedBox(width: AppSpacing.sm),
+              Expanded(
+                child: Text(
                   event.message ?? '',
-                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                    color: colors.textPrimary,
-                    fontWeight: FontWeight.w600,
-                    height: 1.35,
+                  style: Theme.of(context).textTheme.bodySmall,
+                ),
+              ),
+            ],
+          ),
+          if (details.isNotEmpty || repeatCount > 1)
+            ExpansionTile(
+              title: Text(
+                repeatCount > 1
+                    ? 'Notice details · $repeatCount occurrences'
+                    : 'Notice details',
+                style: Theme.of(
+                  context,
+                ).textTheme.bodySmall?.copyWith(color: colors.textSecondary),
+              ),
+              children: [
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: SelectableText(
+                    details,
+                    style: Theme.of(context).textTheme.bodySmall,
                   ),
                 ),
               ],
             ),
-          ),
         ],
       ),
     );
@@ -457,9 +492,13 @@ class _PlanUpdateCardState extends State<_PlanUpdateCard> {
         .length;
     final explanation = (event.explanation ?? '').trim();
     return Padding(
-      padding: const EdgeInsets.only(left: 4, right: 4, bottom: 10),
+      padding: const EdgeInsets.only(
+        left: AppSpacing.xs,
+        right: AppSpacing.xs,
+        bottom: AppSpacing.compact,
+      ),
       child: ConstrainedBox(
-        constraints: const BoxConstraints(maxWidth: 640),
+        constraints: const BoxConstraints(maxWidth: AppSizes.readingMaxWidth),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -470,8 +509,8 @@ class _PlanUpdateCardState extends State<_PlanUpdateCard> {
                 borderRadius: AppShapes.input,
                 child: Padding(
                   padding: const EdgeInsets.symmetric(
-                    horizontal: 4,
-                    vertical: 7,
+                    horizontal: AppSpacing.xs,
+                    vertical: AppSpacing.sm,
                   ),
                   child: Row(
                     crossAxisAlignment: CrossAxisAlignment.center,
@@ -480,20 +519,24 @@ class _PlanUpdateCardState extends State<_PlanUpdateCard> {
                         width: 30,
                         height: 30,
                         decoration: BoxDecoration(
-                          color: colors.surfaceMuted.withValues(alpha: 0.72),
+                          color: colors.surfaceMuted.withValues(
+                            alpha: AppEmphasis.secondary,
+                          ),
                           borderRadius: AppShapes.iconWell,
                           border: Border.all(
-                            color: colors.border.withValues(alpha: 0.5),
+                            color: colors.border.withValues(
+                              alpha: AppEmphasis.disabled,
+                            ),
                           ),
                         ),
                         alignment: Alignment.center,
                         child: Icon(
                           Icons.route_rounded,
-                          size: 16,
+                          size: AppSizes.compactIcon,
                           color: colors.textSecondary,
                         ),
                       ),
-                      const SizedBox(width: 10),
+                      const SizedBox(width: AppSpacing.compact),
                       Expanded(
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
@@ -507,7 +550,7 @@ class _PlanUpdateCardState extends State<_PlanUpdateCard> {
                                   ),
                             ),
                             if (explanation.isNotEmpty) ...[
-                              const SizedBox(height: 2),
+                              const SizedBox(height: AppSpacing.xxs),
                               Text(
                                 explanation,
                                 maxLines: _expanded ? 3 : 1,
@@ -522,19 +565,19 @@ class _PlanUpdateCardState extends State<_PlanUpdateCard> {
                           ],
                         ),
                       ),
-                      const SizedBox(width: 8),
+                      const SizedBox(width: AppSpacing.sm),
                       MeshStatusBadge(
                         label: '$completedCount/${steps.length}',
                         tone: MeshStatusTone.neutral,
                         icon: Icons.checklist_rounded,
                         compact: true,
                       ),
-                      const SizedBox(width: 4),
+                      const SizedBox(width: AppSpacing.xs),
                       Icon(
                         _expanded
                             ? Icons.keyboard_arrow_up_rounded
                             : Icons.keyboard_arrow_down_rounded,
-                        size: 18,
+                        size: AppSizes.inlineIcon,
                         color: colors.textTertiary,
                       ),
                     ],
@@ -543,12 +586,15 @@ class _PlanUpdateCardState extends State<_PlanUpdateCard> {
               ),
             ),
             AnimatedSize(
-              duration: const Duration(milliseconds: 160),
-              curve: Curves.easeOutCubic,
+              duration: AppMotion.quick,
+              curve: AppMotion.standard,
               alignment: Alignment.topLeft,
               child: _expanded
                   ? Padding(
-                      padding: const EdgeInsets.only(left: 44, top: 6),
+                      padding: const EdgeInsets.only(
+                        left: AppSizes.menuItem,
+                        top: AppSpacing.tight,
+                      ),
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
@@ -557,19 +603,20 @@ class _PlanUpdateCardState extends State<_PlanUpdateCard> {
                             index < steps.length;
                             index += 1
                           ) ...[
-                            if (index > 0) const SizedBox(height: 8),
+                            if (index > 0)
+                              const SizedBox(height: AppSpacing.sm),
                             Row(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
                                 Icon(
                                   _planStepIcon(steps[index].status),
-                                  size: 17,
+                                  size: AppSizes.inlineIcon,
                                   color: _planStepColor(
                                     colors,
                                     steps[index].status,
                                   ),
                                 ),
-                                const SizedBox(width: 10),
+                                const SizedBox(width: AppSpacing.compact),
                                 Expanded(
                                   child: Text(
                                     steps[index].step,
@@ -578,12 +625,12 @@ class _PlanUpdateCardState extends State<_PlanUpdateCard> {
                                         .bodyMedium
                                         ?.copyWith(
                                           color: colors.textPrimary,
-                                          fontWeight: FontWeight.w600,
-                                          height: 1.35,
+                                          fontWeight: AppWeights.title,
+                                          height: AppLineHeights.caption,
                                         ),
                                   ),
                                 ),
-                                const SizedBox(width: 8),
+                                const SizedBox(width: AppSpacing.sm),
                                 MeshStatusBadge(
                                   label: _planStepLabel(steps[index].status),
                                   tone: _planStepTone(steps[index].status),
@@ -705,18 +752,21 @@ class _RuntimeSignalStrip extends StatelessWidget {
 
     return MeshSurface(
       radius: AppRadii.control,
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      padding: const EdgeInsets.symmetric(
+        horizontal: AppSpacing.md,
+        vertical: AppSpacing.compact,
+      ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Wrap(spacing: 8, runSpacing: 8, children: pills),
           if (details.isNotEmpty) ...[
-            const SizedBox(height: 8),
+            const SizedBox(height: AppSpacing.sm),
             Text(
               details.join(' • '),
               style: Theme.of(context).textTheme.bodySmall?.copyWith(
                 color: colors.textSecondary,
-                fontWeight: FontWeight.w600,
+                fontWeight: AppWeights.title,
               ),
             ),
           ],
@@ -895,7 +945,12 @@ class _PendingSendStrip extends StatelessWidget {
         ? pendingSendRecoveryMessage(primary)
         : '${_formatRetryDelay(nextAttempt)}${lastError == null ? '' : ' - $lastError'}';
     return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 0, 16, 10),
+      padding: const EdgeInsets.fromLTRB(
+        AppSpacing.lg,
+        0,
+        AppSpacing.lg,
+        AppSpacing.compact,
+      ),
       child: DecoratedBox(
         decoration: BoxDecoration(
           color: colors.surface,
@@ -903,7 +958,10 @@ class _PendingSendStrip extends StatelessWidget {
           border: Border.all(color: colors.border),
         ),
         child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+          padding: const EdgeInsets.symmetric(
+            horizontal: AppSpacing.md,
+            vertical: AppSpacing.compact,
+          ),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
@@ -912,9 +970,9 @@ class _PendingSendStrip extends StatelessWidget {
                   Icon(
                     Icons.cloud_sync_rounded,
                     color: colors.accent,
-                    size: 20,
+                    size: AppSizes.icon,
                   ),
-                  const SizedBox(width: 10),
+                  const SizedBox(width: AppSpacing.compact),
                   Expanded(
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
@@ -927,7 +985,7 @@ class _PendingSendStrip extends StatelessWidget {
                                 fontWeight: AppWeights.title,
                               ),
                         ),
-                        const SizedBox(height: 2),
+                        const SizedBox(height: AppSpacing.xxs),
                         Text(
                           detail,
                           maxLines: 2,
@@ -938,7 +996,7 @@ class _PendingSendStrip extends StatelessWidget {
                       ],
                     ),
                   ),
-                  const SizedBox(width: 8),
+                  const SizedBox(width: AppSpacing.sm),
                   MeshPill(
                     label: pendingSendStateLabel(primary.state),
                     tone: _pendingSendStateTone(primary.state),
@@ -946,7 +1004,7 @@ class _PendingSendStrip extends StatelessWidget {
                   ),
                 ],
               ),
-              const SizedBox(height: 10),
+              const SizedBox(height: AppSpacing.compact),
               Wrap(
                 spacing: 8,
                 runSpacing: 8,
@@ -1003,7 +1061,7 @@ class _CommandTitleParts {
   String get plainText => '$verb $command';
 }
 
-class _MessageBubble extends StatelessWidget {
+class _MessageBubble extends StatefulWidget {
   const _MessageBubble({
     required this.host,
     required this.api,
@@ -1027,7 +1085,30 @@ class _MessageBubble extends StatelessWidget {
   final void Function(String url)? onOpenHostUrl;
 
   @override
+  State<_MessageBubble> createState() => _MessageBubbleState();
+}
+
+class _MessageBubbleState extends State<_MessageBubble> {
+  bool _hovered = false;
+  bool _focused = false;
+
+  @override
   Widget build(BuildContext context) {
+    final host = widget.host;
+    final api = widget.api;
+    final sessionId = widget.sessionId;
+    final message = widget.message;
+    final live = widget.live;
+    final pinned = widget.pinned;
+    final onTogglePin = widget.onTogglePin;
+    final onOpenFile = widget.onOpenFile;
+    final onOpenHostUrl = widget.onOpenHostUrl;
+    final touch = !{
+      TargetPlatform.macOS,
+      TargetPlatform.windows,
+      TargetPlatform.linux,
+    }.contains(Theme.of(context).platform);
+    final showActions = touch || _hovered || _focused;
     final colors = context.colors;
     final isUser = message.role == 'user';
     final isAssistant = message.role == 'assistant';
@@ -1040,7 +1121,7 @@ class _MessageBubble extends StatelessWidget {
 
     final bubbleColor = switch (message.role) {
       'user' => colors.userBubble,
-      'assistant' => colors.assistantBubble,
+      'assistant' => colors.canvas,
       _ => colors.surfaceMuted,
     };
     final textColor = messageBodyColor(colors, userBubble: isUser);
@@ -1060,9 +1141,10 @@ class _MessageBubble extends StatelessWidget {
       ),
       selectionHandleColor: selectionForeground,
     );
-    final bodyStyle = Theme.of(
-      context,
-    ).textTheme.bodyMedium?.copyWith(color: textColor, height: 1.45);
+    final bodyStyle = Theme.of(context).textTheme.bodyMedium?.copyWith(
+      color: textColor,
+      height: AppLineHeights.reading,
+    );
     final linkStyle = messageLinkStyle(
       colors,
       userBubble: isUser,
@@ -1071,173 +1153,200 @@ class _MessageBubble extends StatelessWidget {
     final assistantLinkStyle = messageLinkStyle(
       colors,
       userBubble: false,
-      baseStyle: Theme.of(
-        context,
-      ).textTheme.bodyMedium?.copyWith(color: colors.textPrimary, height: 1.5),
+      baseStyle: Theme.of(context).textTheme.bodyMedium?.copyWith(
+        color: colors.textPrimary,
+        height: AppLineHeights.code,
+      ),
     );
     final messagePadding = isAssistant
-        ? const EdgeInsets.fromLTRB(16, 13, 16, 14)
-        : const EdgeInsets.fromLTRB(16, 12, 16, 14);
+        ? const EdgeInsets.symmetric(vertical: AppSpacing.sm)
+        : const EdgeInsets.fromLTRB(
+            AppSpacing.lg,
+            AppSpacing.md,
+            AppSpacing.lg,
+            AppSpacing.md,
+          );
     final bubbleBorderColor = isAssistant
         ? live
-              ? colors.accent.withValues(alpha: 0.36)
+              ? colors.accent.withValues(alpha: AppEmphasis.muted)
               : colors.assistantBubbleBorder
         : live
         ? colors.accent
-        : colors.accent.withValues(alpha: 0.28);
+        : colors.accent.withValues(alpha: AppEmphasis.borderTint);
     final phaseLabel = live
         ? 'Writing'
         : message.phase == 'commentary'
         ? 'Progress'
         : null;
 
-    return Align(
-      alignment: isUser ? Alignment.centerRight : Alignment.centerLeft,
-      child: Padding(
-        padding: EdgeInsets.only(bottom: isAssistant ? 14 : 10),
-        child: ConstrainedBox(
-          constraints: BoxConstraints(maxWidth: isAssistant ? 680 : 560),
-          child: DecoratedBox(
-            decoration: BoxDecoration(
-              color: bubbleColor,
-              borderRadius: BorderRadius.circular(isAssistant ? 16 : 20),
-              border: Border.all(
-                color: bubbleBorderColor,
-                width: live ? 1.4 : 1,
-              ),
+    return MouseRegion(
+      onEnter: (_) => setState(() => _hovered = true),
+      onExit: (_) => setState(() => _hovered = false),
+      child: Focus(
+        onFocusChange: (value) => setState(() => _focused = value),
+        child: Align(
+          alignment: isUser ? Alignment.centerRight : Alignment.centerLeft,
+          child: Padding(
+            padding: EdgeInsets.only(
+              bottom: isAssistant ? AppSpacing.md : AppSpacing.compact,
             ),
-            child: TextSelectionTheme(
-              data: bubbleSelectionTheme,
-              child: Padding(
-                padding: messagePadding,
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    if (phaseLabel != null && hasAnswer)
-                      Padding(
-                        padding: const EdgeInsets.only(bottom: 6),
-                        child: Row(
-                          children: [
-                            if (live) ...[
-                              const LivePulse(),
-                              const SizedBox(width: 6),
-                            ],
-                            Text(
-                              phaseLabel,
-                              style: Theme.of(context).textTheme.labelSmall
-                                  ?.copyWith(
-                                    color: isAssistant
-                                        ? assistantMetaColor
-                                        : metaColor,
-                                    fontWeight: AppWeights.title,
-                                    letterSpacing: 0.2,
-                                  ),
+            child: ConstrainedBox(
+              constraints: BoxConstraints(
+                maxWidth: isAssistant ? AppSizes.readingMaxWidth : 560,
+              ),
+              child: DecoratedBox(
+                decoration: BoxDecoration(
+                  color: bubbleColor,
+                  borderRadius: BorderRadius.circular(
+                    isAssistant ? AppRadii.surface : AppRadii.sheet,
+                  ),
+                  border: isAssistant
+                      ? null
+                      : Border.all(color: bubbleBorderColor),
+                ),
+                child: TextSelectionTheme(
+                  data: bubbleSelectionTheme,
+                  child: Padding(
+                    padding: messagePadding,
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        if (phaseLabel != null && hasAnswer)
+                          Padding(
+                            padding: const EdgeInsets.only(
+                              bottom: AppSpacing.tight,
                             ),
-                          ],
-                        ),
-                      ),
-                    for (final block in message.content)
-                      if (block is ThinkingBlock)
-                        Padding(
-                          padding: EdgeInsets.only(bottom: hasAnswer ? 10 : 0),
-                          child: _ReasoningBlock(
-                            reasoning: block.thinking,
-                            live: live,
-                            collapsedByDefault: hasAnswer,
-                            onOpenFile: onOpenFile,
-                            onOpenHostUrl: onOpenHostUrl,
+                            child: Row(
+                              children: [
+                                if (live) ...[
+                                  const LivePulse(),
+                                  const SizedBox(width: AppSpacing.tight),
+                                ],
+                                Text(
+                                  phaseLabel,
+                                  style: Theme.of(context).textTheme.labelSmall
+                                      ?.copyWith(
+                                        color: isAssistant
+                                            ? assistantMetaColor
+                                            : metaColor,
+                                        fontWeight: AppWeights.title,
+                                        letterSpacing: AppLetterSpacing.caps,
+                                      ),
+                                ),
+                              ],
+                            ),
                           ),
-                        )
-                      else if (block is TextBlock)
-                        if (isAssistant)
-                          _MarkdownMessageBody(
-                            text: block.text,
-                            textColor: textColor,
-                            linkStyle: assistantLinkStyle,
-                            onOpenFile: onOpenFile,
-                            onOpenHostUrl: onOpenHostUrl,
+                        for (final block in message.content)
+                          if (block is ThinkingBlock)
+                            Padding(
+                              padding: EdgeInsets.only(
+                                bottom: hasAnswer ? AppSpacing.compact : 0,
+                              ),
+                              child: _ReasoningBlock(
+                                reasoning: block.thinking,
+                                live: live,
+                                collapsedByDefault: hasAnswer,
+                                onOpenFile: onOpenFile,
+                                onOpenHostUrl: onOpenHostUrl,
+                              ),
+                            )
+                          else if (block is TextBlock)
+                            if (isAssistant)
+                              _MarkdownMessageBody(
+                                text: block.text,
+                                textColor: textColor,
+                                linkStyle: assistantLinkStyle,
+                                onOpenFile: onOpenFile,
+                                onOpenHostUrl: onOpenHostUrl,
+                                host: host,
+                                api: api,
+                                sessionId: sessionId,
+                              )
+                            else
+                              _LinkifiedSelectableText(
+                                text: block.text,
+                                style: bodyStyle,
+                                linkStyle: linkStyle,
+                                onOpenHostUrl: onOpenHostUrl,
+                              ),
+                        if (message.attachments.isNotEmpty) ...[
+                          _MessageAttachmentsSection(
                             host: host,
                             api: api,
                             sessionId: sessionId,
-                          )
-                        else
-                          _LinkifiedSelectableText(
-                            text: block.text,
-                            style: bodyStyle,
-                            linkStyle: linkStyle,
-                            onOpenHostUrl: onOpenHostUrl,
+                            attachments: message.attachments,
                           ),
-                    if (message.attachments.isNotEmpty) ...[
-                      _MessageAttachmentsSection(
-                        host: host,
-                        api: api,
-                        sessionId: sessionId,
-                        attachments: message.attachments,
-                      ),
-                      if (!hasTextBlocks && hasText) const SizedBox(height: 10),
-                    ],
-                    if (!hasTextBlocks && hasText)
-                      if (isAssistant)
-                        _MarkdownMessageBody(
-                          text: message.text,
-                          textColor: textColor,
-                          linkStyle: assistantLinkStyle,
-                          onOpenFile: onOpenFile,
-                          onOpenHostUrl: onOpenHostUrl,
-                          host: host,
-                          api: api,
-                          sessionId: sessionId,
-                        )
-                      else
-                        _LinkifiedSelectableText(
-                          text: message.text,
-                          style: bodyStyle,
-                          linkStyle: linkStyle,
-                          onOpenHostUrl: onOpenHostUrl,
-                        ),
-                    if (canPin || hasText)
-                      Padding(
-                        padding: const EdgeInsets.only(top: 6),
-                        child: Align(
-                          alignment: Alignment.centerRight,
-                          child: Wrap(
-                            spacing: 8,
-                            runSpacing: 4,
-                            crossAxisAlignment: WrapCrossAlignment.center,
-                            children: [
-                              Text(
-                                _formatMessageTime(message.createdAt),
-                                style: Theme.of(context).textTheme.labelSmall
-                                    ?.copyWith(
-                                      color: isUser
-                                          ? metaColor
-                                          : assistantMetaColor,
-                                      fontSize: 10.5,
-                                      fontFeatures: const [
-                                        FontFeature.tabularFigures(),
-                                      ],
-                                    ),
+                          if (!hasTextBlocks && hasText)
+                            const SizedBox(height: AppSpacing.compact),
+                        ],
+                        if (!hasTextBlocks && hasText)
+                          if (isAssistant)
+                            _MarkdownMessageBody(
+                              text: message.text,
+                              textColor: textColor,
+                              linkStyle: assistantLinkStyle,
+                              onOpenFile: onOpenFile,
+                              onOpenHostUrl: onOpenHostUrl,
+                              host: host,
+                              api: api,
+                              sessionId: sessionId,
+                            )
+                          else
+                            _LinkifiedSelectableText(
+                              text: message.text,
+                              style: bodyStyle,
+                              linkStyle: linkStyle,
+                              onOpenHostUrl: onOpenHostUrl,
+                            ),
+                        if (canPin || hasText)
+                          Align(
+                            alignment: Alignment.centerRight,
+                            child: AnimatedOpacity(
+                              opacity: showActions ? AppEmphasis.full : 0,
+                              duration: AppMotion.quick,
+                              alwaysIncludeSemantics: true,
+                              child: IgnorePointer(
+                                ignoring: !showActions,
+                                child: Tooltip(
+                                  message: _formatMessageTime(
+                                    message.createdAt,
+                                  ),
+                                  child: Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      if (hasText)
+                                        IconButton(
+                                          tooltip: 'Copy message',
+                                          icon: const Icon(
+                                            Icons.copy_outlined,
+                                            size: AppSizes.compactIcon,
+                                          ),
+                                          onPressed: () => Clipboard.setData(
+                                            ClipboardData(text: message.text),
+                                          ),
+                                        ),
+                                      if (canPin)
+                                        IconButton(
+                                          tooltip: pinned
+                                              ? 'Unpin message'
+                                              : 'Pin message',
+                                          icon: Icon(
+                                            pinned
+                                                ? Icons.push_pin_rounded
+                                                : Icons.push_pin_outlined,
+                                            size: AppSizes.compactIcon,
+                                          ),
+                                          onPressed: onTogglePin,
+                                        ),
+                                    ],
+                                  ),
+                                ),
                               ),
-                              if (canPin)
-                                _MessagePinButton(
-                                  pinned: pinned,
-                                  tone: isUser
-                                      ? metaColor
-                                      : colors.textSecondary,
-                                  accent: colors.warning,
-                                  onTap: onTogglePin!,
-                                ),
-                              if (!isUser && hasText)
-                                _MessageCopyButton(
-                                  text: message.text,
-                                  tone: colors.textSecondary,
-                                  accent: colors.accent,
-                                ),
-                            ],
+                            ),
                           ),
-                        ),
-                      ),
-                  ],
+                      ],
+                    ),
+                  ),
                 ),
               ),
             ),
@@ -1405,20 +1514,16 @@ class _MessageImageAttachmentTileState
 
   @override
   Widget build(BuildContext context) {
-    final colors = context.colors;
     final imageProvider = _imageProvider();
     final heroTag = _messageImageHeroTag(widget.url);
     return _ImageAttachmentCard(
       imageProvider: imageProvider,
       heroTag: heroTag,
-      fallback: isHostLoopbackUrl(widget.url) && _hostUrlError == null
-          ? const Center(
-              child: SizedBox.square(
-                dimension: 22,
-                child: CircularProgressIndicator(strokeWidth: 2),
-              ),
-            )
-          : _AttachmentLoadError(colors: colors),
+      loading:
+          isHostLoopbackUrl(widget.url) &&
+          _hostUrlError == null &&
+          imageProvider == null,
+      onRetry: _loadHostUrlIfNeeded,
       onOpen: imageProvider == null
           ? null
           : () {
@@ -1532,18 +1637,14 @@ class _LocalImageAttachmentTileState extends State<_LocalImageAttachmentTile> {
 
   @override
   Widget build(BuildContext context) {
-    final colors = context.colors;
     final heroTag = _messageImageHeroTag('${widget.host.id}:${widget.path}');
     final imageProvider = _imageProvider;
     final hasFailed = _error != null;
     return _ImageAttachmentCard(
       imageProvider: imageProvider,
       heroTag: heroTag,
-      fallback: _LocalImageFallback(
-        path: widget.path,
-        colors: colors,
-        loading: !hasFailed && imageProvider == null,
-      ),
+      loading: !hasFailed && imageProvider == null,
+      onRetry: _load,
       onOpen: imageProvider == null
           ? null
           : () {
@@ -1561,226 +1662,62 @@ class _LocalImageAttachmentTileState extends State<_LocalImageAttachmentTile> {
   }
 }
 
-class _ImageAttachmentCard extends StatelessWidget {
+class _ImageAttachmentCard extends StatefulWidget {
   const _ImageAttachmentCard({
     required this.imageProvider,
     required this.heroTag,
-    required this.fallback,
+    required this.loading,
+    required this.onRetry,
     required this.onOpen,
   });
-
   final ImageProvider<Object>? imageProvider;
   final String heroTag;
-  final Widget fallback;
+  final bool loading;
+  final VoidCallback onRetry;
   final VoidCallback? onOpen;
+  @override
+  State<_ImageAttachmentCard> createState() => _ImageAttachmentCardState();
+}
 
+class _ImageAttachmentCardState extends State<_ImageAttachmentCard> {
+  int _retry = 0;
+  Future<void> _reload() async {
+    await widget.imageProvider?.evict();
+    if (!mounted) return;
+    setState(() => _retry++);
+    widget.onRetry();
+  }
+
+  Widget _error() => MeshEmptyState.compact(
+    icon: Icons.broken_image_rounded,
+    title: 'Could not load image',
+    action: TextButton(onPressed: _reload, child: const Text('Retry')),
+  );
   @override
   Widget build(BuildContext context) {
-    final colors = context.colors;
-    final imageChild = imageProvider == null
-        ? fallback
+    final provider = widget.imageProvider;
+    final imageChild = provider == null
+        ? (widget.loading ? const MeshLoader(label: 'Loading image') : _error())
         : Hero(
-            tag: heroTag,
+            tag: widget.heroTag,
             child: Image(
-              image: imageProvider!,
+              key: ValueKey(_retry),
+              image: provider,
               fit: BoxFit.cover,
               gaplessPlayback: true,
-              errorBuilder: (context, error, stackTrace) => fallback,
+              frameBuilder: (context, child, frame, _) => frame == null
+                  ? const MeshLoader(label: 'Loading image')
+                  : child,
+              errorBuilder: (context, error, stackTrace) => _error(),
             ),
           );
-
-    return DecoratedBox(
-      decoration: BoxDecoration(
-        color: colors.surfaceMuted,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: colors.border),
-      ),
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(15),
-        child: Material(
-          color: Colors.transparent,
-          child: InkWell(
-            onTap: onOpen,
-            child: AspectRatio(aspectRatio: 1.35, child: imageChild),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class _LocalImageFallback extends StatelessWidget {
-  const _LocalImageFallback({
-    required this.path,
-    required this.colors,
-    this.loading = false,
-  });
-
-  final String path;
-  final AppColors colors;
-  final bool loading;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      color: colors.surfaceMuted,
-      padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
-      child: Row(
-        children: [
-          Icon(
-            loading ? Icons.downloading_rounded : Icons.image_rounded,
-            color: colors.accent,
-            size: 18,
-          ),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text(
-                  loading ? 'Loading image...' : _basename(path),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: Theme.of(context).textTheme.labelLarge?.copyWith(
-                    fontWeight: AppWeights.emphasis,
-                  ),
-                ),
-                const SizedBox(height: 2),
-                Text(
-                  path,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: monoStyle(color: colors.textTertiary, fontSize: 10.5),
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _AttachmentLoadError extends StatelessWidget {
-  const _AttachmentLoadError({required this.colors});
-
-  final AppColors colors;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      color: colors.surfaceMuted,
-      alignment: Alignment.center,
-      child: Icon(
-        Icons.broken_image_rounded,
-        color: colors.textTertiary,
-        size: 28,
-      ),
-    );
-  }
-}
-
-class _MessageCopyButton extends StatefulWidget {
-  const _MessageCopyButton({
-    required this.text,
-    required this.tone,
-    required this.accent,
-  });
-
-  final String text;
-  final Color tone;
-  final Color accent;
-
-  @override
-  State<_MessageCopyButton> createState() => _MessageCopyButtonState();
-}
-
-class _MessageCopyButtonState extends State<_MessageCopyButton> {
-  bool _copied = false;
-
-  Future<void> _handle() async {
-    await Clipboard.setData(ClipboardData(text: widget.text));
-    HapticFeedback.selectionClick();
-    if (!mounted) return;
-    setState(() => _copied = true);
-    Future.delayed(const Duration(milliseconds: 1400), () {
-      if (!mounted) return;
-      setState(() => _copied = false);
-    });
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final color = _copied ? widget.accent : widget.tone;
-    return InkWell(
-      onTap: _handle,
-      borderRadius: BorderRadius.circular(8),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(
-              _copied ? Icons.check_rounded : Icons.copy_rounded,
-              size: 13,
-              color: color,
-            ),
-            const SizedBox(width: 4),
-            Text(
-              _copied ? 'Copied' : 'Copy',
-              style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                color: color,
-                fontWeight: AppWeights.emphasis,
-                letterSpacing: 0.6,
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _MessagePinButton extends StatelessWidget {
-  const _MessagePinButton({
-    required this.pinned,
-    required this.tone,
-    required this.accent,
-    required this.onTap,
-  });
-
-  final bool pinned;
-  final Color tone;
-  final Color accent;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    final color = pinned ? accent : tone;
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(8),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(
-              pinned ? Icons.push_pin_rounded : Icons.push_pin_outlined,
-              size: 13,
-              color: color,
-            ),
-            const SizedBox(width: 4),
-            Text(
-              pinned ? 'Pinned' : 'Pin',
-              style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                color: color,
-                fontWeight: AppWeights.emphasis,
-                letterSpacing: 0.6,
-              ),
-            ),
-          ],
+    return ClipRRect(
+      borderRadius: AppShapes.panel,
+      child: Material(
+        color: context.colors.surfaceMuted,
+        child: InkWell(
+          onTap: widget.onOpen,
+          child: AspectRatio(aspectRatio: 1.35, child: imageChild),
         ),
       ),
     );
@@ -1837,9 +1774,10 @@ class _ReasoningTextBody extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colors = context.colors;
-    final style = Theme.of(
-      context,
-    ).textTheme.bodyMedium?.copyWith(color: textColor, height: 1.5);
+    final style = Theme.of(context).textTheme.bodyMedium?.copyWith(
+      color: textColor,
+      height: AppLineHeights.code,
+    );
     return _LinkifiedSelectableText(
       text: text,
       style: style,
@@ -1950,11 +1888,8 @@ class _LinkifiedSelectableTextState extends State<_LinkifiedSelectableText> {
       raw = trimmed;
       final href = raw.startsWith('www.') ? 'https://$raw' : raw;
       final recognizer = TapGestureRecognizer()
-        ..onTap = () => _openLink(
-              context,
-              href,
-              onOpenHostUrl: widget.onOpenHostUrl,
-            );
+        ..onTap = () =>
+            _openLink(context, href, onOpenHostUrl: widget.onOpenHostUrl);
       _recognizers.add(recognizer);
       spans.add(
         TextSpan(text: raw, style: widget.linkStyle, recognizer: recognizer),
@@ -2282,15 +2217,15 @@ class _ActivityCardState extends State<_ActivityCard> {
                 (activity.isTool
                         ? monoStyle(
                             color: context.colors.textPrimary,
-                            fontSize: 13,
+                            fontSize: AppFontSizes.compact,
                           )
                         : Theme.of(context).textTheme.titleSmall?.copyWith(
                             fontWeight: AppWeights.emphasis,
                           ))
-                    ?.copyWith(height: 1.35),
+                    ?.copyWith(height: AppLineHeights.caption),
           );
     return AnimatedSwitcher(
-      duration: const Duration(milliseconds: 160),
+      duration: AppMotion.quick,
       switchInCurve: Curves.easeOutCubic,
       switchOutCurve: Curves.easeOutCubic,
       child: child,
@@ -2300,14 +2235,21 @@ class _ActivityCardState extends State<_ActivityCard> {
   Widget _activityDetailsPanel(BuildContext context, Widget child) {
     final colors = context.colors;
     return Padding(
-      padding: const EdgeInsets.only(top: 6),
+      padding: const EdgeInsets.only(top: AppSpacing.tight),
       child: Container(
         width: double.infinity,
-        padding: const EdgeInsets.fromLTRB(10, 10, 10, 10),
+        padding: const EdgeInsets.fromLTRB(
+          AppSpacing.compact,
+          AppSpacing.compact,
+          AppSpacing.compact,
+          AppSpacing.compact,
+        ),
         decoration: BoxDecoration(
-          color: colors.surface.withValues(alpha: 0.58),
+          color: colors.surface.withValues(alpha: AppEmphasis.medium),
           borderRadius: AppShapes.input,
-          border: Border.all(color: colors.border.withValues(alpha: 0.52)),
+          border: Border.all(
+            color: colors.border.withValues(alpha: AppEmphasis.disabled),
+          ),
         ),
         child: child,
       ),
@@ -2319,9 +2261,6 @@ class _ActivityCardState extends State<_ActivityCard> {
     final activity = widget.activity;
     final sessionCwd = widget.sessionCwd;
     final colors = context.colors;
-    final commandLikeActivity =
-        activity.isCommand ||
-        (activity.isTool && _toolIsCommandActivity(activity));
     if (activity.isFileChange) {
       return _buildFileChangeInlineActivity(context, activity);
     }
@@ -2383,24 +2322,15 @@ class _ActivityCardState extends State<_ActivityCard> {
     return Align(
       alignment: Alignment.centerLeft,
       child: Padding(
-        padding: const EdgeInsets.only(bottom: 10),
+        padding: const EdgeInsets.only(bottom: AppSpacing.compact),
         child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 640),
+          constraints: const BoxConstraints(maxWidth: AppSizes.readingMaxWidth),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Material(
-                color: commandLikeActivity
-                    ? colors.surface.withValues(alpha: 0.76)
-                    : colors.surfaceMuted.withValues(alpha: 0.48),
-                shape: RoundedRectangleBorder(
-                  borderRadius: AppShapes.input,
-                  side: BorderSide(
-                    color: commandLikeActivity
-                        ? colors.codeBorder.withValues(alpha: 0.76)
-                        : colors.border.withValues(alpha: 0.62),
-                  ),
-                ),
+                color: Colors.transparent,
+                shape: RoundedRectangleBorder(borderRadius: AppShapes.input),
                 clipBehavior: Clip.antiAlias,
                 child: InkWell(
                   onTap: () {
@@ -2412,38 +2342,18 @@ class _ActivityCardState extends State<_ActivityCard> {
                   borderRadius: AppShapes.input,
                   child: Padding(
                     padding: const EdgeInsets.symmetric(
-                      horizontal: 10,
-                      vertical: 8,
+                      horizontal: 0,
+                      vertical: AppSpacing.tight,
                     ),
                     child: Row(
                       crossAxisAlignment: CrossAxisAlignment.center,
                       children: [
-                        Container(
-                          width: 30,
-                          height: 30,
-                          decoration: BoxDecoration(
-                            color: commandLikeActivity
-                                ? colors.surfaceElevated
-                                : activity.isCommand || activity.isTool
-                                ? colors.surfaceMuted.withValues(alpha: 0.72)
-                                : colors.accentMuted.withValues(alpha: 0.68),
-                            borderRadius: AppShapes.iconWell,
-                            border: Border.all(
-                              color: colors.border.withValues(alpha: 0.5),
-                            ),
-                          ),
-                          alignment: Alignment.center,
-                          child: Icon(
-                            activityIcon,
-                            size: 16,
-                            color: commandLikeActivity
-                                ? colors.codeForeground
-                                : activity.isCommand || activity.isTool
-                                ? colors.textPrimary
-                                : colors.accent,
-                          ),
+                        Icon(
+                          activityIcon,
+                          size: AppSizes.compactIcon,
+                          color: colors.textTertiary,
                         ),
-                        const SizedBox(width: 10),
+                        const SizedBox(width: AppSpacing.compact),
                         Expanded(
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
@@ -2455,10 +2365,10 @@ class _ActivityCardState extends State<_ActivityCard> {
                                       ?.copyWith(
                                         color: colors.textTertiary,
                                         fontWeight: AppWeights.title,
-                                        letterSpacing: 0.2,
+                                        letterSpacing: AppLetterSpacing.caps,
                                       ),
                                 ),
-                                const SizedBox(height: 2),
+                                const SizedBox(height: AppSpacing.xxs),
                               ],
                               _buildActivityTitle(
                                 context,
@@ -2468,7 +2378,7 @@ class _ActivityCardState extends State<_ActivityCard> {
                               if (!_cardCollapsed &&
                                   subtitle != null &&
                                   subtitle.isNotEmpty) ...[
-                                const SizedBox(height: 4),
+                                const SizedBox(height: AppSpacing.xs),
                                 Text(
                                   subtitle,
                                   maxLines: 2,
@@ -2481,15 +2391,15 @@ class _ActivityCardState extends State<_ActivityCard> {
                           ),
                         ),
                         if (statusBadge != null) ...[
-                          const SizedBox(width: 8),
+                          const SizedBox(width: AppSpacing.sm),
                           statusBadge,
                         ],
-                        const SizedBox(width: 4),
+                        const SizedBox(width: AppSpacing.xs),
                         Icon(
                           _cardCollapsed
                               ? Icons.keyboard_arrow_down_rounded
                               : Icons.keyboard_arrow_up_rounded,
-                          size: 18,
+                          size: AppSizes.inlineIcon,
                           color: colors.textTertiary,
                         ),
                       ],
@@ -2498,8 +2408,8 @@ class _ActivityCardState extends State<_ActivityCard> {
                 ),
               ),
               AnimatedSize(
-                duration: const Duration(milliseconds: 160),
-                curve: Curves.easeOutCubic,
+                duration: AppMotion.quick,
+                curve: AppMotion.standard,
                 alignment: Alignment.topLeft,
                 child: _cardCollapsed
                     ? const SizedBox.shrink()
@@ -2514,7 +2424,7 @@ class _ActivityCardState extends State<_ActivityCard> {
                                 runSpacing: 6,
                                 children: detailPills,
                               ),
-                              const SizedBox(height: 12),
+                              const SizedBox(height: AppSpacing.md),
                             ],
                             if (activity.isCommand)
                               ..._buildCommandBody(context, activity)
@@ -2549,7 +2459,7 @@ class _ActivityCardState extends State<_ActivityCard> {
                               ),
                             ],
                             if (contextActions.isNotEmpty) ...[
-                              const SizedBox(height: 12),
+                              const SizedBox(height: AppSpacing.md),
                               _ActivityActionRow(actions: contextActions),
                             ],
                           ],
@@ -2578,18 +2488,20 @@ class _ActivityCardState extends State<_ActivityCard> {
     return Align(
       alignment: Alignment.centerLeft,
       child: Padding(
-        padding: const EdgeInsets.only(bottom: 10),
+        padding: const EdgeInsets.only(bottom: AppSpacing.compact),
         child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 640),
+          constraints: const BoxConstraints(maxWidth: AppSizes.readingMaxWidth),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Material(
-                color: colors.surfaceMuted.withValues(alpha: 0.48),
+                color: colors.surfaceMuted.withValues(
+                  alpha: AppEmphasis.disabled,
+                ),
                 shape: RoundedRectangleBorder(
                   borderRadius: AppShapes.input,
                   side: BorderSide(
-                    color: colors.border.withValues(alpha: 0.62),
+                    color: colors.border.withValues(alpha: AppEmphasis.medium),
                   ),
                 ),
                 clipBehavior: Clip.antiAlias,
@@ -2603,8 +2515,8 @@ class _ActivityCardState extends State<_ActivityCard> {
                   borderRadius: AppShapes.input,
                   child: Padding(
                     padding: const EdgeInsets.symmetric(
-                      horizontal: 10,
-                      vertical: 8,
+                      horizontal: AppSpacing.compact,
+                      vertical: AppSpacing.sm,
                     ),
                     child: Row(
                       crossAxisAlignment: CrossAxisAlignment.center,
@@ -2613,20 +2525,24 @@ class _ActivityCardState extends State<_ActivityCard> {
                           width: 30,
                           height: 30,
                           decoration: BoxDecoration(
-                            color: colors.surfaceMuted.withValues(alpha: 0.72),
+                            color: colors.surfaceMuted.withValues(
+                              alpha: AppEmphasis.secondary,
+                            ),
                             borderRadius: AppShapes.iconWell,
                             border: Border.all(
-                              color: colors.border.withValues(alpha: 0.5),
+                              color: colors.border.withValues(
+                                alpha: AppEmphasis.disabled,
+                              ),
                             ),
                           ),
                           alignment: Alignment.center,
                           child: Icon(
                             Icons.edit_note_rounded,
-                            size: 16,
+                            size: AppSizes.compactIcon,
                             color: colors.textSecondary,
                           ),
                         ),
-                        const SizedBox(width: 10),
+                        const SizedBox(width: AppSpacing.compact),
                         Expanded(
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
@@ -2639,35 +2555,35 @@ class _ActivityCardState extends State<_ActivityCard> {
                                     ?.copyWith(
                                       color: colors.textPrimary,
                                       fontWeight: AppWeights.emphasis,
-                                      height: 1.25,
+                                      height: AppLineHeights.title,
                                     ),
                               ),
                               if (subtitle.isNotEmpty) ...[
-                                const SizedBox(height: 2),
+                                const SizedBox(height: AppSpacing.xxs),
                                 Text(
                                   subtitle,
                                   maxLines: 1,
                                   overflow: TextOverflow.ellipsis,
                                   style: monoStyle(
                                     color: colors.textSecondary,
-                                    fontSize: 12,
+                                    fontSize: AppFontSizes.caption,
                                     fontWeight: AppWeights.body,
-                                  ).copyWith(height: 1.3),
+                                  ).copyWith(height: AppLineHeights.label),
                                 ),
                               ],
                             ],
                           ),
                         ),
                         if (statusBadge != null) ...[
-                          const SizedBox(width: 8),
+                          const SizedBox(width: AppSpacing.sm),
                           statusBadge,
                         ],
-                        const SizedBox(width: 4),
+                        const SizedBox(width: AppSpacing.xs),
                         Icon(
                           _cardCollapsed
                               ? Icons.keyboard_arrow_down_rounded
                               : Icons.keyboard_arrow_up_rounded,
-                          size: 18,
+                          size: AppSizes.inlineIcon,
                           color: colors.textTertiary,
                         ),
                       ],
@@ -2676,8 +2592,8 @@ class _ActivityCardState extends State<_ActivityCard> {
                 ),
               ),
               AnimatedSize(
-                duration: const Duration(milliseconds: 160),
-                curve: Curves.easeOutCubic,
+                duration: AppMotion.quick,
+                curve: AppMotion.standard,
                 alignment: Alignment.topLeft,
                 child: _cardCollapsed
                     ? const SizedBox.shrink()
@@ -2688,7 +2604,7 @@ class _ActivityCardState extends State<_ActivityCard> {
                           children: [
                             if (contextActions.isNotEmpty) ...[
                               _ActivityActionRow(actions: contextActions),
-                              const SizedBox(height: 10),
+                              const SizedBox(height: AppSpacing.compact),
                             ],
                             if (changes.isEmpty)
                               _waitingText(context, 'Waiting for file changes.')
@@ -2705,7 +2621,7 @@ class _ActivityCardState extends State<_ActivityCard> {
                                   sessionCwd: sessionCwd,
                                   onOpen: _openWorkspaceFile,
                                 ),
-                              const SizedBox(height: 8),
+                              const SizedBox(height: AppSpacing.sm),
                               _buildLazyFileChanges(
                                 context,
                                 changes: changes,
@@ -2733,27 +2649,27 @@ class _ActivityCardState extends State<_ActivityCard> {
 
     if (_friendlyCommandTitleParts(command, activity.status) != null) {
       widgets.add(_activityCodeBlock(context, 'Raw command', command, 'bash'));
-      widgets.add(const SizedBox(height: 12));
+      widgets.add(const SizedBox(height: AppSpacing.md));
     }
 
     if ((activity.terminalInput ?? '').isNotEmpty) {
       widgets.add(
         Padding(
-          padding: const EdgeInsets.only(bottom: 8),
+          padding: const EdgeInsets.only(bottom: AppSpacing.sm),
           child: Text(
             'Sent to terminal',
             style: monoStyle(
               color: colors.textSecondary,
-              fontSize: 11,
+              fontSize: AppFontSizes.metadata,
               fontWeight: AppWeights.emphasis,
-            ).copyWith(letterSpacing: 0.8),
+            ).copyWith(letterSpacing: AppLetterSpacing.caps),
           ),
         ),
       );
       widgets.add(
         SyntaxCodeBlock(text: activity.terminalInput!, language: 'bash'),
       );
-      widgets.add(const SizedBox(height: 12));
+      widgets.add(const SizedBox(height: AppSpacing.md));
     }
 
     if ((activity.output ?? '').isNotEmpty) {
@@ -2765,7 +2681,7 @@ class _ActivityCardState extends State<_ActivityCard> {
           : output;
       widgets.add(SyntaxCodeBlock(text: displayText, language: 'bash'));
       if (isLong) {
-        widgets.add(const SizedBox(height: 6));
+        widgets.add(const SizedBox(height: AppSpacing.tight));
         widgets.add(
           _ExpandToggle(
             expanded: _outputExpanded,
@@ -2793,12 +2709,12 @@ class _ActivityCardState extends State<_ActivityCard> {
     final widgets = <Widget>[];
     widgets.addAll(_buildToolSemanticBlocks(context, activity));
     if (widgets.isNotEmpty) {
-      widgets.add(const SizedBox(height: 12));
+      widgets.add(const SizedBox(height: AppSpacing.md));
     }
     final command = _displayCommandText(_toolCommandText(activity));
     if (_friendlyCommandTitleParts(command, activity.status) != null) {
       widgets.add(_activityCodeBlock(context, 'Raw command', command, 'bash'));
-      widgets.add(const SizedBox(height: 12));
+      widgets.add(const SizedBox(height: AppSpacing.md));
     }
     final output = (activity.output ?? '').trimRight();
     final args = _formatActivityValue(activity.toolArgs);
@@ -2806,12 +2722,12 @@ class _ActivityCardState extends State<_ActivityCard> {
 
     if (args.isNotEmpty) {
       widgets.add(_activityCodeBlock(context, 'Arguments', args, 'json'));
-      widgets.add(const SizedBox(height: 12));
+      widgets.add(const SizedBox(height: AppSpacing.md));
     }
 
     if (output.isNotEmpty) {
       widgets.add(_activityCodeBlock(context, 'Output', output, 'text'));
-      widgets.add(const SizedBox(height: 12));
+      widgets.add(const SizedBox(height: AppSpacing.md));
     }
 
     if (activity.toolAttachments.isNotEmpty) {
@@ -2823,12 +2739,12 @@ class _ActivityCardState extends State<_ActivityCard> {
           attachments: activity.toolAttachments,
         ),
       );
-      widgets.add(const SizedBox(height: 12));
+      widgets.add(const SizedBox(height: AppSpacing.md));
     }
 
     if (result.isNotEmpty) {
       widgets.add(_activityCodeBlock(context, 'Result', result, 'json'));
-      widgets.add(const SizedBox(height: 12));
+      widgets.add(const SizedBox(height: AppSpacing.md));
     }
 
     if (widgets.isEmpty) {
@@ -2860,11 +2776,11 @@ class _ActivityCardState extends State<_ActivityCard> {
           label,
           style: monoStyle(
             color: colors.textSecondary,
-            fontSize: 11,
+            fontSize: AppFontSizes.metadata,
             fontWeight: AppWeights.emphasis,
-          ).copyWith(letterSpacing: 0.8),
+          ).copyWith(letterSpacing: AppLetterSpacing.caps),
         ),
-        const SizedBox(height: 8),
+        const SizedBox(height: AppSpacing.sm),
         SyntaxCodeBlock(text: text, language: language),
       ],
     );
@@ -2914,7 +2830,9 @@ class _ActivityCardState extends State<_ActivityCard> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        ...rows.expand((row) => [row, const SizedBox(height: 10)]),
+        ...rows.expand(
+          (row) => [row, const SizedBox(height: AppSpacing.compact)],
+        ),
         Text(
           _webSearchStatusCopy(activity),
           style: Theme.of(
@@ -2932,12 +2850,16 @@ class _ActivityCardState extends State<_ActivityCard> {
     bool linkify = false,
   }) {
     final colors = context.colors;
-    final bodyStyle = Theme.of(
-      context,
-    ).textTheme.bodySmall?.copyWith(color: colors.textPrimary, height: 1.4);
+    final bodyStyle = Theme.of(context).textTheme.bodySmall?.copyWith(
+      color: colors.textPrimary,
+      height: AppLineHeights.body,
+    );
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      padding: const EdgeInsets.symmetric(
+        horizontal: AppSpacing.md,
+        vertical: AppSpacing.compact,
+      ),
       decoration: BoxDecoration(
         color: colors.surfaceMuted,
         borderRadius: AppShapes.input,
@@ -2950,11 +2872,11 @@ class _ActivityCardState extends State<_ActivityCard> {
             label,
             style: monoStyle(
               color: colors.textSecondary,
-              fontSize: 11,
+              fontSize: AppFontSizes.metadata,
               fontWeight: AppWeights.emphasis,
-            ).copyWith(letterSpacing: 0.8),
+            ).copyWith(letterSpacing: AppLetterSpacing.caps),
           ),
-          const SizedBox(height: 6),
+          const SizedBox(height: AppSpacing.tight),
           linkify
               ? _LinkifiedSelectableText(
                   text: text,
@@ -3015,14 +2937,17 @@ class _ActivityCardState extends State<_ActivityCard> {
             'Prompt used',
             style: monoStyle(
               color: colors.textSecondary,
-              fontSize: 11,
+              fontSize: AppFontSizes.metadata,
               fontWeight: AppWeights.emphasis,
-            ).copyWith(letterSpacing: 0.8),
+            ).copyWith(letterSpacing: AppLetterSpacing.caps),
           ),
-          const SizedBox(height: 8),
+          const SizedBox(height: AppSpacing.sm),
           Container(
             width: double.infinity,
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+            padding: const EdgeInsets.symmetric(
+              horizontal: AppSpacing.md,
+              vertical: AppSpacing.compact,
+            ),
             decoration: BoxDecoration(
               color: colors.surfaceMuted,
               borderRadius: AppShapes.input,
@@ -3032,11 +2957,11 @@ class _ActivityCardState extends State<_ActivityCard> {
               prompt,
               style: Theme.of(context).textTheme.bodySmall?.copyWith(
                 color: colors.textPrimary,
-                height: 1.4,
+                height: AppLineHeights.body,
               ),
             ),
           ),
-          const SizedBox(height: 12),
+          const SizedBox(height: AppSpacing.md),
         ],
         if (savedPath.isNotEmpty) ...[
           _LocalImageAttachmentTile(
@@ -3045,10 +2970,13 @@ class _ActivityCardState extends State<_ActivityCard> {
             sessionId: widget.sessionId,
             path: savedPath,
           ),
-          const SizedBox(height: 8),
+          const SizedBox(height: AppSpacing.sm),
           Text(
             savedPath,
-            style: monoStyle(color: colors.textTertiary, fontSize: 10.5),
+            style: monoStyle(
+              color: colors.textTertiary,
+              fontSize: AppFontSizes.metadata,
+            ),
           ),
         ] else if (activity.status == 'completed') ...[
           _waitingText(
@@ -3156,6 +3084,11 @@ class _ActivityCardState extends State<_ActivityCard> {
 
     final title = (activity.toolTitle ?? '').trim();
     if (title.isNotEmpty) return title;
+    final args = activity.toolArgs;
+    if (args is Map) {
+      final label = args['title'];
+      if (label is String && label.trim().isNotEmpty) return label.trim();
+    }
     final name = (activity.toolName ?? '').trim();
     if (name.isNotEmpty) return name;
     return 'Tool execution';
@@ -3210,7 +3143,7 @@ class _ActivityCardState extends State<_ActivityCard> {
       'session' => 'Session',
       'memory' => 'Memory',
       'task' => 'Task',
-      _ => 'Tool',
+      _ => null,
     };
   }
 
@@ -3280,7 +3213,9 @@ class _ActivityCardState extends State<_ActivityCard> {
     }
 
     return [
-      ...rows.expand((row) => [row, const SizedBox(height: 10)]),
+      ...rows.expand(
+        (row) => [row, const SizedBox(height: AppSpacing.compact)],
+      ),
     ]..removeLast();
   }
 
@@ -3413,7 +3348,10 @@ class _ActivityCardState extends State<_ActivityCard> {
     final colors = context.colors;
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      padding: const EdgeInsets.symmetric(
+        horizontal: AppSpacing.md,
+        vertical: AppSpacing.compact,
+      ),
       decoration: BoxDecoration(
         color: colors.surfaceMuted,
         borderRadius: AppShapes.input,
@@ -3438,7 +3376,7 @@ class _ActivityCardState extends State<_ActivityCard> {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           DiffView(diff: diff),
-          const SizedBox(height: 6),
+          const SizedBox(height: AppSpacing.tight),
           _DiffToggle(
             expanded: true,
             label: label,
@@ -3474,7 +3412,7 @@ class _ActivityCardState extends State<_ActivityCard> {
         children: [
           for (final change in changes)
             Padding(
-              padding: const EdgeInsets.only(bottom: 14),
+              padding: const EdgeInsets.only(bottom: AppSpacing.md),
               child: _FileChangeBlock(
                 change: change,
                 sessionCwd: sessionCwd,
@@ -3507,49 +3445,22 @@ class _CommandTitleChip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final colors = context.colors;
-    final verbStyle = Theme.of(context).textTheme.titleSmall?.copyWith(
-      color: colors.textPrimary,
-      fontWeight: AppWeights.emphasis,
-      height: 1.35,
-    );
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        final maxCommandWidth = constraints.hasBoundedWidth
-            ? math.max(96.0, constraints.maxWidth - 34)
-            : 420.0;
-        return Wrap(
-          crossAxisAlignment: WrapCrossAlignment.center,
-          spacing: 4,
-          runSpacing: 4,
-          children: [
-            Text('${parts.verb} ', style: verbStyle),
-            ConstrainedBox(
-              constraints: BoxConstraints(maxWidth: maxCommandWidth),
-              child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
-                decoration: BoxDecoration(
-                  color: colors.surfaceElevated,
-                  borderRadius: BorderRadius.circular(AppRadii.badge),
-                  border: Border.all(
-                    color: colors.codeBorder.withValues(alpha: 0.92),
-                  ),
-                ),
-                child: Text(
-                  parts.command,
-                  maxLines: collapsed ? 1 : 2,
-                  overflow: TextOverflow.ellipsis,
-                  style: monoStyle(
-                    color: colors.codeForeground,
-                    fontSize: 12.5,
-                    fontWeight: AppWeights.emphasis,
-                  ).copyWith(height: 1.25),
-                ),
-              ),
-            ),
-          ],
-        );
-      },
+    final style = monoStyle(
+      color: context.colors.textSecondary,
+      fontSize: AppFontSizes.code,
+    ).copyWith(height: AppLineHeights.body, fontWeight: AppWeights.body);
+    return Row(
+      children: [
+        Text('${parts.verb} ', style: style),
+        Expanded(
+          child: Text(
+            parts.command,
+            maxLines: collapsed ? 1 : 2,
+            overflow: TextOverflow.ellipsis,
+            style: style,
+          ),
+        ),
+      ],
     );
   }
 }
@@ -3602,26 +3513,29 @@ class _ActivityActionChip extends StatelessWidget {
       color: Colors.transparent,
       child: InkWell(
         onTap: action.onTap,
-        borderRadius: BorderRadius.circular(999),
+        borderRadius: BorderRadius.circular(AppRadii.capsule),
         child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+          padding: const EdgeInsets.symmetric(
+            horizontal: AppSpacing.md,
+            vertical: AppSpacing.sm,
+          ),
           decoration: BoxDecoration(
-            color: tone.withValues(alpha: 0.08),
-            borderRadius: BorderRadius.circular(999),
-            border: Border.all(color: tone.withValues(alpha: 0.18)),
+            color: tone.withValues(alpha: AppEmphasis.focus),
+            borderRadius: BorderRadius.circular(AppRadii.capsule),
+            border: Border.all(color: tone.withValues(alpha: AppEmphasis.soft)),
           ),
           child: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Icon(action.icon, size: 16, color: tone),
-              const SizedBox(width: 6),
+              Icon(action.icon, size: AppSizes.compactIcon, color: tone),
+              const SizedBox(width: AppSpacing.tight),
               Text(
                 action.label,
                 style: Theme.of(context).textTheme.labelMedium?.copyWith(
                   color: action.tone == _ActivityActionTone.accent
                       ? colors.accent
                       : colors.textPrimary,
-                  fontWeight: FontWeight.w700,
+                  fontWeight: AppWeights.strong,
                 ),
               ),
             ],
@@ -3656,11 +3570,18 @@ class _DiffToggle extends StatelessWidget {
           onTap: onToggle,
           borderRadius: AppShapes.badge,
           child: Container(
-            padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 7),
+            padding: const EdgeInsets.symmetric(
+              horizontal: AppSpacing.md,
+              vertical: AppSpacing.sm,
+            ),
             decoration: BoxDecoration(
-              color: colors.surfaceElevated.withValues(alpha: 0.78),
+              color: colors.surfaceElevated.withValues(
+                alpha: AppEmphasis.secondary,
+              ),
               borderRadius: AppShapes.badge,
-              border: Border.all(color: colors.border.withValues(alpha: 0.72)),
+              border: Border.all(
+                color: colors.border.withValues(alpha: AppEmphasis.secondary),
+              ),
             ),
             child: Row(
               mainAxisSize: MainAxisSize.min,
@@ -3669,15 +3590,15 @@ class _DiffToggle extends StatelessWidget {
                   expanded
                       ? Icons.unfold_less_rounded
                       : Icons.unfold_more_rounded,
-                  size: 15,
+                  size: AppSizes.compactIcon,
                   color: colors.textSecondary,
                 ),
-                const SizedBox(width: 6),
+                const SizedBox(width: AppSpacing.tight),
                 Text(
                   expanded ? expandedLabel : label,
                   style: monoStyle(
                     color: colors.textSecondary,
-                    fontSize: 12,
+                    fontSize: AppFontSizes.caption,
                     fontWeight: AppWeights.emphasis,
                   ),
                 ),
@@ -3707,26 +3628,31 @@ class _ExpandToggle extends StatelessWidget {
     return GestureDetector(
       onTap: onToggle,
       child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        padding: const EdgeInsets.symmetric(
+          horizontal: AppSpacing.md,
+          vertical: AppSpacing.sm,
+        ),
         decoration: BoxDecoration(
           color: colors.accentMuted,
-          borderRadius: BorderRadius.circular(8),
-          border: Border.all(color: colors.accent.withValues(alpha: 0.3)),
+          borderRadius: BorderRadius.circular(AppRadii.control),
+          border: Border.all(
+            color: colors.accent.withValues(alpha: AppEmphasis.borderTint),
+          ),
         ),
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
             Icon(
               expanded ? Icons.unfold_less_rounded : Icons.unfold_more_rounded,
-              size: 16,
+              size: AppSizes.compactIcon,
               color: colors.accent,
             ),
-            const SizedBox(width: 6),
+            const SizedBox(width: AppSpacing.tight),
             Text(
               expanded ? 'Show less' : '+$hiddenCount lines',
               style: monoStyle(
                 color: colors.accent,
-                fontSize: 12,
+                fontSize: AppFontSizes.caption,
                 fontWeight: AppWeights.body,
               ),
             ),
@@ -3764,15 +3690,19 @@ class _FileChangeBlock extends StatelessWidget {
     final canOpen = onOpen != null && !isDeleted;
     final pathRow = Row(
       children: [
-        Icon(Icons.description_rounded, size: 16, color: colors.textSecondary),
-        const SizedBox(width: 8),
+        Icon(
+          Icons.description_rounded,
+          size: AppSizes.compactIcon,
+          color: colors.textSecondary,
+        ),
+        const SizedBox(width: AppSpacing.sm),
         Expanded(
           child: Text(
             _relativeSessionPath(change.path, sessionCwd),
             style:
                 monoStyle(
                   color: canOpen ? colors.accent : colors.textPrimary,
-                  fontSize: 12.5,
+                  fontSize: AppFontSizes.code,
                   fontWeight: AppWeights.body,
                 ).copyWith(
                   decoration: canOpen ? TextDecoration.underline : null,
@@ -3780,7 +3710,7 @@ class _FileChangeBlock extends StatelessWidget {
                 ),
           ),
         ),
-        const SizedBox(width: 8),
+        const SizedBox(width: AppSpacing.sm),
         MeshPill(label: change.kind, tone: tone, mono: true),
       ],
     );
@@ -3790,16 +3720,20 @@ class _FileChangeBlock extends StatelessWidget {
         canOpen
             ? InkWell(
                 onTap: () => onOpen!(change.path),
-                borderRadius: BorderRadius.circular(6),
+                borderRadius: BorderRadius.circular(AppRadii.hover),
                 child: Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 2),
+                  padding: const EdgeInsets.symmetric(vertical: AppSpacing.xxs),
                   child: pathRow,
                 ),
               )
             : pathRow,
         if ((change.movePath ?? '').isNotEmpty)
           Padding(
-            padding: const EdgeInsets.only(top: 4, bottom: 8, left: 24),
+            padding: const EdgeInsets.only(
+              top: AppSpacing.xs,
+              bottom: AppSpacing.sm,
+              left: AppSpacing.xl,
+            ),
             child: Text(
               'Moved from ${_relativeSessionPath(change.movePath!, sessionCwd)}',
               style: Theme.of(
@@ -3808,7 +3742,7 @@ class _FileChangeBlock extends StatelessWidget {
             ),
           )
         else
-          const SizedBox(height: 8),
+          const SizedBox(height: AppSpacing.sm),
         DiffView(diff: change.diff),
       ],
     );
@@ -3841,12 +3775,16 @@ class _InlineFileChangeRow extends StatelessWidget {
     };
     final canOpen = onOpen != null && !isDeleted;
     final row = Padding(
-      padding: const EdgeInsets.symmetric(vertical: 4),
+      padding: const EdgeInsets.symmetric(vertical: AppSpacing.xs),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.center,
         children: [
-          Icon(Icons.description_rounded, size: 15, color: colors.textTertiary),
-          const SizedBox(width: 8),
+          Icon(
+            Icons.description_rounded,
+            size: AppSizes.compactIcon,
+            color: colors.textTertiary,
+          ),
+          const SizedBox(width: AppSpacing.sm),
           Expanded(
             child: Text(
               _relativeSessionPath(change.path, sessionCwd),
@@ -3855,7 +3793,7 @@ class _InlineFileChangeRow extends StatelessWidget {
               style:
                   monoStyle(
                     color: canOpen ? colors.accent : colors.textPrimary,
-                    fontSize: 12.5,
+                    fontSize: AppFontSizes.code,
                     fontWeight: AppWeights.body,
                   ).copyWith(
                     decoration: canOpen ? TextDecoration.underline : null,
@@ -3863,7 +3801,7 @@ class _InlineFileChangeRow extends StatelessWidget {
                   ),
             ),
           ),
-          const SizedBox(width: 8),
+          const SizedBox(width: AppSpacing.sm),
           MeshPill(label: change.kind, tone: tone, mono: true),
         ],
       ),
@@ -3891,23 +3829,36 @@ class _DetailRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final colors = context.colors;
+    final labelWidget = Text(
+      label,
+      style: Theme.of(
+        context,
+      ).textTheme.bodySmall?.copyWith(color: context.colors.textSecondary),
+    );
+    final valueWidget = SelectableText(
+      value,
+      style: Theme.of(context).textTheme.bodyMedium,
+    );
     return Padding(
-      padding: const EdgeInsets.only(bottom: 12),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            label.toUpperCase(),
-            style: monoStyle(
-              color: colors.textSecondary,
-              fontSize: 10.5,
-              fontWeight: AppWeights.title,
-            ).copyWith(letterSpacing: 1.2),
-          ),
-          const SizedBox(height: 4),
-          Text(value, style: Theme.of(context).textTheme.bodyMedium),
-        ],
+      padding: const EdgeInsets.only(bottom: AppSpacing.md),
+      child: LayoutBuilder(
+        builder: (context, constraints) => constraints.maxWidth >= 500
+            ? Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Expanded(child: labelWidget),
+                  const SizedBox(width: AppSpacing.md),
+                  Expanded(flex: 3, child: valueWidget),
+                ],
+              )
+            : Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  labelWidget,
+                  const SizedBox(height: AppSpacing.xs),
+                  valueWidget,
+                ],
+              ),
       ),
     );
   }
@@ -3920,7 +3871,6 @@ class _SessionRuntimeDetails extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final colors = context.colors;
     final runtimeDetails = <({String label, String value})>[
       (label: 'Model', value: runtimeValue(runtime.model)),
       if ((runtime.modelProvider ?? '').isNotEmpty &&
@@ -4029,90 +3979,26 @@ class _SessionRuntimeDetails extends StatelessWidget {
               (label: 'Error', value: telemetry.compaction!.error!),
           ];
 
-    return MeshCard(
-      tone: MeshCardTone.muted,
-      padding: const EdgeInsets.fromLTRB(14, 12, 14, 10),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Icon(Icons.memory_rounded, size: 16, color: colors.accent),
-              const SizedBox(width: 7),
-              Text(
-                'Runtime',
-                style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                  color: colors.textPrimary,
-                  fontWeight: AppWeights.title,
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 10),
-          _RuntimeSection(
-            title: 'Runtime',
-            details: runtimeDetails,
-            showTitle: false,
-          ),
-          if (contextDetails.isNotEmpty) ...[
-            const SizedBox(height: 6),
-            _RuntimeExpansionSection(title: 'Context', details: contextDetails),
-          ],
-          if (usageDetails.isNotEmpty) ...[
-            const SizedBox(height: 4),
-            _RuntimeExpansionSection(
-              title: 'Last usage',
-              details: usageDetails,
-            ),
-          ],
-          if (compactionDetails.isNotEmpty) ...[
-            const SizedBox(height: 4),
-            _RuntimeExpansionSection(
-              title: 'Compaction',
-              details: compactionDetails,
-            ),
-          ],
-        ],
-      ),
-    );
-  }
-}
-
-class _RuntimeSection extends StatelessWidget {
-  const _RuntimeSection({
-    required this.title,
-    required this.details,
-    this.showTitle = true,
-  });
-
-  final String title;
-  final List<({String label, String value})> details;
-  final bool showTitle;
-
-  @override
-  Widget build(BuildContext context) {
-    final colors = context.colors;
     return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        if (showTitle) ...[
-          Text(
-            title.toUpperCase(),
-            style: monoStyle(
-              color: colors.textSecondary,
-              fontSize: 9.5,
-              fontWeight: AppWeights.title,
-            ).copyWith(letterSpacing: 1.1),
-          ),
-          const SizedBox(height: 8),
+        for (final detail in runtimeDetails)
+          _DetailRow(label: detail.label, value: detail.value),
+        if (contextDetails.isNotEmpty) ...[
+          const SizedBox(height: AppSpacing.tight),
+          _RuntimeExpansionSection(title: 'Context', details: contextDetails),
         ],
-        Wrap(
-          spacing: 6,
-          runSpacing: 6,
-          children: details
-              .map((detail) => _RuntimeDetailChip(detail: detail))
-              .toList(),
-        ),
+        if (usageDetails.isNotEmpty) ...[
+          const SizedBox(height: AppSpacing.xs),
+          _RuntimeExpansionSection(title: 'Last usage', details: usageDetails),
+        ],
+        if (compactionDetails.isNotEmpty) ...[
+          const SizedBox(height: AppSpacing.xs),
+          _RuntimeExpansionSection(
+            title: 'Compaction',
+            details: compactionDetails,
+          ),
+        ],
       ],
     );
   }
@@ -4127,81 +4013,24 @@ class _RuntimeExpansionSection extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colors = context.colors;
-    return Theme(
-      data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
-      child: ExpansionTile(
-        tilePadding: EdgeInsets.zero,
-        childrenPadding: const EdgeInsets.only(bottom: 6),
-        visualDensity: VisualDensity.compact,
-        iconColor: colors.textSecondary,
-        collapsedIconColor: colors.textSecondary,
-        title: Text(
-          title,
-          style: Theme.of(context).textTheme.labelLarge?.copyWith(
-            color: colors.textPrimary,
-            fontWeight: AppWeights.title,
-          ),
+    return ExpansionTile(
+      tilePadding: EdgeInsets.zero,
+      childrenPadding: const EdgeInsets.only(bottom: AppSpacing.tight),
+      visualDensity: VisualDensity.compact,
+      iconColor: colors.textSecondary,
+      collapsedIconColor: colors.textSecondary,
+      title: Text(
+        title,
+        style: Theme.of(context).textTheme.labelLarge?.copyWith(
+          color: colors.textPrimary,
+          fontWeight: AppWeights.title,
         ),
-        subtitle: Text(
-          '${details.length} ${details.length == 1 ? 'field' : 'fields'}',
-          style: monoStyle(color: colors.textSecondary, fontSize: 10.5),
-        ),
-        children: [
-          Align(
-            alignment: Alignment.centerLeft,
-            child: _RuntimeSection(
-              title: title,
-              details: details,
-              showTitle: false,
-            ),
-          ),
-        ],
       ),
-    );
-  }
-}
 
-class _RuntimeDetailChip extends StatelessWidget {
-  const _RuntimeDetailChip({required this.detail});
-
-  final ({String label, String value}) detail;
-
-  @override
-  Widget build(BuildContext context) {
-    final colors = context.colors;
-    return Container(
-      constraints: const BoxConstraints(maxWidth: 240),
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-      decoration: BoxDecoration(
-        color: colors.surface,
-        borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: colors.border),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Text(
-            detail.label,
-            style: monoStyle(
-              color: colors.textSecondary,
-              fontSize: 10.5,
-              fontWeight: AppWeights.title,
-            ),
-          ),
-          const SizedBox(width: 7),
-          Flexible(
-            child: Text(
-              detail.value,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                color: colors.textPrimary,
-                fontWeight: AppWeights.emphasis,
-              ),
-            ),
-          ),
-        ],
-      ),
+      children: [
+        for (final detail in details)
+          _DetailRow(label: detail.label, value: detail.value),
+      ],
     );
   }
 }
@@ -4835,107 +4664,23 @@ class _DaySeparator extends StatelessWidget {
   Widget build(BuildContext context) {
     final colors = context.colors;
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 10),
+      padding: const EdgeInsets.symmetric(vertical: AppSpacing.compact),
       child: Row(
         children: [
           Expanded(child: Divider(color: colors.border, height: 1)),
           Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 10),
+            padding: const EdgeInsets.symmetric(horizontal: AppSpacing.compact),
             child: Text(
               label,
               style: Theme.of(context).textTheme.labelSmall?.copyWith(
                 color: colors.textTertiary,
                 fontWeight: AppWeights.emphasis,
-                letterSpacing: 0.6,
+                letterSpacing: AppLetterSpacing.caps,
               ),
             ),
           ),
           Expanded(child: Divider(color: colors.border, height: 1)),
         ],
-      ),
-    );
-  }
-}
-
-class _SessionTimelineLoadingState extends StatelessWidget {
-  const _SessionTimelineLoadingState();
-
-  @override
-  Widget build(BuildContext context) {
-    return ListView(
-      physics: const AlwaysScrollableScrollPhysics(),
-      padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
-      children: const [
-        Center(child: MeshSkeleton(width: 88, height: 20, radius: 999)),
-        SizedBox(height: 14),
-        _SessionBubbleSkeleton(
-          widthFactor: 0.78,
-          lineWidths: [1.0, 0.86, 0.48],
-        ),
-        SizedBox(height: 10),
-        _SessionBubbleSkeleton(
-          widthFactor: 0.62,
-          rightAligned: true,
-          lineWidths: [0.94, 0.72],
-        ),
-        SizedBox(height: 10),
-        _SessionBubbleSkeleton(
-          widthFactor: 0.82,
-          lineWidths: [1.0, 0.92, 0.68],
-        ),
-        SizedBox(height: 10),
-        _SessionBubbleSkeleton(
-          widthFactor: 0.54,
-          rightAligned: true,
-          lineWidths: [0.82, 0.54],
-        ),
-      ],
-    );
-  }
-}
-
-class _SessionBubbleSkeleton extends StatelessWidget {
-  const _SessionBubbleSkeleton({
-    required this.widthFactor,
-    required this.lineWidths,
-    this.rightAligned = false,
-  });
-
-  final double widthFactor;
-  final List<double> lineWidths;
-  final bool rightAligned;
-
-  @override
-  Widget build(BuildContext context) {
-    return Align(
-      alignment: rightAligned ? Alignment.centerRight : Alignment.centerLeft,
-      child: FractionallySizedBox(
-        widthFactor: widthFactor,
-        alignment: rightAligned ? Alignment.centerRight : Alignment.centerLeft,
-        child: MeshSurface(
-          tone: rightAligned ? MeshSurfaceTone.accent : MeshSurfaceTone.surface,
-          radius: AppRadii.surface,
-          padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const FractionallySizedBox(
-                widthFactor: 0.24,
-                alignment: Alignment.centerLeft,
-                child: MeshSkeleton(height: 10, radius: AppRadii.badge),
-              ),
-              const SizedBox(height: 10),
-              for (var index = 0; index < lineWidths.length; index += 1) ...[
-                FractionallySizedBox(
-                  widthFactor: lineWidths[index],
-                  alignment: Alignment.centerLeft,
-                  child: const MeshSkeleton(height: 12, radius: AppRadii.badge),
-                ),
-                if (index != lineWidths.length - 1) const SizedBox(height: 8),
-              ],
-            ],
-          ),
-        ),
       ),
     );
   }
@@ -4978,12 +4723,12 @@ class _SessionWaitingState extends StatelessWidget {
             const SizedBox(height: AppSpacing.lg),
             OutlinedButton.icon(
               onPressed: onStop,
-              icon: const Icon(Icons.stop_circle_rounded, size: 17),
-              label: const Text('Stop agent'),
-              style: OutlinedButton.styleFrom(
-                foregroundColor: colors.danger,
-                side: BorderSide(color: colors.danger.withValues(alpha: 0.4)),
+              icon: const Icon(
+                Icons.stop_circle_rounded,
+                size: AppSizes.inlineIcon,
               ),
+              label: const Text('Stop agent'),
+              style: AppControlStyles.danger(colors),
             ),
           ],
         ],

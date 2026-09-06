@@ -93,43 +93,26 @@ class _AgentRunsViewState extends State<AgentRunsView> {
       future: _future,
       builder: (context, snapshot) {
         if (snapshot.connectionState != ConnectionState.done) {
-          return const _AgentRunsLoading();
+          return const MeshLoader(label: 'Loading agents');
         }
         if (snapshot.hasError) {
-          return Center(
-            child: Padding(
-              padding: const EdgeInsets.all(AppSpacing.lg),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  MeshEmptyState.compact(
-                    icon: Icons.error_outline_rounded,
-                    title: 'Could not load agents',
-                    body: friendlyError(snapshot.error ?? 'Unknown error'),
-                  ),
-                  const SizedBox(height: AppSpacing.md),
-                  OutlinedButton.icon(
-                    onPressed: _refresh,
-                    icon: const Icon(Icons.refresh_rounded),
-                    label: const Text('Try again'),
-                  ),
-                ],
-              ),
+          return MeshEmptyState.compact(
+            icon: Icons.error_outline_rounded,
+            title: 'Could not load agents',
+            body: friendlyError(snapshot.error ?? 'Unknown error'),
+            action: TextButton.icon(
+              onPressed: _refresh,
+              icon: const Icon(Icons.refresh_rounded),
+              label: const Text('Try again'),
             ),
           );
         }
         final runs = snapshot.data ?? const <AgentRunSummary>[];
         if (runs.isEmpty) {
-          return Center(
-            child: Padding(
-              padding: const EdgeInsets.all(AppSpacing.lg),
-              child: MeshEmptyState(
-                icon: Icons.account_tree_outlined,
-                title: 'No agents yet',
-                body:
-                    'Agents spawned by this session will appear here with their latest result.',
-              ),
-            ),
+          return const MeshEmptyState.compact(
+            icon: Icons.account_tree_outlined,
+            title: 'No agents yet',
+            body: 'Agents started by this session appear here.',
           );
         }
         return RefreshIndicator(
@@ -147,15 +130,13 @@ class _AgentRunsViewState extends State<AgentRunsView> {
             itemCount: runs.length + 1,
             separatorBuilder: (_, index) => index == 0
                 ? const SizedBox(height: AppSpacing.sm)
-                : Divider(
-                    height: 1,
-                    indent: 44,
-                    color: context.colors.border,
-                  ),
+                : Divider(height: 1, indent: 44, color: context.colors.border),
             itemBuilder: (context, index) {
               if (index == 0) {
-                final active = runs.where((run) => run.isActive).length;
-                return _AgentRunsSummary(total: runs.length, active: active);
+                return Text(
+                  '${runs.length} ${runs.length == 1 ? 'agent' : 'agents'}',
+                  style: Theme.of(context).textTheme.titleSmall,
+                );
               }
               final run = runs[index - 1];
               return _AgentRunRow(run: run, onTap: () => _openRun(run));
@@ -167,46 +148,24 @@ class _AgentRunsViewState extends State<AgentRunsView> {
   }
 }
 
-class _AgentRunsSummary extends StatelessWidget {
-  const _AgentRunsSummary({required this.total, required this.active});
+String _agentStatusLabel(AgentRunSummary run) => switch (run.status) {
+  'active' || 'running' => 'Running',
+  'waiting_for_input' => 'Needs input',
+  'waiting_for_approval' => 'Needs approval',
+  'errored' || 'failed' => 'Error',
+  'closed' || 'cancelled' || 'interrupted' => 'Stopped',
+  'completed' => 'Completed',
+  'idle' => 'Idle',
+  _ => 'Unknown status',
+};
 
-  final int total;
-  final int active;
-
-  @override
-  Widget build(BuildContext context) {
-    final colors = context.colors;
-    final completed = total - active;
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(4, 2, 4, 8),
-      child: Row(
-        children: [
-          Text(
-            '$total ${total == 1 ? 'agent' : 'agents'}',
-            style: Theme.of(context).textTheme.titleSmall?.copyWith(
-              color: colors.textPrimary,
-              fontWeight: AppWeights.title,
-            ),
-          ),
-          const Spacer(),
-          if (active > 0)
-            MeshPill(
-              label: '$active active',
-              tone: MeshPillTone.success,
-              mono: true,
-            ),
-          if (active > 0 && completed > 0) const SizedBox(width: 6),
-          if (completed > 0)
-            MeshPill(
-              label: '$completed done',
-              tone: MeshPillTone.neutral,
-              mono: true,
-            ),
-        ],
-      ),
-    );
-  }
-}
+Color _agentStatusColor(AgentRunSummary run, AppColors colors) =>
+    switch (run.status) {
+      'active' || 'running' => colors.success,
+      'waiting_for_input' || 'waiting_for_approval' => colors.warning,
+      'errored' || 'failed' => colors.danger,
+      _ => colors.textSecondary,
+    };
 
 class _AgentRunRow extends StatelessWidget {
   const _AgentRunRow({required this.run, required this.onTap});
@@ -217,91 +176,94 @@ class _AgentRunRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colors = context.colors;
-    final statusColor = run.isActive ? colors.success : colors.textTertiary;
+    final statusLabel = _agentStatusLabel(run);
+    final statusColor = _agentStatusColor(run, colors);
     return Semantics(
-      label: '${run.label}, ${run.isActive ? 'active' : 'done'}',
+      label: '${run.label}, $statusLabel',
       button: true,
       child: InkWell(
         onTap: onTap,
         child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 12),
+          padding: const EdgeInsets.symmetric(
+            horizontal: AppSpacing.xs,
+            vertical: AppSpacing.md,
+          ),
           child: Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Padding(
-              padding: const EdgeInsets.only(top: 5),
-              child: Container(
-                width: 8,
-                height: 8,
-                decoration: BoxDecoration(
-                  color: statusColor,
-                  shape: BoxShape.circle,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Padding(
+                padding: const EdgeInsets.only(top: AppSpacing.xs),
+                child: Container(
+                  width: 8,
+                  height: 8,
+                  decoration: BoxDecoration(
+                    color: statusColor,
+                    shape: BoxShape.circle,
+                  ),
                 ),
               ),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    children: [
-                      Expanded(
-                        child: Text(
-                          run.label,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: Theme.of(context).textTheme.titleSmall
-                              ?.copyWith(
-                                color: colors.textPrimary,
-                                fontWeight: AppWeights.title,
-                              ),
+              const SizedBox(width: AppSpacing.md),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            run.label,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: Theme.of(context).textTheme.titleSmall
+                                ?.copyWith(
+                                  color: colors.textPrimary,
+                                  fontWeight: AppWeights.title,
+                                ),
+                          ),
                         ),
-                      ),
-                      const SizedBox(width: 8),
+                        const SizedBox(width: AppSpacing.sm),
+                        Text(
+                          _relativeAge(run.updatedAt),
+                          style: Theme.of(context).textTheme.labelSmall
+                              ?.copyWith(color: colors.textTertiary),
+                        ),
+                      ],
+                    ),
+                    if (run.preview.trim().isNotEmpty) ...[
+                      const SizedBox(height: AppSpacing.xs),
                       Text(
-                        _relativeAge(run.updatedAt),
-                        style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                          color: colors.textTertiary,
+                        run.preview.trim(),
+                        maxLines: 3,
+                        overflow: TextOverflow.ellipsis,
+                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color: colors.textSecondary,
+                          height: AppLineHeights.body,
                         ),
                       ),
                     ],
-                  ),
-                  if (run.preview.trim().isNotEmpty) ...[
-                    const SizedBox(height: 4),
+                    const SizedBox(height: AppSpacing.sm),
                     Text(
-                      run.preview.trim(),
-                      maxLines: 3,
-                      overflow: TextOverflow.ellipsis,
-                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                        color: colors.textSecondary,
-                        height: 1.4,
+                      statusLabel,
+                      style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                        color: statusColor,
+                        fontWeight: AppWeights.emphasis,
                       ),
                     ),
                   ],
-                  const SizedBox(height: 7),
-                  Text(
-                    run.isActive ? 'Active' : 'Done',
-                    style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                      color: statusColor,
-                      fontWeight: AppWeights.emphasis,
-                    ),
-                  ),
-                ],
+                ),
               ),
-            ),
-            const SizedBox(width: 4),
-            Padding(
-              padding: const EdgeInsets.only(top: 3),
-              child: Icon(
-                Icons.chevron_right_rounded,
-                size: 18,
-                color: colors.textTertiary,
+              const SizedBox(width: AppSpacing.xs),
+              Padding(
+                padding: const EdgeInsets.only(top: AppSpacing.xs),
+                child: Icon(
+                  Icons.chevron_right_rounded,
+                  size: AppSizes.inlineIcon,
+                  color: colors.textTertiary,
+                ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
-      ),
       ),
     );
   }
@@ -342,7 +304,7 @@ class _AgentRunDetail extends StatelessWidget {
                   tooltip: 'Back to agents',
                   icon: const Icon(Icons.arrow_back_rounded),
                 ),
-                const SizedBox(width: 4),
+                const SizedBox(width: AppSpacing.xs),
                 Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
@@ -357,11 +319,9 @@ class _AgentRunDetail extends StatelessWidget {
                         ),
                       ),
                       Text(
-                        run.isActive ? 'Active' : 'Done',
+                        _agentStatusLabel(run),
                         style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                          color: run.isActive
-                              ? colors.success
-                              : colors.textSecondary,
+                          color: _agentStatusColor(run, colors),
                         ),
                       ),
                     ],
@@ -371,7 +331,7 @@ class _AgentRunDetail extends StatelessWidget {
             ),
             const SizedBox(height: AppSpacing.md),
             if (snapshot.connectionState != ConnectionState.done)
-              const _AgentRunsLoading()
+              const MeshLoader(label: 'Loading agents')
             else if (snapshot.hasError)
               MeshEmptyState.compact(
                 icon: Icons.error_outline_rounded,
@@ -382,7 +342,6 @@ class _AgentRunDetail extends StatelessWidget {
               const MeshEmptyState.compact(
                 icon: Icons.chat_bubble_outline_rounded,
                 title: 'No transcript yet',
-                body: 'This agent has not produced a visible message.',
               )
             else
               for (final message in messages) ...[
@@ -415,33 +374,15 @@ class _AgentMessage extends StatelessWidget {
             fontWeight: AppWeights.emphasis,
           ),
         ),
-        const SizedBox(height: 4),
+        const SizedBox(height: AppSpacing.xs),
         Text(
           message.text.trim(),
           style: Theme.of(context).textTheme.bodySmall?.copyWith(
             color: colors.textPrimary,
-            height: 1.45,
+            height: AppLineHeights.reading,
           ),
         ),
       ],
-    );
-  }
-}
-
-class _AgentRunsLoading extends StatelessWidget {
-  const _AgentRunsLoading();
-
-  @override
-  Widget build(BuildContext context) {
-    return const Padding(
-      padding: EdgeInsets.all(AppSpacing.md),
-      child: Column(
-        children: [
-          MeshListRowSkeleton(framed: false, showTrailing: false),
-          MeshListRowSkeleton(framed: false, showTrailing: false),
-          MeshListRowSkeleton(framed: false, showTrailing: false),
-        ],
-      ),
     );
   }
 }

@@ -1,11 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:flutter_highlight/themes/atom-one-dark.dart';
-import 'package:flutter_highlight/themes/github.dart';
 import 'package:highlight/highlight.dart' show highlight, Node;
 
 import '../theme/app_colors.dart';
 import '../theme/app_theme.dart';
+import '../theme/app_tokens.dart';
+import '../theme/app_code_theme.dart';
 
 /// A code block that renders syntax-highlighted text with the Sidemesh
 /// app theme.
@@ -15,7 +15,12 @@ class SyntaxCodeBlock extends StatefulWidget {
     required this.text,
     this.language,
     this.showLanguageBadge = true,
-    this.padding = const EdgeInsets.fromLTRB(14, 12, 14, 12),
+    this.padding = const EdgeInsets.fromLTRB(
+      AppSpacing.md,
+      AppSpacing.md,
+      AppSpacing.md,
+      AppSpacing.md,
+    ),
   });
 
   final String text;
@@ -45,9 +50,7 @@ class _SyntaxCodeBlockState extends State<SyntaxCodeBlock> {
   Widget build(BuildContext context) {
     final colors = context.colors;
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    final theme = isDark
-        ? _tuneTheme(atomOneDarkTheme, colors)
-        : _tuneTheme(githubTheme, colors);
+    final theme = buildSyntaxTheme(colors, dark: isDark);
     final lang = _normalizeLanguage(widget.language);
     final languageLabel = _displayLanguageLabel(lang);
     final showHeader = widget.showLanguageBadge;
@@ -55,7 +58,7 @@ class _SyntaxCodeBlockState extends State<SyntaxCodeBlock> {
     return DecoratedBox(
       decoration: BoxDecoration(
         color: colors.codeBackground,
-        borderRadius: BorderRadius.circular(14),
+        borderRadius: BorderRadius.circular(AppRadii.panel),
         border: Border.all(color: colors.codeBorder),
       ),
       child: Column(
@@ -63,25 +66,30 @@ class _SyntaxCodeBlockState extends State<SyntaxCodeBlock> {
         children: [
           if (showHeader)
             Padding(
-              padding: const EdgeInsets.fromLTRB(14, 10, 8, 0),
+              padding: const EdgeInsets.fromLTRB(
+                AppSpacing.md,
+                AppSpacing.compact,
+                AppSpacing.sm,
+                0,
+              ),
               child: Row(
                 children: [
                   if (languageLabel != null)
                     Container(
                       padding: const EdgeInsets.symmetric(
-                        horizontal: 8,
-                        vertical: 3,
+                        horizontal: AppSpacing.sm,
+                        vertical: AppSpacing.xs,
                       ),
                       decoration: BoxDecoration(
                         color: colors.surfaceMuted,
-                        borderRadius: BorderRadius.circular(6),
+                        borderRadius: BorderRadius.circular(AppRadii.hover),
                         border: Border.all(color: colors.border),
                       ),
                       child: Text(
                         languageLabel,
                         style: Theme.of(context).textTheme.labelSmall?.copyWith(
                           color: colors.textSecondary,
-                          fontWeight: FontWeight.w700,
+                          fontWeight: AppWeights.strong,
                         ),
                       ),
                     ),
@@ -105,8 +113,8 @@ class _SyntaxCodeBlockState extends State<SyntaxCodeBlock> {
               TextSpan(
                 style: monoStyle(
                   color: colors.codeForeground,
-                  fontSize: 12.5,
-                  height: 1.5,
+                  fontSize: AppFontSizes.code,
+                  height: AppLineHeights.code,
                 ),
                 children: _highlightSpans(
                   widget.text,
@@ -139,23 +147,26 @@ class _CopyIconButton extends StatelessWidget {
       message: copied ? 'Copied' : 'Copy',
       child: InkWell(
         onTap: onPressed,
-        borderRadius: BorderRadius.circular(8),
+        borderRadius: BorderRadius.circular(AppRadii.control),
         child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+          padding: const EdgeInsets.symmetric(
+            horizontal: AppSpacing.sm,
+            vertical: AppSpacing.xs,
+          ),
           child: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
               Icon(
                 copied ? Icons.check_rounded : Icons.copy_rounded,
-                size: 14,
+                size: AppSizes.smallIcon,
                 color: copied ? colors.accent : colors.textSecondary,
               ),
-              const SizedBox(width: 4),
+              const SizedBox(width: AppSpacing.xs),
               Text(
                 copied ? 'Copied' : 'Copy',
                 style: Theme.of(context).textTheme.labelSmall?.copyWith(
                   color: copied ? colors.accent : colors.textSecondary,
-                  fontWeight: FontWeight.w700,
+                  fontWeight: AppWeights.strong,
                 ),
               ),
             ],
@@ -164,19 +175,6 @@ class _CopyIconButton extends StatelessWidget {
       ),
     );
   }
-}
-
-Map<String, TextStyle> _tuneTheme(
-  Map<String, TextStyle> base,
-  AppColors colors,
-) {
-  return {
-    ...base,
-    'root': (base['root'] ?? const TextStyle()).copyWith(
-      backgroundColor: Colors.transparent,
-      color: colors.codeForeground,
-    ),
-  };
 }
 
 /// Best-effort language normalization.  Returns null when we should fall back

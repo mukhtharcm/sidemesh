@@ -5,9 +5,9 @@ import 'package:flutter/material.dart';
 import '../../models.dart';
 import '../../search_query.dart';
 import '../../theme/app_colors.dart';
-import '../../theme/color_contrast.dart';
 import '../../theme/app_theme.dart';
 import '../../theme/app_tokens.dart';
+import '../../theme/app_control_styles.dart';
 import '../../widgets/mesh_widgets.dart';
 import 'inspector_controller.dart';
 
@@ -45,6 +45,9 @@ InspectorSurface buildInspectorSearchSurface({
   required FocusNode focusNode,
   required List<SearchRecord> Function() recordsBuilder,
   Listenable? refresh,
+  bool Function()? loadingBuilder,
+  String? Function()? errorBuilder,
+  VoidCallback? onRetry,
 }) {
   return InspectorSurface(
     kind: InspectorSurfaceKind.search,
@@ -52,12 +55,16 @@ InspectorSurface buildInspectorSearchSurface({
     title: 'Search',
     icon: Icons.search_rounded,
     bodyBuilder: (context) {
-      Widget buildPanel() => SearchPanel(
-        controller: controller,
-        focusNode: focusNode,
-        records: recordsBuilder(),
-        showDragHandle: false,
-        showCloseButton: false,
+      Widget buildPanel() => Padding(
+        padding: const EdgeInsets.all(AppSpacing.lg),
+        child: SearchPanel(
+          controller: controller,
+          focusNode: focusNode,
+          records: recordsBuilder(),
+          loading: loadingBuilder?.call() ?? false,
+          error: errorBuilder?.call(),
+          onRetry: onRetry,
+        ),
       );
       if (refresh == null) return buildPanel();
       return ListenableBuilder(
@@ -68,27 +75,24 @@ InspectorSurface buildInspectorSearchSurface({
   );
 }
 
-/// The search body — input pill, filter chips, and result list. Host
-/// chrome (drag handle for bottom sheets, close button for the old
-/// inline path) is opt-in via [showDragHandle] / [showCloseButton] so
-/// the same widget can live inside the inspector pane or a sheet.
+/// Search content shared by the mobile sheet and desktop inspector.
 class SearchPanel extends StatefulWidget {
   const SearchPanel({
     super.key,
     required this.controller,
     required this.focusNode,
     required this.records,
-    this.onClose,
-    this.showDragHandle = false,
-    this.showCloseButton = false,
+    this.loading = false,
+    this.error,
+    this.onRetry,
   });
 
   final TextEditingController controller;
   final FocusNode focusNode;
   final List<SearchRecord> records;
-  final VoidCallback? onClose;
-  final bool showDragHandle;
-  final bool showCloseButton;
+  final bool loading;
+  final String? error;
+  final VoidCallback? onRetry;
 
   @override
   State<SearchPanel> createState() => _SearchPanelState();
@@ -131,15 +135,17 @@ class _SearchPanelState extends State<SearchPanel> {
   }
 
   List<SearchRecord> _filteredRecords() {
-    return widget.records.where((r) {
-      final kindOk = switch (_filter) {
-        _SearchFilter.all => true,
-        _SearchFilter.messages => r.kind == SearchRecordKind.message,
-        _SearchFilter.activities => r.kind == SearchRecordKind.activity,
-      };
-      if (!kindOk) return false;
-      return matchesSearchQuery(r.haystack, _query);
-    }).toList(growable: false);
+    return widget.records
+        .where((r) {
+          final kindOk = switch (_filter) {
+            _SearchFilter.all => true,
+            _SearchFilter.messages => r.kind == SearchRecordKind.message,
+            _SearchFilter.activities => r.kind == SearchRecordKind.activity,
+          };
+          if (!kindOk) return false;
+          return matchesSearchQuery(r.haystack, _query);
+        })
+        .toList(growable: false);
   }
 
   @override
@@ -148,244 +154,117 @@ class _SearchPanelState extends State<SearchPanel> {
     final theme = Theme.of(context);
     final results = _filteredRecords();
     final hasQuery = _query.trim().isNotEmpty;
-    return Material(
-      color: colors.canvas,
-      shape: widget.showDragHandle
-          ? const RoundedRectangleBorder(
-              borderRadius: BorderRadius.vertical(top: Radius.circular(18)),
-            )
-          : null,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          if (widget.showDragHandle)
-            Padding(
-              padding: const EdgeInsets.only(top: 8),
-              child: Center(
-                child: Container(
-                  width: 44,
-                  height: 4,
-                  decoration: BoxDecoration(
-                    color: colors.border,
-                    borderRadius: BorderRadius.circular(2),
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        TextField(
+          controller: widget.controller,
+          focusNode: widget.focusNode,
+          autofocus: true,
+          textInputAction: TextInputAction.search,
+          style: AppControlStyles.searchText(context),
+          decoration: AppControlStyles.search(context).copyWith(
+            hintText: 'Search messages and actions',
+            suffixIcon: widget.controller.text.isEmpty
+                ? null
+                : IconButton(
+                    tooltip: 'Clear search',
+                    onPressed: widget.controller.clear,
+                    icon: const Icon(Icons.close_rounded),
                   ),
-                ),
-              ),
-            ),
-          Padding(
-            padding: const EdgeInsets.fromLTRB(14, 12, 14, 6),
-            child: Container(
-              padding: const EdgeInsets.fromLTRB(12, 6, 6, 6),
-              decoration: BoxDecoration(
-                color: colors.surfaceMuted,
-                borderRadius: BorderRadius.circular(10),
-                border: Border.all(color: colors.border),
-              ),
-              child: Row(
-                children: [
-                  Icon(
-                    Icons.search_rounded,
-                    size: 18,
-                    color: colors.textTertiary,
-                  ),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: TextField(
-                      controller: widget.controller,
-                      focusNode: widget.focusNode,
-                      autofocus: true,
-                      textInputAction: TextInputAction.search,
-                      cursorColor: colors.accent,
-                      decoration: InputDecoration(
-                        isCollapsed: true,
-                        border: InputBorder.none,
-                        hintText: 'Search this session',
-                        hintStyle: TextStyle(
-                          color: colors.textTertiary,
-                          fontSize: 14,
-                        ),
-                      ),
-                      style: theme.textTheme.bodyMedium?.copyWith(
-                        color: colors.textPrimary,
-                        fontSize: 14,
-                        height: 1.4,
-                      ),
-                    ),
-                  ),
-                  if (hasQuery)
-                    InkResponse(
-                      radius: 16,
-                      onTap: () {
-                        widget.controller.clear();
-                      },
-                      child: Padding(
-                        padding: const EdgeInsets.all(6),
-                        child: Icon(
-                          Icons.close_rounded,
-                          size: 16,
-                          color: colors.textSecondary,
-                        ),
-                      ),
-                    ),
-                  if (widget.showCloseButton) ...[
-                    Container(
-                      width: 1,
-                      height: 18,
-                      margin: const EdgeInsets.symmetric(horizontal: 4),
-                      color: colors.border,
-                    ),
-                    InkResponse(
-                      radius: 18,
-                      onTap: widget.onClose,
-                      child: Padding(
-                        padding: const EdgeInsets.all(6),
-                        child: Icon(
-                          Icons.close_rounded,
-                          size: 16,
-                          color: colors.textSecondary,
-                        ),
-                      ),
-                    ),
-                  ],
-                ],
-              ),
-            ),
-          ),
-          Padding(
-            padding: const EdgeInsets.fromLTRB(14, 2, 14, 6),
-            child: Row(
-              children: [
-                _SearchFilterChip(
-                  label: 'All',
-                  selected: _filter == _SearchFilter.all,
-                  onTap: () => setState(() => _filter = _SearchFilter.all),
-                ),
-                const SizedBox(width: 6),
-                _SearchFilterChip(
-                  label: 'Messages',
-                  selected: _filter == _SearchFilter.messages,
-                  onTap: () =>
-                      setState(() => _filter = _SearchFilter.messages),
-                ),
-                const SizedBox(width: 6),
-                _SearchFilterChip(
-                  label: 'Actions',
-                  selected: _filter == _SearchFilter.activities,
-                  onTap: () =>
-                      setState(() => _filter = _SearchFilter.activities),
-                ),
-                const Spacer(),
-                Text(
-                  hasQuery
-                      ? '${results.length} match${results.length == 1 ? '' : 'es'}'
-                      : '${results.length} item${results.length == 1 ? '' : 's'}',
-                  style: theme.textTheme.labelSmall?.copyWith(
-                    color: colors.textTertiary,
-                    fontFeatures: const [FontFeature.tabularFigures()],
-                  ),
-                ),
-              ],
-            ),
-          ),
-          Divider(height: 1, color: colors.border),
-          Expanded(
-            child: results.isEmpty
-                ? _SearchPanelEmptyState(
-                    query: _query.trim(),
-                    totalRecords: widget.records.length,
-                  )
-                : ListView.separated(
-                    padding: const EdgeInsets.symmetric(vertical: 4),
-                    itemCount: results.length,
-                    separatorBuilder: (_, _) =>
-                        Divider(height: 1, color: colors.border),
-                    itemBuilder: (context, index) {
-                      final record = results[index];
-                      return _SearchResultRow(
-                        record: record,
-                        query: _query.trim(),
-                        expanded: _expanded.contains(record.id),
-                        onToggle: () {
-                          setState(() {
-                            if (!_expanded.add(record.id)) {
-                              _expanded.remove(record.id);
-                            }
-                          });
-                        },
-                      );
-                    },
-                  ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _SearchFilterChip extends StatelessWidget {
-  const _SearchFilterChip({
-    required this.label,
-    required this.selected,
-    required this.onTap,
-  });
-
-  final String label;
-  final bool selected;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    final colors = context.colors;
-    final selectedForeground = readableActionForeground(colors, colors.accent);
-    return Material(
-      color: Colors.transparent,
-      child: InkWell(
-        borderRadius: AppShapes.pill,
-        onTap: onTap,
-        child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-          decoration: BoxDecoration(
-            color: selected ? colors.accent : colors.surfaceMuted,
-            borderRadius: AppShapes.pill,
-            border: Border.all(
-              color: selected ? colors.accent : colors.border,
-              width: 1,
-            ),
-          ),
-          child: Text(
-            label,
-            style: Theme.of(context).textTheme.labelSmall?.copyWith(
-              color: selected ? selectedForeground : colors.textSecondary,
-              fontWeight: AppWeights.emphasis,
-              letterSpacing: 0.3,
-            ),
           ),
         ),
-      ),
-    );
-  }
-}
-
-class _SearchPanelEmptyState extends StatelessWidget {
-  const _SearchPanelEmptyState({
-    required this.query,
-    required this.totalRecords,
-  });
-
-  final String query;
-  final int totalRecords;
-
-  @override
-  Widget build(BuildContext context) {
-    final hasQuery = query.isNotEmpty;
-    return MeshEmptyState.compact(
-      icon: hasQuery ? Icons.search_off_rounded : Icons.search_rounded,
-      title: hasQuery
-          ? 'No matches for "$query"'
-          : 'Search this session',
-      body: hasQuery
-          ? 'Try another word or switch the filter.'
-          : 'Search across $totalRecords loaded items.',
+        if (widget.records.isNotEmpty) ...[
+          const SizedBox(height: AppSpacing.md),
+          SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: SegmentedButton<_SearchFilter>(
+              segments: const [
+                ButtonSegment(value: _SearchFilter.all, label: Text('All')),
+                ButtonSegment(
+                  value: _SearchFilter.messages,
+                  label: Text('Messages'),
+                ),
+                ButtonSegment(
+                  value: _SearchFilter.activities,
+                  label: Text('Actions'),
+                ),
+              ],
+              selected: {_filter},
+              showSelectedIcon: false,
+              onSelectionChanged: (values) =>
+                  setState(() => _filter = values.single),
+            ),
+          ),
+        ],
+        if (hasQuery && results.isNotEmpty) ...[
+          const SizedBox(height: AppSpacing.md),
+          Text(
+            '${results.length} match${results.length == 1 ? '' : 'es'}',
+            style: theme.textTheme.bodySmall?.copyWith(
+              color: colors.textSecondary,
+            ),
+          ),
+        ],
+        const SizedBox(height: AppSpacing.lg),
+        Expanded(
+          child: widget.records.isEmpty && widget.loading
+              ? const MeshLoader(label: 'Loading conversation')
+              : widget.records.isEmpty && widget.error != null
+              ? MeshEmptyState.compact(
+                  icon: Icons.error_outline_rounded,
+                  title: 'Could not load conversation',
+                  body: widget.error!,
+                  action: widget.onRetry == null
+                      ? null
+                      : TextButton(
+                          onPressed: widget.onRetry,
+                          child: const Text('Retry'),
+                        ),
+                )
+              : !hasQuery || results.isEmpty
+              ? Align(
+                  alignment: Alignment.topCenter,
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(
+                      vertical: AppSpacing.xl,
+                    ),
+                    child: Text(
+                      widget.records.isEmpty
+                          ? 'No messages or actions to search yet.'
+                          : hasQuery
+                          ? 'No matches. Try another word or filter.'
+                          : 'Type to search this conversation.',
+                      textAlign: TextAlign.center,
+                      style: theme.textTheme.bodyMedium?.copyWith(
+                        color: colors.textSecondary,
+                      ),
+                    ),
+                  ),
+                )
+              : ListView.separated(
+                  padding: EdgeInsets.zero,
+                  itemCount: results.length,
+                  separatorBuilder: (_, _) =>
+                      Divider(height: AppStrokes.border, color: colors.border),
+                  itemBuilder: (context, index) {
+                    final record = results[index];
+                    return _SearchResultRow(
+                      record: record,
+                      query: _query.trim(),
+                      expanded: _expanded.contains(record.id),
+                      onToggle: () {
+                        setState(() {
+                          if (!_expanded.add(record.id)) {
+                            _expanded.remove(record.id);
+                          }
+                        });
+                      },
+                    );
+                  },
+                ),
+        ),
+      ],
     );
   }
 }
@@ -413,16 +292,24 @@ class _SearchResultRow extends StatelessWidget {
               ? Icons.person_outline_rounded
               : Icons.auto_awesome_rounded)
         : _iconForActivity(record.activity!.type);
+    final preview = record.kind == SearchRecordKind.message
+        ? record.message!.text
+        : _activityPreviewBody(record.activity!);
     final snippet = _SnippetText(
-      body: record.kind == SearchRecordKind.message
-          ? record.message!.text
-          : _activityPreviewBody(record.activity!),
+      body: searchQueryMatchRanges(preview, query).isEmpty
+          ? record.haystack
+          : preview,
       query: query,
     );
     return InkWell(
       onTap: onToggle,
       child: Padding(
-        padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+        padding: const EdgeInsets.fromLTRB(
+          AppSpacing.md,
+          AppSpacing.md,
+          AppSpacing.md,
+          AppSpacing.md,
+        ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
@@ -435,11 +322,11 @@ class _SearchResultRow extends StatelessWidget {
                   alignment: Alignment.center,
                   decoration: BoxDecoration(
                     color: colors.surfaceMuted,
-                    borderRadius: BorderRadius.circular(8),
+                    borderRadius: AppShapes.iconWell,
                   ),
                   child: Icon(
                     leadingIcon,
-                    size: 16,
+                    size: AppSizes.compactIcon,
                     color: isMessage
                         ? (record.message!.role == 'user'
                               ? colors.accent
@@ -447,7 +334,7 @@ class _SearchResultRow extends StatelessWidget {
                         : colors.textSecondary,
                   ),
                 ),
-                const SizedBox(width: 10),
+                const SizedBox(width: AppSpacing.compact),
                 Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
@@ -465,7 +352,7 @@ class _SearchResultRow extends StatelessWidget {
                               ),
                             ),
                           ),
-                          const SizedBox(width: 8),
+                          const SizedBox(width: AppSpacing.sm),
                           Text(
                             _formatRecordTime(record.createdAt),
                             style: theme.textTheme.labelSmall?.copyWith(
@@ -477,23 +364,23 @@ class _SearchResultRow extends StatelessWidget {
                           ),
                         ],
                       ),
-                      const SizedBox(height: 4),
+                      const SizedBox(height: AppSpacing.xs),
                       snippet,
                     ],
                   ),
                 ),
-                const SizedBox(width: 4),
+                const SizedBox(width: AppSpacing.xs),
                 Icon(
                   expanded
                       ? Icons.expand_less_rounded
                       : Icons.expand_more_rounded,
-                  size: 18,
+                  size: AppSizes.inlineIcon,
                   color: colors.textTertiary,
                 ),
               ],
             ),
             if (expanded) ...[
-              const SizedBox(height: 10),
+              const SizedBox(height: AppSpacing.compact),
               _SearchResultExpanded(record: record, query: query),
             ],
           ],
@@ -515,7 +402,7 @@ class _SnippetText extends StatelessWidget {
     final theme = Theme.of(context);
     final baseStyle = theme.textTheme.bodySmall?.copyWith(
       color: colors.textSecondary,
-      height: 1.3,
+      height: AppLineHeights.label,
     );
     final matches = searchQueryMatchRanges(body, query);
     if (matches.isEmpty) {
@@ -537,10 +424,12 @@ class _SnippetText extends StatelessWidget {
     final snippet = body.substring(start, end).replaceAll('\n', ' ');
     final visibleMatches = matches
         .where((match) => match.end > start && match.start < end)
-        .map((match) => SearchQueryMatchRange(
-              (match.start - start).clamp(0, snippet.length),
-              (match.end - start).clamp(0, snippet.length),
-            ))
+        .map(
+          (match) => SearchQueryMatchRange(
+            (match.start - start).clamp(0, snippet.length),
+            (match.end - start).clamp(0, snippet.length),
+          ),
+        )
         .where((match) => match.end > match.start)
         .toList(growable: false);
     final spans = <TextSpan>[];
@@ -558,7 +447,9 @@ class _SnippetText extends StatelessWidget {
           style: baseStyle?.copyWith(
             color: colors.textPrimary,
             fontWeight: AppWeights.title,
-            backgroundColor: colors.accent.withValues(alpha: 0.25),
+            backgroundColor: colors.accent.withValues(
+              alpha: AppEmphasis.borderTint,
+            ),
           ),
         ),
       );
@@ -573,10 +464,7 @@ class _SnippetText extends StatelessWidget {
     return RichText(
       maxLines: 2,
       overflow: TextOverflow.ellipsis,
-      text: TextSpan(
-        style: baseStyle,
-        children: spans,
-      ),
+      text: TextSpan(style: baseStyle, children: spans),
     );
   }
 }
@@ -593,17 +481,17 @@ class _SearchResultExpanded extends StatelessWidget {
     if (record.kind == SearchRecordKind.message) {
       final message = record.message!;
       return Container(
-        padding: const EdgeInsets.all(12),
+        padding: const EdgeInsets.all(AppSpacing.md),
         decoration: BoxDecoration(
           color: colors.surfaceMuted,
-          borderRadius: BorderRadius.circular(10),
+          borderRadius: AppShapes.panel,
           border: Border.all(color: colors.border),
         ),
         child: SelectableText(
           message.text.isEmpty ? '—' : message.text,
           style: Theme.of(context).textTheme.bodyMedium?.copyWith(
             color: colors.textPrimary,
-            height: 1.4,
+            height: AppLineHeights.body,
           ),
         ),
       );
@@ -614,12 +502,12 @@ class _SearchResultExpanded extends StatelessWidget {
       if (value.trim().isEmpty) return;
       meta.add(
         Padding(
-          padding: const EdgeInsets.only(bottom: 4),
+          padding: const EdgeInsets.only(bottom: AppSpacing.xs),
           child: RichText(
             text: TextSpan(
-              style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                color: colors.textSecondary,
-              ),
+              style: Theme.of(
+                context,
+              ).textTheme.bodySmall?.copyWith(color: colors.textSecondary),
               children: [
                 TextSpan(
                   text: '$label ',
@@ -630,7 +518,10 @@ class _SearchResultExpanded extends StatelessWidget {
                 ),
                 TextSpan(
                   text: value,
-                  style: monoStyle(color: colors.textSecondary, fontSize: 12),
+                  style: monoStyle(
+                    color: colors.textSecondary,
+                    fontSize: AppFontSizes.caption,
+                  ),
                 ),
               ],
             ),
@@ -683,17 +574,14 @@ class _SearchResultExpanded extends StatelessWidget {
       addLine('Saved file', activity.savedPath!);
     }
     if (activity.changes.isNotEmpty) {
-      addLine(
-        'Files',
-        activity.changes.map((c) => c.path).join('\n  '),
-      );
+      addLine('Files', activity.changes.map((c) => c.path).join('\n  '));
     }
     final output = (activity.output ?? '').trim();
     return Container(
-      padding: const EdgeInsets.all(12),
+      padding: const EdgeInsets.all(AppSpacing.md),
       decoration: BoxDecoration(
         color: colors.surfaceMuted,
-        borderRadius: BorderRadius.circular(10),
+        borderRadius: AppShapes.panel,
         border: Border.all(color: colors.border),
       ),
       child: Column(
@@ -701,19 +589,22 @@ class _SearchResultExpanded extends StatelessWidget {
         children: [
           ...meta,
           if (output.isNotEmpty) ...[
-            const SizedBox(height: 6),
+            const SizedBox(height: AppSpacing.tight),
             Container(
-              padding: const EdgeInsets.all(8),
+              padding: const EdgeInsets.all(AppSpacing.sm),
               decoration: BoxDecoration(
                 color: colors.canvas,
-                borderRadius: BorderRadius.circular(8),
+                borderRadius: AppShapes.iconWell,
                 border: Border.all(color: colors.border),
               ),
               child: SelectableText(
                 output.length > 4000
                     ? '…${output.substring(output.length - 4000)}'
                     : output,
-                style: monoStyle(color: colors.textPrimary, fontSize: 12),
+                style: monoStyle(
+                  color: colors.textPrimary,
+                  fontSize: AppFontSizes.caption,
+                ),
               ),
             ),
           ],
