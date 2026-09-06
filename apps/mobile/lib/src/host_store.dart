@@ -1,5 +1,6 @@
 import 'dart:convert';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -19,20 +20,20 @@ const _macOsUseDataProtectionKeychain = bool.fromEnvironment(
 /// Non-sensitive metadata (id / label / baseUrl) is stored in
 /// [SharedPreferences]. Bearer tokens live in
 /// [flutter_secure_storage.FlutterSecureStorage] so they are encrypted by the
-/// platform keystore / keychain. On first run we transparently migrate any
-/// existing v1 blob.
+/// platform keystore / keychain. Signed macOS releases start with a fresh host
+/// list; other builds migrate the existing v1 blob.
 class HostStore {
-  HostStore({FlutterSecureStorage? secure, FlutterSecureStorage? legacySecure})
-    : _secure =
-          secure ??
-          _createSecureStorage(
-            useDataProtectionKeyChain: _macOsUseDataProtectionKeychain,
-          ),
-      _legacySecure =
-          legacySecure ??
-          (_macOsUseDataProtectionKeychain
-              ? _createSecureStorage(useDataProtectionKeyChain: false)
-              : null);
+  HostStore({FlutterSecureStorage? secure})
+    : _secure = secure ?? _createSecureStorage();
+
+  bool get _usesFreshMacOsStorage =>
+      !kIsWeb &&
+      defaultTargetPlatform == TargetPlatform.macOS &&
+      _macOsUseDataProtectionKeychain;
+
+  String get _metadataKey => _usesFreshMacOsStorage
+      ? 'sidemesh_hosts_macos_v3'
+      : _hostsMetaKey;
 
   static const _legacyHostsKey = 'sidemesh_hosts_v1';
   static const _hostsMetaKey = 'sidemesh_hosts_v2';
@@ -40,11 +41,8 @@ class HostStore {
   static const _tokensBundleKey = 'sidemesh_host_tokens_v1';
   static const _migrationDoneKey = 'sidemesh_hosts_v2_migrated';
   static const _tokenConsolidationDoneKey = 'sidemesh_tokens_consolidated_v1';
-  static const _macOsDataProtectionMigrationDoneKey =
-      'sidemesh_macos_tokens_data_protection_v1';
 
   final FlutterSecureStorage _secure;
-  final FlutterSecureStorage? _legacySecure;
 
   // In-memory cache of the single keychain bundle. Populated on first read;
   // kept in sync with saveHosts(). Lets us avoid re-prompting mid-session if
@@ -52,17 +50,16 @@ class HostStore {
   // change).
   Map<String, String>? _tokenCache;
 
-  static FlutterSecureStorage _createSecureStorage({
-    required bool useDataProtectionKeyChain,
-  }) => FlutterSecureStorage(
+  static FlutterSecureStorage _createSecureStorage() => FlutterSecureStorage(
     aOptions: AndroidOptions(),
     iOptions: IOSOptions(accessibility: KeychainAccessibility.first_unlock),
-    // Developer ID release builds stay on the regular keychain. macOS rejects
-    // GUI launch when a Developer ID app claims restricted app-id/team-id
-    // entitlements for Data Protection Keychain without a provisioning profile.
+    // Signed macOS releases embed a matching Developer ID provisioning profile.
+    // A fresh service avoids all reads and cleanup of legacy keychain items.
     mOptions: MacOsOptions(
-      accountName: _macOsKeychainService,
-      usesDataProtectionKeychain: useDataProtectionKeyChain,
+      accountName: _macOsUseDataProtectionKeychain
+          ? '${_macOsKeychainService}_data_protection_v2'
+          : _macOsKeychainService,
+      usesDataProtectionKeychain: _macOsUseDataProtectionKeychain,
     ),
   );
 
@@ -113,11 +110,12 @@ class HostStore {
 
   Future<List<HostProfile>> loadHosts() async {
     final prefs = await SharedPreferences.getInstance();
-    await _migrateLegacyIfNeeded(prefs);
-    await _migrateMacOsDataProtectionTokensIfNeeded(prefs);
-    await _consolidateTokensIfNeeded(prefs);
+    if (!_usesFreshMacOsStorage) {
+      await _migrateLegacyIfNeeded(prefs);
+      await _consolidateTokensIfNeeded(prefs);
+    }
 
-    final raw = prefs.getString(_hostsMetaKey);
+    final raw = prefs.getString(_metadataKey);
     if (raw == null || raw.isEmpty) {
       return const [];
     }
@@ -166,7 +164,7 @@ class HostStore {
           },
         )
         .toList();
-    await prefs.setString(_hostsMetaKey, jsonEncode(metadata));
+    await prefs.setString(_metadataKey, jsonEncode(metadata));
 
     final keepIds = hosts.map((host) => host.id).toSet();
     final tokens = <String, String>{
@@ -174,6 +172,8 @@ class HostStore {
         if (host.token.isNotEmpty) host.id: host.token,
     };
     await _writeTokenBundle(tokens);
+
+    if (_usesFreshMacOsStorage) return;
 
     // Best-effort cleanup of any stale per-id items left over from the old
     // scheme. Ignore failures — the consolidation flag ensures we won't try
@@ -223,74 +223,6 @@ class HostStore {
 
     await prefs.remove(_legacyHostsKey);
     await prefs.setBool(_migrationDoneKey, true);
-  }
-
-  /// One-shot migration for explicitly opted-in macOS Data Protection Keychain
-  /// builds. Standard Developer ID releases do not enable this path.
-  Future<void> _migrateMacOsDataProtectionTokensIfNeeded(
-    SharedPreferences prefs,
-  ) async {
-    final legacySecure = _legacySecure;
-    if (legacySecure == null) {
-      return;
-    }
-
-    try {
-      final metaRaw = prefs.getString(_hostsMetaKey);
-      final ids = <String>[];
-      if (metaRaw != null && metaRaw.isNotEmpty) {
-        final decoded = jsonDecode(metaRaw);
-        if (decoded is List<dynamic>) {
-          for (final entry in decoded.whereType<Map<String, dynamic>>()) {
-            final id = entry['id'];
-            if (id is String) ids.add(id);
-          }
-        }
-      }
-
-      if (ids.isEmpty) {
-        await prefs.setBool(_macOsDataProtectionMigrationDoneKey, true);
-        return;
-      }
-
-      final currentTokens = await _readTokenBundle();
-      final missingIds = ids
-          .where((id) => !currentTokens.containsKey(id))
-          .toList();
-      if (missingIds.isEmpty) {
-        await prefs.setBool(_macOsDataProtectionMigrationDoneKey, true);
-        return;
-      }
-
-      final legacyBundle = await _readTokenBundleFromStorage(legacySecure);
-      final migrated = Map<String, String>.from(currentTokens);
-      var changed = false;
-      for (final id in missingIds) {
-        final bundled = legacyBundle[id];
-        if (bundled != null && bundled.isNotEmpty) {
-          migrated[id] = bundled;
-          changed = true;
-        }
-      }
-      for (final id in missingIds) {
-        if (migrated.containsKey(id)) continue;
-        final legacy = await legacySecure.read(key: '$_tokenKeyPrefix$id');
-        if (legacy != null && legacy.isNotEmpty) {
-          migrated[id] = legacy;
-          changed = true;
-        }
-      }
-      if (changed) {
-        await _writeTokenBundle(migrated);
-      }
-      await prefs.setBool(_macOsDataProtectionMigrationDoneKey, true);
-    } on PlatformException catch (_) {
-      // Leave the flag unset so we retry on next launch; but don't crash
-      // the app if the legacy keychain is temporarily unavailable.
-    } on FormatException catch (_) {
-      // Malformed metadata shouldn't block future starts or crash the app.
-      await prefs.setBool(_macOsDataProtectionMigrationDoneKey, true);
-    }
   }
 
   Future<void> _consolidateTokensIfNeeded(SharedPreferences prefs) async {
