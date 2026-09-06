@@ -295,7 +295,10 @@ export class CopilotAgentProvider
         this.completeActiveTurn(sessionId, "interrupted");
         await active.sdkSession.abort().catch(() => undefined);
       }
-      await client?.stop?.();
+      const errors = await client?.stop?.();
+      if (Array.isArray(errors) && errors.length > 0) {
+        throw new AggregateError(errors, "Copilot SDK shutdown failed.");
+      }
     } catch (error) {
       await client?.forceStop?.();
       throw error;
@@ -550,6 +553,7 @@ export class CopilotAgentProvider
   public async createSession(
     request: AgentCreateSessionRequest,
   ): Promise<AgentCreateSessionResult> {
+    if (this.closed) throw new Error("Copilot provider is closed.");
     const session = this.createSessionState(request);
     let activeTurnId: string | null = null;
     if (request.input.length > 0) {
@@ -566,6 +570,7 @@ export class CopilotAgentProvider
   public async submitInput(
     request: AgentSubmitInputRequest,
   ): Promise<AgentSubmitInputResult> {
+    if (this.closed) throw new Error("Copilot provider is closed.");
     const session = await this.getWritableSession(request.sessionId);
     session.runtime = mergeRuntime(
       session.runtime,
@@ -923,6 +928,7 @@ export class CopilotAgentProvider
   private async ensureSdkSession(
     session: CopilotSessionState,
   ): Promise<CopilotSdkSession> {
+    if (this.closed) throw new Error("Copilot provider is closed.");
     if (session.sdkSession) {
       return session.sdkSession;
     }
@@ -1011,6 +1017,7 @@ export class CopilotAgentProvider
     sessionId: string,
     event: CopilotSdkSessionEvent,
   ): void {
+    if (this.closed) return;
     const session = this.sessions.get(sessionId);
     if (!session) {
       return;
@@ -1588,6 +1595,7 @@ export class CopilotAgentProvider
     sessionId: string,
     request: CopilotSdkPermissionRequest,
   ): Promise<CopilotSdkPermissionResult> {
+    if (this.closed) return { kind: "denied-interactively-by-user" };
     if (
       approvalPolicyForSession(this.sessions.get(sessionId), this.allowAll) ===
       "never"
@@ -1615,6 +1623,7 @@ export class CopilotAgentProvider
     sessionId: string,
     request: CopilotSdkUserInputRequest,
   ): Promise<CopilotSdkUserInputResponse> {
+    if (this.closed) return { answer: "", wasFreeform: true };
     const session = this.sessions.get(sessionId);
     if (!session) {
       return { answer: "", wasFreeform: true };
@@ -1635,6 +1644,7 @@ export class CopilotAgentProvider
     sessionId: string,
     request: CopilotSdkElicitationContext,
   ): Promise<CopilotSdkElicitationResult> {
+    if (this.closed) return { action: "cancel" };
     const session = this.sessions.get(sessionId);
     if (!session) {
       return { action: "cancel" };

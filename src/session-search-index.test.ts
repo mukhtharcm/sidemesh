@@ -475,7 +475,7 @@ describe("SessionSearchIndex", () => {
     const counts = reopened.prepare(`
       SELECT
         (SELECT COUNT(*) FROM session_search_documents) AS documentCount,
-        (SELECT COUNT(*) FROM session_manifest) AS sessionManifestCount,
+        (SELECT COUNT(*) FROM sqlite_schema WHERE name IN ('session_manifest', 'manifest')) AS sessionManifestCount,
         (SELECT COUNT(*) FROM session_fts) AS ftsCount
     `).get() as {
       documentCount: number;

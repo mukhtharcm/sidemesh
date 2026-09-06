@@ -1,3 +1,5 @@
+import { isDeepStrictEqual } from "node:util";
+
 import type { AgentSessionActivityDraft } from "./agent-provider.js";
 import { materializeAgentActivityDraft } from "./agent-provider.js";
 import { appendCommandActivityOutput, applyCommandTerminalInteraction, mergeActivity } from "./activity.js";
@@ -62,6 +64,18 @@ export class SessionStateStore {
     const merged = mergeActivity(previous, activity);
     activities.set(merged.id, merged);
     return merged;
+  }
+
+  public confirmActivities(id: string, persisted: SessionActivity[]): void {
+    const state = this.get(id);
+    if (state.activeTurn) return;
+    for (const activity of persisted) {
+      const live = state.activities.get(activity.id);
+      if (!live) continue;
+      const { seq: _seq, createdAt: _createdAt, ...savedContent } = activity;
+      const { seq: _liveSeq, createdAt: _liveCreatedAt, ...liveContent } = live;
+      if (isDeepStrictEqual(savedContent, liveContent)) state.activities.delete(activity.id);
+    }
   }
 
   public appendOutput(id: string, activityId: string, delta: string): SessionActivity | null {
