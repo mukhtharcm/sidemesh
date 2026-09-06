@@ -28,6 +28,7 @@ class TerminalScreen extends StatefulWidget {
     required this.cwd,
     this.sessionId,
     this.title,
+    this.onClose,
   });
 
   final HostProfile host;
@@ -35,6 +36,7 @@ class TerminalScreen extends StatefulWidget {
   final String cwd;
   final String? sessionId;
   final String? title;
+  final VoidCallback? onClose;
 
   @override
   State<TerminalScreen> createState() => _TerminalScreenState();
@@ -51,10 +53,17 @@ class _TerminalScreenState extends State<TerminalScreen> {
       backgroundColor: colors.canvas,
       appBar: AppBar(
         backgroundColor: colors.canvas,
+        leading: widget.onClose == null
+            ? null
+            : IconButton(
+                tooltip: 'Back to machine',
+                onPressed: widget.onClose,
+                icon: const Icon(Icons.arrow_back_rounded),
+              ),
         title: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(widget.title ?? 'Terminal'),
+            const Text('Terminal'),
             Text(
               _terminalLocationLabel(widget.host.label, widget.cwd),
               maxLines: 1,
@@ -195,7 +204,6 @@ class _TerminalPaneState extends State<TerminalPane> {
       onOutput: _sendInput,
       onResize: _handleResize,
     );
-    _terminal.write('Starting terminal...\r\n');
     HostReconnectScheduler.instance.registerSlot(
       widget.host.id,
       _reconnectSlotId,
@@ -233,7 +241,6 @@ class _TerminalPaneState extends State<TerminalPane> {
     _channel = null;
     _terminalInfo = null;
     _lastSeq = -1;
-    _terminal.write('\r\nStarting terminal...\r\n');
     unawaited(_startTerminal(reuseExisting: widget.reuseExisting));
   }
 
@@ -443,7 +450,6 @@ class _TerminalPaneState extends State<TerminalPane> {
       case 'error':
         final message = frame['message']?.toString() ?? 'Something went wrong';
         setState(() => _error = message);
-        _terminal.write('\r\nSomething went wrong: $message\r\n');
         return;
     }
   }
@@ -688,7 +694,6 @@ class _TerminalPaneState extends State<TerminalPane> {
       _lastSeq = -1;
       _error = null;
     });
-    _terminal.write('\r\nStarting a new terminal...\r\n');
     await _startTerminal(reuseExisting: false, replaceExisting: true);
   }
 
@@ -746,7 +751,7 @@ class _TerminalPaneState extends State<TerminalPane> {
                       fontSize: widget.compact
                           ? AppFontSizes.caption
                           : AppFontSizes.compact,
-                      height: 1.22,
+                      height: AppLineHeights.label,
                     ),
                     padding: EdgeInsets.all(
                       widget.compact ? AppSpacing.compact : AppSpacing.md,
@@ -793,12 +798,13 @@ class _TerminalPaneState extends State<TerminalPane> {
             ),
           ),
         ),
-        TerminalKeyBar(
-          compact: widget.compact,
-          modifierState: _modifierState,
-          onModifierStateChanged: _setModifierState,
-          onAction: _onKeyBarAction,
-        ),
+        if (!AppSizes.usesPointerControls(Theme.of(context).platform))
+          TerminalKeyBar(
+            compact: widget.compact,
+            modifierState: _modifierState,
+            onModifierStateChanged: _setModifierState,
+            onAction: _onKeyBarAction,
+          ),
       ],
     );
   }
