@@ -32,6 +32,7 @@ import {
   type AgentPendingAction,
   type AgentProvider,
   type AgentProviderMethodName,
+  type AgentProviderLiveEvent,
   type AgentSessionInputItem,
   type AgentSessionOverrides,
 } from "./agent-provider.js";
@@ -758,7 +759,7 @@ export async function startServer(
       sessionState.get(sessionId).unverifiedTurn = false;
       sessionState.get(sessionId).recoveredStatus = null;
       sessionState.get(sessionId).activities.clear();
-    sessionState.clearDraft(sessionId);
+      sessionState.clearDraft(sessionId);
       sessionState.get(sessionId).runtime = null;
 
       clearActionsForSession(
@@ -1015,18 +1016,18 @@ export async function startServer(
     broadcastRecentSessionsLive({ type: "remove", sessionId });
   }
 
-  provider.on("stderr", (line) => {
-    process.stderr.write(line);
-  });
+  const onProviderStderr = (line: string): void => { process.stderr.write(line); };
+  provider.on("stderr", onProviderStderr);
 
   const fsWatchRegistry = new FsWatchRegistry();
 
-  provider.on("liveEvent", (event) => {
+  const onProviderLiveEvent = (event: AgentProviderLiveEvent): void => {
     switch (event.type) {
       case "skills_changed":
         broadcastSkillsChanged(socketsBySession);
         return;
       case "turn_started":
+        sessionState.get(event.sessionId).activities.clear();
         sessionState.clearDraft(event.sessionId);
         sessionState.get(event.sessionId).unverifiedTurn = false;
         sessionState.get(event.sessionId).recoveredStatus = null;
@@ -1243,7 +1244,8 @@ export async function startServer(
           event.sessionId,
           event.status === "errored" ? "errored" : "idle",
         );
-        sessionState.get(event.sessionId).activities.clear();
+        // Keep the finished tool overlay until provider history catches up.
+        // A snapshot may have started reading just before this completion.
 
         scheduleRecentSessionUpsert(event.sessionId, 0);
         void indexSessionForSearch(searchIndex, providerRuntime, event.sessionId).catch(() => {});
@@ -1277,7 +1279,8 @@ export async function startServer(
         scheduleRecentSessionUpsert(event.action.sessionId);
         return;
     }
-  });
+  };
+  provider.on("liveEvent", onProviderLiveEvent);
 
   for (const entry of providerRuntime.providers) {
     providerVersions.set(
@@ -2096,6 +2099,7 @@ export async function startServer(
       ensureSeqCursor(sessionId, nextSeqForLatestPlanUpdate(log.nextSeq, latestPlanUpdate));
       const mergedActivities = mergeSessionActivities(log.activities, [...state.activities.values()]);
       const activities = mergedActivities.slice(-activityLimit);
+      sessionState.confirmActivities(sessionId, log.activities);
       const history = buildSessionHistorySummary(
         log.totalMessages, log.messages.length, Math.max(log.totalActivities, mergedActivities.length), activities.length,
       );
@@ -2876,7 +2880,7 @@ export async function startServer(
       sessionState.get(sessionId).recoveredStatus = null;
       sessionState.get(sessionId).status = null;
       sessionState.get(sessionId).activities.clear();
-    sessionState.clearDraft(sessionId);
+      sessionState.clearDraft(sessionId);
 
       sessionState.get(sessionId).nextSeq = 0;
       response.json({ archived: true });
@@ -3301,11 +3305,18 @@ export async function startServer(
       }
       await closeWebSocketServer(wsServer);
       await closeHttpServer(server);
+      provider.off("liveEvent", onProviderLiveEvent);
+      for (const timer of recentSessionBroadcastTimers.values()) clearTimeout(timer);
+      recentSessionBroadcastTimers.clear();
       await searchIndexBackfill.catch(() => undefined);
       await searchIndex.close();
       await sessionRuntimeSignalsSaveChain.catch(() => undefined);
-      await provider.close?.();
-      await pushNotifications.close();
+      try {
+        await provider.close?.();
+      } finally {
+        provider.off("stderr", onProviderStderr);
+        await pushNotifications.close();
+      }
     },
   };
   return runningServerRef;

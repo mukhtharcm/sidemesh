@@ -29,7 +29,9 @@ The server finishes provider reads before capturing the live overlay and its
 revision. The client buffers events while fetching, installs the snapshot's
 partial text, and applies later deltas. Covered completed messages are preserved
 while provider history flushes, without replaying old draft/status transitions.
-Warnings, queue changes, and retry notifications remain observable. A failed
+Finished tool overlays remain until the provider snapshot confirms their content
+(or another turn begins), so a completion cannot erase updates from a read
+already in progress. Warnings, queue changes, and retry notifications remain observable. A failed
 request drains buffered events and preserves the existing conversation.
 
 ## Coordinated upgrade

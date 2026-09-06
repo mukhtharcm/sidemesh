@@ -52,6 +52,23 @@ describe("Copilot provider", () => {
     }
   });
 
+  it("force-stops and reports SDK cleanup errors returned as an array", async () => {
+    const dir = await mkdtemp(nodePath.join(tmpdir(), "sidemesh-copilot-close-error-"));
+    const sdk = new FakeCopilotSdkClient();
+    let forced = false;
+    Object.assign(sdk, {
+      stop: async () => [new Error("session cleanup failed")],
+      forceStop: async () => { forced = true; },
+    });
+    const provider = new CopilotAgentProvider({ stateDir: dir, sdkClientFactory: fakeSdkFactory(sdk) });
+    try {
+      await provider.start();
+      await assert.rejects(provider.close(), /Copilot SDK shutdown failed/);
+      assert.equal(forced, true);
+      await assert.rejects(provider.createSession({ cwd: dir, input: [], overrides: emptyOverrides() }), /closed/);
+    } finally { await rm(dir, { recursive: true, force: true }); }
+  });
+
   it("shares client startup and closes a client that finishes starting during shutdown", async () => {
     const dir = await mkdtemp(nodePath.join(tmpdir(), "sidemesh-copilot-start-close-"));
     const sdk = new FakeCopilotSdkClient();

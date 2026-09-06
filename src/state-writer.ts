@@ -49,16 +49,16 @@ export class StateWriter {
       } catch (error) {
         // A request arriving during a failed write still gets its own attempt.
         this.attempted = failedGeneration;
-        this.settle(failedGeneration, error);
+        this.settle(failedGeneration, { error });
       }
     }
   }
 
-  private settle(generation: number, error?: unknown): void {
+  private settle(generation: number, failure?: { error: unknown }): void {
     for (const waiter of this.waiters) {
       if (waiter.generation > generation) continue;
       this.waiters.delete(waiter);
-      if (error !== undefined) waiter.reject(error);
+      if (failure) waiter.reject(failure.error);
       else waiter.resolve();
     }
   }

@@ -73,6 +73,14 @@ describe("StateWriter", () => {
     assert.equal(saves, 2);
   });
 
+  it("does not acknowledge a rejected write even when no error object is supplied", async () => {
+    const writer = new StateWriter(() => Promise.reject());
+    await writer.request().then(
+      () => assert.fail("a failed write was acknowledged"),
+      (error: unknown) => assert.equal(error, undefined),
+    );
+  });
+
   it("reports a persistent shutdown failure instead of silently dropping data", async () => {
     const writer = new StateWriter(async () => { throw new Error("disk full"); });
     await assert.rejects(writer.request(), /disk full/);

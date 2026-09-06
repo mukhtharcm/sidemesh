@@ -3477,6 +3477,17 @@ describe("session live rich events", () => {
     });
   });
 
+  it("releases provider listeners and timers when the server closes", async () => {
+    const stateDir = await mkdtemp(nodePath.join(tmpdir(), "sidemesh-server-close-"));
+    const provider = new ActivityReplayFixtureProvider();
+    await withServerRuntime(makeConfig(stateDir), makeCustomSingleProviderRuntime(provider), async () => {
+      assert.equal(provider.listenerCount("liveEvent"), 1);
+      provider.emit("liveEvent", { type: "runtime_updated", sessionId: provider.sessionId, runtime: { model: "last model" } });
+    });
+    assert.equal(provider.listenerCount("liveEvent"), 0);
+    assert.equal(provider.listenerCount("stderr"), 0);
+  });
+
   it("snapshots include live replies and updates arriving during a provider read", async () => {
     const stateDir = await mkdtemp(nodePath.join(tmpdir(), "sidemesh-snapshot-race-"));
     const provider = new ActivityReplayFixtureProvider();
@@ -3516,6 +3527,60 @@ describe("session live rich events", () => {
       assert.equal(body.activities[0].output, "fresh output");
       assert.equal(body.latestPlanUpdate.plan[0].step, "Fresh plan");
       assert.equal(body.revision, 6);
+    });
+  });
+
+  it("snapshots preserve finished tool output when a turn completes during a provider read", async () => {
+    const stateDir = await mkdtemp(nodePath.join(tmpdir(), "sidemesh-snapshot-race-"));
+    const provider = new ActivityReplayFixtureProvider();
+    await withServerRuntime(makeConfig(stateDir), makeCustomSingleProviderRuntime(provider), async (server, config) => {
+      let enter!: () => void;
+      let release!: () => void;
+      const entered = new Promise<void>((resolve) => { enter = resolve; });
+      const reading = new Promise<void>((resolve) => { release = resolve; });
+      const readLog = provider.readSessionLog.bind(provider);
+      provider.readSessionLog = async (thread, options) => {
+        const log = await readLog(thread, options);
+        if (options?.messageLimit === 13) { enter(); await reading; }
+        return log;
+      };
+      const snapshot = request({
+        hostname: "127.0.0.1", port: server.port,
+        path: `/api/sessions/${provider.sessionId}/log?messageLimit=13`,
+        headers: { Authorization: `Bearer ${config.token}` },
+      });
+      await entered;
+      provider.emit("liveEvent", { type: "turn_started", sessionId: provider.sessionId, turnId: "turn-live" });
+      provider.emit("liveEvent", { type: "assistant_delta", sessionId: provider.sessionId, delta: "Still writing" });
+      provider.emit("liveEvent", { type: "reasoning_delta", sessionId: provider.sessionId, delta: "Checking", summary: false });
+      provider.emit("liveEvent", { type: "runtime_updated", sessionId: provider.sessionId, runtime: { model: "live-model" } });
+      provider.emit("liveEvent", {
+        type: "activity_updated", sessionId: provider.sessionId,
+        activity: { ...((await readLog({ id: provider.sessionId } as ThreadRecord)).activities[0]), output: "fresh output" },
+      });
+      provider.emit("liveEvent", { type: "plan_updated", sessionId: provider.sessionId, plan: [{ step: "Fresh plan", status: "in_progress" }] });
+      provider.emit("liveEvent", { type: "turn_completed", sessionId: provider.sessionId, turnId: "turn-live", status: "completed" });
+      release();
+      const result = await snapshot;
+      assert.equal(result.statusCode, 200);
+      const body = result.body as any;
+      assert.equal(body.liveAssistantText, "");
+      assert.equal(body.liveAssistantReasoning, "");
+      assert.equal(body.session.runtime.model, "live-model");
+      assert.equal(body.activities[0].output, "fresh output");
+      assert.equal(body.latestPlanUpdate.plan[0].step, "Fresh plan");
+      assert.equal(body.revision, 7);
+      assert.equal(body.session.status, "idle");
+      const fetchLog = () => request({
+        hostname: "127.0.0.1", port: server.port,
+        path: `/api/sessions/${provider.sessionId}/log`,
+        headers: { Authorization: `Bearer ${config.token}` },
+      });
+      assert.equal(((await fetchLog()).body as any).activities[0].output, "fresh output");
+      provider.mutatePersistedActivity("fresh output");
+      await fetchLog();
+      provider.mutatePersistedActivity("updated later on disk");
+      assert.equal(((await fetchLog()).body as any).activities[0].output, "updated later on disk");
     });
   });
 

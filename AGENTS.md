@@ -260,6 +260,8 @@ specific agent provider.
   covered additive text, and preserves newer events and informational warnings.
   Completed messages may precede durable history; keep them without replaying
   old completion transitions over newer drafts. Drain buffered events on errors.
+  Keep finished tool overlays until provider history confirms their content;
+  clearing at turn completion can lose updates from a snapshot already reading.
 - **Cached session verification**: cached transcripts remain stale until a full
   snapshot succeeds. Provider timestamps may be coarse and existing rows can
   change without a new transcript sequence number.
