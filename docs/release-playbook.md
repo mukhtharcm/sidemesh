@@ -40,6 +40,29 @@ scripts/secret-scan.sh --history
 The manual GitHub Actions workflow `Secret Scan` runs gitleaks against full git
 history and should also pass before public release.
 
+## Local iOS Sharing with Speedflight
+
+Use Flutter 3.44.7, Xcode, and an App Store Connect Admin or App Manager key
+for the app team. Store `ASC_KEY_ID`, `ASC_ISSUER_ID`, `ASC_PRIVATE_KEY_PATH`,
+`SPEEDFLIGHT_TEAM_ID`, `SPEEDFLIGHT_SECRET`, `SPEEDFLIGHT_AUTHOR`, and
+`SPEEDFLIGHT_DEEP_LINK=sidemesh://` in the ignored `.env.speedflight` file
+with mode `600`. Set `FLUTTER_BIN` if the matching SDK is not on `PATH`.
+`SPEEDFLIGHT_ICON` is an optional PNG path. Keep the same upload secret for
+all builds of this app.
+
+After the preflight checks, commit and push the feature branch, then run:
+
+```bash
+scripts/speedflight.sh "Sidemesh preview" "Test host pairing and session access."
+```
+
+Optional screenshot paths follow the notes. The script prepares Flutter,
+archives the `prod` workspace with automatic signing, exports an ad hoc IPA,
+and uploads it. Build files go in `apps/mobile/build/speedflight/`.
+The app page link permits downloads. Share it privately and open it in Safari
+on an iPhone registered with the signing team. The `sidemesh://` URL opens
+the app; it does not supply host credentials or select a session.
+
 ## Daemon Install From npm
 
 On a trusted host that should consume the published package:
