@@ -26,9 +26,10 @@ class AppearanceSettings extends StatelessWidget {
         final colors = context.colors;
         final typography = controller.typography;
         final content = AppContentColumn(
-          maxWidth: 680,
           child: ListView(
-            padding: AppPadding.mobilePage,
+            padding: AppSizes.usesPointerControls(Theme.of(context).platform)
+                ? AppPadding.desktopPage
+                : AppPadding.mobilePage,
             children: [
               const Text('Color mode'),
               const SizedBox(height: AppSpacing.md),
