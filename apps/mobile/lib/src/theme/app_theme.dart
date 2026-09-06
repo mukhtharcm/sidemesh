@@ -176,11 +176,13 @@ ThemeData _buildTheme(
       backgroundColor: palette.surfaceElevated,
       surfaceTintColor: Colors.transparent,
       shape: RoundedRectangleBorder(
-        borderRadius: AppShapes.dialog,
+        borderRadius: desktop ? AppShapes.dialog : AppShapes.card,
         side: BorderSide(color: palette.border),
       ),
       titleTextStyle: textTheme.titleMedium,
-      contentTextStyle: textTheme.bodyMedium,
+      contentTextStyle: textTheme.bodyMedium?.copyWith(
+        color: palette.textSecondary,
+      ),
     ),
     segmentedButtonTheme: SegmentedButtonThemeData(
       style: ButtonStyle(
@@ -466,6 +468,13 @@ ThemeData _buildTheme(
       thumbColor: palette.accent,
       overlayColor: palette.accent.withValues(alpha: AppEmphasis.tint),
       thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 7),
+    ),
+    listTileTheme: ListTileThemeData(
+      contentPadding: const EdgeInsets.symmetric(horizontal: AppSpacing.md),
+      minLeadingWidth: AppSizes.icon,
+      horizontalTitleGap: AppSpacing.sm,
+      visualDensity: VisualDensity.standard,
+      minTileHeight: desktop ? AppSizes.menuItem : AppSizes.rowMinHeight,
     ),
     expansionTileTheme: ExpansionTileThemeData(
       shape: const Border(),

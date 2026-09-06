@@ -16,6 +16,8 @@ import '../theme/app_colors.dart';
 import '../theme/app_tokens.dart';
 import '../theme/app_code_theme.dart';
 import '../widgets/app_snackbar.dart';
+import '../widgets/app_menu.dart';
+import '../widgets/mesh_widgets.dart';
 import '../widgets/terminal_keybar.dart';
 import '../host_reconnect_scheduler.dart';
 import '../host_status_store.dart';
@@ -28,6 +30,7 @@ class TerminalScreen extends StatefulWidget {
     required this.cwd,
     this.sessionId,
     this.title,
+    this.onClose,
   });
 
   final HostProfile host;
@@ -35,6 +38,7 @@ class TerminalScreen extends StatefulWidget {
   final String cwd;
   final String? sessionId;
   final String? title;
+  final VoidCallback? onClose;
 
   @override
   State<TerminalScreen> createState() => _TerminalScreenState();
@@ -51,12 +55,20 @@ class _TerminalScreenState extends State<TerminalScreen> {
       backgroundColor: colors.canvas,
       appBar: AppBar(
         backgroundColor: colors.canvas,
+        leading: widget.onClose == null
+            ? null
+            : IconButton(
+                tooltip: 'Back to machine',
+                onPressed: widget.onClose,
+                icon: const Icon(Icons.arrow_back_rounded),
+              ),
         title: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(widget.title ?? 'Terminal'),
+            const Text('Terminal'),
             Text(
-              _terminalLocationLabel(widget.host.label, widget.cwd),
+              _appBarControls.status ??
+                  _terminalLocationLabel(widget.host.label, widget.cwd),
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
               style: Theme.of(
@@ -73,21 +85,26 @@ class _TerminalScreenState extends State<TerminalScreen> {
               icon: const Icon(Icons.restart_alt_rounded),
             )
           else if (_appBarControls.showStop)
-            IconButton(
-              tooltip: 'Stop terminal',
-              onPressed: _appBarControls.stopping
-                  ? null
-                  : _appBarControls.onStop,
-              icon: _appBarControls.stopping
-                  ? SizedBox(
-                      width: 18,
-                      height: 18,
-                      child: CircularProgressIndicator(
-                        strokeWidth: AppStrokes.indicator,
-                        color: colors.danger,
-                      ),
-                    )
-                  : Icon(Icons.stop_circle_rounded, color: colors.danger),
+            AppMenuButton(
+              tooltip: 'Terminal actions',
+              children: [
+                MenuItemButton(
+                  onPressed: _appBarControls.stopping
+                      ? null
+                      : _appBarControls.onStop,
+                  child: const Text('Stop terminal'),
+                ),
+              ],
+            ),
+          if (_appBarControls.status != null)
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: AppSpacing.md),
+              child: SizedBox.square(
+                dimension: AppSizes.compactIcon,
+                child: CircularProgressIndicator(
+                  strokeWidth: AppStrokes.indicator,
+                ),
+              ),
             ),
         ],
       ),
@@ -112,6 +129,7 @@ class TerminalPaneAppBarControls {
     this.showStop = false,
     this.showRestart = false,
     this.stopping = false,
+    this.status,
     this.onStop,
     this.onRestart,
   });
@@ -119,6 +137,7 @@ class TerminalPaneAppBarControls {
   final bool showStop;
   final bool showRestart;
   final bool stopping;
+  final String? status;
   final VoidCallback? onStop;
   final VoidCallback? onRestart;
 
@@ -127,11 +146,12 @@ class TerminalPaneAppBarControls {
     return other is TerminalPaneAppBarControls &&
         other.showStop == showStop &&
         other.showRestart == showRestart &&
-        other.stopping == stopping;
+        other.stopping == stopping &&
+        other.status == status;
   }
 
   @override
-  int get hashCode => Object.hash(showStop, showRestart, stopping);
+  int get hashCode => Object.hash(showStop, showRestart, stopping, status);
 }
 
 class TerminalPane extends StatefulWidget {
@@ -172,6 +192,8 @@ class _TerminalPaneState extends State<TerminalPane> {
   StreamSubscription<dynamic>? _subscription;
   HostTerminalInfo? _terminalInfo;
   bool _starting = true;
+  bool _creating = false;
+  bool _reconnecting = false;
   bool _connecting = false;
   bool _stopping = false;
   String? _error;
@@ -195,7 +217,6 @@ class _TerminalPaneState extends State<TerminalPane> {
       onOutput: _sendInput,
       onResize: _handleResize,
     );
-    _terminal.write('Starting terminal...\r\n');
     HostReconnectScheduler.instance.registerSlot(
       widget.host.id,
       _reconnectSlotId,
@@ -233,7 +254,6 @@ class _TerminalPaneState extends State<TerminalPane> {
     _channel = null;
     _terminalInfo = null;
     _lastSeq = -1;
-    _terminal.write('\r\nStarting terminal...\r\n');
     unawaited(_startTerminal(reuseExisting: widget.reuseExisting));
   }
 
@@ -257,20 +277,25 @@ class _TerminalPaneState extends State<TerminalPane> {
   }) async {
     setState(() {
       _starting = true;
+      _creating = false;
+      _reconnecting = false;
       _error = null;
     });
     try {
-      final terminal =
-          await _findReusableTerminal(reuseExisting) ??
-          await widget.api.createTerminal(
-            widget.host,
-            cwd: widget.cwd,
-            sessionId: widget.sessionId,
-            title: widget.title,
-            cols: _terminal.viewWidth,
-            rows: _terminal.viewHeight,
-            replaceExisting: replaceExisting,
-          );
+      var terminal = await _findReusableTerminal(reuseExisting);
+      if (!mounted) return;
+      if (terminal == null) {
+        setState(() => _creating = true);
+        terminal = await widget.api.createTerminal(
+          widget.host,
+          cwd: widget.cwd,
+          sessionId: widget.sessionId,
+          title: widget.title,
+          cols: _terminal.viewWidth,
+          rows: _terminal.viewHeight,
+          replaceExisting: replaceExisting,
+        );
+      }
       if (!mounted) return;
       setState(() {
         _terminalInfo = terminal;
@@ -284,7 +309,6 @@ class _TerminalPaneState extends State<TerminalPane> {
         _starting = false;
         _error = message;
       });
-      _terminal.write('\r\nCould not start terminal: $message\r\n');
     }
   }
 
@@ -330,13 +354,6 @@ class _TerminalPaneState extends State<TerminalPane> {
         onDone: _scheduleReconnect,
         cancelOnError: false,
       );
-      setState(() {
-        _connecting = false;
-      });
-      HostReconnectScheduler.instance.markConnected(
-        widget.host.id,
-        _reconnectSlotId,
-      );
     } catch (error) {
       if (!mounted) return;
       setState(() {
@@ -358,7 +375,8 @@ class _TerminalPaneState extends State<TerminalPane> {
     }
     setState(() {
       _connecting = false;
-      _error = 'Connection lost. Reconnecting...';
+      _reconnecting = true;
+      _error = null;
     });
     HostReconnectScheduler.instance.markDisconnected(
       widget.host.id,
@@ -384,7 +402,12 @@ class _TerminalPaneState extends State<TerminalPane> {
               terminal.cast<String, dynamic>(),
             );
             _connecting = false;
+            _reconnecting = false;
             _error = null;
+            HostReconnectScheduler.instance.markConnected(
+              widget.host.id,
+              _reconnectSlotId,
+            );
           });
         }
         return;
@@ -426,7 +449,8 @@ class _TerminalPaneState extends State<TerminalPane> {
             );
           }
         });
-        _terminal.write('\r\nTerminal stopped.\r\n');
+        _terminal.setCursorVisibleMode(false);
+        _focusNode.unfocus();
         return;
       case 'replace':
         final seq = _intOrNull(frame['seq']);
@@ -443,7 +467,6 @@ class _TerminalPaneState extends State<TerminalPane> {
       case 'error':
         final message = frame['message']?.toString() ?? 'Something went wrong';
         setState(() => _error = message);
-        _terminal.write('\r\nSomething went wrong: $message\r\n');
         return;
     }
   }
@@ -665,6 +688,8 @@ class _TerminalPaneState extends State<TerminalPane> {
       if (!mounted) return;
       setState(() {
         _terminalInfo = _stoppedTerminal(updated);
+        _terminal.setCursorVisibleMode(false);
+        _focusNode.unfocus();
         _stopping = false;
       });
     } catch (error) {
@@ -676,8 +701,8 @@ class _TerminalPaneState extends State<TerminalPane> {
 
   Future<void> _restartTerminal() async {
     if (_starting) return;
-    await _subscription?.cancel();
-    await _channel?.sink.close();
+    unawaited(_subscription?.cancel());
+    unawaited(_channel?.sink.close());
     if (!mounted) return;
     setState(() {
       _subscription = null;
@@ -688,7 +713,7 @@ class _TerminalPaneState extends State<TerminalPane> {
       _lastSeq = -1;
       _error = null;
     });
-    _terminal.write('\r\nStarting a new terminal...\r\n');
+    _terminal.setCursorVisibleMode(true);
     await _startTerminal(reuseExisting: false, replaceExisting: true);
   }
 
@@ -707,8 +732,10 @@ class _TerminalPaneState extends State<TerminalPane> {
     return Column(
       children: [
         _TerminalNoticeBanner(
-          starting: _starting,
-          connecting: _connecting,
+          starting: widget.onAppBarControlsChanged == null && _starting,
+          connecting:
+              widget.onAppBarControlsChanged == null &&
+              (_connecting || _reconnecting),
           error: _error,
           terminal: terminal,
         ),
@@ -739,6 +766,7 @@ class _TerminalPaneState extends State<TerminalPane> {
                     controller: _terminalController,
                     focusNode: _focusNode,
                     autofocus: true,
+                    readOnly: terminal?.isRunning != true,
                     keyboardType: TextInputType.text,
                     deleteDetection: true,
                     theme: buildTerminalTheme(colors),
@@ -746,7 +774,7 @@ class _TerminalPaneState extends State<TerminalPane> {
                       fontSize: widget.compact
                           ? AppFontSizes.caption
                           : AppFontSizes.compact,
-                      height: 1.22,
+                      height: AppLineHeights.label,
                     ),
                     padding: EdgeInsets.all(
                       widget.compact ? AppSpacing.compact : AppSpacing.md,
@@ -788,17 +816,43 @@ class _TerminalPaneState extends State<TerminalPane> {
                     },
                     onHandleDragUpdate: _updateSelectionHandle,
                   ),
+                  if (terminal != null && !terminal.isRunning && !_starting)
+                    Align(
+                      alignment: Alignment.bottomCenter,
+                      child: Padding(
+                        padding: const EdgeInsets.all(AppSpacing.lg),
+                        child: MeshCard(
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Text(
+                                'Terminal stopped',
+                                style: Theme.of(context).textTheme.titleSmall,
+                              ),
+                              const SizedBox(height: AppSpacing.sm),
+                              FilledButton.icon(
+                                onPressed: _restartTerminal,
+                                icon: const Icon(Icons.restart_alt_rounded),
+                                label: const Text('Start terminal'),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
                 ],
               ),
             ),
           ),
         ),
-        TerminalKeyBar(
-          compact: widget.compact,
-          modifierState: _modifierState,
-          onModifierStateChanged: _setModifierState,
-          onAction: _onKeyBarAction,
-        ),
+        if (terminal?.isRunning == true &&
+            !AppSizes.usesPointerControls(Theme.of(context).platform))
+          TerminalKeyBar(
+            compact: widget.compact,
+            modifierState: _modifierState,
+            onModifierStateChanged: _setModifierState,
+            onAction: _onKeyBarAction,
+          ),
       ],
     );
   }
@@ -811,9 +865,15 @@ class _TerminalPaneState extends State<TerminalPane> {
         !running &&
         !_starting &&
         !_connecting &&
-        (terminal != null || _error != null);
+        terminal == null &&
+        _error != null;
     return TerminalPaneAppBarControls(
       showStop: running,
+      status: _starting
+          ? (_creating ? 'Starting…' : 'Connecting…')
+          : (_connecting || _reconnecting)
+          ? (_reconnecting ? 'Reconnecting…' : 'Connecting…')
+          : null,
       showRestart: canRestart,
       stopping: _stopping,
       onStop: _stopTerminal,
@@ -922,7 +982,6 @@ class _TerminalNoticeBanner extends StatelessWidget {
 
   _TerminalBannerState? _bannerState(BuildContext context) {
     final colors = context.colors;
-    final running = terminal?.isRunning == true;
     final limitedBackend = terminal?.backend == 'pipe';
     if (error != null && error!.trim().isNotEmpty) {
       return _TerminalBannerState(
@@ -936,7 +995,7 @@ class _TerminalNoticeBanner extends StatelessWidget {
     if (starting) {
       return _TerminalBannerState(
         icon: Icons.sync_rounded,
-        label: 'Starting terminal',
+        label: 'Connecting…',
         background: colors.surfaceElevated,
         border: colors.border,
         foreground: colors.textSecondary,
@@ -951,15 +1010,6 @@ class _TerminalNoticeBanner extends StatelessWidget {
         border: colors.border,
         foreground: colors.textSecondary,
         spinner: true,
-      );
-    }
-    if (!running && terminal != null) {
-      return _TerminalBannerState(
-        icon: Icons.stop_circle_outlined,
-        label: 'Terminal stopped',
-        background: colors.surfaceElevated,
-        border: colors.border,
-        foreground: colors.textSecondary,
       );
     }
     if (limitedBackend) {

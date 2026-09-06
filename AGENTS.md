@@ -212,6 +212,9 @@ specific agent provider.
   `theme/message_text_styles.dart` and `theme/app_status_styles.dart`.
   Transparent ownership surfaces, responsive layout constraints, and protocol
   timings are not visual theme overrides.
+  Use `Switch` for app-owned controls: `Switch.adaptive` can bypass the
+  shared switch colors on Apple platforms. Keep `AppSettingsRow` controls
+  as siblings; a row inside another row's footer adds a second text inset.
 
 - **Trailing Flutter menus**: fixed-width action menus must set
   `crossAxisUnconstrained: false` on `MenuAnchor`. Otherwise the visible panel
