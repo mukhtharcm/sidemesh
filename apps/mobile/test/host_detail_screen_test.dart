@@ -65,6 +65,38 @@ void main() {
           expect(api.nodeReads, 2);
           expect(api.sessionReads, 0);
           expect(tester.takeException(), isNull);
+
+          await tester.tap(find.text('Update Sidemesh'));
+          await tester.pumpAndSettle();
+          expect(find.byType(AlertDialog), findsOneWidget);
+          expect(
+            find.text(
+              'Open terminals and browser tabs disconnect while the update starts.',
+            ),
+            findsOneWidget,
+          );
+          expect(find.text('Update now').hitTestable(), findsOneWidget);
+          expect(
+            tester.getCenter(find.text('Cancel')).dy,
+            tester.getCenter(find.text('Update now')).dy,
+          );
+          await tester.tap(find.byType(Checkbox));
+          await tester.pumpAndSettle();
+          await tester.tap(find.text('Cancel'));
+          await tester.pumpAndSettle();
+          final prefs = await SharedPreferences.getInstance();
+          expect(prefs.getBool('sidemesh_update_skip_confirm'), isNull);
+          expect(api.updates, 0);
+
+          await tester.tap(find.text('Update Sidemesh'));
+          await tester.pumpAndSettle();
+          await tester.tap(find.byType(Checkbox));
+          await tester.pumpAndSettle();
+          await tester.tap(find.text('Update now'));
+          await tester.pump();
+          expect(api.updates, 1);
+          expect(prefs.getBool('sidemesh_update_skip_confirm'), isTrue);
+          expect(tester.takeException(), isNull);
           await tester.pumpWidget(const SizedBox());
         },
       );
@@ -107,6 +139,7 @@ Future<void> _pumpMachine(
 class _MachineApi extends ApiClient {
   int nodeReads = 0;
   int sessionReads = 0;
+  int updates = 0;
 
   @override
   Future<NodeInfo> fetchNode(HostProfile host) async {
@@ -126,6 +159,15 @@ class _MachineApi extends ApiClient {
   @override
   Future<UpdateInfo> refreshUpdateInfo(HostProfile host) async =>
       _node.updateInfo;
+
+  @override
+  Future<UpdateOperation?> updateDaemon(
+    HostProfile host, {
+    String? updateChannel,
+  }) async {
+    updates++;
+    return null;
+  }
 
   @override
   Future<UpdateOperation?> fetchUpdateStatus(HostProfile host) async => null;

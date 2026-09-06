@@ -835,7 +835,8 @@ class _SessionControlsSheetState extends State<SessionControlsSheet> {
     final selected = providerAccessModeById(catalog, _effectiveAccessMode);
     if (widget.onClose == null || selected == null) return choices;
     return ExpansionTile(
-      tilePadding: EdgeInsets.zero,
+      tilePadding: const EdgeInsets.symmetric(horizontal: AppSpacing.md),
+      leading: Icon(providerAccessModeIcon(selected.icon), size: AppSizes.icon),
       title: Text(selected.label, style: theme.textTheme.bodyMedium),
       subtitle: Text(
         selected.disabledReason ?? selected.description,
@@ -1022,7 +1023,8 @@ class _SessionControlsSheetState extends State<SessionControlsSheet> {
               ),
           ],
           if (_showFastSection) ...[
-            const SizedBox(height: AppSpacing.lg),
+            if (showModeControls || showModelControls || showReasoningControls)
+              const SizedBox(height: AppSpacing.lg),
             _FastModeTile(
               value: _effectiveFastMode,
               enabled: _selectedModelSupportsFast,
@@ -1036,22 +1038,10 @@ class _SessionControlsSheetState extends State<SessionControlsSheet> {
             ),
           ],
           if (showAccessControls) ...[
-            const SizedBox(height: AppSpacing.lg),
-            Text(
-              'Access',
-              style: theme.textTheme.labelLarge?.copyWith(
-                color: colors.textSecondary,
-                letterSpacing: AppLetterSpacing.caps,
-              ),
-            ),
+            if (showModeControls || showModelControls || _showFastSection)
+              const SizedBox(height: AppSpacing.lg),
+            const AppSectionHeader(title: 'Access'),
             const SizedBox(height: AppSpacing.sm),
-            Text(
-              'Choose how the provider should handle sensitive actions.',
-              style: theme.textTheme.bodySmall?.copyWith(
-                color: colors.textSecondary,
-              ),
-            ),
-            const SizedBox(height: AppSpacing.tight),
             _buildAccessModeControls(context),
           ],
           if (showLegacyPolicyControls) ...[
@@ -1101,7 +1091,9 @@ class _SessionControlsSheetState extends State<SessionControlsSheet> {
           children: [
             Flexible(
               child: SingleChildScrollView(
-                padding: const EdgeInsets.all(AppSpacing.lg),
+                padding: widget.onClose == null
+                    ? AppPadding.mobilePage
+                    : EdgeInsets.zero,
                 child: content,
               ),
             ),
