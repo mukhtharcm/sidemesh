@@ -248,6 +248,18 @@ specific agent provider.
   sizes from the active platform. Use `TargetPlatformVariant` in widget tests;
   changing only `ThemeData.platform` after construction does not rebuild the
   input and button themes.
+- **Speedflight requests**: Treat “deploy to Speedflight”, “send a Speedflight
+  build”, or “share an iOS build with Speedflight” as a request to build and
+  upload, then return the install page link. Follow “Local iOS Sharing with
+  Speedflight” in `docs/release-playbook.md`, including its preflight checks.
+  Reuse the existing `.env.speedflight` and local export settings; do not
+  replace the upload secret. These files are local to a checkout. If absent,
+  check other worktrees of this repository for the existing setup before
+  asking for credentials. Never print or commit their contents.
+  Commit and push the intended source on a feature branch, write a short
+  build title and test notes, then run `scripts/speedflight.sh "<title>" "<notes>"`.
+  Return the script's app page link privately in the chat with the version and
+  build number. Do not post the install link in a public PR or CI log.
 - **Speedflight**: `scripts/speedflight.sh` builds the prod iOS workspace for
   ad hoc distribution. Local `.env.speedflight` holds signing settings and the
   upload secret; keep it out of Git. `FLUTTER_BIN` can select the Flutter SDK
