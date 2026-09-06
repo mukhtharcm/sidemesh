@@ -24,14 +24,22 @@ BUILD_NUMBER="${BUILD_NUMBER:-1}"
 FLUTTER_BUILD_NAME="${FLUTTER_BUILD_NAME:-${VERSION%%-*}}"
 SIGNING_IDENTITY="${SIGNING_IDENTITY:-}"
 ENTITLEMENTS_PATH="${ENTITLEMENTS_PATH:-$MOBILE_DIR/macos/Runner/Release.entitlements}"
-ENABLE_DATA_PROTECTION_KEYCHAIN="${ENABLE_DATA_PROTECTION_KEYCHAIN:-false}"
-case "$ENABLE_DATA_PROTECTION_KEYCHAIN" in
-  true | false) ;;
-  *)
-    echo "ENABLE_DATA_PROTECTION_KEYCHAIN must be true or false" >&2
+MACOS_PROVISION_PROFILE_PATH="${MACOS_PROVISION_PROFILE_PATH:-}"
+ENABLE_DATA_PROTECTION_KEYCHAIN=false
+if [[ -n "$SIGNING_IDENTITY" ]]; then
+  if [[ ! -f "$MACOS_PROVISION_PROFILE_PATH" ]]; then
+    echo "Signed releases require MACOS_PROVISION_PROFILE_PATH (Developer ID profile)" >&2
     exit 1
-    ;;
-esac
+  fi
+  signing_temp_dir="$(mktemp -d)"
+  trap 'rm -rf "$signing_temp_dir"' EXIT
+  security cms -D -i "$MACOS_PROVISION_PROFILE_PATH" -o "$signing_temp_dir/profile.plist"
+  python3 "$ROOT_DIR/scripts/macos-keychain-entitlements.py" \
+    "$signing_temp_dir/profile.plist" "$ENTITLEMENTS_PATH" \
+    "$BUNDLE_IDENTIFIER" "$SIGNING_IDENTITY" "$signing_temp_dir/entitlements.plist"
+  ENTITLEMENTS_PATH="$signing_temp_dir/entitlements.plist"
+  ENABLE_DATA_PROTECTION_KEYCHAIN=true
+fi
 
 BUILD_PRODUCTS_DIR="$MOBILE_DIR/build/macos/Build/Products/Release-$FLAVOR"
 BUILT_APP_PATH="$BUILD_PRODUCTS_DIR/$APP_NAME.app"
@@ -80,6 +88,7 @@ fi
 
 if [[ -n "$SIGNING_IDENTITY" ]]; then
   echo "Signing app with Developer ID identity: $SIGNING_IDENTITY"
+  cp "$MACOS_PROVISION_PROFILE_PATH" "$BUILT_APP_PATH/Contents/embedded.provisionprofile"
   if [[ ! -f "$ENTITLEMENTS_PATH" ]]; then
     echo "Entitlements file not found: $ENTITLEMENTS_PATH" >&2
     exit 1
@@ -87,13 +96,14 @@ if [[ -n "$SIGNING_IDENTITY" ]]; then
 
   if [[ -d "$BUILT_APP_PATH/Contents/Frameworks" ]]; then
     while IFS= read -r -d '' item; do
-      codesign --force --timestamp --options runtime --sign "$SIGNING_IDENTITY" "$item"
+      codesign --force --deep --timestamp --options runtime --sign "$SIGNING_IDENTITY" "$item"
     done < <(find "$BUILT_APP_PATH/Contents/Frameworks" \( -name "*.framework" -o -name "*.dylib" \) -print0)
   fi
 
+  # Only the main app has the provisioning profile. Do not pass its restricted
+  # keychain entitlements to nested frameworks or Sparkle helpers with --deep.
   codesign \
     --force \
-    --deep \
     --timestamp \
     --options runtime \
     --entitlements "$ENTITLEMENTS_PATH" \
@@ -103,6 +113,7 @@ if [[ -n "$SIGNING_IDENTITY" ]]; then
   codesign --verify --deep --strict --verbose=2 "$BUILT_APP_PATH"
 else
   echo "No SIGNING_IDENTITY provided; creating unsigned/ad-hoc artifacts."
+  rm -f "$BUILT_APP_PATH/Contents/embedded.provisionprofile"
   codesign --force --deep --sign - --entitlements "$ENTITLEMENTS_PATH" "$BUILT_APP_PATH" || true
 fi
 

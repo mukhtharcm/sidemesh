@@ -13,8 +13,8 @@
 		APIs return errSecMissingEntitlement (-34018), which is the error we
 		hit in practice.
 
-		Flip `com.apple.security.app-sandbox` back to <true/> and configure a
-		development team in Xcode if you plan to notarize / distribute the app.
+		Signed releases remain unsandboxed and use the Data Protection Keychain
+		with an embedded Developer ID profile. See docs/release-playbook.md.
 	-->
 	<key>com.apple.security.app-sandbox</key>
 	<false/>
