@@ -36,8 +36,8 @@ Future<void> main(List<String> args) async {
   _configureDesktopRuntimeBackends();
   final launchState = await resolveCurrentWindowLaunchState();
   if (_isDesktopPlatform && Platform.isMacOS) {
-    // Our macOS build runs unsandboxed by design so keychain access works
-    // without extra signing setup. file_picker 11+ assumes a sandboxed app
+    // Our macOS build runs unsandboxed by design.
+    // file_picker 11+ assumes a sandboxed app
     // and performs an entitlement check unless we opt out explicitly.
     await FilePicker.skipEntitlementsChecks();
     if (launchState.arguments.kind == SidemeshWindowKind.main) {

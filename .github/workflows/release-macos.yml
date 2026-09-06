@@ -76,6 +76,20 @@ jobs:
           security list-keychains -d user -s "$keychain_path" login.keychain-db
           security default-keychain -d user -s "$keychain_path"
 
+      - name: Prepare Developer ID provisioning profile
+        if: env.HAS_SIGNING_SECRETS == 'true'
+        env:
+          MACOS_PROVISION_PROFILE_BASE64: ${{ secrets.MACOS_PROVISION_PROFILE_BASE64 }}
+        run: |
+          if [[ -z "$MACOS_PROVISION_PROFILE_BASE64" ]]; then
+            echo "MACOS_PROVISION_PROFILE_BASE64 is required for signed releases" >&2
+            exit 1
+          fi
+          profile_path="$RUNNER_TEMP/sidemesh-developer-id.provisionprofile"
+          printf '%s' "$MACOS_PROVISION_PROFILE_BASE64" | base64 --decode > "$profile_path"
+          chmod 600 "$profile_path"
+          echo "MACOS_PROVISION_PROFILE_PATH=$profile_path" >> "$GITHUB_ENV"
+
       - name: Package release artifacts
         env:
           VERSION: ${{ steps.meta.outputs.version }}
@@ -233,3 +247,4 @@ jobs:
         if: always() && env.HAS_SIGNING_SECRETS == 'true'
         run: |
           security delete-keychain "$RUNNER_TEMP/sidemesh-signing.keychain-db" || true
+          rm -f "$RUNNER_TEMP/sidemesh-developer-id.provisionprofile"

@@ -213,9 +213,14 @@ specific agent provider.
   Runtime `NodeConfig.port` may be `0` in tests or ephemeral dev servers;
   persisted config only allows `1-65535`, so serialization must omit `0`
   instead of writing it back to disk.
-- **macOS unsandboxed**: The macOS build runs unsandboxed by design so keychain
-  access works without extra signing. `file_picker` 11+ assumes sandboxed apps
+- **macOS unsandboxed**: The macOS build runs unsandboxed by design. `file_picker` 11+ assumes sandboxed apps
   and performs an entitlement check — we explicitly skip it in `main.dart`.
+- **macOS keychain**: Signed releases require a Developer ID provisioning
+  profile and use the Data Protection Keychain. Packaging validates and embeds
+  the profile before signing with its authorized entitlements. The fresh host
+  list requires re-pairing once; never read or clean up legacy keychain items
+  in this path, as either operation can show password prompts. Ad-hoc dev
+  builds retain the regular keychain. See `docs/release-playbook.md`.
 - **macOS path_provider FFI**: `path_provider_foundation` now uses the
   `objective_c` native asset on macOS. If that framework is missing from a
   debug app bundle, early calls like `getApplicationSupportDirectory()` can
