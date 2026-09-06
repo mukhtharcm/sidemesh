@@ -17,6 +17,7 @@ import '../theme/app_tokens.dart';
 import '../theme/app_code_theme.dart';
 import '../widgets/app_snackbar.dart';
 import '../widgets/app_menu.dart';
+import '../widgets/mesh_widgets.dart';
 import '../widgets/terminal_keybar.dart';
 import '../host_reconnect_scheduler.dart';
 import '../host_status_store.dart';
@@ -448,7 +449,8 @@ class _TerminalPaneState extends State<TerminalPane> {
             );
           }
         });
-        _terminal.write('\r\nTerminal stopped.\r\n');
+        _terminal.setCursorVisibleMode(false);
+        _focusNode.unfocus();
         return;
       case 'replace':
         final seq = _intOrNull(frame['seq']);
@@ -686,6 +688,8 @@ class _TerminalPaneState extends State<TerminalPane> {
       if (!mounted) return;
       setState(() {
         _terminalInfo = _stoppedTerminal(updated);
+        _terminal.setCursorVisibleMode(false);
+        _focusNode.unfocus();
         _stopping = false;
       });
     } catch (error) {
@@ -697,8 +701,8 @@ class _TerminalPaneState extends State<TerminalPane> {
 
   Future<void> _restartTerminal() async {
     if (_starting) return;
-    await _subscription?.cancel();
-    await _channel?.sink.close();
+    unawaited(_subscription?.cancel());
+    unawaited(_channel?.sink.close());
     if (!mounted) return;
     setState(() {
       _subscription = null;
@@ -709,6 +713,7 @@ class _TerminalPaneState extends State<TerminalPane> {
       _lastSeq = -1;
       _error = null;
     });
+    _terminal.setCursorVisibleMode(true);
     await _startTerminal(reuseExisting: false, replaceExisting: true);
   }
 
@@ -761,6 +766,7 @@ class _TerminalPaneState extends State<TerminalPane> {
                     controller: _terminalController,
                     focusNode: _focusNode,
                     autofocus: true,
+                    readOnly: terminal?.isRunning != true,
                     keyboardType: TextInputType.text,
                     deleteDetection: true,
                     theme: buildTerminalTheme(colors),
@@ -810,12 +816,37 @@ class _TerminalPaneState extends State<TerminalPane> {
                     },
                     onHandleDragUpdate: _updateSelectionHandle,
                   ),
+                  if (terminal != null && !terminal.isRunning && !_starting)
+                    Align(
+                      alignment: Alignment.bottomCenter,
+                      child: Padding(
+                        padding: const EdgeInsets.all(AppSpacing.lg),
+                        child: MeshCard(
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Text(
+                                'Terminal stopped',
+                                style: Theme.of(context).textTheme.titleSmall,
+                              ),
+                              const SizedBox(height: AppSpacing.sm),
+                              FilledButton.icon(
+                                onPressed: _restartTerminal,
+                                icon: const Icon(Icons.restart_alt_rounded),
+                                label: const Text('Start terminal'),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
                 ],
               ),
             ),
           ),
         ),
-        if (!AppSizes.usesPointerControls(Theme.of(context).platform))
+        if (terminal?.isRunning == true &&
+            !AppSizes.usesPointerControls(Theme.of(context).platform))
           TerminalKeyBar(
             compact: widget.compact,
             modifierState: _modifierState,
@@ -834,7 +865,8 @@ class _TerminalPaneState extends State<TerminalPane> {
         !running &&
         !_starting &&
         !_connecting &&
-        (terminal != null || _error != null);
+        terminal == null &&
+        _error != null;
     return TerminalPaneAppBarControls(
       showStop: running,
       status: _starting
@@ -950,7 +982,6 @@ class _TerminalNoticeBanner extends StatelessWidget {
 
   _TerminalBannerState? _bannerState(BuildContext context) {
     final colors = context.colors;
-    final running = terminal?.isRunning == true;
     final limitedBackend = terminal?.backend == 'pipe';
     if (error != null && error!.trim().isNotEmpty) {
       return _TerminalBannerState(
@@ -979,15 +1010,6 @@ class _TerminalNoticeBanner extends StatelessWidget {
         border: colors.border,
         foreground: colors.textSecondary,
         spinner: true,
-      );
-    }
-    if (!running && terminal != null) {
-      return _TerminalBannerState(
-        icon: Icons.stop_circle_outlined,
-        label: 'Terminal stopped',
-        background: colors.surfaceElevated,
-        border: colors.border,
-        foreground: colors.textSecondary,
       );
     }
     if (limitedBackend) {

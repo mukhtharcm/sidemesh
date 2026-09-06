@@ -49,6 +49,20 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('Stop terminal'), findsOneWidget);
     expect(find.byTooltip('Start a new terminal'), findsNothing);
+    await tester.tap(find.byTooltip('Terminal actions'));
+    await tester.pumpAndSettle();
+    api.channel.emit(jsonEncode({'type': 'exit', 'seq': 1, 'exitCode': 0}));
+    await tester.pumpAndSettle();
+    expect(find.text('Terminal stopped'), findsOneWidget);
+    expect(find.text('Start terminal'), findsOneWidget);
+    expect(
+      tester.widget<TerminalView>(find.byType(TerminalView)).readOnly,
+      isTrue,
+    );
+    await tester.tap(find.text('Start terminal'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 100));
+    expect(api.replaced, isTrue);
     await tester.pumpWidget(const SizedBox());
     api.channel.dispose();
   });
@@ -79,10 +93,7 @@ void main() {
           ),
         );
         await tester.pumpAndSettle();
-        expect(
-          find.byType(TerminalKeyBar),
-          platform == TargetPlatform.iOS ? findsOneWidget : findsNothing,
-        );
+        expect(find.byType(TerminalKeyBar), findsNothing);
         final terminal = tester
             .widget<TerminalView>(find.byType(TerminalView))
             .terminal;
@@ -106,6 +117,21 @@ const _running = <String, Object?>{
 };
 
 class _LiveApi extends ApiClient {
+  bool replaced = false;
+  @override
+  Future<HostTerminalInfo> createTerminal(
+    HostProfile host, {
+    required String cwd,
+    String? sessionId,
+    String? title,
+    int? cols,
+    int? rows,
+    bool replaceExisting = false,
+  }) {
+    replaced = replaceExisting;
+    return Completer<HostTerminalInfo>().future;
+  }
+
   final channel = _ControllableWebSocketChannel();
   @override
   Future<List<HostTerminalInfo>> fetchTerminals(HostProfile host) async => [
@@ -121,6 +147,9 @@ class _LiveApi extends ApiClient {
 
 class _ControllableWebSocketChannel extends StreamChannelMixin<dynamic>
     implements WebSocketChannel {
+  _ControllableWebSocketChannel() {
+    _outgoing.stream.listen((_) {});
+  }
   final StreamController<dynamic> _incoming = StreamController<dynamic>();
   final StreamController<dynamic> _outgoing = StreamController<dynamic>();
 
@@ -165,8 +194,9 @@ class _TestWebSocketSink implements WebSocketSink {
       _delegate.addError(error, stackTrace);
 
   @override
-  Future<void> close([int? closeCode, String? closeReason]) =>
-      _delegate.close();
+  Future<void> close([int? closeCode, String? closeReason]) async {
+    unawaited(_delegate.close());
+  }
 
   @override
   Future<void> get done => _delegate.done;
