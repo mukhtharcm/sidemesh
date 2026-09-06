@@ -1389,9 +1389,6 @@ export async function startServer(
         defaultProvider.provider.displayName,
       providerVersion,
       providerConfig: defaultProvider.configSummary,
-      // Compatibility alias for defaultProviderCapabilities.
-      // Retained until the minimum supported mobile client version no longer depends on it.
-      providerCapabilities: defaultProviderCapabilities,
       defaultProviderCapabilities,
       hostCapabilities,
       searchSessions: hostCapabilities.sessions.search,

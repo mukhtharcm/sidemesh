@@ -244,8 +244,9 @@ specific agent provider.
 - **Session freshness**: recover through `GET /api/sessions/:id/log` on open,
   every WebSocket `hello`, app resume, and turn completion. There is no events
   replay endpoint. `seq` orders transcript items; it does not prove freshness.
-  Snapshot/live `revision` only identifies events already covered by an in-flight
-  snapshot. It resets with the daemon and must never skip a reconnect refresh.
+  Snapshot/live `revision` identifies events covered by the latest snapshot,
+  including delayed WebSocket deliveries after the HTTP response. It resets
+  with the daemon and must never skip a reconnect refresh.
 - **Image-bearing tool results**: expose screenshots and other returned images
   through provider-neutral `ToolActivity.attachments`, not fabricated assistant
   messages. Shared normalization recognizes common OpenAI, MCP, and ACP content
@@ -259,7 +260,10 @@ specific agent provider.
   and its revision. The client buffers live events during a snapshot, discards
   covered additive text, and preserves newer events and informational warnings.
   Completed messages may precede durable history; keep them without replaying
-  old completion transitions over newer drafts. Drain buffered events on errors.
+  old completion transitions over newer drafts. Match them against provider
+  history using the normal message reconciliation, since IDs can differ.
+  Covered turn completions must still schedule the final history/Git refresh.
+  Drain buffered events on errors.
   Keep finished tool overlays until provider history confirms their content;
   clearing at turn completion can lose updates from a snapshot already reading.
 - **Cached session verification**: cached transcripts remain stale until a full

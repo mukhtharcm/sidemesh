@@ -880,6 +880,7 @@ class _SessionScreenState extends State<SessionScreen>
   // Incremented whenever a fresh snapshot is requested so in-flight responses
   // from older requests can be discarded.
   int _snapshotRequestId = 0;
+  int? _snapshotRevision;
   // Buffer live events that arrive while a snapshot is in flight so we can
   // replay them after the snapshot's setState runs — prevents a stale
   // snapshot from clobbering an already-delivered action_opened / activity.
@@ -2243,8 +2244,7 @@ class _SessionScreenState extends State<SessionScreen>
       // OS can pause or silently kill the socket while backgrounded; the
       // normal onDone / onError path often doesn't fire until a write
       // actually fails. Force a reconnect + re-sync on resume so the user
-      // sees fresh state immediately — prefer the cheap events delta over
-      // a full snapshot whenever we have a known lastSeq.
+      // sees fresh state immediately from a provider snapshot.
       unawaited(_resyncAfterResume());
       _connectLive();
       _schedulePendingSendRetry();
@@ -2423,20 +2423,10 @@ class _SessionScreenState extends State<SessionScreen>
         return;
       }
       final pendingAction = log.pendingAction;
-      // Capture any live events delivered while the snapshot was in flight —
-      // we'll replay them after the snapshot setState so they aren't clobbered.
-      final coveredMessages = <SessionMessage>[];
-      final bufferedEvents = _pendingLiveEvents.where((event) {
-        final revision = event.revision;
-        if (revision == null || log.revision == null || revision > log.revision!) {
-          return true;
-        }
-        // History may still be flushing to disk. Keep completed messages, but
-        // do not replay their old status/draft transitions over the snapshot.
-        if (event.messageItem != null) coveredMessages.add(event.messageItem!);
-        return event.type == 'provider_warning' ||
-            event.type == 'queue_updated' || event.type == 'auto_retry_updated';
-      }).toList();
+      // Apply buffered events through the same revision check as events that
+      // arrive after the HTTP response. The two connections can arrive in
+      // either order.
+      final bufferedEvents = List<LiveEvent>.from(_pendingLiveEvents);
       _pendingLiveEvents.clear();
       final snapshotActivities = _mergeIncomingActivities(
         _activities,
@@ -2444,14 +2434,10 @@ class _SessionScreenState extends State<SessionScreen>
         mode: _ActivityMergeMode.snapshot,
       );
       setState(() {
+        _snapshotRevision = log.revision;
         _session = log.session;
         _messages = log.messages;
         _optimisticMessages = _reconcileOptimisticMessages(log.messages);
-        for (final message in coveredMessages) {
-          if (!log.messages.any((saved) => saved.id == message.id)) {
-            _upsertOptimisticMessage(message);
-          }
-        }
         _activities = snapshotActivities;
         _history = log.history;
         _messageLimit = resolvedMessageLimit;
@@ -2579,6 +2565,16 @@ class _SessionScreenState extends State<SessionScreen>
       // Cached transcripts are best-effort. A fresh snapshot is already queued.
       return false;
     }
+  }
+
+  void _scheduleTurnCompletionRefresh() {
+    // Providers can finish a turn before their last history write is readable.
+    // Keep this refresh even when a snapshot already covered the idle state.
+    Future<void>.delayed(const Duration(milliseconds: 1200), () {
+      if (!mounted) return;
+      unawaited(_loadSnapshot(scrollToBottom: false));
+      unawaited(_loadGitStatus(silent: true));
+    });
   }
 
   void _applyFetchedSessionStatus(SessionStatus status) {
@@ -2758,6 +2754,7 @@ class _SessionScreenState extends State<SessionScreen>
     }
 
     if (event.type == 'hello') {
+      _snapshotRevision = null;
       _pendingLiveEvents.clear();
       unawaited(_loadSkills(forceReload: true));
       // Every connection verifies the snapshot, including daemon restarts and
@@ -2765,6 +2762,31 @@ class _SessionScreenState extends State<SessionScreen>
       _markTranscriptPossiblyStale();
       unawaited(_loadSnapshot(scrollToBottom: false));
       return;
+    }
+
+    final revision = event.revision;
+    if (revision != null &&
+        _snapshotRevision != null &&
+        revision <= _snapshotRevision!) {
+      // History can lag a live completion and use different message IDs.
+      // Preserve the reply without applying old status/draft transitions.
+      final message = event.messageItem;
+      if (message != null &&
+          !_messages.any((saved) =>
+              saved.id == message.id ||
+              _matchesPersistedMessage(saved, message))) {
+        setState(() => _upsertOptimisticMessage(message));
+      }
+      if (event.type == 'turn_completed') {
+        _scheduleTurnCompletionRefresh();
+      }
+      // These notifications are not represented in the session snapshot.
+      if (event.type != 'provider_warning' &&
+          event.type != 'queue_updated' &&
+          event.type != 'auto_retry_updated' &&
+          event.type != 'skills_changed') {
+        return;
+      }
     }
 
     switch (event.type) {
@@ -2859,21 +2881,7 @@ class _SessionScreenState extends State<SessionScreen>
         });
         _thinkingNotifier.value = false;
         _syncSessionLiveActivity();
-        // Background reconcile; do not block UI. Delayed enough for the agent to
-        // finish flushing the rollout .jsonl file — otherwise the snapshot
-        // reads a partial file and the new assistant message appears to
-        // vanish until the user reloads.
-        Future<void>.delayed(const Duration(milliseconds: 1200), () {
-          if (!mounted) return;
-          unawaited(
-            _loadSnapshot(
-              messageLimit: _messageLimit,
-              activityLimit: _activityLimit,
-              scrollToBottom: false,
-            ),
-          );
-          unawaited(_loadGitStatus(silent: true));
-        });
+        _scheduleTurnCompletionRefresh();
       case 'activity_updated':
         final activity = event.activity;
         if (activity == null) {
