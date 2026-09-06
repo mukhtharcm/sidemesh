@@ -23,12 +23,6 @@ String _releaseTrackLabel(String value) {
   return value == 'bleeding-edge' ? 'Early access' : 'Stable';
 }
 
-String _releaseTrackDetail(String value) {
-  return value == 'bleeding-edge'
-      ? 'Early access · newest CI-verified changes'
-      : 'Stable · tagged releases';
-}
-
 class HostDetailScreen extends StatefulWidget {
   const HostDetailScreen({
     super.key,
@@ -284,9 +278,8 @@ class _HostDetailScreenState extends State<HostDetailScreen>
                       bottom: AppSizes.floatingActionClearance,
                     ),
               children: [
-                const AppSectionHeader(title: 'Connection'),
-                const SizedBox(height: AppSpacing.sm),
                 _NodeCard(host: widget.host, node: node),
+                const SizedBox(height: AppSpacing.sm),
                 _MachineAgents(node: node),
                 if (_shouldShowMobileCompatibility(node)) ...[
                   const SizedBox(height: AppSpacing.md),
@@ -372,26 +365,24 @@ class _NodeCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Column(
-      children: [
-        AppSettingsRow(
-          icon: Icons.lan_outlined,
-          title: node.hostname,
-          footer: SelectableText(
-            host.baseUrl,
-            style: Theme.of(context).textTheme.bodySmall?.copyWith(
-              color: context.colors.textSecondary,
-            ),
-          ),
-        ),
-        AppSettingsRow(
-          icon: Icons.computer_rounded,
-          title: node.platform,
-          subtitle: node.packageVersion == null
-              ? null
-              : 'Sidemesh ${node.packageVersion}',
-        ),
-      ],
+    final platform = switch (node.platform) {
+      'darwin' => 'macOS',
+      'linux' => 'Linux',
+      'win32' => 'Windows',
+      _ => node.platform,
+    };
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: AppSpacing.md),
+      child: SelectableText(
+        [
+          host.baseUrl,
+          platform,
+          if (node.packageVersion != null) 'Sidemesh ${node.packageVersion}',
+        ].join(' · '),
+        style: Theme.of(
+          context,
+        ).textTheme.bodySmall?.copyWith(color: context.colors.textSecondary),
+      ),
     );
   }
 }
@@ -548,27 +539,20 @@ class _MachineAgents extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final providers = node.supportedProviders;
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        const AppSectionHeader(title: 'Agents'),
-        if (providers.isEmpty)
-          AppSettingsRow(
-            icon: Icons.hub_rounded,
-            title: node.providerDisplayName,
-            subtitle: node.providerDisplayVersion,
-            trailing: const Text('Default'),
-          ),
-        for (final provider in providers)
-          AppSettingsRow(
-            icon: Icons.hub_rounded,
-            title: provider.displayName.isEmpty
+    final names = providers.isEmpty
+        ? ['${node.providerDisplayName} (default)']
+        : providers.map((provider) {
+            final name = provider.displayName.isEmpty
                 ? provider.kind
-                : provider.displayName,
-            subtitle: provider.version.isEmpty ? null : provider.version,
-            trailing: provider.isDefault ? const Text('Default') : null,
-          ),
-      ],
+                : provider.displayName;
+            return provider.isDefault ? '$name (default)' : name;
+          });
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: AppSpacing.md),
+      child: Text(
+        'Agents: ${names.join(' · ')}',
+        style: Theme.of(context).textTheme.bodyMedium,
+      ),
     );
   }
 }
@@ -1014,63 +998,9 @@ class _HostManagementCardState extends State<_HostManagementCard> {
     return 'latest version';
   }
 
-  String _updateChannelDetail() {
-    final configured = _selectedUpdateChannel == widget.node.updateChannel;
-    final base = _releaseTrackDetail(_selectedUpdateChannel);
-    return configured ? base : '$base · next update only';
-  }
-
   String _updateDetail() {
-    final isOffline =
-        HostStatusStore.instance.statusFor(widget.host.id).reachability ==
-        HostReachability.offline;
-    if (isOffline) {
-      return 'Machine offline, cannot update';
-    }
-    if (widget.checkingUpdateInfo) {
-      return 'Checking for updates…';
-    }
-
-    if (widget.node.usesBleedingEdgeTrack) {
-      final current = widget.node.currentInstallLabel;
-      final latest = widget.node.latestInstallLabel;
-      if (!widget.node.updateAvailable) {
-        return 'Up to date · $current';
-      }
-      if (widget.node.shortCurrentCommitSha != null &&
-          widget.node.shortLatestCommitSha != null) {
-        return '$current → $latest';
-      }
-      return current;
-    }
-
-    final packageVersion = widget.node.packageVersion;
-    final latestVersion = widget.node.latestVersion;
-    final hasCurrent = packageVersion != null && packageVersion.isNotEmpty;
-    final hasLatest = latestVersion != null && latestVersion.isNotEmpty;
-
-    if (!widget.node.updateAvailable) {
-      if (hasCurrent) return 'Up to date · v$packageVersion';
-      return 'Up to date · version unavailable';
-    }
-
-    if (hasCurrent && hasLatest) {
-      return 'v$packageVersion → v$latestVersion';
-    }
-    if (hasCurrent) {
-      return 'Current version: v$packageVersion';
-    }
-    return 'Version unavailable';
-  }
-
-  IconData get _updateIcon {
-    if (widget.checkingUpdateInfo) {
-      return Icons.sync_rounded;
-    }
-    if (!widget.node.updateAvailable) {
-      return Icons.check_circle_rounded;
-    }
-    return Icons.system_update_alt_rounded;
+    if (widget.checkingUpdateInfo) return 'Checking for updates…';
+    return widget.node.updateAvailable ? 'Update available' : 'Up to date';
   }
 
   @override
@@ -1111,53 +1041,90 @@ class _HostManagementCardState extends State<_HostManagementCard> {
               ),
               Divider(height: 1, color: colors.border),
             ],
-            if (widget.node.supportsHostCapability('workspace', 'terminal'))
-              _ManagementRow(
-                icon: Icons.terminal_rounded,
-                label: 'Open terminal',
-                detail: 'Open a shell on this machine.',
-                busy: false,
-                onTap: _openTerminal,
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: AppSpacing.md),
+              child: Wrap(
+                spacing: AppSpacing.sm,
+                runSpacing: AppSpacing.sm,
+                crossAxisAlignment: WrapCrossAlignment.center,
+                children: [
+                  if (widget.node.supportsHostCapability(
+                    'workspace',
+                    'terminal',
+                  ))
+                    OutlinedButton.icon(
+                      onPressed: isOffline ? null : _openTerminal,
+                      icon: const Icon(Icons.terminal_rounded),
+                      label: const Text('Open terminal'),
+                    ),
+                  MenuAnchor(
+                    menuChildren: [
+                      if (_supportsChannelSelection)
+                        MenuItemButton(
+                          onPressed: isOffline || _savingUpdateChannel
+                              ? null
+                              : _pickUpdateChannel,
+                          child: const Text('Release track'),
+                        ),
+                      if (_supportsRestart)
+                        MenuItemButton(
+                          onPressed: isOffline || _restartingProvider
+                              ? null
+                              : _restartProvider,
+                          child: Text('Restart $_providerDisplayName'),
+                        ),
+                      MenuItemButton(
+                        onPressed: isOffline || _restartingDaemon
+                            ? null
+                            : _restartDaemon,
+                        child: const Text('Restart Sidemesh'),
+                      ),
+                    ],
+                    builder: (context, controller, child) => IconButton(
+                      tooltip: 'More machine actions',
+                      onPressed: () => controller.isOpen
+                          ? controller.close()
+                          : controller.open(),
+                      icon: const Icon(Icons.more_horiz_rounded),
+                    ),
+                  ),
+                ],
               ),
-            if (_supportsRestart)
-              _ManagementRow(
-                icon: Icons.refresh_rounded,
-                label: 'Restart $_providerDisplayName',
-                detail: 'Leaves terminals running.',
-                busy: _restartingProvider,
-                onTap: _restartProvider,
-              ),
-            if (_supportsChannelSelection)
-              _ManagementRow(
-                icon: Icons.alt_route_rounded,
-                label: 'Release track',
-                detail: _updateChannelDetail(),
-                busy: _savingUpdateChannel,
-                onTap: _pickUpdateChannel,
-              ),
-            if (_updateSupported)
-              _ManagementRow(
-                icon: _updateIcon,
-                label: 'Update Sidemesh',
-                detail: _updateDetail(),
-                busy:
-                    _updating ||
-                    widget.checkingUpdateInfo ||
-                    (_updateOperation?.isInProgress ?? false),
-                onTap:
-                    isOffline ||
-                        _updateStartedAt != null ||
-                        (_updateOperation?.isInProgress ?? false)
-                    ? null
-                    : () => unawaited(_updateDaemon()),
-              ),
-            _ManagementRow(
-              icon: Icons.restart_alt_rounded,
-              label: 'Restart Sidemesh',
-              detail: 'Reconnects automatically after the restart.',
-              busy: _restartingDaemon,
-              onTap: _restartDaemon,
             ),
+            if (_updateSupported) ...[
+              const SizedBox(height: AppSpacing.md),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: AppSpacing.md),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        isOffline ? 'Machine offline' : _updateDetail(),
+                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color: colors.textSecondary,
+                        ),
+                      ),
+                    ),
+                    if (_updating ||
+                        widget.checkingUpdateInfo ||
+                        (_updateOperation?.isInProgress ?? false))
+                      const SizedBox.square(
+                        dimension: AppSizes.icon,
+                        child: CircularProgressIndicator(
+                          strokeWidth: AppStrokes.indicator,
+                        ),
+                      )
+                    else if (widget.node.updateAvailable)
+                      TextButton(
+                        onPressed: isOffline || _updateStartedAt != null
+                            ? null
+                            : () => unawaited(_updateDaemon()),
+                        child: const Text('Update Sidemesh'),
+                      ),
+                  ],
+                ),
+              ),
+            ],
           ],
         );
       },
@@ -1448,40 +1415,6 @@ class _UpdateProgressBanner extends StatelessWidget {
             ),
         ],
       ),
-    );
-  }
-}
-
-class _ManagementRow extends StatelessWidget {
-  const _ManagementRow({
-    required this.icon,
-    required this.label,
-    required this.detail,
-    required this.busy,
-    required this.onTap,
-  });
-
-  final IconData icon;
-  final String label;
-  final String detail;
-  final bool busy;
-  final VoidCallback? onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    return AppSettingsRow(
-      icon: icon,
-      title: label,
-      subtitle: detail,
-      onTap: busy ? null : onTap,
-      trailing: busy
-          ? const SizedBox.square(
-              dimension: AppSizes.icon,
-              child: CircularProgressIndicator(
-                strokeWidth: AppStrokes.indicator,
-              ),
-            )
-          : const Icon(Icons.chevron_right_rounded),
     );
   }
 }

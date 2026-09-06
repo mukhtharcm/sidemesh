@@ -2494,12 +2494,11 @@ void main() {
     );
     await _pumpFrames(tester);
 
-    expect(find.text('Agents'), findsOneWidget);
-    expect(find.text('Fake Test Provider'), findsOneWidget);
-    expect(find.text('fake-provider 1.0.0'), findsOneWidget);
-    expect(find.text('Codex'), findsOneWidget);
-    expect(find.text('codex-cli 0.125.0'), findsOneWidget);
-    expect(find.text('Default'), findsOneWidget);
+    expect(
+      find.text('Agents: Codex · Fake Test Provider (default)'),
+      findsOneWidget,
+    );
+    expect(find.text('codex-cli 0.125.0'), findsNothing);
     expect(find.text('Agent features'), findsNothing);
     expect(find.text('Machine features'), findsNothing);
     expect(find.text('Command: codex'), findsNothing);

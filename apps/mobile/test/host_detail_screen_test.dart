@@ -49,19 +49,23 @@ void main() {
           expect(find.text('Start from folder'), findsNothing);
           expect(find.text('Machine tools'), findsNothing);
           expect(find.text('New session'), findsOneWidget);
-          expect(find.text('Connection'), findsOneWidget);
+          expect(find.text('Connection'), findsNothing);
           if (desktop) {
             expect(
               tester.getCenter(find.text('Test machine')).dy,
               closeTo(tester.getCenter(find.text('New session')).dy, 1),
             );
           }
-          expect(find.text('Agents'), findsOneWidget);
+          expect(find.textContaining('Agents:'), findsOneWidget);
           expect(find.text('Open terminal'), findsOneWidget);
           expect(find.text('Update Sidemesh'), findsOneWidget);
           expect(api.sessionReads, 0);
-          final rowX = tester.getTopLeft(find.text('Open terminal')).dx;
-          expect(tester.getTopLeft(find.text('Update Sidemesh')).dx, rowX);
+          expect(find.text('Restart Sidemesh'), findsNothing);
+          await tester.tap(find.byTooltip('More machine actions'));
+          await tester.pumpAndSettle();
+          expect(find.text('Restart Sidemesh'), findsOneWidget);
+          await tester.tap(find.byTooltip('More machine actions'));
+          await tester.pumpAndSettle();
 
           await tester.tap(find.byTooltip('Refresh'));
           await tester.pumpAndSettle();
