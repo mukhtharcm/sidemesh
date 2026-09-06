@@ -47,7 +47,12 @@ for the app team. Store `ASC_KEY_ID`, `ASC_ISSUER_ID`, `ASC_PRIVATE_KEY_PATH`,
 `SPEEDFLIGHT_TEAM_ID`, `SPEEDFLIGHT_SECRET`, `SPEEDFLIGHT_AUTHOR`, and
 `SPEEDFLIGHT_DEEP_LINK=sidemesh://` in the ignored `.env.speedflight` file
 with mode `600`. Set `FLUTTER_BIN` if the matching SDK is not on `PATH`.
-`SPEEDFLIGHT_ICON` is an optional PNG path. Keep the same upload secret for
+`SPEEDFLIGHT_ICON` is an optional PNG path.
+If cloud signing is unavailable, `SPEEDFLIGHT_EXPORT_OPTIONS_PLIST` can point
+to an ignored local export plist with an existing distribution certificate
+and ad hoc profiles for both the app and Live Activity extension. Use `asc`
+to provision and install those profiles for the registered test devices.
+The archive still uses automatic signing. Keep the same upload secret for
 all builds of this app.
 
 After the preflight checks, commit and push the feature branch, then run:

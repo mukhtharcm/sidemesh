@@ -253,6 +253,12 @@ specific agent provider.
   upload secret; keep it out of Git. `FLUTTER_BIN` can select the Flutter SDK
   used by CI. The script overrides manual App Store signing for both the app
   and Live Activity extension, without editing the project signing settings.
+  Cloud signing access can fail even when the API key can manage profiles.
+  `SPEEDFLIGHT_EXPORT_OPTIONS_PLIST` supports export with an existing local
+  distribution certificate and ad hoc profiles provisioned through `asc`.
+  A locked keychain ahead of the login keychain can shadow the same signing
+  identity and cause `errSecInternalComponent`; check keychain search order
+  before replacing certificates or changing Apple account permissions.
 - **Flutter flavors**: Build/run commands must include `--flavor dev` or
   `--flavor prod`.
 - **Flutter control geometry**: shared button themes set platform-specific
