@@ -55,13 +55,13 @@ void main() {
     expect(node.provider, 'codex');
     expect(node.providerDisplayName, 'Codex');
     expect(node.providerDisplayVersion, 'codex-cli 0.125.0');
-    expect(node.providerCapabilities.supports('sessions', 'create'), isTrue);
+    expect(node.defaultProviderCapabilities.supports('sessions', 'create'), isTrue);
     expect(
       node.defaultProviderCapabilities.supports('sessions', 'searchSessions'),
       isTrue,
     );
     expect(
-      node.providerCapabilities.supports('workspace', 'gitStatus'),
+      node.defaultProviderCapabilities.supports('workspace', 'gitStatus'),
       isFalse,
     );
     expect(node.supportsHostCapability('workspace', 'gitStatus'), isTrue);
@@ -104,13 +104,13 @@ void main() {
 
     expect(node.provider, 'codex');
     expect(node.providerName, 'Codex');
-    expect(node.providerVersion, 'codex-cli 0.124.0');
+    expect(node.providerVersion, isEmpty);
     expect(node.providerDisplayName, 'Codex');
-    expect(node.providerDisplayVersion, 'codex-cli 0.124.0');
+    expect(node.providerDisplayVersion, isEmpty);
     expect(node.updateChannel, 'stable');
     expect(node.currentCommitSha, isNull);
     expect(node.providerConfig.kind, isEmpty);
-    expect(node.providerCapabilities.values, isEmpty);
+    expect(node.defaultProviderCapabilities.values, isEmpty);
     expect(node.hostCapabilities.values, isEmpty);
     expect(node.supportsHostCapability('workspace', 'gitStatus'), isFalse);
     expect(node.supportedProviders, isEmpty);
@@ -212,50 +212,6 @@ void main() {
     expect(operation.startedDateTime.millisecondsSinceEpoch, 1000);
     expect(operation.finishedDateTime?.millisecondsSinceEpoch, 3000);
   });
-
-  test(
-    'NodeInfo falls back to providerCapabilities when defaultProviderCapabilities is absent',
-    () {
-      // Regression test for legacy daemon compatibility. Older daemons may
-      // send only providerCapabilities before defaultProviderCapabilities
-      // was introduced. New clients should still work.
-      final node = NodeInfo.fromJson({
-        'label': 'Legacy daemon',
-        'hostname': 'macbook.local',
-        'platform': 'darwin',
-        'codexVersion': 'codex-cli 0.124.0',
-        'provider': 'codex',
-        'providerName': 'Codex',
-        'providerVersion': 'codex-cli 0.124.0',
-        'providerConfig': {'kind': 'codex', 'command': 'codex'},
-        'providerCapabilities': {
-          'sessions': {'create': true, 'searchSessions': true},
-        },
-        'hostCapabilities': {
-          'workspace': {'filesystem': true},
-        },
-        'supportedProviders': [
-          {
-            'kind': 'codex',
-            'displayName': 'Codex',
-            'defaultCommand': 'codex',
-            'capabilities': {
-              'sessions': {'create': true},
-            },
-          },
-        ],
-      });
-
-      expect(node.provider, 'codex');
-      expect(node.providerCapabilities.supports('sessions', 'create'), isTrue);
-      expect(
-        node.defaultProviderCapabilities.supports('sessions', 'searchSessions'),
-        isTrue,
-      );
-      expect(node.supportsHostCapability('workspace', 'filesystem'), isTrue);
-      expect(node.supportedProviders, hasLength(1));
-    },
-  );
 
   test('ProviderMetadata drops malformed provider entries', () {
     final metadata = ProviderMetadata.fromJson({
@@ -377,18 +333,18 @@ void main() {
     );
 
     expect(chatOnly.providerDisplayVersion, 'fake-provider 1.0.0 (chat-only)');
-    expect(chatOnly.providerCapabilities.supports('input', 'text'), isTrue);
+    expect(chatOnly.defaultProviderCapabilities.supports('input', 'text'), isTrue);
     expect(
-      chatOnly.providerCapabilities.supports('input', 'imageUrl'),
+      chatOnly.defaultProviderCapabilities.supports('input', 'imageUrl'),
       isFalse,
     );
-    expect(chatOnly.providerCapabilities.supports('input', 'skills'), isFalse);
+    expect(chatOnly.defaultProviderCapabilities.supports('input', 'skills'), isFalse);
     expect(
-      chatOnly.providerCapabilities.supports('configuration', 'models'),
+      chatOnly.defaultProviderCapabilities.supports('configuration', 'models'),
       isFalse,
     );
     expect(
-      chatOnly.providerCapabilities.supports('runtimeControls', 'model'),
+      chatOnly.defaultProviderCapabilities.supports('runtimeControls', 'model'),
       isFalse,
     );
 
@@ -403,9 +359,9 @@ void main() {
       ),
     );
 
-    expect(noFiles.providerCapabilities.supports('input', 'imageUrl'), isTrue);
+    expect(noFiles.defaultProviderCapabilities.supports('input', 'imageUrl'), isTrue);
     expect(
-      noFiles.providerCapabilities.supports('configuration', 'models'),
+      noFiles.defaultProviderCapabilities.supports('configuration', 'models'),
       isTrue,
     );
   });

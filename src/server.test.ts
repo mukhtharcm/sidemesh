@@ -1,8 +1,10 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { createHash } from "node:crypto";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
 import { EventEmitter } from "node:events";
 import {
+  appendFile,
   mkdir,
   mkdtemp,
   readFile,
@@ -164,71 +166,6 @@ function request(options: http.RequestOptions & { body?: string }): Promise<{
     if (options.body) req.write(options.body);
     req.end();
   });
-}
-
-async function writeLegacyDedupeReceipt(
-  stateDir: string,
-  key: string,
-  signatureHash: string,
-  receipt: { mode: string; turnId: string | null; messageId: string },
-  rawSignatureHash?: string,
-): Promise<void> {
-  await mkdir(stateDir, { recursive: true });
-  await writeFile(
-    nodePath.join(stateDir, "session-input-dedupe-v1.json"),
-    JSON.stringify({
-      version: 1,
-      entries: [
-        {
-          key,
-          signatureHash,
-          ...(rawSignatureHash ? { rawSignatureHash } : {}),
-          createdAt: Date.now(),
-          updatedAt: Date.now(),
-          receipt,
-        },
-      ],
-    }),
-    "utf8",
-  );
-}
-
-function legacyInputSignature(input: AgentSessionInputItem[]): string {
-  return createHash("sha256")
-    .update(
-      JSON.stringify({
-        input,
-        overrides: {
-          model: null,
-          reasoningEffort: null,
-          fastMode: null,
-          approvalPolicy: null,
-          sandboxMode: null,
-          networkAccess: null,
-        },
-      }),
-    )
-    .digest("hex");
-}
-
-function preAccessModeInputSignature(input: AgentSessionInputItem[]): string {
-  return createHash("sha256")
-    .update(
-      JSON.stringify({
-        input,
-        overrides: {
-          model: null,
-          reasoningEffort: null,
-          fastMode: null,
-          approvalPolicy: null,
-          sandboxMode: null,
-          networkAccess: null,
-          permissionProfile: null,
-          approvalsReviewer: null,
-        },
-      }),
-    )
-    .digest("hex");
 }
 
 async function withServer(config: NodeConfig, fn: (server: RunningServer, config: NodeConfig) => Promise<void>): Promise<void> {
@@ -1956,7 +1893,7 @@ describe("session input item parsing", () => {
         },
         body: JSON.stringify({
           cwd: "/tmp",
-          prompt: "start",
+          input: [{ type: "text", text: "start", text_elements: [] }],
           accessMode: "retired",
         }),
       });
@@ -2072,7 +2009,7 @@ describe("session input item parsing", () => {
         },
         body: JSON.stringify({
           cwd,
-          prompt: "start",
+          input: [{ type: "text", text: "start", text_elements: [] }],
         }),
       });
       assert.equal(created.statusCode, 201);
@@ -2119,145 +2056,7 @@ describe("session input item parsing", () => {
     });
   });
 
-  it("replays legacy dedupe receipts that ignored file inputs", async () => {
-    const stateDir = await mkdtemp(nodePath.join(tmpdir(), "sidemesh-server-test-"));
-    const cwd = await prepareFileInputWorkspace(stateDir);
-    const clientMessageId = "legacy-file-retry";
-    const legacyReceipt = {
-      mode: "turn",
-      turnId: "legacy-turn",
-      messageId: "legacy-message",
-    };
-    await writeLegacyDedupeReceipt(
-      stateDir,
-      `fake-restart-session:${clientMessageId}`,
-      legacyInputSignature([
-        {
-          type: "text",
-          text: "legacy retry",
-          text_elements: [],
-        },
-      ]),
-      legacyReceipt,
-    );
-    await rm(nodePath.join(cwd, "package.json"));
-    const provider = new RestartableFakeProvider();
-    const runtime = makeCustomSingleProviderRuntime(provider);
-    await withServerRuntime(makeConfig(stateDir), runtime, async (server, config) => {
-      const created = await request({
-        hostname: "127.0.0.1",
-        port: server.port,
-        path: "/api/sessions/create",
-        method: "POST",
-        headers: {
-          Authorization: "Bearer " + config.token,
-          "content-type": "application/json",
-        },
-        body: JSON.stringify({
-          cwd,
-          prompt: "start",
-        }),
-      });
-      assert.equal(created.statusCode, 201);
-      const sessionId = (created.body as any).session.id as string;
 
-      const retry = await request({
-        hostname: "127.0.0.1",
-        port: server.port,
-        path: `/api/sessions/${encodeURIComponent(sessionId)}/input`,
-        method: "POST",
-        headers: {
-          Authorization: "Bearer " + config.token,
-          "content-type": "application/json",
-        },
-        body: JSON.stringify({
-          clientMessageId,
-          input: [
-            { type: "file", path: "package.json" },
-            { type: "text", text: "legacy retry" },
-          ],
-        }),
-      });
-      assert.equal(retry.statusCode, 200);
-      assert.deepEqual(retry.body, {
-        ...legacyReceipt,
-        replayed: true,
-      });
-      assert.equal(provider.submittedInputs, 0);
-    });
-  });
-
-  it("replays pre-access-mode receipts without accepting a changed access mode", async () => {
-    const stateDir = await mkdtemp(nodePath.join(tmpdir(), "sidemesh-server-test-"));
-    const clientMessageId = "pre-access-mode-retry";
-    const input = [
-      {
-        type: "text" as const,
-        text: "retry after upgrade",
-        text_elements: [],
-      },
-    ];
-    const receipt = {
-      mode: "turn",
-      turnId: "pre-access-turn",
-      messageId: "pre-access-message",
-    };
-    const oldSignature = preAccessModeInputSignature(input);
-    await writeLegacyDedupeReceipt(
-      stateDir,
-      `fake-restart-session:${clientMessageId}`,
-      oldSignature,
-      receipt,
-      oldSignature,
-    );
-
-    const provider = new RestartableFakeProvider();
-    const runtime = makeCustomSingleProviderRuntime(provider);
-    await withServerRuntime(makeConfig(stateDir), runtime, async (server, config) => {
-      const created = await request({
-        hostname: "127.0.0.1",
-        port: server.port,
-        path: "/api/sessions/create",
-        method: "POST",
-        headers: {
-          Authorization: "Bearer " + config.token,
-          "content-type": "application/json",
-        },
-        body: JSON.stringify({ cwd: "/tmp", prompt: "start" }),
-      });
-      assert.equal(created.statusCode, 201);
-
-      const send = (accessMode?: string) =>
-        request({
-          hostname: "127.0.0.1",
-          port: server.port,
-          path: "/api/sessions/fake-restart-session/input",
-          method: "POST",
-          headers: {
-            Authorization: "Bearer " + config.token,
-            "content-type": "application/json",
-          },
-          body: JSON.stringify({
-            clientMessageId,
-            input,
-            ...(accessMode ? { accessMode } : {}),
-          }),
-        });
-
-      const retry = await send();
-      assert.equal(retry.statusCode, 200);
-      assert.deepEqual(retry.body, { ...receipt, replayed: true });
-      assert.equal(provider.submittedInputs, 0);
-
-      const changed = await send("guarded");
-      assert.equal(changed.statusCode, 409);
-      assert.equal(
-        (changed.body as any).error,
-        "clientMessageId was already used with different input",
-      );
-      assert.equal(provider.submittedInputs, 0);
-    });
-  });
 
   it("deduplicates concurrent file input retries before file resolution", async () => {
     const stateDir = await mkdtemp(nodePath.join(tmpdir(), "sidemesh-server-test-"));
@@ -2276,7 +2075,7 @@ describe("session input item parsing", () => {
         },
         body: JSON.stringify({
           cwd,
-          prompt: "start",
+          input: [{ type: "text", text: "start", text_elements: [] }],
         }),
       });
       assert.equal(created.statusCode, 201);
@@ -2502,7 +2301,7 @@ describe("POST /api/admin/provider/:kind/restart", () => {
         },
         body: JSON.stringify({
           cwd: "/tmp/restart-test",
-          prompt: "start",
+          input: [{ type: "text", text: "start", text_elements: [] }],
         }),
       });
       assert.equal(created.statusCode, 201);
@@ -2536,7 +2335,6 @@ describe("POST /api/admin/provider/:kind/restart", () => {
           () => sessionLive.events.find((event) => event.type === "hello"),
           "restart session hello",
         );
-        const hello = sessionLive.events.find((event) => event.type === "hello");
         provider.emit("liveEvent", {
           type: "provider_warning",
           sessionId,
@@ -2552,7 +2350,8 @@ describe("POST /api/admin/provider/:kind/restart", () => {
             ),
           "restart seed live event",
         );
-        assert.equal(seeded.seq, hello?.nextSeq);
+        assert.equal(typeof seeded.seq, "number");
+        assert.equal(typeof seeded.revision, "number");
 
         const restart = await request({
           hostname: "127.0.0.1",
@@ -2636,7 +2435,7 @@ describe("POST /api/admin/provider/:kind/restart", () => {
         },
         body: JSON.stringify({
           cwd: "/tmp/restart-test",
-          prompt: "start",
+          input: [{ type: "text", text: "start", text_elements: [] }],
         }),
       });
       assert.equal(created.statusCode, 201);
@@ -2652,7 +2451,7 @@ describe("POST /api/admin/provider/:kind/restart", () => {
           "content-type": "application/json",
         },
         body: JSON.stringify({
-          text: "retry me",
+          input: [{ type: "text", text: "retry me", text_elements: [] }],
           clientMessageId: "local-1",
         }),
       });
@@ -2670,7 +2469,7 @@ describe("POST /api/admin/provider/:kind/restart", () => {
           "content-type": "application/json",
         },
         body: JSON.stringify({
-          text: "retry me",
+          input: [{ type: "text", text: "retry me", text_elements: [] }],
           clientMessageId: "local-1",
         }),
       });
@@ -2697,7 +2496,7 @@ describe("POST /api/admin/provider/:kind/restart", () => {
           "content-type": "application/json",
         },
         body: JSON.stringify({
-          text: "retry me",
+          input: [{ type: "text", text: "retry me", text_elements: [] }],
           clientMessageId: "local-1",
         }),
       });
@@ -2723,7 +2522,7 @@ describe("GET /api/node", () => {
       assert.equal(res.statusCode, 200);
       const body = res.body as any;
       assert.equal(body.provider, "fake");
-      assert.equal(body.providerCapabilities.sessions.create, true);
+      assert.equal(body.defaultProviderCapabilities.sessions.create, true);
       assert.equal(body.defaultProviderCapabilities.sessions.create, true);
       assert.equal(body.searchSessions, true);
       assert.equal(body.hostCapabilities.workspace.filesystem, true);
@@ -2784,7 +2583,7 @@ describe("GET /api/node", () => {
 
       // providerCapabilities and defaultProviderCapabilities both reflect the
       // default (full) provider.
-      assert.equal(body.providerCapabilities.configuration.models, true);
+      assert.equal(body.defaultProviderCapabilities.configuration.models, true);
       assert.equal(body.defaultProviderCapabilities.configuration.models, true);
 
       // The secondary (chat-only) entry must retain its own distinct flags.
@@ -3498,7 +3297,7 @@ describe("session live rich events", () => {
     });
   });
 
-  it("replays the latest missed plan update through the events delta route", async () => {
+  it("refreshes the latest plan through the snapshot route", async () => {
     const stateDir = await mkdtemp(nodePath.join(tmpdir(), "sidemesh-server-live-test-"));
     const { runtime, provider } = makeSingleProviderRuntime({
       latencyMs: 0,
@@ -3524,7 +3323,7 @@ describe("session live rich events", () => {
       const delta = await request({
         hostname: "127.0.0.1",
         port: server.port,
-        path: `/api/sessions/${encodeURIComponent(sessionId)}/events?since=-1`,
+        path: `/api/sessions/${encodeURIComponent(sessionId)}/log`,
         method: "GET",
         headers: { Authorization: "Bearer " + config.token },
       });
@@ -3539,12 +3338,12 @@ describe("session live rich events", () => {
       const upToDate = await request({
         hostname: "127.0.0.1",
         port: server.port,
-        path: `/api/sessions/${encodeURIComponent(sessionId)}/events?since=${replayedSeq}`,
+        path: `/api/sessions/${encodeURIComponent(sessionId)}/log`,
         method: "GET",
         headers: { Authorization: "Bearer " + config.token },
       });
       assert.equal(upToDate.statusCode, 200);
-      assert.equal((upToDate.body as any).latestPlanUpdate, null);
+      assert.deepEqual((upToDate.body as any).latestPlanUpdate, (delta.body as any).latestPlanUpdate);
     });
   });
 
@@ -3574,7 +3373,7 @@ describe("session live rich events", () => {
       const firstDelta = await request({
         hostname: "127.0.0.1",
         port: server.port,
-        path: `/api/sessions/${encodeURIComponent(sessionId)}/events?since=-1`,
+        path: `/api/sessions/${encodeURIComponent(sessionId)}/log`,
         method: "GET",
         headers: { Authorization: "Bearer " + config.token },
       });
@@ -3583,7 +3382,6 @@ describe("session live rich events", () => {
         (firstDelta.body as any).latestPlanUpdate.plan[0].step,
         "Show the plan",
       );
-      const firstSeq = (firstDelta.body as any).latestPlanUpdate.seq as number;
 
       provider.emit("liveEvent", {
         type: "plan_updated",
@@ -3595,7 +3393,7 @@ describe("session live rich events", () => {
       const clearDelta = await request({
         hostname: "127.0.0.1",
         port: server.port,
-        path: `/api/sessions/${encodeURIComponent(sessionId)}/events?since=${firstSeq}`,
+        path: `/api/sessions/${encodeURIComponent(sessionId)}/log`,
         method: "GET",
         headers: { Authorization: "Bearer " + config.token },
       });
@@ -3614,13 +3412,13 @@ describe("session live rich events", () => {
     });
   });
 
-  it("replays updated activities through the events delta route even when the transcript seq is unchanged", async () => {
+  it("refreshes updated activities even when transcript order is unchanged", async () => {
     const stateDir = await mkdtemp(nodePath.join(tmpdir(), "sidemesh-server-live-test-"));
     const provider = new ActivityReplayFixtureProvider();
     const runtime = makeCustomSingleProviderRuntime(provider);
     await withServerRuntime(makeConfig(stateDir), runtime, async (server, config) => {
       const logPath = `/api/sessions/${encodeURIComponent(provider.sessionId)}/log`;
-      const eventsPath = `/api/sessions/${encodeURIComponent(provider.sessionId)}/events?since=1`;
+      const eventsPath = `/api/sessions/${encodeURIComponent(provider.sessionId)}/log`;
 
       const initialLog = await request({
         hostname: "127.0.0.1",
@@ -3665,7 +3463,7 @@ describe("session live rich events", () => {
       assert.equal((delta.body as any).activities.length, 1);
       assert.equal((delta.body as any).activities[0].id, "cmd-1");
       assert.equal((delta.body as any).activities[0].output, "before\nafter");
-      assert.ok(((delta.body as any).nextSeq as number) > 1);
+
 
       const refreshedLog = await request({
         hostname: "127.0.0.1",
@@ -3679,7 +3477,98 @@ describe("session live rich events", () => {
     });
   });
 
-  it("forces snapshot fallback when persisted session state changed without replayable seq deltas", async () => {
+  it("snapshots include live replies and updates arriving during a provider read", async () => {
+    const stateDir = await mkdtemp(nodePath.join(tmpdir(), "sidemesh-snapshot-race-"));
+    const provider = new ActivityReplayFixtureProvider();
+    await withServerRuntime(makeConfig(stateDir), makeCustomSingleProviderRuntime(provider), async (server, config) => {
+      let enter!: () => void;
+      let release!: () => void;
+      const entered = new Promise<void>((resolve) => { enter = resolve; });
+      const reading = new Promise<void>((resolve) => { release = resolve; });
+      const readLog = provider.readSessionLog.bind(provider);
+      provider.readSessionLog = async (thread, options) => {
+        const log = await readLog(thread, options);
+        if (options?.messageLimit === 13) { enter(); await reading; }
+        return log;
+      };
+      const snapshot = request({
+        hostname: "127.0.0.1", port: server.port,
+        path: `/api/sessions/${provider.sessionId}/log?messageLimit=13`,
+        headers: { Authorization: `Bearer ${config.token}` },
+      });
+      await entered;
+      provider.emit("liveEvent", { type: "turn_started", sessionId: provider.sessionId, turnId: "turn-live" });
+      provider.emit("liveEvent", { type: "assistant_delta", sessionId: provider.sessionId, delta: "Still writing" });
+      provider.emit("liveEvent", { type: "reasoning_delta", sessionId: provider.sessionId, delta: "Checking", summary: false });
+      provider.emit("liveEvent", { type: "runtime_updated", sessionId: provider.sessionId, runtime: { model: "live-model" } });
+      provider.emit("liveEvent", {
+        type: "activity_updated", sessionId: provider.sessionId,
+        activity: { ...((await readLog({ id: provider.sessionId } as ThreadRecord)).activities[0]), output: "fresh output" },
+      });
+      provider.emit("liveEvent", { type: "plan_updated", sessionId: provider.sessionId, plan: [{ step: "Fresh plan", status: "in_progress" }] });
+      release();
+      const result = await snapshot;
+      assert.equal(result.statusCode, 200);
+      const body = result.body as any;
+      assert.equal(body.liveAssistantText, "Still writing");
+      assert.equal(body.liveAssistantReasoning, "Checking");
+      assert.equal(body.session.runtime.model, "live-model");
+      assert.equal(body.activities[0].output, "fresh output");
+      assert.equal(body.latestPlanUpdate.plan[0].step, "Fresh plan");
+      assert.equal(body.revision, 6);
+    });
+  });
+
+  it("recovers Pi history through snapshots, including partial file appends and changed git branches", async () => {
+    const stateDir = await mkdtemp(nodePath.join(tmpdir(), "sidemesh-pi-snapshot-"));
+    const cwd = nodePath.join(stateDir, "repo");
+    const agentDir = nodePath.join(stateDir, "pi");
+    const sessionDir = nodePath.join(agentDir, "sessions", "fixture");
+    await mkdir(cwd);
+    await mkdir(sessionDir, { recursive: true });
+    const git = (args: string[]) => promisify(execFile)("git", args, { cwd });
+    await git(["init", "--initial-branch=before"]);
+    const record = (index: number) => JSON.stringify({
+      type: "message", id: `m${index}`, parentId: index === 1 ? null : `m${index - 1}`,
+      timestamp: new Date(1777629600000 + index * 1000).toISOString(),
+      message: { role: index % 2 ? "user" : "assistant", content: [{ type: "text", text: `Message ${index}` }], timestamp: 1777629600000 + index * 1000 },
+    });
+    const historyPath = nodePath.join(sessionDir, "fixture.jsonl");
+    await writeFile(historyPath, JSON.stringify({ type: "session", version: 3, id: "pi-fixture", timestamp: "2026-05-01T10:00:00.000Z", cwd }) + "\n" + record(1) + "\n" + record(2) + "\n");
+    const piConfig = { kind: "pi" as const, agentDir, stateDir: nodePath.join(stateDir, "pi-state") };
+    const config = { ...makeConfig(stateDir), provider: piConfig, providers: [piConfig], defaultProviderKind: "pi" as const };
+    await withServer(config, async (server) => {
+      const get = (path: string) => request({ hostname: "127.0.0.1", port: server.port, path, headers: { Authorization: `Bearer ${config.token}` } });
+      const first = await get("/api/sessions/pi-fixture/log");
+      assert.equal(first.statusCode, 200);
+      assert.deepEqual((first.body as any).messages.map((message: any) => message.text), ["Message 1", "Message 2"]);
+      const third = record(3);
+      const split = Math.floor(third.length / 2);
+      await appendFile(historyPath, third.slice(0, split));
+      await get("/api/sessions/pi-fixture/log");
+      await appendFile(historyPath, third.slice(split) + "\n");
+      const simultaneous = await Promise.all(Array.from({ length: 3 }, () => get("/api/sessions/pi-fixture/log")));
+      for (const result of simultaneous) {
+        assert.equal(result.statusCode, 200);
+        assert.deepEqual((result.body as any).messages.map((message: any) => message.text), ["Message 1", "Message 2", "Message 3"]);
+      }
+      await appendFile(historyPath, Array.from({ length: 210 }, (_, index) => record(index + 4)).join("\n") + "\n");
+      const bounded = await get("/api/sessions/pi-fixture/log");
+      assert.equal((bounded.body as any).messages.length, 200);
+      assert.equal((bounded.body as any).history.totalMessages, 213);
+      assert.equal((bounded.body as any).history.isTruncated, true);
+      const older = await get("/api/sessions/pi-fixture/log?messageLimit=300");
+      assert.equal((older.body as any).messages.length, 213);
+      const before = await get("/api/sessions?runtime=none&limit=10");
+      assert.equal((before.body as any)[0].gitInfo.branch, "before");
+      await git(["symbolic-ref", "HEAD", "refs/heads/after"]);
+      const after = await get("/api/sessions?runtime=none&limit=11");
+      assert.equal((after.body as any)[0].gitInfo.branch, "after");
+      assert.equal((await get("/api/sessions/pi-fixture/events?since=0")).statusCode, 404);
+    });
+  });
+
+  it("refreshes changed persisted state directly", async () => {
     const stateDir = await mkdtemp(nodePath.join(tmpdir(), "sidemesh-server-live-test-"));
     const provider = new ActivityReplayFixtureProvider();
     const runtime = makeCustomSingleProviderRuntime(provider);
@@ -3702,13 +3591,13 @@ describe("session live rich events", () => {
         hostname: "127.0.0.1",
         port: server.port,
         path:
-          `/api/sessions/${encodeURIComponent(provider.sessionId)}/events?since=1&baseUpdatedAt=1000`,
+          `/api/sessions/${encodeURIComponent(provider.sessionId)}/log`,
         method: "GET",
         headers: { Authorization: "Bearer " + config.token },
       });
-      assert.equal(delta.statusCode, 409);
-      assert.equal((delta.body as any).error, "stale_snapshot");
-      assert.equal((delta.body as any).currentUpdatedAt, 2000);
+      assert.equal(delta.statusCode, 200);
+      assert.equal((delta.body as any).activities[0].output, "after restart");
+      assert.equal((delta.body as any).session.updatedAt, 2000);
     });
   });
 
@@ -3745,7 +3634,7 @@ describe("session live rich events", () => {
     });
   });
 
-  it("restores the latest plan update and replay cursor from persisted daemon state after restart", async () => {
+  it("restores the latest plan after daemon restart", async () => {
     const stateDir = await mkdtemp(nodePath.join(tmpdir(), "sidemesh-server-live-test-"));
     const { runtime, provider } = makeSingleProviderRuntime({
       latencyMs: 0,
@@ -3797,7 +3686,7 @@ describe("session live rich events", () => {
       const replay = await request({
         hostname: "127.0.0.1",
         port: secondServer.port,
-        path: `/api/sessions/${encodeURIComponent(sessionId)}/events?since=-1`,
+        path: `/api/sessions/${encodeURIComponent(sessionId)}/log`,
         method: "GET",
         headers: { Authorization: "Bearer " + config.token },
       });
@@ -3814,7 +3703,7 @@ describe("session live rich events", () => {
           () => live.events.find((event) => event.type === "hello"),
           "restart hello after persisted plan restore",
         );
-        assert.equal(hello.nextSeq, 1);
+        assert.equal(hello.type, "hello");
       } finally {
         await closeSessionLiveSocket(live.socket);
       }
@@ -3989,7 +3878,7 @@ describe("provider-scoped catalog routes", () => {
           path: "/api/permission-profiles",
           method: "GET",
         })).statusCode,
-        501,
+        404,
       );
       assert.equal(
         (await request({
@@ -4032,7 +3921,6 @@ describe("provider-scoped catalog routes", () => {
         "/api/models?agentProvider=unknown",
         "/api/profiles?agentProvider=unknown",
         "/api/access-modes?agentProvider=unknown",
-        "/api/permission-profiles?agentProvider=unknown",
         `/api/skills?agentProvider=unknown&cwd=${encodeURIComponent("/tmp")}`,
       ]) {
         const res = await request({ ...baseRequest, path, method: "GET" });
@@ -4075,7 +3963,6 @@ describe("provider-scoped catalog routes", () => {
           "/api/models",
           "/api/profiles",
           "/api/access-modes",
-          "/api/permission-profiles",
           `/api/skills?cwd=${encodeURIComponent("/tmp")}`,
         ]) {
           const res = await request({ ...baseRequest, path, method: "GET" });
@@ -4182,7 +4069,7 @@ describe("GET /api/sessions/:sessionId/status", () => {
       },
       body: JSON.stringify({
         cwd: "/tmp/restart-test",
-        prompt: "start",
+        input: [{ type: "text", text: "start", text_elements: [] }],
       }),
     });
     assert.equal(createRes.statusCode, 201);
@@ -4257,7 +4144,7 @@ describe("GET /api/sessions/:sessionId/status", () => {
       },
       body: JSON.stringify({
         cwd: "/tmp/transient-unreadable-create-status-test",
-        prompt: "start while thread read is temporarily unavailable",
+        input: [{ type: "text", text: "start while thread read is temporarily unavailable", text_elements: [] }],
       }),
     });
     assert.equal(createRes.statusCode, 201);
@@ -4659,7 +4546,7 @@ describe("GET /api/sessions/:sessionId/status", () => {
       const eventsRes = await request({
         hostname: "127.0.0.1",
         port: server.port,
-        path: `/api/sessions/${encodeURIComponent(sessionId)}/events?since=0`,
+        path: `/api/sessions/${encodeURIComponent(sessionId)}/log`,
         method: "GET",
         headers: { Authorization: "Bearer " + config.token },
       });
@@ -4779,7 +4666,7 @@ describe("GET /api/sessions/:sessionId/status", () => {
         },
         body: JSON.stringify({
           cwd: "/tmp/immediate-completion-test",
-          prompt: "finish immediately",
+          input: [{ type: "text", text: "finish immediately", text_elements: [] }],
         }),
       });
       assert.equal(createRes.statusCode, 201);
@@ -4809,7 +4696,7 @@ describe("GET /api/sessions/:sessionId/status", () => {
           "content-type": "application/json",
         },
         body: JSON.stringify({
-          text: "finish immediately again",
+          input: [{ type: "text", text: "finish immediately again", text_elements: [] }],
         }),
       });
       assert.equal(inputRes.statusCode, 200);
@@ -4845,7 +4732,7 @@ describe("GET /api/sessions/:sessionId/status", () => {
         },
         body: JSON.stringify({
           cwd: "/tmp/immediate-completion-transient-status-test",
-          prompt: "finish immediately while status read is unavailable",
+          input: [{ type: "text", text: "finish immediately while status read is unavailable", text_elements: [] }],
         }),
       });
       assert.equal(createRes.statusCode, 201);
@@ -4905,7 +4792,7 @@ describe("GET /api/sessions/:sessionId/status", () => {
           "content-type": "application/json",
         },
         body: JSON.stringify({
-          text: "start after cached idle",
+          input: [{ type: "text", text: "start after cached idle", text_elements: [] }],
         }),
       });
       assert.equal(inputRes.statusCode, 200);
@@ -4944,7 +4831,7 @@ describe("GET /api/sessions/:sessionId/status", () => {
         },
         body: JSON.stringify({
           cwd: "/tmp/lagging-create-turn-test",
-          prompt: "start while history lags",
+          input: [{ type: "text", text: "start while history lags", text_elements: [] }],
         }),
       });
       assert.equal(createRes.statusCode, 201);
@@ -4988,7 +4875,7 @@ describe("GET /api/sessions/:sessionId/status", () => {
         },
         body: JSON.stringify({
           cwd: "/tmp/transient-unreadable-create-turn-test",
-          prompt: "start while rollout is still empty",
+          input: [{ type: "text", text: "start while rollout is still empty", text_elements: [] }],
         }),
       });
       assert.equal(createRes.statusCode, 201);
@@ -5037,7 +4924,7 @@ describe("GET /api/sessions/:sessionId/status", () => {
         },
         body: JSON.stringify({
           cwd: "/tmp/recovering-missing-create-turn-test",
-          prompt: "start while turn snapshot is temporarily unavailable",
+          input: [{ type: "text", text: "start while turn snapshot is temporarily unavailable", text_elements: [] }],
         }),
       });
       assert.equal(createRes.statusCode, 201);
@@ -5080,7 +4967,7 @@ describe("GET /api/sessions/:sessionId/status", () => {
         },
         body: JSON.stringify({
           cwd: "/tmp/recovering-race-create-turn-test",
-          prompt: "start while turn snapshot is temporarily unavailable",
+          input: [{ type: "text", text: "start while turn snapshot is temporarily unavailable", text_elements: [] }],
         }),
       });
       assert.equal(createRes.statusCode, 201);
@@ -5128,7 +5015,7 @@ describe("GET /api/sessions/:sessionId/status", () => {
         },
         body: JSON.stringify({
           cwd: "/tmp/recovering-live-activity-create-turn-test",
-          prompt: "start while turn snapshot is temporarily unavailable",
+          input: [{ type: "text", text: "start while turn snapshot is temporarily unavailable", text_elements: [] }],
         }),
       });
       assert.equal(createRes.statusCode, 201);
@@ -5198,7 +5085,7 @@ describe("GET /api/sessions/:sessionId/status", () => {
         },
         body: JSON.stringify({
           cwd: "/tmp/recovering-failed-create-turn-test",
-          prompt: "start while failed turn snapshot is temporarily unavailable",
+          input: [{ type: "text", text: "start while failed turn snapshot is temporarily unavailable", text_elements: [] }],
         }),
       });
       assert.equal(createRes.statusCode, 201);
@@ -5298,7 +5185,7 @@ describe("GET /api/sessions/:sessionId/status", () => {
     });
   });
 
-  it("clears unverified active turns from event replay snapshots", async () => {
+  it("clears unverified active turns from repeated snapshots", async () => {
     const stateDir = await mkdtemp(nodePath.join(tmpdir(), "sidemesh-server-status-test-"));
     const provider = new TransientUnreadableCreateStatusProvider();
     const runtime = makeCustomSingleProviderRuntime(provider);
@@ -5309,7 +5196,7 @@ describe("GET /api/sessions/:sessionId/status", () => {
       const eventsRes = await request({
         hostname: "127.0.0.1",
         port: server.port,
-        path: `/api/sessions/${encodeURIComponent(sessionId)}/events?since=0`,
+        path: `/api/sessions/${encodeURIComponent(sessionId)}/log`,
         method: "GET",
         headers: { Authorization: "Bearer " + config.token },
       });
@@ -5346,7 +5233,7 @@ describe("GET /api/sessions/:sessionId/status", () => {
         },
         body: JSON.stringify({
           cwd: "/tmp/restart-test",
-          prompt: "start",
+          input: [{ type: "text", text: "start", text_elements: [] }],
         }),
       });
       assert.equal(createRes.statusCode, 201);
@@ -5425,7 +5312,7 @@ describe("GET /api/sessions/:sessionId/status", () => {
           },
           body: JSON.stringify({
             cwd: "/tmp/restart-test",
-            prompt: "start",
+            input: [{ type: "text", text: "start", text_elements: [] }],
           }),
         });
         assert.equal(createRes.statusCode, 201);
@@ -5548,7 +5435,7 @@ describe("GET /api/sessions/:sessionId/status", () => {
           },
           body: JSON.stringify({
             cwd: "/tmp/recent-rename-test",
-            prompt: "rename this recent session",
+            input: [{ type: "text", text: "rename this recent session", text_elements: [] }],
           }),
         });
         assert.equal(createRes.statusCode, 201);

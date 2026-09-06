@@ -8,9 +8,10 @@ import { CodexAgentProvider } from "./codex-provider.js";
 import { AgentProviderRequestError } from "./agent-provider.js";
 import type {
   AgentSessionResumeOptions,
-  AgentSubmitInputRequest,
 } from "./agent-provider.js";
 import type { SessionRuntimeSummary, ThreadRecord } from "./types.js";
+
+type AgentSubmitInputRequest = Parameters<CodexAgentProvider["submitInput"]>[0];
 
 function createSubmitRequest(
   overrides: Partial<AgentSubmitInputRequest["overrides"]> = {},

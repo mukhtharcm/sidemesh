@@ -21,6 +21,67 @@ import {
 import { CopilotAgentProvider } from "./copilot-provider.js";
 
 describe("Copilot provider", () => {
+  it("closes once, interrupts running work, and flushes recoverable history", async () => {
+    const dir = await mkdtemp(nodePath.join(tmpdir(), "sidemesh-copilot-close-"));
+    const sdk = new FakeCopilotSdkClient({ holdResponses: true });
+    let stops = 0;
+    Object.assign(sdk, { stop: async () => { stops++; } });
+    const provider = new CopilotAgentProvider({ stateDir: dir, sdkClientFactory: fakeSdkFactory(sdk) });
+    try {
+      await provider.start();
+      const created = await provider.createSession({
+        cwd: dir, input: [{ type: "text", text: "unsaved task", text_elements: [] }],
+        overrides: emptyOverrides(),
+      });
+      await waitFor(() => sdk.created[0]?.session.sent.length === 1);
+      await Promise.all([provider.close(), provider.close()]);
+      assert.equal(stops, 1);
+      assert.equal(sdk.created[0]?.session.aborted, true);
+      assert.deepEqual(await provider.listLoadedSessionIds(), []);
+      const restored = new CopilotAgentProvider({ stateDir: dir, sdkClientFactory: fakeSdkFactory(sdk) });
+      await restored.start();
+      try {
+        const log = await restored.readSessionLog(created.thread);
+        assert.equal(log.messages[0]?.text, "unsaved task");
+        const thread = await restored.readSessionThread(created.thread.id, true);
+        assert.notEqual(thread.status?.type, "running");
+      } finally { await restored.close(); }
+    } finally {
+      await provider.close();
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("shares client startup and closes a client that finishes starting during shutdown", async () => {
+    const dir = await mkdtemp(nodePath.join(tmpdir(), "sidemesh-copilot-start-close-"));
+    const sdk = new FakeCopilotSdkClient();
+    let release!: () => void;
+    const starting = new Promise<void>((resolve) => { release = resolve; });
+    let starts = 0;
+    let stops = 0;
+    Object.assign(sdk, {
+      start: async () => { starts++; await starting; },
+      stop: async () => { stops++; },
+    });
+    const provider = new CopilotAgentProvider({ stateDir: dir, sdkClientFactory: fakeSdkFactory(sdk) });
+    try {
+      const versions = Promise.all([provider.getVersion(), provider.getVersion()]);
+      await waitFor(() => starts === 1);
+      const closing = provider.close();
+      release();
+      await versions;
+      await closing;
+      assert.equal(starts, 1);
+      assert.equal(stops, 1);
+      await provider.getVersion();
+      assert.equal(starts, 1, "closed providers must not start another SDK process");
+    } finally {
+      release();
+      await provider.close();
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
   it("lists SDK sessions, reads SDK history, and resumes through the SDK", async () => {
     const dir = await mkdtemp(
       nodePath.join(tmpdir(), "sidemesh-copilot-sdk-history-"),

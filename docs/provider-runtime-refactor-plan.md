@@ -1,5 +1,9 @@
 # Provider Runtime Refactor Plan
 
+> Historical plan: replay endpoints and Sidemesh compatibility aliases described
+> below have been removed. The current contract is documented in
+> [session synchronization](session-synchronization.md).
+
 This document turns the current provider-runtime study into an implementation
 plan. The main goal is to make provider capability reporting honest, keep
 host-owned features out of the provider contract, and preserve the parts of the

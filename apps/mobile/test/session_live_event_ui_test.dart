@@ -29,6 +29,85 @@ void main() {
     SharedPreferences.setMockInitialValues(<String, Object>{});
   });
 
+  testWidgets('snapshot draft and buffered live text join exactly once', (tester) async {
+    final session = _session('snapshot-live-boundary', status: 'running');
+    final api = _RichEventFakeApi(sessionSummary: session);
+    addTearDown(api.dispose);
+    await _pumpApp(tester, SessionScreen(
+      host: _host(session.id), session: session, api: api, desktopMode: true,
+    ), size: const Size(1180, 900));
+    await _pumpFrames(tester);
+
+    final ready = Completer<void>();
+    api.fetchLogBlocker = ready.future;
+    api.emit({'type': 'hello', 'sessionId': session.id});
+    await _pumpFrames(tester);
+    api.liveAssistantText = 'Hello';
+    api.revision = 3;
+    api.emit({'type': 'assistant_delta', 'sessionId': session.id, 'delta': 'Hello', 'revision': 3});
+    api.emit({'type': 'assistant_delta', 'sessionId': session.id, 'delta': ' world', 'revision': 4});
+    await _pumpFrames(tester);
+    ready.complete();
+    await _pumpFrames(tester);
+    expect(find.text('Hello world'), findsOneWidget);
+    expect(find.textContaining('HelloHello'), findsNothing);
+
+    // A new connection can have a lower revision after a daemon restart.
+    api.liveAssistantText = 'Recovered after restart';
+    api.revision = 1;
+    api.emit({'type': 'hello', 'sessionId': session.id});
+    await _pumpFrames(tester);
+    expect(find.text('Recovered after restart'), findsOneWidget);
+    expect(find.text('Hello world'), findsNothing);
+  });
+
+  testWidgets('covered completion does not clear a newer snapshot draft', (tester) async {
+    final session = _session('snapshot-completed-boundary', status: 'running');
+    final api = _RichEventFakeApi(sessionSummary: session);
+    addTearDown(api.dispose);
+    await _pumpApp(tester, SessionScreen(
+      host: _host(session.id), session: session, api: api, desktopMode: true,
+    ), size: const Size(1180, 900));
+    await _pumpFrames(tester);
+    final ready = Completer<void>();
+    api.fetchLogBlocker = ready.future;
+    api.emit({'type': 'hello', 'sessionId': session.id});
+    await _pumpFrames(tester);
+    api.liveAssistantText = 'Next reply in progress';
+    api.revision = 5;
+    api.emit({
+      'type': 'assistant_message_completed', 'sessionId': session.id, 'revision': 3,
+      'messageItem': _assistantMessage(id: 'completed', text: 'Completed reply', content: const [TextBlock('Completed reply')]).toJson(),
+    });
+    api.emit({'type': 'provider_warning', 'sessionId': session.id, 'revision': 4, 'message': 'Still show this warning', 'level': 'warning'});
+    await _pumpFrames(tester);
+    ready.complete();
+    await _pumpFrames(tester);
+    expect(find.text('Completed reply'), findsOneWidget);
+    expect(find.text('Next reply in progress'), findsOneWidget);
+    expect(find.text('Still show this warning'), findsOneWidget);
+  });
+
+  testWidgets('failed snapshot still applies live text buffered during the request', (tester) async {
+    final session = _session('snapshot-failure-live', status: 'running');
+    final api = _RichEventFakeApi(sessionSummary: session);
+    addTearDown(api.dispose);
+    await _pumpApp(tester, SessionScreen(
+      host: _host(session.id), session: session, api: api, desktopMode: true,
+    ), size: const Size(1180, 900));
+    await _pumpFrames(tester);
+    final ready = Completer<void>();
+    api.fetchLogBlocker = ready.future;
+    api.fetchLogError = StateError('temporary disconnect');
+    api.emit({'type': 'hello', 'sessionId': session.id});
+    await _pumpFrames(tester);
+    api.emit({'type': 'assistant_delta', 'sessionId': session.id, 'delta': 'Live reply survives', 'revision': 2});
+    await _pumpFrames(tester);
+    ready.complete();
+    await _pumpFrames(tester);
+    expect(find.text('Live reply survives'), findsOneWidget);
+  });
+
   testWidgets('desktop session focuses the composer after opening', (
     tester,
   ) async {
@@ -429,9 +508,9 @@ void main() {
   });
 
   testWidgets(
-    'session screen restores a missed plan update from delta replay',
+    'session screen restores a missed plan update from a refreshed snapshot',
     (tester) async {
-      final session = _session('plan-delta-replay');
+      final session = _session('plan-snapshot-refresh');
       final api = _RichEventFakeApi(
         messages: [
           _assistantMessage(
@@ -440,10 +519,8 @@ void main() {
             content: const [TextBlock('Existing transcript item.')],
           ),
         ],
-        eventsDelta: SessionEventsDelta(
-          sessionId: session.id,
-          since: 1,
-          nextSeq: 3,
+        snapshotUpdate: _SnapshotUpdate(
+
           messages: const [],
           activities: const [],
           latestPlanUpdate: LiveEvent.fromJson(
@@ -466,7 +543,7 @@ void main() {
       await _pumpApp(
         tester,
         SessionScreen(
-          host: _host('plan-delta-replay'),
+          host: _host('plan-snapshot-refresh'),
           session: session,
           api: api,
           desktopMode: true,
@@ -477,7 +554,7 @@ void main() {
 
       expect(find.text('Catch up missed plan state'), findsNothing);
 
-      api.emit({'type': 'hello', 'sessionId': session.id, 'nextSeq': 3});
+      api.emit({'type': 'hello', 'sessionId': session.id, 'revision': 3});
       await _pumpFrames(tester);
 
       expect(find.text('Plan update'), findsOneWidget);
@@ -490,15 +567,13 @@ void main() {
     },
   );
 
-  testWidgets('session screen clears an existing plan from delta replay', (
+  testWidgets('session screen clears an existing plan from a refreshed snapshot', (
     tester,
   ) async {
-    final session = _session('plan-clear-delta-replay');
+    final session = _session('plan-clear-snapshot-refresh');
     final api = _RichEventFakeApi(
-      eventsDelta: SessionEventsDelta(
-        sessionId: session.id,
-        since: 3,
-        nextSeq: 5,
+      snapshotUpdate: _SnapshotUpdate(
+
         messages: const [],
         activities: const [],
         latestPlanUpdate: LiveEvent.fromJson(
@@ -519,7 +594,7 @@ void main() {
     await _pumpApp(
       tester,
       SessionScreen(
-        host: _host('plan-clear-delta-replay'),
+        host: _host('plan-clear-snapshot-refresh'),
         session: session,
         api: api,
         desktopMode: true,
@@ -548,7 +623,7 @@ void main() {
 
     expect(find.text('Clear stale visible plan'), findsOneWidget);
 
-    api.emit({'type': 'hello', 'sessionId': session.id, 'nextSeq': 5});
+    api.emit({'type': 'hello', 'sessionId': session.id, 'revision': 5});
     await _pumpFrames(tester);
 
     expect(find.text('Plan update'), findsNothing);
@@ -571,15 +646,14 @@ void main() {
       ],
       sessionStatus: SessionStatus(
         sessionId: session.id,
+
         status: 'running',
         isRunning: true,
         activeTurnId: 'turn-1',
         pendingAction: null,
       ),
-      eventsDelta: SessionEventsDelta(
-        sessionId: session.id,
-        since: 1,
-        nextSeq: 1,
+      snapshotUpdate: _SnapshotUpdate(
+
         messages: const [],
         activities: const [],
         latestPlanUpdate: null,
@@ -625,7 +699,7 @@ void main() {
   });
 
   testWidgets(
-    'delta replay clears stale pending actions when the server has none',
+    'snapshot refresh clears stale pending actions when the server has none',
     (tester) async {
       final session = _session('pending-action-delta-clear');
       final api = _RichEventFakeApi(
@@ -636,10 +710,8 @@ void main() {
             content: const [TextBlock('Existing transcript item.')],
           ),
         ],
-        eventsDelta: SessionEventsDelta(
-          sessionId: session.id,
-          since: 1,
-          nextSeq: 3,
+        snapshotUpdate: _SnapshotUpdate(
+
           messages: const [],
           activities: const [],
           latestPlanUpdate: null,
@@ -680,7 +752,7 @@ void main() {
 
       expect(find.text('Approve file edit'), findsOneWidget);
 
-      api.emit({'type': 'hello', 'sessionId': session.id, 'nextSeq': 3});
+      api.emit({'type': 'hello', 'sessionId': session.id, 'revision': 3});
       await _pumpFrames(tester);
 
       expect(find.text('Approve file edit'), findsNothing);
@@ -797,7 +869,7 @@ void main() {
   );
 
   testWidgets(
-    'cached activity details refresh from delta replay without manual reload',
+    'cached activity details refresh from a refreshed snapshot without manual reload',
     (tester) async {
       final host = _host('cached-activity-delta');
       final session = _session('cached-activity-delta');
@@ -806,10 +878,8 @@ void main() {
         activities: [
           _fileChangeActivity(id: 'file-1', seq: 1, path: '/repo/after.txt'),
         ],
-        eventsDelta: SessionEventsDelta(
-          sessionId: session.id,
-          since: 1,
-          nextSeq: 2,
+        snapshotUpdate: _SnapshotUpdate(
+
           messages: const [],
           activities: [
             _fileChangeActivity(id: 'file-1', seq: 1, path: '/repo/after.txt'),
@@ -925,10 +995,8 @@ void main() {
     final api = _RichEventFakeApi(
       sessionSummary: session,
       activities: [freshFile],
-      eventsDelta: SessionEventsDelta(
-        sessionId: session.id,
-        since: 10,
-        nextSeq: 10,
+      snapshotUpdate: _SnapshotUpdate(
+
         messages: const [],
         activities: const [],
         latestPlanUpdate: null,
@@ -967,7 +1035,7 @@ void main() {
   });
 
   testWidgets(
-    'delta replay refreshes cached history metadata without manual reload',
+    'snapshot refresh updates cached history metadata without manual reload',
     (tester) async {
       final host = _host('cached-history-delta');
       final session = _session('cached-history-delta');
@@ -996,10 +1064,8 @@ void main() {
           totalActivities: 0,
           returnedActivities: 0,
         ),
-        eventsDelta: SessionEventsDelta(
-          sessionId: session.id,
-          since: 1,
-          nextSeq: 2,
+        snapshotUpdate: _SnapshotUpdate(
+
           messages: [deltaMessage],
           activities: const [],
           latestPlanUpdate: null,
@@ -1051,14 +1117,14 @@ void main() {
     },
   );
 
-  testWidgets('stale delta fallback reloads the full snapshot automatically', (
+  testWidgets('refresh replaces stale cached content automatically', (
     tester,
   ) async {
     final host = _host('stale-delta-fallback');
     final session = _session('stale-delta-fallback');
     final api = _RichEventFakeApi(
       sessionSummary: session,
-      eventsError: StateError('stale_snapshot'),
+
       activities: [
         _fileChangeActivity(id: 'file-1', seq: 1, path: '/repo/fresh.txt'),
       ],
@@ -1096,16 +1162,14 @@ void main() {
   });
 
   testWidgets(
-    'cached session verifies snapshot even when delta has no transcript rows',
+    'cached session verifies the full snapshot even without live events',
     (tester) async {
       final host = _host('cached-delta-empty-snapshot-verify');
       final session = _session('cached-delta-empty-snapshot-verify');
       final api = _RichEventFakeApi(
         sessionSummary: session,
-        eventsDelta: SessionEventsDelta(
-          sessionId: session.id,
-          since: 1,
-          nextSeq: 1,
+        snapshotUpdate: _SnapshotUpdate(
+
           messages: const [],
           activities: const [],
           latestPlanUpdate: null,
@@ -1178,10 +1242,8 @@ void main() {
             content: const [TextBlock('Fresh snapshot item.')],
           ),
         ],
-        eventsDelta: SessionEventsDelta(
-          sessionId: session.id,
-          since: 1,
-          nextSeq: 1,
+        snapshotUpdate: _SnapshotUpdate(
+
           messages: const [],
           activities: const [],
           latestPlanUpdate: null,
@@ -1226,7 +1288,7 @@ void main() {
       );
       await _pumpFrames(tester);
 
-      api.emit({'type': 'hello', 'sessionId': session.id, 'nextSeq': 3});
+      api.emit({'type': 'hello', 'sessionId': session.id, 'revision': 3});
       await _pumpFrames(tester);
 
       expect(find.text('Cached transcript item.'), findsOneWidget);
@@ -1264,7 +1326,7 @@ void main() {
     final host = _host('cached-offline-status');
     final session = _session('cached-offline-status');
     final api = _RichEventFakeApi(
-      eventsError: StateError('offline'),
+
       fetchLogError: StateError('offline'),
     );
     addTearDown(api.dispose);
@@ -2332,14 +2394,22 @@ NodeInfo _nodeInfo({
   'supportedProviders': const [],
 });
 
+class _SnapshotUpdate {
+  const _SnapshotUpdate({required this.messages, required this.activities, required this.latestPlanUpdate, required this.pendingAction, required this.session});
+  final List<SessionMessage> messages;
+  final List<SessionActivity> activities;
+  final LiveEvent? latestPlanUpdate;
+  final PendingAction? pendingAction;
+  final SessionSummary? session;
+}
+
 class _RichEventFakeApi extends ApiClient {
   _RichEventFakeApi({
     this.messages = const [],
     this.activities = const [],
     this.sessionLogHistory,
     this.latestPlanUpdate,
-    this.eventsDelta,
-    this.eventsError,
+    this.snapshotUpdate,
     this.fetchLogBlocker,
     this.fetchLogError,
     this.nodeInfo,
@@ -2354,10 +2424,12 @@ class _RichEventFakeApi extends ApiClient {
   final List<SessionActivity> activities;
   final SessionLogHistorySummary? sessionLogHistory;
   final LiveEvent? latestPlanUpdate;
-  final SessionEventsDelta? eventsDelta;
-  final Object? eventsError;
+  final _SnapshotUpdate? snapshotUpdate;
   Future<void>? fetchLogBlocker;
-  final Object? fetchLogError;
+  Object? fetchLogError;
+  int? revision;
+  String liveAssistantText = '';
+  String liveAssistantReasoning = '';
   final NodeInfo? nodeInfo;
   final SessionSummary? sessionSummary;
   final SessionStatus? sessionStatus;
@@ -2384,10 +2456,13 @@ class _RichEventFakeApi extends ApiClient {
       throw fetchLogError!;
     }
     return SessionLog(
-      session: sessionSummary ?? _session(sessionId),
-      messages: messages,
-      activities: activities,
-      pendingAction: pendingAction,
+      session: snapshotUpdate?.session ?? sessionSummary ?? _session(sessionId),
+      revision: revision,
+      liveAssistantText: liveAssistantText,
+      liveAssistantReasoning: liveAssistantReasoning,
+      messages: _refreshedMessages,
+      activities: _refreshedActivities,
+      pendingAction: snapshotUpdate != null ? snapshotUpdate!.pendingAction : pendingAction,
       history:
           sessionLogHistory ??
           SessionLogHistorySummary(
@@ -2397,32 +2472,19 @@ class _RichEventFakeApi extends ApiClient {
             totalActivities: activities.length,
             returnedActivities: activities.length,
           ),
-      latestPlanUpdate: latestPlanUpdate,
+      latestPlanUpdate: snapshotUpdate?.latestPlanUpdate ?? latestPlanUpdate,
     );
   }
 
-  @override
-  Future<SessionEventsDelta> fetchEvents(
-    HostProfile host,
-    String sessionId, {
-    required int since,
-    int? baseUpdatedAt,
-  }) async {
-    if (eventsError != null) {
-      throw eventsError!;
-    }
-    return eventsDelta ??
-        SessionEventsDelta(
-          sessionId: sessionId,
-          since: since,
-          nextSeq: since,
-          messages: const [],
-          activities: const [],
-          latestPlanUpdate: null,
-          pendingAction: null,
-          session: null,
-        );
-  }
+  List<SessionMessage> get _refreshedMessages => {
+    for (final item in messages) item.id: item,
+    for (final item in snapshotUpdate?.messages ?? const <SessionMessage>[]) item.id: item,
+  }.values.toList();
+
+  List<SessionActivity> get _refreshedActivities => {
+    for (final item in activities) item.id: item,
+    for (final item in snapshotUpdate?.activities ?? const <SessionActivity>[]) item.id: item,
+  }.values.toList();
 
   @override
   Future<SessionStatus> fetchStatus(HostProfile host, String sessionId) async {

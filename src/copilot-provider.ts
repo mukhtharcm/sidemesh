@@ -7,6 +7,8 @@ import { BlockList, isIP } from "node:net";
 import nodePath from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 
+import { StateWriter } from "./state-writer.js";
+
 import {
   type AgentCreateSessionRequest,
   type AgentCreateSessionResult,
@@ -176,7 +178,6 @@ export const COPILOT_PROVIDER_CAPABILITIES: AgentProviderCapabilities = {
     compact: true,
     interrupt: true,
     history: true,
-    eventReplay: true,
     recentFallback: true,
     searchSessions: false,
   },
@@ -202,7 +203,6 @@ export const COPILOT_PROVIDER_CAPABILITIES: AgentProviderCapabilities = {
     models: true,
     profiles: false,
     accessModes: false,
-    permissionProfiles: false,
     skills: true,
     skillManagement: true,
   },
@@ -216,8 +216,6 @@ export const COPILOT_PROVIDER_CAPABILITIES: AgentProviderCapabilities = {
     networkAccess: false,
     webSearch: false,
     accessMode: false,
-    permissionProfile: false,
-    approvalsReviewer: false,
   },
   lifecycle: {
     restart: false,
@@ -258,7 +256,11 @@ export class CopilotAgentProvider
   >();
   private readonly planUpdateVersions = new Map<string, number>();
   private sdkClient: CopilotSdkClient | null = null;
-  private saveChain: Promise<void> = Promise.resolve();
+  private clientStarting: Promise<CopilotSdkClient> | null = null;
+  private closed = false;
+  private readonly turnTasks = new Set<Promise<void>>();
+  private readonly stateWriter = new StateWriter(() => this.saveState());
+  private closing: Promise<void> | null = null;
 
   public constructor(options: CopilotAgentProviderOptions = {}) {
     super();
@@ -276,6 +278,34 @@ export class CopilotAgentProvider
     await chmod(this.stateDir, 0o700);
     await this.ensureSdkClient();
     await this.loadState();
+  }
+
+  public close(): Promise<void> {
+    return this.closing ??= this.closeRuntime();
+  }
+
+  private async closeRuntime(): Promise<void> {
+    this.closed = true;
+    const client = this.sdkClient ?? await this.clientStarting?.catch(() => null);
+    try {
+      for (const [sessionId, active] of this.activeTurns) {
+        this.resolvePendingPermissionsForSession(sessionId, { kind: "denied-interactively-by-user" });
+        this.resolvePendingUserInputsForSession(sessionId, { answer: "", wasFreeform: true });
+        this.resolvePendingElicitationsForSession(sessionId, { action: "cancel" });
+        this.completeActiveTurn(sessionId, "interrupted");
+        await active.sdkSession.abort().catch(() => undefined);
+      }
+      await client?.stop?.();
+    } catch (error) {
+      await client?.forceStop?.();
+      throw error;
+    } finally {
+      await Promise.allSettled(this.turnTasks);
+      this.sdkClient = null;
+      this.loadedSessionIds.clear();
+      for (const session of this.sessions.values()) session.sdkSession = null;
+      await this.stateWriter.flush();
+    }
   }
 
   public async getVersion(): Promise<string> {
@@ -814,7 +844,15 @@ export class CopilotAgentProvider
     session.turns.push(turn);
     session.thread.status = { type: "running", activeFlags: ["inProgress"] };
     this.touch(session);
-    void this.runTurn(session.thread.id, turnId, input);
+    const task = this.runTurn(session.thread.id, turnId, input);
+    this.turnTasks.add(task);
+    void task.then(
+      () => this.turnTasks.delete(task),
+      (error: unknown) => {
+        this.turnTasks.delete(task);
+        this.emit("stderr", `Copilot turn persistence failed: ${String(error)}`);
+      },
+    );
     return turnId;
   }
 
@@ -831,6 +869,7 @@ export class CopilotAgentProvider
     try {
       const sdkSession = await this.ensureSdkSession(session);
       await this.applyRuntimeControls(session, sdkSession);
+      if (this.closed) throw new Error("Copilot provider is closed.");
       const completed = new Promise<string>((resolve) => {
         this.activeTurns.set(sessionId, {
           turnId,
@@ -860,17 +899,25 @@ export class CopilotAgentProvider
   }
 
   private async ensureSdkClient(): Promise<CopilotSdkClient> {
-    if (this.sdkClient) {
-      return this.sdkClient;
+    if (this.closed) throw new Error("Copilot provider is closed.");
+    if (this.sdkClient) return this.sdkClient;
+    if (!this.clientStarting) {
+      this.clientStarting = (async () => {
+        const client = await this.sdkClientFactory({
+          bin: this.bin, cwd: process.cwd(), env: { ...process.env, NO_COLOR: "1" },
+        });
+        try {
+          await client.start();
+          this.sdkClient = client;
+          return client;
+        } catch (error) {
+          await client.forceStop?.();
+          throw error;
+        }
+      })();
     }
-    const client = await this.sdkClientFactory({
-      bin: this.bin,
-      cwd: process.cwd(),
-      env: { ...process.env, NO_COLOR: "1" },
-    });
-    await client.start();
-    this.sdkClient = client;
-    return client;
+    try { return await this.clientStarting; }
+    finally { this.clientStarting = null; }
   }
 
   private async ensureSdkSession(
@@ -1888,11 +1935,8 @@ export class CopilotAgentProvider
     }
   }
 
-  private async persistSoon(): Promise<void> {
-    this.saveChain = this.saveChain
-      .catch(() => undefined)
-      .then(() => this.saveState());
-    await this.saveChain;
+  private persistSoon(): Promise<void> {
+    return this.stateWriter.request();
   }
 
   private persistEventually(): void {

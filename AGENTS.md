@@ -48,7 +48,7 @@ src/
   codex-provider.ts            # Codex adapter
   copilot-provider.ts          # Copilot CLI adapter
   fake-provider.ts             # Deterministic test harness
-  server.ts                    # Express HTTP + WebSocket server
+  server.ts                    # Hono HTTP + WebSocket server
   fs-routes.ts                 # Host filesystem API
   terminal.ts                  # Host integrated terminal
   browser-preview.ts           # Host browser tabs
@@ -59,7 +59,8 @@ src/
   git.ts                       # Git operations
   workspace-scope.ts           # Workspace path resolution / sandboxing
   session-input-dedupe-store.ts  # On-disk input deduplication ledger
-  session-replay-index.ts      # Incremental .jsonl parser for Codex rollouts
+  session-state.ts             # Current session overlay and transcript ordering
+  state-writer.ts              # Coalesced durable snapshot writes
 apps/mobile/lib/src/
   screens/                     # Flutter screens
   theme/                       # App theming
@@ -240,11 +241,11 @@ specific agent provider.
 - **No formatter**: No Prettier, Biome, or ESLint. Follow file-local style.
 - **WebSocket `hello`**: The server sends `{"type":"hello"}` on every WS
   connection.
-- **Session replay freshness**: live activity updates must not be replay-filtered
-  only by the activity's original `seq`. Activities keep their transcript order
-  stable while replay freshness is tracked separately in `src/server.ts`, so
-  delta sync should use the replay cursor rather than assuming updated
-  activities get a newer transcript `seq`.
+- **Session freshness**: recover through `GET /api/sessions/:id/log` on open,
+  every WebSocket `hello`, app resume, and turn completion. There is no events
+  replay endpoint. `seq` orders transcript items; it does not prove freshness.
+  Snapshot/live `revision` only identifies events already covered by an in-flight
+  snapshot. It resets with the daemon and must never skip a reconnect refresh.
 - **Image-bearing tool results**: expose screenshots and other returned images
   through provider-neutral `ToolActivity.attachments`, not fabricated assistant
   messages. Shared normalization recognizes common OpenAI, MCP, and ACP content
@@ -254,24 +255,14 @@ specific agent provider.
   Provider adapters must filter before applying the requested limit, and
   multi-provider wrapping must namespace `subAgent.parentSessionId` as well as
   the child thread id.
-- **Mobile delta parity**: `SessionEventsDelta` does not include a full
-  `history` summary. When replaying deltas into a cached session,
-  `apps/mobile/lib/src/screens/session_screen.dart` must keep
-  `SessionLogHistorySummary` in sync locally or the “older history” UI can stay
-  stale until a full snapshot reload.
-- **Delta staleness fallback**: some providers can expose newer session state
-  without any replayable `seq` bump (for example, persisted activity details
-  changing in place). `GET /api/sessions/:id/events` can therefore return a
-  `stale_snapshot` error when the caller's `baseUpdatedAt` is older than the
-  current session `updatedAt` but there are no replayable message/activity/plan
-  deltas. Mobile session refresh paths should treat that as a signal to reload
-  the full snapshot automatically.
-- **Cached session verification**: delta replay is a fast first pass, not a
-  proof that a cached or resume-stale transcript is fully fresh. When the
-  session screen is showing cached or possibly stale content, it should still
-  verify with a full snapshot after delta replay before clearing stale-state UI.
-  Provider `updatedAt` values can be coarse, and transcript rows can mutate in
-  place without producing replayable deltas.
+- **Snapshot/live boundary**: finish provider reads before capturing live state
+  and its revision. The client buffers live events during a snapshot, discards
+  covered additive text, and preserves newer events and informational warnings.
+  Completed messages may precede durable history; keep them without replaying
+  old completion transitions over newer drafts. Drain buffered events on errors.
+- **Cached session verification**: cached transcripts remain stale until a full
+  snapshot succeeds. Provider timestamps may be coarse and existing rows can
+  change without a new transcript sequence number.
 - **Workspace sandboxing**: `resolveWorkspacePath` uses `realpath` and prefix
   match against workspace roots. `WorkspaceAccessError` extends `Error` with
   a `status` field (default 403) that HTTP handlers can throw directly. Roots
