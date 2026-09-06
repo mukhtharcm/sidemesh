@@ -75,73 +75,82 @@ void main() {
     }
   });
 
-  testWidgets('desktop settings categories stay inside one dialog', (
-    tester,
-  ) async {
-    debugDefaultTargetPlatformOverride = TargetPlatform.macOS;
-    tester.view
-      ..devicePixelRatio = 1
-      ..physicalSize = const Size(1440, 1024);
-    try {
-      await CreateSessionDefaultsStore.instance.ensureLoaded();
-      final controller = await ThemeController.load();
-      final palette = ThemeVariant.codexAmber;
+  for (final brightness in Brightness.values) {
+    testWidgets(
+      'desktop settings categories stay inside one dialog ($brightness)',
+      (tester) async {
+        debugDefaultTargetPlatformOverride = TargetPlatform.macOS;
+        tester.view
+          ..devicePixelRatio = 1
+          ..physicalSize = const Size(1440, 1024);
+        try {
+          await CreateSessionDefaultsStore.instance.ensureLoaded();
+          final controller = await ThemeController.load();
+          final palette = ThemeVariant.codexAmber;
 
-      await tester.pumpWidget(
-        ThemeScope(
-          notifier: controller,
-          child: MaterialApp(
-            theme: buildLightTheme(
-              palette.light,
-              typography: controller.typography,
-            ),
-            darkTheme: buildDarkTheme(
-              palette.dark,
-              typography: controller.typography,
-            ),
-            home: Builder(
-              builder: (context) => Scaffold(
-                body: Center(
-                  child: FilledButton(
-                    onPressed: () => openSettingsScreen(
-                      context,
-                      onResetSidebarWidth: () {},
-                      onResetInspectorWidth: () {},
+          await tester.pumpWidget(
+            ThemeScope(
+              notifier: controller,
+              child: MaterialApp(
+                themeMode: brightness == Brightness.dark
+                    ? ThemeMode.dark
+                    : ThemeMode.light,
+                theme: buildLightTheme(
+                  palette.light,
+                  typography: controller.typography,
+                ),
+                darkTheme: buildDarkTheme(
+                  palette.dark,
+                  typography: controller.typography,
+                ),
+                home: Builder(
+                  builder: (context) => Scaffold(
+                    body: Center(
+                      child: FilledButton(
+                        onPressed: () => openSettingsScreen(
+                          context,
+                          onResetSidebarWidth: () {},
+                          onResetInspectorWidth: () {},
+                        ),
+                        child: const Text('Open settings'),
+                      ),
                     ),
-                    child: const Text('Open settings'),
                   ),
                 ),
               ),
             ),
-          ),
-        ),
-      );
+          );
 
-      await tester.tap(find.text('Open settings'));
-      await tester.pumpAndSettle();
+          await tester.tap(find.text('Open settings'));
+          await tester.pumpAndSettle();
 
-      expect(find.byType(Dialog), findsOneWidget);
-      expect(find.text('General'), findsOneWidget);
-      await tester.tap(find.widgetWithText(ListTile, 'Appearance'));
-      await tester.pumpAndSettle();
-      expect(find.text('Color mode'), findsOneWidget);
-      expect(find.byType(Dialog), findsOneWidget);
-      expect(find.byType(BottomSheet), findsNothing);
-      await tester.tap(find.widgetWithText(ListTile, 'New sessions'));
-      await tester.pumpAndSettle();
-      expect(find.byType(AppSelect<ApprovalPolicy>), findsOneWidget);
-      expect(find.byType(Dialog), findsOneWidget);
-      expect(find.text('Color mode'), findsNothing);
-      await tester.tap(find.widgetWithText(ListTile, 'Local data'));
-      await tester.pumpAndSettle();
-      expect(find.text('Clear saved transcript cache'), findsOneWidget);
-      expect(find.byType(Dialog), findsOneWidget);
-    } finally {
-      debugDefaultTargetPlatformOverride = null;
-      tester.view.resetPhysicalSize();
-      tester.view.resetDevicePixelRatio();
-    }
-  });
+          expect(find.byType(Dialog), findsOneWidget);
+          expect(find.text('General'), findsOneWidget);
+          expect(find.text('Appearance'), findsOneWidget);
+          expect(find.text('Device'), findsOneWidget);
+          await tester.tap(find.widgetWithText(ListTile, 'Appearance'));
+          await tester.pumpAndSettle();
+          expect(find.text('Color mode'), findsOneWidget);
+          expect(find.byType(Dialog), findsOneWidget);
+          expect(find.byType(BottomSheet), findsNothing);
+          await tester.tap(find.widgetWithText(ListTile, 'New sessions'));
+          await tester.pumpAndSettle();
+          expect(find.byType(AppSelect<ApprovalPolicy>), findsOneWidget);
+          expect(find.byTooltip('Close'), findsNothing);
+          expect(find.byType(Dialog), findsOneWidget);
+          expect(find.text('Color mode'), findsNothing);
+          await tester.tap(find.widgetWithText(ListTile, 'Local data'));
+          await tester.pumpAndSettle();
+          expect(find.text('Clear saved transcript cache'), findsOneWidget);
+          expect(find.byType(Dialog), findsOneWidget);
+        } finally {
+          debugDefaultTargetPlatformOverride = null;
+          tester.view.resetPhysicalSize();
+          tester.view.resetDevicePixelRatio();
+        }
+      },
+    );
+  }
 
   testWidgets('macOS updater failure stays compact and can recover', (
     tester,
@@ -151,15 +160,23 @@ void main() {
       ..devicePixelRatio = 1
       ..physicalSize = const Size(900, 1200);
     var failLoading = true;
+    var automatic = true;
+    var interval = 86400;
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
         .setMockMethodCallHandler(updaterChannel, (call) async {
           if (failLoading) {
             throw PlatformException(code: 'unavailable');
           }
+          if (call.method == 'setAutomaticallyChecksForUpdates') {
+            automatic = (call.arguments as Map)['enabled'] as bool;
+          }
+          if (call.method == 'setUpdateCheckIntervalSeconds') {
+            interval = (call.arguments as Map)['seconds'] as int;
+          }
           return <String, Object>{
             'supported': true,
-            'automaticallyChecksForUpdates': true,
-            'updateCheckIntervalSeconds': 86400,
+            'automaticallyChecksForUpdates': automatic,
+            'updateCheckIntervalSeconds': interval,
             'canCheckForUpdates': true,
           };
         });
@@ -205,6 +222,28 @@ void main() {
       expect(find.widgetWithText(OutlinedButton, 'Check now'), findsOneWidget);
       expect(find.text('Check automatically'), findsOneWidget);
       expect(find.text('How often'), findsOneWidget);
+      final titleX = tester.getTopLeft(find.text('Mac app updates')).dx;
+      expect(tester.getTopLeft(find.text('Check automatically')).dx, titleX);
+      expect(tester.getTopLeft(find.text('How often')).dx, titleX);
+
+      await tester.tap(find.byType(AppSelect<AppUpdateCheckIntervalOption>));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Weekly'));
+      await tester.pumpAndSettle();
+      expect(interval, 604800);
+      expect(find.text('Weekly background checks are on.'), findsOneWidget);
+
+      await tester.tap(find.byType(Switch));
+      await tester.pumpAndSettle();
+      expect(automatic, isFalse);
+      expect(
+        tester
+            .widget<AppSelect<AppUpdateCheckIntervalOption>>(
+              find.byType(AppSelect<AppUpdateCheckIntervalOption>),
+            )
+            .onChanged,
+        isNull,
+      );
       expect(tester.takeException(), isNull);
     } finally {
       debugDefaultTargetPlatformOverride = null;
