@@ -294,6 +294,11 @@ specific agent provider.
   from `apps/mobile/` with
   `dart run sqflite_common_ffi_web:setup --force` after upgrading the package.
 - **No formatter**: No Prettier, Biome, or ESLint. Follow file-local style.
+- **Codex history messages**: newer rollouts use `event_msg.item_completed`
+  with `UserMessage` / `AgentMessage` items instead of `user_message` /
+  `agent_message` events. Read both formats for transcripts and previews.
+  Do not also promote `response_item.message`: it includes model context and
+  copies of visible messages.
 - **WebSocket `hello`**: The server sends `{"type":"hello"}` on every WS
   connection.
 - **Session freshness**: recover through `GET /api/sessions/:id/log` on open,
