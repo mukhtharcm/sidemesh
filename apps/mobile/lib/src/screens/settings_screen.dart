@@ -285,9 +285,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
         widget.onResetInspectorWidth != null;
     final content = _SettingsContent(
       category: widget.embedded ? _category : widget.initialCategory,
-      onAppearance: widget.embedded
-          ? () => setState(() => _category = 'Appearance')
-          : null,
       appUpdateStore: _appUpdateStore,
       appVersionStore: _appVersionStore,
       themeController: themeController,
@@ -385,9 +382,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 Expanded(
                   child: switch (_category) {
                     'Appearance' => const AppearanceSettings(embedded: true),
-                    'New sessions' => const Padding(
-                      padding: EdgeInsets.all(AppSpacing.xl),
-                      child: _LaunchDefaultsSheet(embedded: true),
+                    'New sessions' => const AppContentColumn(
+                      child: Padding(
+                        padding: AppPadding.desktopPage,
+                        child: _LaunchDefaultsSheet(embedded: true),
+                      ),
                     ),
                     _ => content,
                   },
@@ -597,7 +596,10 @@ class _LaunchDefaultsSheetState extends State<_LaunchDefaultsSheet> {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         mainAxisSize: MainAxisSize.min,
         children: [
-          if (!widget.page) ...[
+          if (widget.embedded) ...[
+            const AppSectionHeader(title: 'New session defaults'),
+            const SizedBox(height: AppSpacing.md),
+          ] else if (!widget.page) ...[
             Row(
               children: [
                 Icon(Icons.rocket_launch_rounded, color: colors.accent),
@@ -632,7 +634,7 @@ class _LaunchDefaultsSheetState extends State<_LaunchDefaultsSheet> {
             title: 'Fast mode',
             trailing: Semantics(
               label: 'Fast mode',
-              child: Switch.adaptive(
+              child: Switch(
                 value: _draft.fastMode,
                 onChanged: _saving
                     ? null
@@ -642,7 +644,11 @@ class _LaunchDefaultsSheetState extends State<_LaunchDefaultsSheet> {
               ),
             ),
           ),
-          Divider(height: 1, indent: 52, color: colors.border),
+          Divider(
+            height: 1,
+            indent: AppSpacing.md + AppSizes.icon + AppSpacing.sm,
+            color: colors.border,
+          ),
           AppSettingsRow(
             icon: Icons.verified_user_outlined,
             title: 'Approval policy',
@@ -660,7 +666,11 @@ class _LaunchDefaultsSheetState extends State<_LaunchDefaultsSheet> {
                 ? null
                 : () => unawaited(_pickApproval()),
           ),
-          Divider(height: 1, indent: 52, color: colors.border),
+          Divider(
+            height: 1,
+            indent: AppSpacing.md + AppSizes.icon + AppSpacing.sm,
+            color: colors.border,
+          ),
           AppSettingsRow(
             icon: Icons.folder_outlined,
             title: 'File access',
@@ -678,13 +688,17 @@ class _LaunchDefaultsSheetState extends State<_LaunchDefaultsSheet> {
                 ? null
                 : () => unawaited(_pickSandbox()),
           ),
-          Divider(height: 1, indent: 52, color: colors.border),
+          Divider(
+            height: 1,
+            indent: AppSpacing.md + AppSizes.icon + AppSpacing.sm,
+            color: colors.border,
+          ),
           AppSettingsRow(
             icon: Icons.public_rounded,
             title: 'Web search',
             trailing: Semantics(
               label: 'Web search',
-              child: Switch.adaptive(
+              child: Switch(
                 value: _draft.webSearch,
                 onChanged: _saving
                     ? null
@@ -795,7 +809,6 @@ typedef _ThemeModeLabelFor = String Function(ThemeMode mode);
 class _SettingsContent extends StatelessWidget {
   const _SettingsContent({
     this.category,
-    this.onAppearance,
     required this.appUpdateStore,
     required this.appVersionStore,
     required this.themeController,
@@ -824,7 +837,6 @@ class _SettingsContent extends StatelessWidget {
   });
 
   final String? category;
-  final VoidCallback? onAppearance;
   final AppUpdateSettingsStore appUpdateStore;
   final AppVersionStore appVersionStore;
   final ThemeController themeController;
@@ -865,34 +877,33 @@ class _SettingsContent extends StatelessWidget {
     final showAppUpdateSection =
         !kIsWeb && defaultTargetPlatform == TargetPlatform.macOS;
     final list = ListView(
-      padding: EdgeInsets.fromLTRB(
-        AppSpacing.lg,
-        AppSpacing.lg,
-        AppSpacing.lg,
-        AppSpacing.xxl,
-      ),
+      padding: AppSizes.usesPointerControls(Theme.of(context).platform)
+          ? AppPadding.desktopPage
+          : AppPadding.mobilePage,
       children: [
         if (category == null || category == 'General')
           _SettingsSection(
             icon: Icons.palette_rounded,
-            title: 'Appearance & device',
+            title: category == null ? 'Appearance & device' : 'Device',
             subtitle: 'Theme, text, and screen behavior.',
             children: [
-              ListenableBuilder(
-                listenable: themeController,
-                builder: (context, _) => _ActionRow(
-                  icon: Icons.palette_outlined,
-                  title: 'Appearance',
-                  subtitle:
-                      '${themeModeLabelFor(themeController.mode)} · ${themeController.variant.label} · ${themeController.typography.interfaceFont.label}',
-                  onTap: onAppearance ?? () => showAppearanceSheet(context),
+              if (category == null) ...[
+                ListenableBuilder(
+                  listenable: themeController,
+                  builder: (context, _) => _ActionRow(
+                    icon: Icons.palette_outlined,
+                    title: 'Appearance',
+                    subtitle:
+                        '${themeModeLabelFor(themeController.mode)} · ${themeController.variant.label} · ${themeController.typography.interfaceFont.label}',
+                    onTap: () => showAppearanceSheet(context),
+                  ),
                 ),
-              ),
-              const Divider(
-                height: 1,
-                indent: AppSpacing.md + AppSizes.icon + AppSpacing.sm,
-                endIndent: AppSpacing.md,
-              ),
+                const Divider(
+                  height: 1,
+                  indent: AppSpacing.md + AppSizes.icon + AppSpacing.sm,
+                  endIndent: AppSpacing.md,
+                ),
+              ],
               ListenableBuilder(
                 listenable: screenAwakeStore,
                 builder: (context, _) {
@@ -1015,7 +1026,10 @@ class _SettingsContent extends StatelessWidget {
                       ),
                     ),
                   ),
-                  Divider(color: colors.border, indent: 52),
+                  Divider(
+                    color: colors.border,
+                    indent: AppSpacing.md + AppSizes.icon + AppSpacing.sm,
+                  ),
                   _ActionRow(
                     icon: Icons.image_rounded,
                     title: 'Clear saved image cache',
@@ -1033,7 +1047,10 @@ class _SettingsContent extends StatelessWidget {
                       ),
                     ),
                   ),
-                  Divider(color: colors.border, indent: 52),
+                  Divider(
+                    color: colors.border,
+                    indent: AppSpacing.md + AppSizes.icon + AppSpacing.sm,
+                  ),
                   _ActionRow(
                     icon: Icons.outbox_rounded,
                     title: 'Clear queued sends',
@@ -1166,7 +1183,6 @@ class _AppUpdateSettingsCard extends StatelessWidget {
     return ListenableBuilder(
       listenable: Listenable.merge([appUpdateStore, appVersionStore]),
       builder: (context, _) {
-        final colors = context.colors;
         final settings = appUpdateStore.settings;
         final versionInfo = appVersionStore.info;
         final supported = settings.supported;
@@ -1199,151 +1215,63 @@ class _AppUpdateSettingsCard extends StatelessWidget {
             ? 'You are on $versionLabel. '
             : 'You are on $versionLabel. Install the signed production macOS build if you want in-app update checks.';
         final selectedInterval = settings.selectedIntervalOption;
-        return _SettingsCard(
-          icon: Icons.system_update_rounded,
-          title: 'Mac app updates',
-          subtitle: subtitle,
-          body: cardBody,
-          trailing: loadFailed
-              ? OutlinedButton(
-                  onPressed: appUpdateStore.loading
-                      ? null
-                      : () => unawaited(onRetryAppUpdateSettings()),
-                  child: Text(appUpdateStore.loading ? 'Retrying...' : 'Retry'),
-                )
-              : supported
-              ? OutlinedButton(
-                  onPressed: checkNowEnabled
-                      ? () => unawaited(onCheckForUpdatesNow())
-                      : null,
-                  child: Text(
-                    appUpdateStore.checking ? 'Checking...' : 'Check now',
-                  ),
-                )
-              : null,
-          footer: supported
-              ? Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    _ToggleTile(
-                      icon: Icons.schedule_rounded,
-                      title: 'Check automatically',
-                      subtitle: 'Check for updates in the background.',
-                      value: automaticChecks,
-                      onChanged: !appUpdateStore.saving
-                          ? (value) =>
-                                unawaited(onSetAutomaticUpdateChecks(value))
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            _SettingsCard(
+              icon: Icons.system_update_rounded,
+              title: 'Mac app updates',
+              subtitle: subtitle,
+              body: cardBody,
+              trailing: loadFailed
+                  ? OutlinedButton(
+                      onPressed: appUpdateStore.loading
+                          ? null
+                          : () => unawaited(onRetryAppUpdateSettings()),
+                      child: Text(
+                        appUpdateStore.loading ? 'Retrying...' : 'Retry',
+                      ),
+                    )
+                  : supported
+                  ? OutlinedButton(
+                      onPressed: checkNowEnabled
+                          ? () => unawaited(onCheckForUpdatesNow())
                           : null,
-                    ),
-                    const SizedBox(height: AppSpacing.md),
-                    Text(
-                      'How often',
-                      style: Theme.of(context).textTheme.labelLarge?.copyWith(
-                        fontWeight: AppWeights.emphasis,
+                      child: Text(
+                        appUpdateStore.checking ? 'Checking...' : 'Check now',
                       ),
-                    ),
-                    const SizedBox(height: AppSpacing.sm),
-                    Wrap(
-                      spacing: AppSpacing.sm,
-                      runSpacing: AppSpacing.sm,
-                      children: [
-                        for (final option
-                            in AppUpdateCheckIntervalOption.values)
-                          _UpdateIntervalOptionButton(
-                            option: option,
-                            selected:
-                                selectedInterval?.seconds == option.seconds,
-                            enabled: automaticChecks && !appUpdateStore.saving,
-                            onTap: () =>
-                                unawaited(onSetUpdateCheckInterval(option)),
-                          ),
-                      ],
-                    ),
-                    if (!automaticChecks) ...[
-                      const SizedBox(height: AppSpacing.sm),
-                      Text(
-                        'Automatic checks are off, so this cadence is currently paused.',
-                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                          color: colors.textSecondary,
-                          height: AppLineHeights.label,
-                        ),
-                      ),
-                    ],
-                  ],
-                )
-              : null,
-        );
-      },
-    );
-  }
-}
-
-class _UpdateIntervalOptionButton extends StatelessWidget {
-  const _UpdateIntervalOptionButton({
-    required this.option,
-    required this.selected,
-    required this.enabled,
-    required this.onTap,
-  });
-
-  final AppUpdateCheckIntervalOption option;
-  final bool selected;
-  final bool enabled;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    final colors = context.colors;
-    final background = selected ? colors.accentMuted : colors.surfaceMuted;
-    final borderColor = selected
-        ? colors.accent.withValues(alpha: AppEmphasis.borderTint)
-        : colors.border;
-    final titleColor = enabled
-        ? colors.textPrimary
-        : colors.textSecondary.withValues(alpha: AppEmphasis.strong);
-    final detailColor = enabled
-        ? colors.textSecondary
-        : colors.textSecondary.withValues(alpha: AppEmphasis.secondary);
-    return Opacity(
-      opacity: enabled ? AppEmphasis.full : AppEmphasis.disabled,
-      child: InkWell(
-        borderRadius: AppShapes.input,
-        onTap: enabled ? onTap : null,
-        child: AnimatedContainer(
-          duration: AppMotion.quick,
-          curve: AppMotion.standard,
-          width: 148,
-          padding: const EdgeInsets.symmetric(
-            horizontal: AppSpacing.md,
-            vertical: AppSpacing.compact,
-          ),
-          decoration: BoxDecoration(
-            color: background,
-            borderRadius: AppShapes.input,
-            border: Border.all(color: borderColor),
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                option.label,
-                style: Theme.of(context).textTheme.labelLarge?.copyWith(
-                  fontWeight: AppWeights.emphasis,
-                  color: titleColor,
-                ),
+                    )
+                  : null,
+            ),
+            if (supported) ...[
+              const SizedBox(height: AppSpacing.md),
+              _ToggleTile(
+                icon: Icons.schedule_rounded,
+                title: 'Check automatically',
+                subtitle: 'Check for updates in the background.',
+                value: automaticChecks,
+                onChanged: !appUpdateStore.saving
+                    ? (value) => unawaited(onSetAutomaticUpdateChecks(value))
+                    : null,
               ),
-              const SizedBox(height: AppSpacing.xxs),
-              Text(
-                option.detail,
-                style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                  color: detailColor,
-                  height: 1.28,
+              AppSettingsRow(
+                icon: Icons.event_repeat_rounded,
+                title: 'How often',
+                subtitle: automaticChecks ? null : 'Automatic checks are off.',
+                trailing: AppSelect<AppUpdateCheckIntervalOption>(
+                  value: selectedInterval,
+                  values: AppUpdateCheckIntervalOption.values,
+                  label: (option) => option.label,
+                  hint: settings.intervalLabel,
+                  onChanged: automaticChecks && !appUpdateStore.saving
+                      ? (option) => unawaited(onSetUpdateCheckInterval(option))
+                      : null,
                 ),
               ),
             ],
-          ),
-        ),
-      ),
+          ],
+        );
+      },
     );
   }
 }
@@ -1368,7 +1296,7 @@ class _AboutFooter extends StatelessWidget {
     final colors = context.colors;
     return Padding(
       padding: const EdgeInsets.symmetric(
-        horizontal: AppSpacing.sm,
+        horizontal: AppSpacing.md,
         vertical: AppSpacing.sm,
       ),
       child: Column(
@@ -1442,7 +1370,6 @@ class _SettingsCard extends StatelessWidget {
     required this.subtitle,
     this.body,
     this.trailing,
-    this.footer,
   });
 
   final IconData icon;
@@ -1450,34 +1377,23 @@ class _SettingsCard extends StatelessWidget {
   final String subtitle;
   final String? body;
   final Widget? trailing;
-  final Widget? footer;
 
   @override
   Widget build(BuildContext context) {
     final colors = context.colors;
-    final supporting = body == null && footer == null
-        ? null
-        : Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              if (body != null)
-                Text(
-                  body!,
-                  style: Theme.of(
-                    context,
-                  ).textTheme.bodySmall?.copyWith(color: colors.textSecondary),
-                ),
-              if (body != null && footer != null)
-                const SizedBox(height: AppSpacing.sm),
-              ?footer,
-            ],
-          );
     return AppSettingsRow(
       icon: icon,
       title: title,
       subtitle: subtitle,
       trailing: trailing,
-      footer: supporting,
+      footer: body == null
+          ? null
+          : Text(
+              body!,
+              style: Theme.of(
+                context,
+              ).textTheme.bodySmall?.copyWith(color: colors.textSecondary),
+            ),
     );
   }
 }

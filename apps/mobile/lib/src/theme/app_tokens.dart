@@ -84,6 +84,7 @@ abstract final class AppSizes {
   static const double menuMinWidth = 210;
   static const double pickerWidth = 340;
   static const double pickerMaxHeight = 360;
+  static const double confirmDialogWidth = 440;
   static const double settingsWidth = 780;
   static const double settingsHeight = 580;
 

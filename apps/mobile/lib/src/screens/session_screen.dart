@@ -3973,7 +3973,6 @@ class _SessionScreenState extends State<SessionScreen>
       description: body,
       confirmLabel: confirmLabel,
       danger: danger,
-      maxWidth: 420,
     );
     if (!widget.desktopMode) {
       return showConfirm();
@@ -3992,7 +3991,6 @@ class _SessionScreenState extends State<SessionScreen>
           icon: Icons.edit_outlined,
           title: 'Rename session',
           description: 'Choose the name shown in Sidemesh.',
-          maxWidth: 460,
           showCloseButton: true,
           actions: [
             TextButton(

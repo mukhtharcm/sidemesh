@@ -3586,7 +3586,6 @@ class _StorageEntryEditorDialogState extends State<_StorageEntryEditorDialog> {
       title: widget.title,
       description:
           'Keys identify each saved item for the current page. The value is stored exactly as entered.',
-      maxWidth: 480,
       actions: [
         TextButton(
           onPressed: () => Navigator.of(context).pop(),
