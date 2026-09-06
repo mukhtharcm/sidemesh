@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../theme/app_colors.dart';
 import '../theme/app_theme.dart';
 import '../theme/color_contrast.dart';
+import '../theme/app_tokens.dart';
 
 /// Renders a unified-diff string with a Codex-TUI-inspired look:
 ///
@@ -44,7 +45,7 @@ class DiffView extends StatelessWidget {
     return DecoratedBox(
       decoration: BoxDecoration(
         color: colors.codeBackground,
-        borderRadius: BorderRadius.circular(14),
+        borderRadius: BorderRadius.circular(AppRadii.panel),
         border: Border.all(
           color: visibleBorderOn(
             colors,
@@ -54,7 +55,7 @@ class DiffView extends StatelessWidget {
         ),
       ),
       child: ClipRRect(
-        borderRadius: BorderRadius.circular(14),
+        borderRadius: BorderRadius.circular(AppRadii.panel),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
@@ -88,15 +89,15 @@ class DiffView extends StatelessWidget {
               Container(
                 width: double.infinity,
                 padding: const EdgeInsets.symmetric(
-                  horizontal: 12,
-                  vertical: 8,
+                  horizontal: AppSpacing.md,
+                  vertical: AppSpacing.sm,
                 ),
                 color: colors.surfaceMuted,
                 child: Text(
                   '${parsed.length - maxLines!} more lines',
                   style: Theme.of(context).textTheme.bodySmall?.copyWith(
                     color: colors.textSecondary,
-                    fontWeight: FontWeight.w600,
+                    fontWeight: AppWeights.title,
                   ),
                 ),
               ),
@@ -206,17 +207,21 @@ class _DiffRow extends StatelessWidget {
       _DiffKind.meta => '·',
     };
 
-    final textStyle = monoStyle(color: textColor, fontSize: 12.5, height: 1.5);
+    final textStyle = monoStyle(
+      color: textColor,
+      fontSize: AppFontSizes.code,
+      height: AppLineHeights.code,
+    );
     final mutedMono = monoStyle(
       color: gutterTextColor,
-      fontSize: 11.5,
-      height: 1.5,
+      fontSize: AppFontSizes.caption,
+      height: AppLineHeights.code,
     );
     final glyphStyle = monoStyle(
       color: glyphColor,
-      fontSize: 12.5,
-      fontWeight: FontWeight.w800,
-      height: 1.5,
+      fontSize: AppFontSizes.code,
+      fontWeight: AppWeights.strong,
+      height: AppLineHeights.code,
     );
 
     return ColoredBox(
@@ -250,7 +255,12 @@ class _DiffRow extends StatelessWidget {
             child: Text(glyph, textAlign: TextAlign.center, style: glyphStyle),
           ),
           Padding(
-            padding: const EdgeInsets.fromLTRB(10, 2, 14, 2),
+            padding: const EdgeInsets.fromLTRB(
+              AppSpacing.compact,
+              AppSpacing.xxs,
+              AppSpacing.md,
+              AppSpacing.xxs,
+            ),
             child: Text(
               row.content.isEmpty ? ' ' : row.content,
               style: textStyle,
@@ -278,7 +288,10 @@ class _GutterCell extends StatelessWidget {
   Widget build(BuildContext context) {
     return Container(
       width: width,
-      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+      padding: const EdgeInsets.symmetric(
+        horizontal: AppSpacing.xs,
+        vertical: AppSpacing.xxs,
+      ),
       color: background,
       alignment: Alignment.topCenter,
       child: child,

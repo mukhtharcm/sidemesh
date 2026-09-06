@@ -9,6 +9,7 @@ import '../theme/app_colors.dart';
 import '../theme/app_tokens.dart';
 import 'app_sheets.dart';
 import 'mesh_widgets.dart';
+import '../theme/app_status_styles.dart';
 
 Future<void> showTerminalKeyBarSheet({
   required BuildContext context,
@@ -62,7 +63,10 @@ class _TerminalKeyBarSheetState extends State<_TerminalKeyBarSheet> {
               for (final category in categories) ...[
                 SliverToBoxAdapter(
                   child: Padding(
-                    padding: const EdgeInsets.only(bottom: 8, top: 4),
+                    padding: const EdgeInsets.only(
+                      bottom: AppSpacing.sm,
+                      top: AppSpacing.xs,
+                    ),
                     child: Text(
                       category.label,
                       style: Theme.of(context).textTheme.labelLarge?.copyWith(
@@ -73,7 +77,7 @@ class _TerminalKeyBarSheetState extends State<_TerminalKeyBarSheet> {
                   ),
                 ),
                 SliverPadding(
-                  padding: const EdgeInsets.only(bottom: 16),
+                  padding: const EdgeInsets.only(bottom: AppSpacing.lg),
                   sliver: SliverGrid(
                     gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
                       crossAxisCount: widget.compact ? 5 : 6,
@@ -125,7 +129,7 @@ class _SheetKeyButton extends StatelessWidget {
             action.label,
             style: Theme.of(context).textTheme.labelLarge?.copyWith(
               color: colors.textPrimary,
-              fontSize: 12,
+              fontSize: AppFontSizes.caption,
               fontWeight: AppWeights.emphasis,
             ),
           ),

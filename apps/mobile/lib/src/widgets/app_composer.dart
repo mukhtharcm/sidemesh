@@ -74,7 +74,7 @@ class AppComposer extends StatelessWidget {
     this.submitOnEnter = false,
     this.maxLines = 6,
     this.textCapitalization = TextCapitalization.sentences,
-    this.maxWidth = 920,
+    this.maxWidth = AppSizes.readingMaxWidth,
   });
 
   final TextEditingController controller;
@@ -108,19 +108,16 @@ class AppComposer extends StatelessWidget {
     return SafeArea(
       top: false,
       child: Container(
-        decoration: BoxDecoration(
-          color: colors.canvas,
-          border: Border(top: BorderSide(color: colors.border)),
-        ),
+        decoration: BoxDecoration(color: colors.canvas),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
             ?header,
             Padding(
               padding: EdgeInsets.fromLTRB(
-                submitOnEnter ? AppSizes.desktopGutter : 14,
-                submitOnEnter ? AppSpacing.sm : 6,
-                submitOnEnter ? AppSizes.desktopGutter : 14,
+                AppSizes.mobileGutter,
+                AppSpacing.sm,
+                AppSizes.mobileGutter,
                 AppSpacing.sm,
               ),
               child: Center(
@@ -151,6 +148,7 @@ class AppComposer extends StatelessWidget {
       additionalFallbacks: <Color>[colors.textSecondary],
     );
     Widget field = TextField(
+      enabled: enabled,
       key: textFieldKey,
       controller: controller,
       focusNode: focusNode,
@@ -161,18 +159,16 @@ class AppComposer extends StatelessWidget {
       onTapOutside: _isMacDesktop || onDismiss == null
           ? null
           : (_) => onDismiss!(),
-      style: Theme.of(context).textTheme.bodyMedium,
-      decoration: InputDecoration(
+      style: submitOnEnter
+          ? Theme.of(context).textTheme.bodyMedium
+          : Theme.of(context).textTheme.bodyLarge,
+      decoration: AppInputDecorations.borderless.copyWith(
         hintText: submitOnEnter && desktopHintText != null
             ? desktopHintText
             : hintText,
         hintStyle: TextStyle(color: hintColor),
-        border: InputBorder.none,
-        enabledBorder: InputBorder.none,
-        focusedBorder: InputBorder.none,
-        filled: false,
-        fillColor: Colors.transparent,
         isDense: true,
+        constraints: const BoxConstraints(),
         contentPadding: EdgeInsets.zero,
       ),
     );
@@ -212,13 +208,13 @@ class AppComposer extends StatelessWidget {
 
     final textArea = Padding(
       padding: EdgeInsets.symmetric(
-        horizontal: submitOnEnter ? AppSpacing.xs : 6,
-        vertical: 6,
+        horizontal: submitOnEnter ? AppSpacing.xs : AppSpacing.tight,
+        vertical: AppSpacing.tight,
       ),
       child: field,
     );
 
-    return AnimatedContainer(
+    final surface = AnimatedContainer(
       duration: AppMotion.quick,
       curve: AppMotion.standard,
       decoration: BoxDecoration(
@@ -228,8 +224,8 @@ class AppComposer extends StatelessWidget {
         ),
         border: Border.all(
           color: focused
-              ? colors.accent.withValues(alpha: 0.42)
-              : colors.border.withValues(alpha: 0.82),
+              ? colors.accent.withValues(alpha: AppEmphasis.muted)
+              : colors.border.withValues(alpha: AppEmphasis.strong),
         ),
       ),
       padding: const EdgeInsets.all(AppSpacing.sm),
@@ -237,22 +233,60 @@ class AppComposer extends StatelessWidget {
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          textArea,
-          const SizedBox(height: AppSpacing.xs),
-          _AppComposerToolbar(
-            controller: controller,
-            sending: sending,
-            enabled: enabled,
-            hasSendableContext: hasSendableContext,
-            leading: leading,
-            controls: controls,
-            onSend: onSend,
-            sendButtonKey: sendButtonKey,
-            sendSemanticsLabel: sendSemanticsLabel,
-            desktop: submitOnEnter,
-          ),
+          if (submitOnEnter)
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.end,
+              children: [
+                Expanded(child: textArea),
+                _AppComposerSendButton(
+                  key: sendButtonKey,
+                  controller: controller,
+                  sending: sending,
+                  enabled: enabled,
+                  hasSendableContext: hasSendableContext,
+                  onSend: onSend,
+                  semanticsLabel: sendSemanticsLabel,
+                  compact: true,
+                ),
+              ],
+            )
+          else
+            textArea,
+          if (!submitOnEnter) const SizedBox(height: AppSpacing.xs),
+          if (!submitOnEnter)
+            _AppComposerToolbar(
+              controller: controller,
+              sending: sending,
+              enabled: enabled,
+              hasSendableContext: hasSendableContext,
+              leading: leading,
+              controls: controls,
+              onSend: onSend,
+              sendButtonKey: sendButtonKey,
+              sendSemanticsLabel: sendSemanticsLabel,
+              desktop: submitOnEnter,
+            ),
         ],
       ),
+    );
+    if (!submitOnEnter) return surface;
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        surface,
+        _AppComposerToolbar(
+          controller: controller,
+          sending: sending,
+          enabled: enabled,
+          hasSendableContext: hasSendableContext,
+          leading: leading,
+          controls: controls,
+          onSend: onSend,
+          sendButtonKey: null,
+          sendSemanticsLabel: sendSemanticsLabel,
+          desktop: true,
+        ),
+      ],
     );
   }
 }
@@ -287,7 +321,10 @@ class _AppComposerToolbar extends StatelessWidget {
     return Row(
       crossAxisAlignment: CrossAxisAlignment.center,
       children: [
-        if (leading != null) ...[leading!, const SizedBox(width: 6)],
+        if (leading != null) ...[
+          leading!,
+          const SizedBox(width: AppSpacing.tight),
+        ],
         Expanded(
           child: controls.isEmpty
               ? const SizedBox.shrink()
@@ -306,15 +343,17 @@ class _AppComposerToolbar extends StatelessWidget {
                         ? maxControlWidth
                         : naturalWidth;
                     return Row(
-                      mainAxisAlignment: MainAxisAlignment.end,
+                      mainAxisAlignment: desktop
+                          ? MainAxisAlignment.end
+                          : MainAxisAlignment.start,
                       children: [
                         for (
                           var index = 0;
                           index < controls.length;
                           index++
                         ) ...[
-                          SizedBox(
-                            width: controlWidth,
+                          ConstrainedBox(
+                            constraints: BoxConstraints(maxWidth: controlWidth),
                             child: _AppComposerControlButton(
                               control: controls[index],
                               compact: !desktop,
@@ -329,16 +368,17 @@ class _AppComposerToolbar extends StatelessWidget {
                 ),
         ),
         SizedBox(width: controls.isEmpty ? 0 : AppSpacing.sm),
-        _AppComposerSendButton(
-          key: sendButtonKey,
-          controller: controller,
-          sending: sending,
-          enabled: enabled,
-          hasSendableContext: hasSendableContext,
-          onSend: onSend,
-          semanticsLabel: sendSemanticsLabel,
-          compact: desktop,
-        ),
+        if (!desktop)
+          _AppComposerSendButton(
+            key: sendButtonKey,
+            controller: controller,
+            sending: sending,
+            enabled: enabled,
+            hasSendableContext: hasSendableContext,
+            onSend: onSend,
+            semanticsLabel: sendSemanticsLabel,
+            compact: desktop,
+          ),
       ],
     );
   }
@@ -356,12 +396,7 @@ class _AppComposerControlButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colors = context.colors;
-    final background = colors.surfaceMuted;
-    final iconColor = visibleUiColorOn(
-      colors,
-      background: background,
-      preferred: colors.textSecondary,
-    );
+    final background = compact ? colors.composerBackground : colors.canvas;
     final labelColor = readableTextOn(
       colors,
       background: background,
@@ -388,37 +423,35 @@ class _AppComposerControlButton extends StatelessWidget {
             borderRadius: AppShapes.badge,
             onTap: control.enabled ? control.onPressed : null,
             child: Opacity(
-              opacity: control.enabled ? 1 : 0.48,
+              opacity: control.enabled
+                  ? AppEmphasis.full
+                  : AppEmphasis.disabled,
               child: Container(
                 constraints: BoxConstraints(
-                  minHeight: compact ? 44 : AppSizes.compactControl,
+                  minHeight: compact
+                      ? AppSizes.control
+                      : AppSizes.compactControl,
                 ),
                 padding: EdgeInsets.symmetric(
-                  horizontal: compact ? AppSpacing.sm : 9,
-                  vertical: compact ? 7 : 6,
+                  horizontal: compact ? AppSpacing.sm : AppSpacing.sm,
+                  vertical: compact ? AppSpacing.sm : AppSpacing.tight,
                 ),
                 decoration: BoxDecoration(
                   color: background,
                   borderRadius: AppShapes.badge,
                 ),
                 child: Row(
-                  mainAxisSize: MainAxisSize.max,
+                  mainAxisSize: MainAxisSize.min,
                   children: [
-                    Icon(
-                      control.icon,
-                      size: compact ? 14 : 15,
-                      color: iconColor,
-                    ),
-                    const SizedBox(width: 6),
-                    Expanded(
+                    Flexible(
                       child: Text(
                         control.label,
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
-                        style: monoStyle(
+                        style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                           color: labelColor,
-                          fontSize: compact ? 11 : 11.5,
-                          fontWeight: AppWeights.title,
+                          fontWeight: AppWeights.body,
+                          fontSize: compact ? null : AppFontSizes.compact,
                         ),
                       ),
                     ),
@@ -463,7 +496,7 @@ class AppComposerAddButton extends StatelessWidget {
       background: colors.composerBackground,
       preferred: enabled ? colors.accent : colors.textSecondary,
     );
-    final size = compact ? AppSizes.compactControl : 44.0;
+    final size = compact ? AppSizes.compactControl : AppSizes.control;
     return Tooltip(
       message: tooltip,
       child: Semantics(
@@ -480,7 +513,7 @@ class AppComposerAddButton extends StatelessWidget {
             child: SizedBox(
               width: size,
               height: size,
-              child: Icon(icon, color: iconColor, size: 20),
+              child: Icon(icon, color: iconColor, size: AppSizes.icon),
             ),
           ),
         ),
@@ -507,7 +540,10 @@ class AppComposerContextShelf extends StatelessWidget {
       height: desktop ? 52 : 48,
       child: ListView.separated(
         scrollDirection: Axis.horizontal,
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+        padding: const EdgeInsets.symmetric(
+          horizontal: AppSpacing.md,
+          vertical: AppSpacing.tight,
+        ),
         itemCount: items.length,
         separatorBuilder: (_, _) => const SizedBox(width: AppSpacing.sm),
         itemBuilder: (context, index) =>
@@ -553,12 +589,12 @@ class _AppComposerContextChip extends StatelessWidget {
         borderRadius: AppShapes.pill,
         border: Border.all(color: borderColor),
       ),
-      padding: const EdgeInsets.only(left: 8),
+      padding: const EdgeInsets.only(left: AppSpacing.sm),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
           item.icon,
-          const SizedBox(width: 6),
+          const SizedBox(width: AppSpacing.tight),
           ConstrainedBox(
             constraints: BoxConstraints(
               maxWidth: item.sublabel == null ? 150 : 170,
@@ -590,12 +626,15 @@ class _AppComposerContextChip extends StatelessWidget {
                         item.sublabel!,
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
-                        style: monoStyle(color: secondary, fontSize: 10),
+                        style: monoStyle(
+                          color: secondary,
+                          fontSize: AppFontSizes.micro,
+                        ),
                       ),
                     ],
                   ),
           ),
-          const SizedBox(width: 2),
+          const SizedBox(width: AppSpacing.xxs),
           Tooltip(
             message: 'Remove ${item.label}',
             child: IconButton(
@@ -603,7 +642,11 @@ class _AppComposerContextChip extends StatelessWidget {
               constraints: const BoxConstraints.tightFor(width: 32, height: 32),
               padding: EdgeInsets.zero,
               onPressed: item.onRemove,
-              icon: Icon(Icons.close_rounded, size: 14, color: iconForeground),
+              icon: Icon(
+                Icons.close_rounded,
+                size: AppSizes.smallIcon,
+                color: iconForeground,
+              ),
             ),
           ),
         ],
@@ -640,29 +683,23 @@ class _AppComposerSendButton extends StatelessWidget {
       builder: (context, _) {
         final hasText = controller.text.trim().isNotEmpty;
         final canSend = enabled && !sending && (hasText || hasSendableContext);
-        final showActive = sending || canSend;
         final background = sending
             ? colors.surfaceMuted
             : canSend
-            ? colors.accent
+            ? colors.textPrimary
             : colors.surfaceMuted;
         final activeForeground = readableActionForeground(
           colors,
-          colors.accent,
+          colors.textPrimary,
         );
         final quietForeground = visibleUiColorOn(
           colors,
           background: colors.surfaceMuted,
           preferred: colors.textSecondary,
         );
-        final quietBorder = visibleBorderOn(
-          colors,
-          background: colors.surfaceMuted,
-          preferred: colors.border,
-        );
-        final hitSize = compact ? AppSizes.compactControl : AppSizes.control;
-        final visibleSize = compact ? AppSizes.compactControl : 42.0;
-        final radius = compact ? AppRadii.iconWell : AppRadii.action;
+        final hitSize = compact ? 32.0 : AppSizes.control;
+        final visibleSize = compact ? 30.0 : 40.0;
+        const radius = AppRadii.capsule;
         return Semantics(
           label: semanticsLabel,
           button: true,
@@ -686,9 +723,6 @@ class _AppComposerSendButton extends StatelessWidget {
                       decoration: BoxDecoration(
                         color: background,
                         borderRadius: BorderRadius.circular(radius),
-                        border: showActive
-                            ? null
-                            : Border.all(color: quietBorder),
                       ),
                       alignment: Alignment.center,
                       child: sending
@@ -696,13 +730,15 @@ class _AppComposerSendButton extends StatelessWidget {
                               width: 18,
                               height: 18,
                               child: CircularProgressIndicator(
-                                strokeWidth: 2,
+                                strokeWidth: AppStrokes.indicator,
                                 color: quietForeground,
                               ),
                             )
                           : Icon(
                               Icons.arrow_upward_rounded,
-                              size: compact ? 19 : 22,
+                              size: compact
+                                  ? AppSizes.icon
+                                  : AppSizes.largeIcon,
                               color: canSend
                                   ? activeForeground
                                   : quietForeground,

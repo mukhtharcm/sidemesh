@@ -3,11 +3,66 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:sidemesh_mobile/src/theme/app_palettes.dart';
 import 'package:sidemesh_mobile/src/theme/app_theme.dart';
 import 'package:sidemesh_mobile/src/theme/app_tokens.dart';
+import 'package:sidemesh_mobile/src/theme/color_contrast.dart';
 import 'package:sidemesh_mobile/src/widgets/app_primitives.dart';
 import 'package:sidemesh_mobile/src/widgets/app_sheets.dart';
 import 'package:sidemesh_mobile/src/widgets/mesh_widgets.dart';
 
 void main() {
+  test(
+    'theme controls keep shape, contrast, and disabled states in every palette',
+    () {
+      for (final variant in ThemeVariant.values) {
+        for (final dark in [false, true]) {
+          final colors = dark ? variant.dark : variant.light;
+          final theme = dark ? buildDarkTheme(colors) : buildLightTheme(colors);
+          final input = theme.inputDecorationTheme;
+          for (final border in [
+            input.enabledBorder,
+            input.focusedBorder,
+            input.disabledBorder,
+            input.errorBorder,
+            input.focusedErrorBorder,
+          ]) {
+            expect(
+              (border as OutlineInputBorder).borderRadius,
+              AppShapes.input,
+            );
+          }
+          expect(
+            contrastRatio(input.hintStyle!.color!, input.fillColor!),
+            greaterThanOrEqualTo(minimumReadableTextContrast),
+            reason: '${variant.name} dark=$dark',
+          );
+          expect(
+            contrastRatio(
+              input.focusedBorder!.borderSide.color,
+              input.fillColor!,
+            ),
+            greaterThanOrEqualTo(minimumUiContrast),
+            reason: '${variant.name} dark=$dark',
+          );
+          final enabled = <WidgetState>{WidgetState.selected};
+          final disabled = <WidgetState>{
+            WidgetState.selected,
+            WidgetState.disabled,
+          };
+          expect(
+            theme.switchTheme.trackColor!.resolve(disabled),
+            isNot(theme.switchTheme.trackColor!.resolve(enabled)),
+          );
+          expect(
+            contrastRatio(
+              theme.switchTheme.thumbColor!.resolve(enabled)!,
+              theme.switchTheme.trackColor!.resolve(enabled)!,
+            ),
+            greaterThanOrEqualTo(minimumUiContrast),
+          );
+        }
+      }
+    },
+  );
+
   testWidgets('section and management rows share one label grid', (
     tester,
   ) async {
@@ -42,32 +97,45 @@ void main() {
     expect(sectionX, rowX);
   });
 
-  testWidgets('global interactive controls use the canonical height', (
-    tester,
-  ) async {
-    await tester.pumpWidget(
-      MaterialApp(
-        theme: buildLightTheme(ThemeVariant.nord.light),
-        home: Scaffold(
-          body: Row(
-            children: [
-              FilledButton(onPressed: () {}, child: const Text('Save')),
-              IconButton(
-                onPressed: () {},
-                icon: const Icon(Icons.more_horiz_rounded),
-              ),
-            ],
+  for (final platform in [TargetPlatform.iOS, TargetPlatform.macOS]) {
+    testWidgets('button surfaces keep the theme height on $platform', (
+      tester,
+    ) async {
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: buildLightTheme(ThemeVariant.nord.light, platform: platform),
+          home: Scaffold(
+            body: Row(
+              children: [
+                FilledButton(onPressed: () {}, child: const Text('Save')),
+                OutlinedButton(onPressed: () {}, child: const Text('Check')),
+                TextButton(onPressed: () {}, child: const Text('Cancel')),
+                IconButton(
+                  onPressed: () {},
+                  icon: const Icon(Icons.more_horiz_rounded),
+                ),
+              ],
+            ),
           ),
         ),
-      ),
-    );
-
-    expect(
-      tester.getSize(find.widgetWithText(FilledButton, 'Save')).height,
-      AppSizes.control,
-    );
-    expect(tester.getSize(find.byType(IconButton)).height, AppSizes.control);
-  });
+      );
+      final height = AppSizes.usesPointerControls(platform)
+          ? AppSizes.compactControl
+          : AppSizes.control;
+      for (final type in [
+        FilledButton,
+        OutlinedButton,
+        TextButton,
+        IconButton,
+      ]) {
+        final surface = find
+            .descendant(of: find.byType(type), matching: find.byType(Material))
+            .first;
+        expect(tester.getSize(surface).height, height);
+      }
+      expect(tester.takeException(), isNull);
+    });
+  }
 
   testWidgets('desktop management content uses the shared maximum width', (
     tester,
@@ -129,7 +197,7 @@ void main() {
       ),
     );
 
-    expect(find.byIcon(Icons.radio_button_checked_rounded), findsOneWidget);
+    expect(find.byIcon(Icons.check_rounded), findsOneWidget);
     await tester.tap(find.text('Selected model'));
     await tester.tap(find.text('Unavailable model'));
     expect(taps, 1);

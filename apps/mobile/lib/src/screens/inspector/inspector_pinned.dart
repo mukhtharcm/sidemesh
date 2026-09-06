@@ -5,6 +5,7 @@ import '../../theme/app_colors.dart';
 import '../../theme/app_tokens.dart';
 import '../../widgets/mesh_widgets.dart';
 import 'inspector_controller.dart';
+import '../../theme/app_status_styles.dart';
 
 /// Builds an [InspectorSurface] that hosts the pinned-messages list in
 /// pane 3. Passes [refresh] through so the body rebuilds when the pins
@@ -56,14 +57,19 @@ class PinnedListPanel extends StatelessWidget {
     if (pins.isEmpty) {
       return const MeshEmptyState.compact(
         icon: Icons.push_pin_rounded,
-        title: 'Nothing saved yet',
+        title: 'No pinned messages',
         body: 'Pin a message to keep it easy to find.',
       );
     }
     return ListView.separated(
-      padding: const EdgeInsets.fromLTRB(12, 12, 12, 16),
+      padding: const EdgeInsets.fromLTRB(
+        AppSpacing.md,
+        AppSpacing.md,
+        AppSpacing.md,
+        AppSpacing.lg,
+      ),
       itemCount: pins.length,
-      separatorBuilder: (_, _) => const SizedBox(height: 8),
+      separatorBuilder: (_, _) => const SizedBox(height: AppSpacing.sm),
       itemBuilder: (context, index) {
         final pin = pins[index];
         return _PinnedListTile(
@@ -96,14 +102,23 @@ class _PinnedListTile extends StatelessWidget {
     return MeshSurface(
       onTap: onOpen,
       radius: AppRadii.control,
-      padding: const EdgeInsets.fromLTRB(12, 10, 8, 12),
+      padding: const EdgeInsets.fromLTRB(
+        AppSpacing.md,
+        AppSpacing.compact,
+        AppSpacing.sm,
+        AppSpacing.md,
+      ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
             children: [
-              Icon(roleIcon, size: 14, color: colors.textSecondary),
-              const SizedBox(width: 6),
+              Icon(
+                roleIcon,
+                size: AppSizes.smallIcon,
+                color: colors.textSecondary,
+              ),
+              const SizedBox(width: AppSpacing.tight),
               Expanded(
                 child: Text(
                   pin.roleLabel,
@@ -112,20 +127,20 @@ class _PinnedListTile extends StatelessWidget {
                   style: Theme.of(context).textTheme.labelSmall?.copyWith(
                     color: colors.textSecondary,
                     fontWeight: AppWeights.emphasis,
-                    letterSpacing: 0.4,
+                    letterSpacing: AppLetterSpacing.caps,
                   ),
                 ),
               ),
               Tooltip(
                 message: 'Unpin',
                 child: InkResponse(
-                  radius: 22,
+                  radius: AppSizes.touchFeedbackRadius,
                   onTap: onUnpin,
                   child: Padding(
-                    padding: const EdgeInsets.all(8),
+                    padding: const EdgeInsets.all(AppSpacing.sm),
                     child: Icon(
                       Icons.close_rounded,
-                      size: 16,
+                      size: AppSizes.compactIcon,
                       color: colors.textTertiary,
                     ),
                   ),
@@ -133,18 +148,18 @@ class _PinnedListTile extends StatelessWidget {
               ),
             ],
           ),
-          const SizedBox(height: 4),
+          const SizedBox(height: AppSpacing.xs),
           Text(
             pin.preview,
             maxLines: 3,
             overflow: TextOverflow.ellipsis,
             style: Theme.of(context).textTheme.bodySmall?.copyWith(
               color: colors.textPrimary,
-              height: 1.35,
+              height: AppLineHeights.caption,
             ),
           ),
           if (pin.attachmentCount > 0 || pin.textTruncated) ...[
-            const SizedBox(height: 8),
+            const SizedBox(height: AppSpacing.sm),
             Wrap(
               spacing: 6,
               runSpacing: 6,

@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../models.dart';
 import 'app_primitives.dart';
 import 'mesh_widgets.dart';
+import '../theme/app_tokens.dart';
 
 String reasoningEffortLabel(String value) {
   final normalized = value.trim();
@@ -51,7 +52,7 @@ class ReasoningChoiceList extends StatelessWidget {
     return ListView.separated(
       padding: padding,
       itemCount: options.length,
-      separatorBuilder: (_, _) => const SizedBox(height: 8),
+      separatorBuilder: (_, _) => const SizedBox(height: AppSpacing.sm),
       itemBuilder: (context, index) {
         final option = options[index];
         final selected = option.reasoningEffort == currentReasoning;

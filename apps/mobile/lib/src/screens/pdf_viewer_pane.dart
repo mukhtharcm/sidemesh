@@ -9,6 +9,8 @@ import '../models.dart';
 import '../theme/app_colors.dart';
 import '../theme/app_theme.dart';
 import '../widgets/mesh_widgets.dart';
+import '../theme/app_tokens.dart';
+import '../theme/app_status_styles.dart';
 
 typedef PdfViewerPanePreviewBuilder =
     Widget Function(BuildContext context, PdfViewerPanePreviewData data);
@@ -149,7 +151,7 @@ class _PdfViewerPaneState extends State<PdfViewerPane> {
     await _controller.setZoom(
       _controller.centerPosition,
       zoom,
-      duration: const Duration(milliseconds: 180),
+      duration: AppMotion.quick,
     );
   }
 
@@ -161,10 +163,7 @@ class _PdfViewerPaneState extends State<PdfViewerPane> {
     final destination = _controller.calcMatrixFitWidthForPage(
       pageNumber: pageNumber,
     );
-    await _controller.goTo(
-      destination,
-      duration: const Duration(milliseconds: 180),
-    );
+    await _controller.goTo(destination, duration: AppMotion.quick);
   }
 
   Future<void> _goToPage(int pageNumber) async {
@@ -176,7 +175,7 @@ class _PdfViewerPaneState extends State<PdfViewerPane> {
     }
     await _controller.goToPage(
       pageNumber: pageNumber,
-      duration: const Duration(milliseconds: 180),
+      duration: AppMotion.quick,
     );
   }
 
@@ -211,7 +210,7 @@ class _PdfViewerPaneState extends State<PdfViewerPane> {
   @override
   Widget build(BuildContext context) {
     if (_loading && _bytes == null) {
-      return const _PdfViewerLoadingState();
+      return const MeshLoader(label: 'Loading PDF');
     }
     if (_error != null && _bytes == null) {
       return _PdfViewerErrorState(
@@ -226,11 +225,7 @@ class _PdfViewerPaneState extends State<PdfViewerPane> {
     final params = PdfViewerParams(
       margin: widget.dense ? 10 : 14,
       backgroundColor: colors.surfaceMuted,
-      pageDropShadow: BoxShadow(
-        color: colors.textPrimary.withValues(alpha: 0.08),
-        blurRadius: 18,
-        offset: const Offset(0, 6),
-      ),
+      pageDropShadow: AppShadows.surface(colors.textPrimary),
       onPageChanged: (pageNumber) {
         if (!mounted) {
           return;
@@ -258,8 +253,18 @@ class _PdfViewerPaneState extends State<PdfViewerPane> {
         ? '...'
         : '${(_currentZoom! * 100).round()}%';
     final controlPadding = widget.dense
-        ? const EdgeInsets.fromLTRB(12, 10, 12, 10)
-        : const EdgeInsets.fromLTRB(14, 12, 14, 12);
+        ? const EdgeInsets.fromLTRB(
+            AppSpacing.md,
+            AppSpacing.compact,
+            AppSpacing.md,
+            AppSpacing.compact,
+          )
+        : const EdgeInsets.fromLTRB(
+            AppSpacing.md,
+            AppSpacing.md,
+            AppSpacing.md,
+            AppSpacing.md,
+          );
     final viewerBody = LayoutBuilder(
       builder: (context, constraints) {
         final child = MeshSurface(
@@ -278,7 +283,7 @@ class _PdfViewerPaneState extends State<PdfViewerPane> {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         Expanded(child: viewerBody),
-        const SizedBox(height: 12),
+        const SizedBox(height: AppSpacing.md),
         MeshSurface(
           padding: controlPadding,
           tone: MeshSurfaceTone.surface,
@@ -301,7 +306,7 @@ class _PdfViewerPaneState extends State<PdfViewerPane> {
                       overflow: TextOverflow.ellipsis,
                       style: monoStyle(
                         color: colors.textSecondary,
-                        fontSize: 11.5,
+                        fontSize: AppFontSizes.caption,
                       ),
                     ),
                   ),
@@ -314,7 +319,7 @@ class _PdfViewerPaneState extends State<PdfViewerPane> {
                         : null,
                     icon: const Icon(Icons.chevron_right_rounded),
                   ),
-                  const SizedBox(width: 8),
+                  const SizedBox(width: AppSpacing.sm),
                   IconButton(
                     tooltip: 'Zoom out',
                     onPressed: _controller.isReady
@@ -329,7 +334,7 @@ class _PdfViewerPaneState extends State<PdfViewerPane> {
                       textAlign: TextAlign.center,
                       style: monoStyle(
                         color: colors.textSecondary,
-                        fontSize: 11.5,
+                        fontSize: AppFontSizes.caption,
                       ),
                     ),
                   ),
@@ -347,77 +352,13 @@ class _PdfViewerPaneState extends State<PdfViewerPane> {
                   ),
                 ],
               ),
-              const SizedBox(height: 4),
+              const SizedBox(height: AppSpacing.xs),
               Text(
                 'Scroll to read. Pinch or use the zoom controls to adjust the page.',
                 style: Theme.of(
                   context,
                 ).textTheme.bodySmall?.copyWith(color: colors.textTertiary),
               ),
-            ],
-          ),
-        ),
-      ],
-    );
-  }
-}
-
-class _PdfViewerLoadingState extends StatelessWidget {
-  const _PdfViewerLoadingState();
-
-  @override
-  Widget build(BuildContext context) {
-    final colors = context.colors;
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        Expanded(
-          child: MeshSurface(
-            padding: const EdgeInsets.fromLTRB(18, 18, 18, 18),
-            tone: MeshSurfaceTone.surface,
-            child: Container(
-              color: colors.surfaceMuted,
-              child: Column(
-                children: [
-                  const SizedBox(height: 20),
-                  const FractionallySizedBox(
-                    widthFactor: 0.72,
-                    child: MeshSkeleton(height: 18, radius: 999),
-                  ),
-                  const SizedBox(height: 18),
-                  Expanded(
-                    child: LayoutBuilder(
-                      builder: (context, constraints) => MeshSkeleton(
-                        height: constraints.maxHeight,
-                        radius: 18,
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: 12),
-                ],
-              ),
-            ),
-          ),
-        ),
-        const SizedBox(height: 12),
-        const MeshSurface(
-          padding: EdgeInsets.fromLTRB(14, 12, 14, 12),
-          tone: MeshSurfaceTone.surface,
-          child: Row(
-            children: [
-              MeshSkeleton(width: 32, height: 32, radius: 999),
-              SizedBox(width: 12),
-              Expanded(child: MeshSkeleton(height: 14, radius: 999)),
-              SizedBox(width: 12),
-              MeshSkeleton(width: 32, height: 32, radius: 999),
-              SizedBox(width: 18),
-              MeshSkeleton(width: 32, height: 32, radius: 999),
-              SizedBox(width: 10),
-              MeshSkeleton(width: 48, height: 14, radius: 999),
-              SizedBox(width: 10),
-              MeshSkeleton(width: 32, height: 32, radius: 999),
-              SizedBox(width: 10),
-              MeshSkeleton(width: 32, height: 32, radius: 999),
             ],
           ),
         ),
@@ -434,25 +375,11 @@ class _PdfViewerErrorState extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.all(24),
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          MeshEmptyState(
-            icon: Icons.picture_as_pdf_rounded,
-            title: 'Could not load PDF',
-            body: error,
-          ),
-          TextButton.icon(
-            onPressed: () {
-              unawaited(onRetry());
-            },
-            icon: const Icon(Icons.refresh_rounded),
-            label: const Text('Try again'),
-          ),
-        ],
-      ),
+    return MeshEmptyState.compact(
+      icon: Icons.picture_as_pdf_rounded,
+      title: 'Could not load PDF',
+      body: error,
+      action: TextButton(onPressed: onRetry, child: const Text('Retry')),
     );
   }
 }

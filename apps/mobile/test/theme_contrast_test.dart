@@ -3,7 +3,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:sidemesh_mobile/src/theme/app_colors.dart';
 import 'package:sidemesh_mobile/src/theme/app_palettes.dart';
 import 'package:sidemesh_mobile/src/theme/color_contrast.dart';
-import 'package:sidemesh_mobile/src/widgets/mesh_widgets.dart';
+import 'package:sidemesh_mobile/src/theme/app_status_styles.dart';
 
 Iterable<({String label, AppColors colors})> _allPalettes() sync* {
   for (final variant in ThemeVariant.values) {

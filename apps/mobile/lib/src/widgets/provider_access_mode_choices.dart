@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../models.dart';
 import '../theme/app_colors.dart';
 import 'app_primitives.dart';
+import '../theme/app_tokens.dart';
 
 class ProviderAccessModeChoices extends StatelessWidget {
   const ProviderAccessModeChoices({
@@ -44,7 +45,10 @@ class ProviderAccessModeChoices extends StatelessWidget {
             onTap: modes[index].enabled ? () => onSelected(modes[index]) : null,
           ),
           if (index != modes.length - 1)
-            Divider(height: 1, color: colors.border.withValues(alpha: 0.65)),
+            Divider(
+              height: 1,
+              color: colors.border.withValues(alpha: AppEmphasis.medium),
+            ),
         ],
       ],
     );

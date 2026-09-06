@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/gestures.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -246,6 +247,56 @@ void main() {
     expect(_composerTextField(tester).focusNode?.hasFocus, isTrue);
   });
 
+  for (final desktop in [true, false]) {
+    testWidgets('message actions follow pointer and touch input: $desktop', (
+      tester,
+    ) async {
+      final api = _RichEventFakeApi(
+        messages: [
+          _assistantMessage(
+            id: 'hover-message',
+            text: 'Hover this message.',
+            content: const [],
+          ),
+        ],
+      );
+      addTearDown(api.dispose);
+      await _pumpApp(
+        tester,
+        SessionScreen(
+          host: _host('message-actions'),
+          session: _session('message-actions'),
+          api: api,
+          desktopMode: desktop,
+        ),
+        size: desktop ? const Size(1180, 900) : const Size(390, 844),
+      );
+      await _pumpFrames(tester);
+      final copy = find.byTooltip('Copy message');
+      final opacity = find
+          .ancestor(of: copy, matching: find.byType(AnimatedOpacity))
+          .first;
+      expect(tester.widget<AnimatedOpacity>(opacity).opacity, desktop ? 0 : 1);
+      expect(find.byTooltip('Message actions'), findsNothing);
+      if (desktop) {
+        final mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
+        await mouse.addPointer(location: Offset.zero);
+        await mouse.moveTo(tester.getCenter(find.text('Hover this message.')));
+        await _pumpFrames(tester);
+        expect(tester.widget<AnimatedOpacity>(opacity).opacity, 1);
+        await mouse.moveTo(Offset.zero);
+        await _pumpFrames(tester);
+        expect(tester.widget<AnimatedOpacity>(opacity).opacity, 0);
+        Focus.of(
+          tester.element(find.text('Hover this message.')),
+        ).requestFocus();
+        await _pumpFrames(tester);
+        expect(tester.widget<AnimatedOpacity>(opacity).opacity, 1);
+        await mouse.removePointer();
+      }
+    });
+  }
+
   testWidgets('mobile session does not autofocus the composer', (tester) async {
     final api = _RichEventFakeApi();
     addTearDown(api.dispose);
@@ -414,6 +465,22 @@ void main() {
         'source': 'fake/runtime',
       });
       api.emit({
+        'type': 'provider_warning',
+        'sessionId': session.id,
+        'level': 'warning',
+        'code': 'warn-1',
+        'message': 'Heads up from the fake provider',
+        'source': 'fake/runtime',
+      });
+      api.emit({
+        'type': 'provider_warning',
+        'sessionId': session.id,
+        'level': 'info',
+        'message': 'Provider diagnostic for developers',
+        'code': 'diagnostic',
+        'source': 'fake/runtime',
+      });
+      api.emit({
         'type': 'plan_updated',
         'sessionId': session.id,
         'turnId': 'turn-1',
@@ -440,9 +507,27 @@ void main() {
         'delayMs': 1500,
         'errorMessage': 'Overloaded',
       });
+      api.emit({
+        'type': 'provider_warning',
+        'sessionId': session.id,
+        'level': 'info',
+        'message': 'Provider diagnostic for developers',
+        'code': 'diagnostic',
+        'source': 'fake/runtime',
+      });
       await _pumpFrames(tester);
 
       expect(find.text('Heads up from the fake provider'), findsOneWidget);
+      expect(find.text('Provider notice · 2 occurrences'), findsOneWidget);
+      expect(
+        find.textContaining('Provider diagnostic for developers'),
+        findsNothing,
+      );
+      expect(find.text('Notice details · 2 occurrences'), findsOneWidget);
+      expect(find.text('fake/runtime · warn-1'), findsNothing);
+      await tester.tap(find.text('Notice details · 2 occurrences'));
+      await _pumpFrames(tester);
+      expect(find.text('fake/runtime · warn-1'), findsOneWidget);
       expect(find.text('Plan update'), findsOneWidget);
       expect(find.text('Ship the change'), findsNothing);
       expect(find.text('Queue · 1 steering · 2 follow-up'), findsOneWidget);
@@ -1416,9 +1501,7 @@ void main() {
       await tester.pump(const Duration(milliseconds: 900));
       expect(
         find.descendant(
-          of: find.byKey(
-            const ValueKey<String>('session-freshness-indicator'),
-          ),
+          of: find.byKey(const ValueKey<String>('session-freshness-indicator')),
           matching: find.byType(CircularProgressIndicator),
         ),
         findsOneWidget,
@@ -1436,6 +1519,35 @@ void main() {
       );
     },
   );
+
+  testWidgets('failed initial transcript can be retried', (tester) async {
+    final api = _RichEventFakeApi(fetchLogError: StateError('offline'));
+    addTearDown(api.dispose);
+    await _pumpApp(
+      tester,
+      SessionScreen(
+        host: _host('initial-load-retry'),
+        session: _session('initial-load-retry'),
+        api: api,
+        desktopMode: true,
+      ),
+      size: const Size(1180, 900),
+    );
+    await _pumpFrames(tester);
+    expect(
+      find.textContaining('Could not load this conversation.'),
+      findsOneWidget,
+    );
+    expect(_composerTextField(tester).enabled, isFalse);
+    api.fetchLogError = null;
+    await tester.tap(find.text('Retry'));
+    await _pumpFrames(tester);
+    expect(
+      find.textContaining('Could not load this conversation.'),
+      findsNothing,
+    );
+    expect(_composerTextField(tester).enabled, isTrue);
+  });
 
   testWidgets('cached transcript shows an actionable rail only after failure', (
     tester,
@@ -2000,38 +2112,37 @@ void main() {
     expect(find.text('apps/mobile/lib/b.dart'), findsOneWidget);
   });
 
-  testWidgets(
-    'closed thread status does not occupy composer space',
-    (tester) async {
-      final session = _session('closed-status-hidden', status: 'idle');
-      final api = _RichEventFakeApi(sessionSummary: session);
-      addTearDown(api.dispose);
+  testWidgets('closed thread status does not occupy composer space', (
+    tester,
+  ) async {
+    final session = _session('closed-status-hidden', status: 'idle');
+    final api = _RichEventFakeApi(sessionSummary: session);
+    addTearDown(api.dispose);
 
-      await _pumpApp(
-        tester,
-        SessionScreen(
-          host: _host('closed-status-hidden'),
-          session: session,
-          api: api,
-          desktopMode: true,
-        ),
-        size: const Size(1180, 900),
-      );
-      await _pumpFrames(tester);
+    await _pumpApp(
+      tester,
+      SessionScreen(
+        host: _host('closed-status-hidden'),
+        session: session,
+        api: api,
+        desktopMode: true,
+      ),
+      size: const Size(1180, 900),
+    );
+    await _pumpFrames(tester);
 
-      api.emit({
-        'type': 'thread_status_changed',
-        'sessionId': session.id,
-        'status': 'closed',
-        'message': 'The previous turn is complete.',
-      });
-      await _pumpFrames(tester);
+    api.emit({
+      'type': 'thread_status_changed',
+      'sessionId': session.id,
+      'status': 'closed',
+      'message': 'The previous turn is complete.',
+    });
+    await _pumpFrames(tester);
 
-      expect(find.text('Closed'), findsNothing);
-      expect(find.text('The previous turn is complete.'), findsNothing);
-      expect(_composerTextFieldFinder(), findsOneWidget);
-    },
-  );
+    expect(find.text('Closed'), findsNothing);
+    expect(find.text('The previous turn is complete.'), findsNothing);
+    expect(_composerTextFieldFinder(), findsOneWidget);
+  });
 
   testWidgets(
     'mobile running session shows stop pill and stops after confirmation',
@@ -2093,12 +2204,14 @@ Finder _composerTextFieldFinder() {
   return find.byWidgetPredicate(
     (widget) =>
         widget is TextField &&
-        widget.decoration?.hintText?.startsWith('Reply here') == true,
+        widget.decoration?.hintText?.startsWith('Reply') == true,
   );
 }
 
 Future<void> _tapDesktopReload(WidgetTester tester) async {
   await tester.tap(find.byTooltip('Session actions'));
+  await _pumpFrames(tester);
+  await tester.tap(find.text('Troubleshooting'));
   await _pumpFrames(tester);
   await tester.tap(find.text('Reload'));
   await tester.pump();
@@ -2125,8 +2238,14 @@ Future<void> _pumpApp(
   final palette = ThemeVariant.codexAmber;
   await tester.pumpWidget(
     MaterialApp(
-      theme: buildLightTheme(palette.light),
-      darkTheme: buildDarkTheme(palette.dark),
+      theme: buildLightTheme(
+        palette.light,
+        platform: size.width >= 760 ? TargetPlatform.macOS : TargetPlatform.iOS,
+      ),
+      darkTheme: buildDarkTheme(
+        palette.dark,
+        platform: size.width >= 760 ? TargetPlatform.macOS : TargetPlatform.iOS,
+      ),
       home: Scaffold(body: child),
     ),
   );

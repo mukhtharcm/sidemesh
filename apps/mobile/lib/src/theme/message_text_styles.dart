@@ -1,14 +1,14 @@
 import 'package:flutter/material.dart';
 
-import 'theme/app_colors.dart';
-import 'theme/color_contrast.dart';
-import 'theme/app_tokens.dart';
+import 'app_colors.dart';
+import 'color_contrast.dart';
+import 'app_tokens.dart';
 
-export 'theme/color_contrast.dart'
+export 'color_contrast.dart'
     show contrastRatio, minimumReadableTextContrast, readableColorForBackground;
 
 Color messageLinkColor(AppColors colors, {required bool userBubble}) {
-  final background = userBubble ? colors.userBubble : colors.assistantBubble;
+  final background = userBubble ? colors.userBubble : colors.canvas;
   final preferred = userBubble ? colors.userBubbleOn : colors.accent;
   final fallbacks = userBubble
       ? <Color>[
@@ -31,29 +31,17 @@ Color messageLinkColor(AppColors colors, {required bool userBubble}) {
 }
 
 Color messageBodyColor(AppColors colors, {required bool userBubble}) {
-  final background = userBubble ? colors.userBubble : colors.assistantBubble;
+  final background = userBubble ? colors.userBubble : colors.canvas;
   final preferred = userBubble ? colors.userBubbleOn : colors.textPrimary;
-  return readableTextOn(
-    colors,
-    background: background,
-    preferred: preferred,
-  );
+  return readableTextOn(colors, background: background, preferred: preferred);
 }
 
 Color messageMetaColor(AppColors colors, {required bool userBubble}) {
-  final background = userBubble ? colors.userBubble : colors.assistantBubble;
+  final background = userBubble ? colors.userBubble : colors.canvas;
   final preferred = userBubble ? colors.userBubbleOn : colors.textTertiary;
   final fallbacks = userBubble
-      ? <Color>[
-          colors.userBubbleOn,
-          colors.accentOn,
-          colors.textPrimary,
-        ]
-      : <Color>[
-          colors.textSecondary,
-          colors.textPrimary,
-          colors.accent,
-        ];
+      ? <Color>[colors.userBubbleOn, colors.accentOn, colors.textPrimary]
+      : <Color>[colors.textSecondary, colors.textPrimary, colors.accent];
   return readableColorForBackground(
     background: background,
     preferred: preferred,
@@ -68,7 +56,7 @@ TextStyle messageLinkStyle(
 }) {
   final linkColor = messageLinkColor(colors, userBubble: userBubble);
   return linkTextStyleForBackground(
-    background: userBubble ? colors.userBubble : colors.assistantBubble,
+    background: userBubble ? colors.userBubble : colors.canvas,
     preferred: linkColor,
     fallbacks: const <Color>[],
     baseStyle: baseStyle,
@@ -90,8 +78,8 @@ TextStyle linkTextStyleForBackground({
   return source.copyWith(
     color: linkColor,
     decoration: TextDecoration.underline,
-    decorationColor: linkColor.withValues(alpha: 0.86),
-    decorationThickness: 1.35,
+    decorationColor: linkColor.withValues(alpha: AppEmphasis.strong),
+    decorationThickness: AppStrokes.focus,
     fontWeight: source.fontWeight ?? AppWeights.emphasis,
   );
 }

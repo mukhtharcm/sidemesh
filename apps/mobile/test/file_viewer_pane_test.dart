@@ -30,6 +30,47 @@ void main() {
     VideoPlayerPlatform.instance = originalPlatform;
   });
 
+  for (final dark in [false, true]) {
+    for (final type in ['audio', 'video']) {
+      testWidgets('$type preview retries failed loading: $dark', (
+        tester,
+      ) async {
+        fakeVideoPlatform.failNext = true;
+        final path = '/workspace/media.mp4';
+        final api = _FakeFileViewerApi(
+          file: FsFile(
+            path: path,
+            size: 100,
+            binary: true,
+            truncated: false,
+            modifiedAtMs: 0,
+            mimeHint: '$type/mp4',
+            encoding: 'none',
+            contents: '',
+          ),
+        );
+        await tester.pumpWidget(
+          MaterialApp(
+            theme: dark
+                ? buildDarkTheme(ThemeVariant.nord.dark)
+                : buildLightTheme(ThemeVariant.nord.light),
+            home: FileViewerScreen(host: _host, api: api, path: path),
+          ),
+        );
+        await tester.pumpAndSettle();
+        expect(find.text('Could not load $type'), findsOneWidget);
+        await tester.tap(find.text('Retry'));
+        await tester.pumpAndSettle();
+        expect(
+          fakeVideoPlatform.calls.where((call) => call == 'createWithOptions'),
+          hasLength(2),
+        );
+        expect(find.text('Could not load $type'), findsNothing);
+        expect(tester.takeException(), isNull);
+      });
+    }
+  }
+
   testWidgets(
     'file viewer auto-opens video previews from the authenticated blob url',
     (tester) async {
@@ -214,7 +255,7 @@ void main() {
       await tester.pump();
       await tester.pumpAndSettle();
 
-      expect(find.text('ZIP contents'), findsOneWidget);
+      expect(find.textContaining('unpacked'), findsOneWidget);
       expect(find.text('README.md'), findsOneWidget);
       expect(find.text('assets/'), findsOneWidget);
       expect(find.text('docs/guide.md'), findsOneWidget);
@@ -421,10 +462,10 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(find.byType(Table), findsOneWidget);
-      expect(find.text('CSV'), findsOneWidget);
-      expect(find.text('3 rows'), findsOneWidget);
-      expect(find.text('3 columns'), findsOneWidget);
-      expect(find.text('Uneven rows'), findsOneWidget);
+      expect(find.textContaining('CSV'), findsOneWidget);
+      expect(find.textContaining('3 rows'), findsOneWidget);
+      expect(find.textContaining('3 columns'), findsOneWidget);
+      expect(find.textContaining('Uneven rows'), findsOneWidget);
       expect(
         find.textContaining('Rows have different column counts'),
         findsOneWidget,
@@ -552,6 +593,7 @@ class _FakeVideoPlayerPlatform extends VideoPlayerPlatform {
   final List<Duration> seekPositions = <Duration>[];
   Duration currentPosition = Duration.zero;
   int nextPlayerId = 0;
+  bool failNext = false;
 
   @override
   Future<void> init() async {
@@ -561,6 +603,10 @@ class _FakeVideoPlayerPlatform extends VideoPlayerPlatform {
   @override
   Future<int?> createWithOptions(VideoCreationOptions options) async {
     calls.add('createWithOptions');
+    if (failNext) {
+      failNext = false;
+      throw StateError('Media unavailable');
+    }
     dataSources.add(options.dataSource);
     final playerId = nextPlayerId++;
     streams[playerId] = Stream<VideoEvent>.value(

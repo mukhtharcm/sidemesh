@@ -24,6 +24,7 @@ class _Composer extends StatelessWidget {
     required this.loadingFileSearch,
     required this.fileError,
     required this.sending,
+    required this.enabled,
     required this.supportsImageInput,
     required this.supportsSkillInput,
     required this.supportsFileMentions,
@@ -38,6 +39,8 @@ class _Composer extends StatelessWidget {
     required this.onDismiss,
     this.onAddSkillTrigger,
     this.onAddFileTrigger,
+    this.modelAnchorKey,
+    this.thinkingAnchorKey,
     this.modelLabel,
     this.modelDetail,
     this.onModelTap,
@@ -65,6 +68,7 @@ class _Composer extends StatelessWidget {
   final String? fileError;
 
   final bool sending;
+  final bool enabled;
   final bool supportsImageInput;
   final bool supportsSkillInput;
 
@@ -87,6 +91,8 @@ class _Composer extends StatelessWidget {
   /// Inserts a `@` trigger into the text field and focuses it (mobile + button).
   final VoidCallback? onAddFileTrigger;
 
+  final Key? modelAnchorKey;
+  final Key? thinkingAnchorKey;
   final String? modelLabel;
   final String? modelDetail;
   final VoidCallback? onModelTap;
@@ -104,10 +110,11 @@ class _Composer extends StatelessWidget {
         (supportsImageInput || supportsSkillInput || supportsFileMentions);
     final bool showModelButton = modelLabel != null && onModelTap != null;
     final bool showThinkingButton =
-        thinkingLabel != null && onThinkingTap != null;
+        isDesktop && thinkingLabel != null && onThinkingTap != null;
     final controls = <AppComposerControl>[
       if (showModelButton)
         AppComposerControl(
+          key: modelAnchorKey,
           icon: Icons.memory_rounded,
           label: modelLabel!,
           detail: modelDetail,
@@ -116,6 +123,7 @@ class _Composer extends StatelessWidget {
         ),
       if (showThinkingButton)
         AppComposerControl(
+          key: thinkingAnchorKey,
           icon: Icons.psychology_alt_rounded,
           label: thinkingLabel!,
           detail: thinkingDetail,
@@ -143,12 +151,12 @@ class _Composer extends StatelessWidget {
       controller: controller,
       focusNode: focusNode,
       sending: sending,
+      enabled: enabled,
       onSend: onSend,
       onDismiss: onDismiss,
       onNativePaste: onNativePaste,
       submitOnEnter: submitOnEnter,
-      desktopHintText:
-          'Reply here. Press Enter to send, Shift+Enter for a new line',
+      desktopHintText: 'Reply…',
       hasSendableContext: hasContext,
       leading: leading,
       controls: controls,
@@ -160,7 +168,12 @@ class _Composer extends StatelessWidget {
             curve: AppMotion.standard,
             child: (supportsSkillInput && activeSkillQuery != null)
                 ? Padding(
-                    padding: const EdgeInsets.fromLTRB(14, 8, 14, 0),
+                    padding: const EdgeInsets.fromLTRB(
+                      AppSpacing.md,
+                      AppSpacing.sm,
+                      AppSpacing.md,
+                      0,
+                    ),
                     child: _ComposerSkillSuggestionTray(
                       query: activeSkillQuery!,
                       suggestions: skillSuggestions,
@@ -176,7 +189,12 @@ class _Composer extends StatelessWidget {
             curve: AppMotion.standard,
             child: activeFileQuery != null
                 ? Padding(
-                    padding: const EdgeInsets.fromLTRB(14, 8, 14, 0),
+                    padding: const EdgeInsets.fromLTRB(
+                      AppSpacing.md,
+                      AppSpacing.sm,
+                      AppSpacing.md,
+                      0,
+                    ),
                     child: _ComposerFileSuggestionTray(
                       query: activeFileQuery!,
                       suggestions: fileSuggestions,
@@ -257,7 +275,7 @@ class _ComposerContextShelf extends StatelessWidget {
             id: 'image-${a.id}',
             icon: isDesktop
                 ? ClipRRect(
-                    borderRadius: BorderRadius.circular(6),
+                    borderRadius: BorderRadius.circular(AppRadii.hover),
                     child: Image.memory(
                       a.bytes,
                       width: 20,
@@ -266,7 +284,11 @@ class _ComposerContextShelf extends StatelessWidget {
                       gaplessPlayback: true,
                     ),
                   )
-                : Icon(Icons.image_rounded, size: 14, color: shelfSecondary),
+                : Icon(
+                    Icons.image_rounded,
+                    size: AppSizes.smallIcon,
+                    color: shelfSecondary,
+                  ),
             label: a.name,
             sublabel: isDesktop ? _formatByteCount(a.byteLength) : null,
             onRemove: () => onRemoveAttachment(a.id),
@@ -276,7 +298,7 @@ class _ComposerContextShelf extends StatelessWidget {
             id: 'skill-${s.skill.path}',
             icon: Icon(
               Icons.auto_awesome_rounded,
-              size: 14,
+              size: AppSizes.smallIcon,
               color: shelfAccent,
             ),
             label: s.tokenText,
@@ -289,7 +311,7 @@ class _ComposerContextShelf extends StatelessWidget {
               f.file.isDirectory
                   ? Icons.folder_rounded
                   : Icons.insert_drive_file_rounded,
-              size: 14,
+              size: AppSizes.smallIcon,
               color: shelfSecondary,
             ),
             label: _fileShelfLabel(
@@ -360,8 +382,6 @@ class _ComposerPlusButton extends StatelessWidget {
         return MeshBottomSheetScaffold(
           icon: Icons.add_rounded,
           title: 'Add something',
-          description:
-              'Attach an image, insert a skill, or mention a file in this message.',
           maxWidth: 560,
           maxHeightFactor: 0.48,
           child: ListView(
@@ -409,7 +429,7 @@ class _ComposerAttachButton extends StatelessWidget {
       enabled: enabled,
       onPressed: onPressed,
       tooltip: 'Attach images',
-      icon: Icons.add_photo_alternate_rounded,
+      icon: Icons.add_rounded,
       compact: true,
     );
   }
@@ -455,26 +475,29 @@ class _ComposerSkillSuggestionTrayState
     Widget child;
     if (widget.loading) {
       child = const Padding(
-        padding: EdgeInsets.symmetric(horizontal: 8, vertical: 8),
-        child: _ComposerSuggestionTrayLoadingState(
-          badgeCount: 1,
-          showTrailing: true,
+        padding: EdgeInsets.symmetric(
+          horizontal: AppSpacing.sm,
+          vertical: AppSpacing.sm,
         ),
+        child: MeshLoader(label: 'Loading suggestions'),
       );
     } else if (widget.suggestions.isEmpty) {
       final message = widget.error == null || widget.error!.trim().isEmpty
           ? 'No skills match "\$${widget.query}".'
           : 'Couldn\'t load skills: ${widget.error}';
       child = Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+        padding: const EdgeInsets.symmetric(
+          horizontal: AppSpacing.md,
+          vertical: AppSpacing.compact,
+        ),
         child: Row(
           children: [
             Icon(
               Icons.auto_awesome_rounded,
-              size: 16,
+              size: AppSizes.compactIcon,
               color: colors.textTertiary,
             ),
-            const SizedBox(width: 8),
+            const SizedBox(width: AppSpacing.sm),
             Expanded(
               child: Text(
                 message,
@@ -536,7 +559,11 @@ class _ComposerSkillSuggestionTrayState
           border: Border.all(color: colors.border),
         ),
         alignment: Alignment.center,
-        child: Icon(Icons.auto_awesome_rounded, size: 15, color: colors.accent),
+        child: Icon(
+          Icons.auto_awesome_rounded,
+          size: AppSizes.compactIcon,
+          color: colors.accent,
+        ),
       ),
       title: Text(
         skill.displayName,
@@ -559,7 +586,7 @@ class _ComposerSkillSuggestionTrayState
         skill.mentionToken,
         style: monoStyle(
           color: colors.textTertiary,
-          fontSize: 11,
+          fontSize: AppFontSizes.metadata,
           fontWeight: AppWeights.body,
         ),
       ),
@@ -577,13 +604,16 @@ class _SkillScopeBadge extends StatelessWidget {
     final colors = context.colors;
     final isWorkspace = skill.scope == 'repo';
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+      padding: const EdgeInsets.symmetric(
+        horizontal: AppSpacing.sm,
+        vertical: AppSpacing.xs,
+      ),
       decoration: BoxDecoration(
         color: isWorkspace ? colors.accentMuted : colors.surfaceMuted,
         borderRadius: AppShapes.pill,
         border: Border.all(
           color: isWorkspace
-              ? colors.accent.withValues(alpha: 0.35)
+              ? colors.accent.withValues(alpha: AppEmphasis.muted)
               : colors.border,
         ),
       ),
@@ -591,7 +621,7 @@ class _SkillScopeBadge extends StatelessWidget {
         skill.scopeLabel,
         style: monoStyle(
           color: isWorkspace ? colors.accent : colors.textTertiary,
-          fontSize: 10,
+          fontSize: AppFontSizes.micro,
           fontWeight: AppWeights.emphasis,
         ),
       ),
@@ -639,16 +669,26 @@ class _ComposerFileSuggestionTrayState
     Widget child;
     if (widget.loading && widget.suggestions.isEmpty) {
       child = const Padding(
-        padding: EdgeInsets.symmetric(horizontal: 8, vertical: 8),
-        child: _ComposerSuggestionTrayLoadingState(showTrailing: false),
+        padding: EdgeInsets.symmetric(
+          horizontal: AppSpacing.sm,
+          vertical: AppSpacing.sm,
+        ),
+        child: MeshLoader(label: 'Loading suggestions'),
       );
     } else if (widget.error != null && widget.error!.trim().isNotEmpty) {
       child = Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+        padding: const EdgeInsets.symmetric(
+          horizontal: AppSpacing.md,
+          vertical: AppSpacing.compact,
+        ),
         child: Row(
           children: [
-            Icon(Icons.error_outline_rounded, size: 16, color: colors.danger),
-            const SizedBox(width: 8),
+            Icon(
+              Icons.error_outline_rounded,
+              size: AppSizes.compactIcon,
+              color: colors.danger,
+            ),
+            const SizedBox(width: AppSpacing.sm),
             Expanded(
               child: Text(
                 widget.error!,
@@ -662,15 +702,18 @@ class _ComposerFileSuggestionTrayState
       );
     } else if (widget.suggestions.isEmpty) {
       child = Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+        padding: const EdgeInsets.symmetric(
+          horizontal: AppSpacing.md,
+          vertical: AppSpacing.compact,
+        ),
         child: Row(
           children: [
             Icon(
               Icons.search_off_rounded,
-              size: 16,
+              size: AppSizes.compactIcon,
               color: colors.textTertiary,
             ),
-            const SizedBox(width: 8),
+            const SizedBox(width: AppSpacing.sm),
             Expanded(
               child: Text(
                 widget.query.trim().isEmpty
@@ -749,7 +792,7 @@ class _ComposerFileSuggestionTrayState
           file.isDirectory
               ? Icons.folder_rounded
               : Icons.insert_drive_file_rounded,
-          size: 15,
+          size: AppSizes.compactIcon,
           color: colors.textTertiary,
         ),
       ),
@@ -763,54 +806,13 @@ class _ComposerFileSuggestionTrayState
       ),
       subtitle: Text(
         _compactFileParentPath(file, maxSegments: ambiguousName ? 4 : 3),
-        style: monoStyle(color: colors.textTertiary, fontSize: 11),
+        style: monoStyle(
+          color: colors.textTertiary,
+          fontSize: AppFontSizes.metadata,
+        ),
         maxLines: 1,
         overflow: TextOverflow.ellipsis,
       ),
-    );
-  }
-}
-
-class _ComposerSuggestionTrayLoadingState extends StatelessWidget {
-  const _ComposerSuggestionTrayLoadingState({
-    this.badgeCount = 0,
-    required this.showTrailing,
-  });
-
-  final int badgeCount;
-  final bool showTrailing;
-
-  @override
-  Widget build(BuildContext context) {
-    return Column(
-      children: [
-        MeshListRowSkeleton(
-          dense: true,
-          framed: false,
-          titleWidthFactor: 0.46,
-          subtitleWidthFactor: 0.72,
-          badgeCount: badgeCount,
-          showTrailing: showTrailing,
-        ),
-        const SizedBox(height: 4),
-        MeshListRowSkeleton(
-          dense: true,
-          framed: false,
-          titleWidthFactor: 0.58,
-          subtitleWidthFactor: 0.64,
-          badgeCount: badgeCount,
-          showTrailing: showTrailing,
-        ),
-        const SizedBox(height: 4),
-        MeshListRowSkeleton(
-          dense: true,
-          framed: false,
-          titleWidthFactor: 0.4,
-          subtitleWidthFactor: 0.7,
-          badgeCount: badgeCount,
-          showTrailing: showTrailing,
-        ),
-      ],
     );
   }
 }

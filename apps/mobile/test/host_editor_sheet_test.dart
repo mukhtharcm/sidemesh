@@ -7,13 +7,67 @@ import 'package:sidemesh_mobile/src/theme/app_palettes.dart';
 import 'package:sidemesh_mobile/src/theme/app_theme.dart';
 
 void main() {
+  for (final dark in [false, true]) {
+    testWidgets('desktop machine editor fits its content: $dark', (
+      tester,
+    ) async {
+      debugDefaultTargetPlatformOverride = TargetPlatform.macOS;
+      tester.view
+        ..devicePixelRatio = 1
+        ..physicalSize = const Size(1180, 900);
+      addTearDown(() {
+        tester.view.resetPhysicalSize();
+        tester.view.resetDevicePixelRatio();
+      });
+      try {
+        await tester.pumpWidget(
+          MaterialApp(
+            theme: buildLightTheme(
+              ThemeVariant.nord.light,
+              platform: TargetPlatform.macOS,
+            ),
+            darkTheme: buildDarkTheme(
+              ThemeVariant.nord.dark,
+              platform: TargetPlatform.macOS,
+            ),
+            themeMode: dark ? ThemeMode.dark : ThemeMode.light,
+            home: const HostEditorSheet(
+              initialHost: HostProfile(
+                id: 'test',
+                label: 'Test machine',
+                baseUrl: 'http://localhost:4001',
+                token: 'test',
+              ),
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+        final surface = find
+            .ancestor(
+              of: find.text('Edit machine'),
+              matching: find.byType(Material),
+            )
+            .first;
+        expect(tester.getSize(surface).height, lessThan(600));
+        expect(find.byType(BottomSheet), findsNothing);
+        expect(
+          tester.widget<TextField>(find.byType(TextField).last).obscureText,
+          isTrue,
+        );
+        expect(tester.takeException(), isNull);
+      } finally {
+        debugDefaultTargetPlatformOverride = null;
+      }
+    });
+  }
+
   testWidgets('host editor presents one focused setup page on mobile', (
     tester,
   ) async {
     try {
       await _pumpHostEditor(tester);
 
-      expect(find.text('Add host'), findsOneWidget);
+      expect(find.text('Add machine'), findsOneWidget);
       expect(find.text('Pairing'), findsNothing);
       expect(find.text('About this machine'), findsNothing);
       expect(find.text('Connection'), findsNothing);
@@ -23,7 +77,7 @@ void main() {
       expect(find.text('Address'), findsOneWidget);
       expect(find.text('Token'), findsOneWidget);
       expect(find.text('Check connection'), findsOneWidget);
-      expect(find.text('Save host'), findsOneWidget);
+      expect(find.text('Save machine'), findsOneWidget);
       expect(find.byType(Switch), findsOneWidget);
       expect(tester.takeException(), isNull);
     } finally {
@@ -37,8 +91,8 @@ void main() {
     try {
       await _pumpHostEditor(tester, size: const Size(320, 568));
 
-      expect(find.text('Add host'), findsOneWidget);
-      expect(find.text('Save host'), findsOneWidget);
+      expect(find.text('Add machine'), findsOneWidget);
+      expect(find.text('Save machine'), findsOneWidget);
       expect(find.text('Cancel'), findsOneWidget);
       expect(tester.takeException(), isNull);
     } finally {
@@ -64,7 +118,7 @@ void main() {
         ),
       );
 
-      expect(find.text('Edit host'), findsOneWidget);
+      expect(find.text('Edit machine'), findsOneWidget);
       expect(find.text('Save changes'), findsOneWidget);
       expect(find.byTooltip('Show token'), findsOneWidget);
 

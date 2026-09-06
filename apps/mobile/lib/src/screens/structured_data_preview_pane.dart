@@ -58,7 +58,6 @@ class StructuredDataPreviewPane extends StatelessWidget {
       _StructuredPreviewState.empty => MeshEmptyState.compact(
         icon: Icons.data_object_rounded,
         title: 'Empty ${format.label} file',
-        body: 'There is no structured data to preview yet.',
       ),
       _StructuredPreviewState.error => MeshEmptyState.compact(
         icon: Icons.error_outline_rounded,
@@ -265,8 +264,18 @@ class _StructuredPreviewHeader extends StatelessWidget {
 
     return Padding(
       padding: dense
-          ? const EdgeInsets.fromLTRB(12, 12, 12, 10)
-          : const EdgeInsets.fromLTRB(14, 14, 14, 12),
+          ? const EdgeInsets.fromLTRB(
+              AppSpacing.md,
+              AppSpacing.md,
+              AppSpacing.md,
+              AppSpacing.compact,
+            )
+          : const EdgeInsets.fromLTRB(
+              AppSpacing.md,
+              AppSpacing.md,
+              AppSpacing.md,
+              AppSpacing.md,
+            ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -277,7 +286,7 @@ class _StructuredPreviewHeader extends StatelessWidget {
               fontWeight: AppWeights.title,
             ),
           ),
-          const SizedBox(height: 6),
+          const SizedBox(height: AppSpacing.tight),
           Wrap(
             spacing: 8,
             runSpacing: 8,
@@ -316,7 +325,9 @@ class _StructuredTreeBody extends StatelessWidget {
       );
     }
     return Padding(
-      padding: EdgeInsets.only(bottom: dense ? 4 : 6),
+      padding: EdgeInsets.only(
+        bottom: dense ? AppSpacing.xs : AppSpacing.tight,
+      ),
       child: _StructuredChildList(children: children, depth: 0, dense: dense),
     );
   }
@@ -498,48 +509,50 @@ class _StructuredBranchTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colors = context.colors;
-    return Theme(
-      data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
-      child: Material(
-        type: MaterialType.transparency,
-        child: ExpansionTile(
-          tilePadding: EdgeInsets.fromLTRB(
-            _rowInset(depth, dense),
-            dense ? 6 : 8,
-            12,
-            dense ? 6 : 8,
-          ),
-          childrenPadding: EdgeInsets.only(bottom: dense ? 4 : 6),
-          visualDensity: VisualDensity.compact,
-          iconColor: colors.textSecondary,
-          collapsedIconColor: colors.textSecondary,
-          title: Row(
-            children: [
-              Expanded(
-                child: Text(
-                  label,
-                  style: Theme.of(context).textTheme.labelLarge?.copyWith(
-                    color: colors.textPrimary,
-                    fontWeight: AppWeights.emphasis,
-                  ),
+    return Material(
+      type: MaterialType.transparency,
+      child: ExpansionTile(
+        tilePadding: EdgeInsets.fromLTRB(
+          _rowInset(depth, dense),
+          dense ? AppSpacing.tight : AppSpacing.sm,
+          AppSpacing.md,
+          dense ? AppSpacing.tight : AppSpacing.sm,
+        ),
+        childrenPadding: EdgeInsets.only(
+          bottom: dense ? AppSpacing.xs : AppSpacing.tight,
+        ),
+        visualDensity: VisualDensity.compact,
+        iconColor: colors.textSecondary,
+        collapsedIconColor: colors.textSecondary,
+        title: Row(
+          children: [
+            Expanded(
+              child: Text(
+                label,
+                style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                  color: colors.textPrimary,
+                  fontWeight: AppWeights.emphasis,
                 ),
               ),
-              const SizedBox(width: 8),
-              _StructuredTypeChip(label: _nodeKindLabel(node)),
-            ],
-          ),
-          subtitle: Text(
-            _nodeSummary(node),
-            style: monoStyle(color: colors.textSecondary, fontSize: 10.5),
-          ),
-          children: [
-            _StructuredChildList(
-              children: _childrenForNode(node),
-              depth: depth + 1,
-              dense: dense,
             ),
+            const SizedBox(width: AppSpacing.sm),
+            _StructuredTypeChip(label: _nodeKindLabel(node)),
           ],
         ),
+        subtitle: Text(
+          _nodeSummary(node),
+          style: monoStyle(
+            color: colors.textSecondary,
+            fontSize: AppFontSizes.metadata,
+          ),
+        ),
+        children: [
+          _StructuredChildList(
+            children: _childrenForNode(node),
+            depth: depth + 1,
+            dense: dense,
+          ),
+        ],
       ),
     );
   }
@@ -566,9 +579,9 @@ class _StructuredSummaryTile extends StatelessWidget {
     return Padding(
       padding: EdgeInsets.fromLTRB(
         _rowInset(depth, dense),
-        dense ? 10 : 12,
-        12,
-        dense ? 10 : 12,
+        dense ? AppSpacing.compact : AppSpacing.md,
+        AppSpacing.md,
+        dense ? AppSpacing.compact : AppSpacing.md,
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -584,14 +597,17 @@ class _StructuredSummaryTile extends StatelessWidget {
                   ),
                 ),
               ),
-              const SizedBox(width: 8),
+              const SizedBox(width: AppSpacing.sm),
               _StructuredTypeChip(label: kind),
             ],
           ),
-          const SizedBox(height: 6),
+          const SizedBox(height: AppSpacing.tight),
           Text(
             summary,
-            style: monoStyle(color: colors.textSecondary, fontSize: 12.5),
+            style: monoStyle(
+              color: colors.textSecondary,
+              fontSize: AppFontSizes.code,
+            ),
           ),
         ],
       ),
@@ -620,9 +636,9 @@ class _StructuredScalarTile extends StatelessWidget {
     return Padding(
       padding: EdgeInsets.fromLTRB(
         _rowInset(depth, dense),
-        dense ? 10 : 12,
-        12,
-        dense ? 10 : 12,
+        dense ? AppSpacing.compact : AppSpacing.md,
+        AppSpacing.md,
+        dense ? AppSpacing.compact : AppSpacing.md,
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -639,17 +655,17 @@ class _StructuredScalarTile extends StatelessWidget {
                   ),
                 ),
               ),
-              const SizedBox(width: 8),
+              const SizedBox(width: AppSpacing.sm),
               _StructuredTypeChip(label: _scalarKindLabel(value)),
             ],
           ),
-          const SizedBox(height: 6),
+          const SizedBox(height: AppSpacing.tight),
           Text(
             displayValue,
             style: monoStyle(
               color: isEmpty ? colors.textSecondary : colors.textPrimary,
-              fontSize: 12.5,
-            ).copyWith(height: 1.4),
+              fontSize: AppFontSizes.code,
+            ).copyWith(height: AppLineHeights.body),
           ),
         ],
       ),
@@ -666,7 +682,10 @@ class _StructuredTypeChip extends StatelessWidget {
   Widget build(BuildContext context) {
     final colors = context.colors;
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      padding: const EdgeInsets.symmetric(
+        horizontal: AppSpacing.sm,
+        vertical: AppSpacing.xs,
+      ),
       decoration: BoxDecoration(
         color: colors.surfaceMuted,
         borderRadius: BorderRadius.circular(AppRadii.badge),
@@ -676,7 +695,7 @@ class _StructuredTypeChip extends StatelessWidget {
         label,
         style: monoStyle(
           color: colors.textSecondary,
-          fontSize: 10.5,
+          fontSize: AppFontSizes.metadata,
           fontWeight: AppWeights.emphasis,
         ),
       ),

@@ -14,10 +14,10 @@ import '../live_activity_service.dart';
 import '../local_notification_service.dart';
 import '../models.dart';
 import '../theme/app_colors.dart';
-import '../theme/color_contrast.dart';
 import '../theme/app_theme.dart';
 import '../theme/app_tokens.dart';
 import '../widgets/app_snackbar.dart';
+import '../widgets/app_menu.dart';
 import '../widgets/desktop_sidebar_search_field.dart';
 import '../widgets/mesh_widgets.dart';
 import '../widgets/notification_permission_banner.dart';
@@ -32,14 +32,16 @@ import 'inspector/inspector_controller.dart';
 import 'settings_screen.dart';
 import 'session_screen.dart';
 import 'usage_pane.dart';
+import '../theme/app_control_styles.dart';
 
 /// macOS shell with rail, list pane, active detail, and optional tools pane.
 /// Reuses the same panes as the mobile home
 /// screen, so we keep a single source of truth for session data.
 class DesktopShell extends StatefulWidget {
-  const DesktopShell({super.key, this.api});
+  const DesktopShell({super.key, this.api, this.hostStore});
 
   final ApiClient? api;
+  final HostStore? hostStore;
 
   @override
   State<DesktopShell> createState() => _DesktopShellState();
@@ -57,59 +59,46 @@ class _OnboardingEmptyState extends StatelessWidget {
   Widget build(BuildContext context) {
     return Center(
       child: SingleChildScrollView(
-        padding: const EdgeInsets.all(32),
+        padding: const EdgeInsets.all(AppSpacing.xxl),
         child: ConstrainedBox(
           constraints: const BoxConstraints(maxWidth: 520),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              Container(
-                width: 72,
-                height: 72,
-                decoration: BoxDecoration(
-                  color: colors.accentMuted,
-                  borderRadius: AppShapes.sheet,
-                  border: Border.all(
-                    color: colors.accent.withValues(alpha: 0.4),
-                  ),
-                ),
-                alignment: Alignment.center,
-                child: Icon(Icons.hub_rounded, size: 32, color: colors.accent),
+              Icon(
+                Icons.hub_rounded,
+                size: AppSizes.iconWell,
+                color: colors.textSecondary,
               ),
-              const SizedBox(height: 24),
+              const SizedBox(height: AppSpacing.xl),
               Text(
                 'Connect a machine',
                 textAlign: TextAlign.center,
                 style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                  fontWeight: FontWeight.w800,
+                  fontWeight: AppWeights.strong,
                   color: colors.textPrimary,
-                  letterSpacing: -0.3,
+                  letterSpacing: AppLetterSpacing.headline,
                 ),
               ),
-              const SizedBox(height: 8),
+              const SizedBox(height: AppSpacing.sm),
               Text(
-                'Install Sidemesh on the machine you want to control, then add that host here.',
+                'Install Sidemesh on the machine you want to control, then connect it here.',
                 textAlign: TextAlign.center,
                 style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                   color: colors.textSecondary,
-                  height: 1.4,
+                  height: AppLineHeights.body,
                 ),
               ),
-              const SizedBox(height: 24),
+              const SizedBox(height: AppSpacing.xl),
               FilledButton.icon(
                 onPressed: onAddHost,
                 icon: const Icon(Icons.add_rounded),
-                label: const Text('Add your first host'),
+                label: const Text('Add machine'),
               ),
-              const SizedBox(height: 10),
-              TextButton(
-                onPressed: onAddHost,
-                child: const Text('Enter host details manually'),
-              ),
-              const SizedBox(height: 24),
+              const SizedBox(height: AppSpacing.xl),
               Container(
-                padding: const EdgeInsets.all(18),
+                padding: const EdgeInsets.all(AppSpacing.lg),
                 decoration: BoxDecoration(
                   color: colors.surface,
                   borderRadius: AppShapes.dialog,
@@ -125,15 +114,15 @@ class _OnboardingEmptyState extends StatelessWidget {
                         fontWeight: AppWeights.title,
                       ),
                     ),
-                    const SizedBox(height: 6),
+                    const SizedBox(height: AppSpacing.tight),
                     Text(
                       'Run these once on the machine you want to control.',
                       style: Theme.of(context).textTheme.bodySmall?.copyWith(
                         color: colors.textSecondary,
-                        height: 1.4,
+                        height: AppLineHeights.body,
                       ),
                     ),
-                    const SizedBox(height: 14),
+                    const SizedBox(height: AppSpacing.md),
                     _CommandBlock(
                       text:
                           'npm install -g sidemesh\nsidemesh setup\nsidemesh pair',
@@ -164,10 +153,13 @@ class _CommandBlock extends StatelessWidget {
         .where((line) => line.isNotEmpty)
         .toList(growable: false);
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+      padding: const EdgeInsets.symmetric(
+        horizontal: AppSpacing.md,
+        vertical: AppSpacing.compact,
+      ),
       decoration: BoxDecoration(
         color: colors.codeBackground,
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: BorderRadius.circular(AppRadii.panel),
         border: Border.all(color: colors.codeBorder),
       ),
       child: Row(
@@ -177,21 +169,24 @@ class _CommandBlock extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 for (var i = 0; i < lines.length; i++) ...[
-                  if (i > 0) const SizedBox(height: 6),
+                  if (i > 0) const SizedBox(height: AppSpacing.tight),
                   Row(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
                         '\$',
-                        style: monoStyle(color: colors.accent, fontSize: 12),
+                        style: monoStyle(
+                          color: colors.accent,
+                          fontSize: AppFontSizes.caption,
+                        ),
                       ),
-                      const SizedBox(width: 8),
+                      const SizedBox(width: AppSpacing.sm),
                       Expanded(
                         child: Text(
                           lines[i],
                           style: monoStyle(
                             color: colors.codeForeground,
-                            fontSize: 12,
+                            fontSize: AppFontSizes.caption,
                           ),
                         ),
                       ),
@@ -228,7 +223,7 @@ class _DesktopSessionDraft {
 }
 
 class _DesktopShellState extends State<DesktopShell> {
-  final HostStore _store = HostStore();
+  late final HostStore _store = widget.hostStore ?? HostStore();
   late final ApiClient _api;
   final TextEditingController _searchController = TextEditingController();
   final FocusNode _searchFocus = FocusNode(debugLabel: 'sidebar-search');
@@ -236,12 +231,14 @@ class _DesktopShellState extends State<DesktopShell> {
 
   List<HostProfile> _hosts = const [];
   bool _loading = true;
+  bool _loadingHosts = false;
+  bool _hostLoadSlow = false;
+  Object? _hostLoadError;
   _SidebarSection _section = _SidebarSection.recent;
   _ActiveSession? _active;
   _DesktopSessionDraft? _draft;
   HostProfile? _activeHost;
   bool _showUsage = false;
-  int _activeCount = 0;
   int _inboxCount = 0;
   bool _recentVerificationActive = false;
   int _sessionOpenSerial = 0;
@@ -261,9 +258,8 @@ class _DesktopShellState extends State<DesktopShell> {
   // Reserve space under the macOS titlebar so traffic lights & drag area
   // stay clean. 28pt matches the standard NSWindow titlebar height.
   static const double _titlebarInset = 28;
-  static const double _railWidth = 76;
-  static const double _defaultSidebarWidth = 352;
-  static const double _minSidebarWidth = 300;
+  static const double _defaultSidebarWidth = 320;
+  static const double _minSidebarWidth = 280;
   static const double _maxSidebarWidth = 440;
   static const String _sidebarWidthPref = 'sidemesh.desktop.sidebarWidth';
   static const double _defaultInspectorWidth = 380;
@@ -341,27 +337,47 @@ class _DesktopShellState extends State<DesktopShell> {
   }
 
   Future<void> _loadHosts() async {
-    final hosts = await _store.loadHosts();
-    if (!mounted) return;
+    if (_loadingHosts) return;
+    _loadingHosts = true;
     setState(() {
-      _hosts = hosts;
-      _loading = false;
-      final draft = _draft;
-      if (draft != null) {
-        final matchingHosts = hosts.where((host) => host.id == draft.host.id);
-        final updatedHost = matchingHosts.isEmpty ? null : matchingHosts.first;
-        _draft = updatedHost == null || !updatedHost.enabled
-            ? null
-            : _DesktopSessionDraft(host: updatedHost, serial: draft.serial);
-      }
+      _loading = true;
+      _hostLoadSlow = false;
+      _hostLoadError = null;
     });
-    for (final host in hosts) {
-      if (!host.enabled) {
-        HostStatusStore.instance.clear(host.id);
+    final slowLoad = Timer(const Duration(seconds: 5), () {
+      if (mounted) setState(() => _hostLoadSlow = true);
+    });
+    try {
+      final hosts = await _store.loadHosts();
+      if (!mounted) return;
+      setState(() {
+        _hosts = hosts;
+        _loading = false;
+        final draft = _draft;
+        if (draft != null) {
+          final matchingHosts = hosts.where((host) => host.id == draft.host.id);
+          final updatedHost = matchingHosts.isEmpty
+              ? null
+              : matchingHosts.first;
+          _draft = updatedHost == null || !updatedHost.enabled
+              ? null
+              : _DesktopSessionDraft(host: updatedHost, serial: draft.serial);
+        }
+      });
+      for (final host in hosts) {
+        if (!host.enabled) {
+          HostStatusStore.instance.clear(host.id);
+        }
       }
+      ApprovalInboxStore.instance.configure(hosts: _enabledHosts, api: _api);
+      unawaited(_handleNotificationRouteIntent());
+    } catch (error) {
+      if (mounted) setState(() => _hostLoadError = error);
+    } finally {
+      slowLoad.cancel();
+      _loadingHosts = false;
+      if (mounted) setState(() => _loading = false);
     }
-    ApprovalInboxStore.instance.configure(hosts: _enabledHosts, api: _api);
-    unawaited(_handleNotificationRouteIntent());
   }
 
   Future<void> _loadSidebarWidth() async {
@@ -480,13 +496,18 @@ class _DesktopShellState extends State<DesktopShell> {
         return Dialog(
           backgroundColor: colors.surface,
           shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(14),
+            borderRadius: BorderRadius.circular(AppRadii.panel),
             side: BorderSide(color: colors.border),
           ),
           child: ConstrainedBox(
             constraints: const BoxConstraints(maxWidth: 420),
             child: Padding(
-              padding: const EdgeInsets.fromLTRB(20, 18, 20, 16),
+              padding: const EdgeInsets.fromLTRB(
+                AppSpacing.xl,
+                AppSpacing.lg,
+                AppSpacing.xl,
+                AppSpacing.lg,
+              ),
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -495,22 +516,22 @@ class _DesktopShellState extends State<DesktopShell> {
                     children: [
                       Icon(
                         Icons.keyboard_rounded,
-                        size: 18,
+                        size: AppSizes.inlineIcon,
                         color: colors.textSecondary,
                       ),
-                      const SizedBox(width: 8),
+                      const SizedBox(width: AppSpacing.sm),
                       Text(
                         'Keyboard shortcuts',
                         style: Theme.of(dialogContext).textTheme.titleMedium
                             ?.copyWith(
                               color: colors.textPrimary,
-                              fontWeight: FontWeight.w600,
+                              fontWeight: AppWeights.title,
                             ),
                       ),
                       const Spacer(),
                       IconButton(
                         tooltip: 'Close',
-                        iconSize: 18,
+                        iconSize: AppSizes.inlineIcon,
                         onPressed: () => Navigator.of(dialogContext).pop(),
                         icon: Icon(
                           Icons.close_rounded,
@@ -519,26 +540,29 @@ class _DesktopShellState extends State<DesktopShell> {
                       ),
                     ],
                   ),
-                  const SizedBox(height: 8),
+                  const SizedBox(height: AppSpacing.sm),
                   Text(
                     'Use these desktop shortcuts to move faster through the home surfaces.',
                     style: Theme.of(dialogContext).textTheme.bodySmall
-                        ?.copyWith(color: colors.textSecondary, height: 1.35),
+                        ?.copyWith(
+                          color: colors.textSecondary,
+                          height: AppLineHeights.caption,
+                        ),
                   ),
-                  const SizedBox(height: 14),
+                  const SizedBox(height: AppSpacing.md),
                   for (final section in sections) ...[
                     Text(
                       section.title,
                       style: Theme.of(dialogContext).textTheme.labelLarge
                           ?.copyWith(
                             color: colors.textSecondary,
-                            fontWeight: FontWeight.w700,
+                            fontWeight: AppWeights.strong,
                           ),
                     ),
-                    const SizedBox(height: 8),
+                    const SizedBox(height: AppSpacing.sm),
                     for (final e in section.items)
                       Padding(
-                        padding: const EdgeInsets.only(bottom: 8),
+                        padding: const EdgeInsets.only(bottom: AppSpacing.sm),
                         child: Row(
                           children: [
                             Expanded(
@@ -546,16 +570,16 @@ class _DesktopShellState extends State<DesktopShell> {
                                 e.label,
                                 style: TextStyle(
                                   color: colors.textPrimary,
-                                  fontSize: 13,
-                                  height: 1.3,
+                                  fontSize: AppFontSizes.compact,
+                                  height: AppLineHeights.label,
                                 ),
                               ),
                             ),
-                            const SizedBox(width: 12),
+                            const SizedBox(width: AppSpacing.md),
                             Container(
                               padding: const EdgeInsets.symmetric(
-                                horizontal: 10,
-                                vertical: 5,
+                                horizontal: AppSpacing.compact,
+                                vertical: AppSpacing.xs,
                               ),
                               decoration: BoxDecoration(
                                 color: colors.surfaceMuted,
@@ -565,15 +589,16 @@ class _DesktopShellState extends State<DesktopShell> {
                               child: Text(
                                 e.keys,
                                 style: const TextStyle(
-                                  fontSize: 12,
-                                  fontFamily: 'monospace',
+                                  fontSize: AppFontSizes.caption,
+                                  fontFamily: AppFonts.code,
                                 ),
                               ),
                             ),
                           ],
                         ),
                       ),
-                    if (section != sections.last) const SizedBox(height: 8),
+                    if (section != sections.last)
+                      const SizedBox(height: AppSpacing.sm),
                   ],
                 ],
               ),
@@ -614,10 +639,10 @@ class _DesktopShellState extends State<DesktopShell> {
       return;
     }
     final enabledHosts = _enabledHosts;
-    final host = enabledHosts.length == 1
-        ? enabledHosts.first
-        : await showCreateSessionHostPicker(context, hosts: enabledHosts);
-    if (!mounted || host == null) return;
+    final currentHost = _active?.host ?? _activeHost;
+    final host =
+        enabledHosts.where((host) => host.id == currentHost?.id).firstOrNull ??
+        enabledHosts.first;
     _inspector.close();
     setState(() {
       _draft = _DesktopSessionDraft(host: host, serial: ++_draftSerial);
@@ -628,10 +653,8 @@ class _DesktopShellState extends State<DesktopShell> {
   }
 
   Future<void> _showHostEditor({HostProfile? initial}) async {
-    final result = await showModalBottomSheet<HostProfile>(
+    final result = await showDialog<HostProfile>(
       context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
       builder: (_) => HostEditorSheet(initialHost: initial),
     );
     if (result == null) return;
@@ -844,21 +867,37 @@ class _DesktopShellState extends State<DesktopShell> {
     );
   }
 
+  bool _searchOpen = false;
+
+  Future<void> _openSessionSearch() async {
+    if (_searchOpen) return;
+    _searchOpen = true;
+    try {
+      final result = await showSessionSearch(context, hosts: _hosts, api: _api);
+      if (mounted && result != null) _openSession(result.host, result.session);
+    } finally {
+      _searchOpen = false;
+    }
+  }
+
   void _bumpRefresh() {
     setState(() => _refreshTick++);
   }
 
   /// Figures out how wide each column should be given the available [total]
-  /// width. The rail stays fixed; the list pane and inspector give up space
+  /// width. The list pane and inspector give up space
   /// before the detail pane does.
-  ({double rail, double sidebar, double detail, double inspector})
-  _computePaneWidths(double total) {
+  ({double sidebar, double detail, double inspector}) _computePaneWidths(
+    double total,
+  ) {
     // Resizer is 6pt (see _SidebarResizer). When inspector is open,
     // the inspector pane gets its own resize handle on its left edge.
     const double resizer = 6;
     const double inspectorMin = _minInspectorWidth;
     const double detailMin = 560;
-    final inspectorOpen = _inspector.current != null;
+    final inspectorOpen =
+        _inspector.current != null &&
+        total >= _minSidebarWidth + inspectorMin + detailMin + resizer * 2;
 
     double sidebar = _sidebarWidth.clamp(_minSidebarWidth, _maxSidebarWidth);
     double inspector = inspectorOpen
@@ -866,8 +905,7 @@ class _DesktopShellState extends State<DesktopShell> {
         : 0;
     double inspectorResizer = inspectorOpen ? resizer : 0;
 
-    double detail =
-        total - _railWidth - sidebar - resizer - inspectorResizer - inspector;
+    double detail = total - sidebar - resizer - inspectorResizer - inspector;
 
     if (inspectorOpen && detail < detailMin) {
       // Shrink the sidebar toward its min first; session titles stay
@@ -892,14 +930,9 @@ class _DesktopShellState extends State<DesktopShell> {
       }
     }
 
-    // If detail is still under min we let it float; the overlay
-    // fallback is a later-phase task.
-    return (
-      rail: _railWidth,
-      sidebar: sidebar,
-      detail: detail,
-      inspector: inspector,
-    );
+    // At narrow widths the inspector is drawn over the conversation.
+    // It does not reduce the width of the transcript behind it.
+    return (sidebar: sidebar, detail: detail, inspector: inspector);
   }
 
   void _toggleInspectorDebug() {
@@ -916,7 +949,7 @@ class _DesktopShellState extends State<DesktopShell> {
         bodyBuilder: (context) {
           final colors = context.colors;
           return Padding(
-            padding: const EdgeInsets.all(16),
+            padding: const EdgeInsets.all(AppSpacing.lg),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
@@ -929,7 +962,7 @@ class _DesktopShellState extends State<DesktopShell> {
                     fontWeight: AppWeights.title,
                   ),
                 ),
-                const SizedBox(height: 8),
+                const SizedBox(height: AppSpacing.sm),
                 Text(
                   hasActiveSession
                       ? 'This side panel is reserved for extra details and '
@@ -939,7 +972,7 @@ class _DesktopShellState extends State<DesktopShell> {
                             'here.',
                   style: Theme.of(context).textTheme.bodySmall?.copyWith(
                     color: colors.textSecondary,
-                    height: 1.4,
+                    height: AppLineHeights.body,
                   ),
                 ),
               ],
@@ -992,6 +1025,10 @@ class _DesktopShellState extends State<DesktopShell> {
                 ),
                 _FocusSearchIntent: CallbackAction<_FocusSearchIntent>(
                   onInvoke: (_) {
+                    if (_section == _SidebarSection.recent) {
+                      unawaited(_openSessionSearch());
+                      return null;
+                    }
                     _searchFocus.requestFocus();
                     _searchController.selection = TextSelection(
                       baseOffset: 0,
@@ -1041,155 +1078,262 @@ class _DesktopShellState extends State<DesktopShell> {
                           final widths = _computePaneWidths(
                             constraints.maxWidth,
                           );
-                          return Row(
-                            crossAxisAlignment: CrossAxisAlignment.stretch,
+                          final overlayInspector =
+                              _inspector.current != null &&
+                              widths.inspector == 0;
+                          return Stack(
                             children: [
-                              SizedBox(
-                                width: widths.rail,
-                                child: _DesktopRail(
-                                  titlebarInset: _titlebarInset,
-                                  section: _section,
-                                  inboxCount: _inboxCount,
-                                  activeCount: _activeCount,
-                                  hostCount: _hosts.length,
-                                  onSelectSection: (s) =>
-                                      setState(() => _section = s),
-                                  onShowShortcuts: _showShortcutsSheet,
-                                  onOpenSettings: _openSettings,
-                                  onOpenUsage: _openUsage,
-                                ),
-                              ),
-                              SizedBox(
-                                width: widths.sidebar,
-                                child: ListenableBuilder(
-                                  listenable: ApprovalInboxStore.instance,
-                                  builder: (context, _) => _Sidebar(
-                                    titlebarInset: _titlebarInset,
+                              Row(
+                                crossAxisAlignment: CrossAxisAlignment.stretch,
+                                children: [
+                                  SizedBox(
                                     width: widths.sidebar,
-                                    hosts: _hosts,
-                                    loading: _loading,
-                                    api: _api,
-                                    section: _section,
-                                    refreshTick: _refreshTick,
-                                    inboxCount: _inboxCount,
-                                    selectedSessionId: _active?.session.id,
-                                    selectedHostId: _activeHost?.id,
-                                    searchController: _searchController,
-                                    searchFocus: _searchFocus,
-                                    query: _query,
-                                    onClearSearch: () {
-                                      _searchController.clear();
-                                    },
-                                    onOpenSession: _openSession,
-                                    onOpenSessionFromAction: (host, action) =>
-                                        _openSession(
-                                          host,
-                                          _sessionFromAction(action),
+                                    child: Column(
+                                      children: [
+                                        SizedBox(height: _titlebarInset),
+                                        if (_section != _SidebarSection.recent)
+                                          Align(
+                                            alignment: Alignment.centerLeft,
+                                            child: TextButton.icon(
+                                              onPressed: () => setState(
+                                                () => _section =
+                                                    _SidebarSection.recent,
+                                              ),
+                                              icon: const Icon(
+                                                Icons.arrow_back_rounded,
+                                                size: AppSizes.inlineIcon,
+                                              ),
+                                              label: const Text(
+                                                'Back to sessions',
+                                              ),
+                                            ),
+                                          ),
+                                        if (_section ==
+                                                _SidebarSection.recent &&
+                                            _inboxCount > 0)
+                                          ListTile(
+                                            leading: const Icon(
+                                              Icons.inbox_outlined,
+                                              size: AppSizes.icon,
+                                            ),
+                                            title: const Text('Needs you'),
+                                            trailing: Text('$_inboxCount'),
+                                            onTap: () => setState(
+                                              () => _section =
+                                                  _SidebarSection.inbox,
+                                            ),
+                                          ),
+                                        Expanded(
+                                          child: ListenableBuilder(
+                                            listenable:
+                                                ApprovalInboxStore.instance,
+                                            builder: (context, _) => _Sidebar(
+                                              titlebarInset: 0,
+                                              width: widths.sidebar,
+                                              hosts: _hosts,
+                                              loading: _loading,
+                                              loadError: _hostLoadError,
+                                              onRetry: _loadHosts,
+                                              api: _api,
+                                              section: _section,
+                                              refreshTick: _refreshTick,
+                                              inboxCount: _inboxCount,
+                                              selectedSessionId:
+                                                  _active?.session.id,
+                                              selectedHostId: _activeHost?.id,
+                                              searchController:
+                                                  _searchController,
+                                              searchFocus: _searchFocus,
+                                              query:
+                                                  _section ==
+                                                      _SidebarSection.recent
+                                                  ? ''
+                                                  : _query,
+                                              onSearch: _openSessionSearch,
+                                              onClearSearch: () {
+                                                _searchController.clear();
+                                              },
+                                              onOpenSession: _openSession,
+                                              onOpenSessionFromAction:
+                                                  (host, action) =>
+                                                      _openSession(
+                                                        host,
+                                                        _sessionFromAction(
+                                                          action,
+                                                        ),
+                                                      ),
+                                              onOpenPendingSession:
+                                                  (host, session, seed) async {
+                                                    _openSession(
+                                                      host,
+                                                      session,
+                                                      composerSeed: seed,
+                                                    );
+                                                  },
+                                              onOpenHostDetail: _openHostDetail,
+                                              onAddHost: () =>
+                                                  _showHostEditor(),
+                                              onStartSession:
+                                                  _startSessionFromSidebar,
+                                              onEditHost: (h) =>
+                                                  _showHostEditor(initial: h),
+                                              onRemoveHost: _removeHost,
+                                              onToggleHostEnabled:
+                                                  _toggleHostEnabled,
+                                              onActiveCountChanged: (_) {},
+                                              recentVerificationActive:
+                                                  _recentVerificationActive,
+                                              onRecentVerificationChanged: (active) {
+                                                if (!mounted ||
+                                                    active ==
+                                                        _recentVerificationActive) {
+                                                  return;
+                                                }
+                                                setState(
+                                                  () =>
+                                                      _recentVerificationActive =
+                                                          active,
+                                                );
+                                              },
+                                              onInboxCountChanged: (n) {
+                                                if (!mounted ||
+                                                    n == _inboxCount) {
+                                                  return;
+                                                }
+                                                setState(() => _inboxCount = n);
+                                              },
+                                              recentFilters: _recentFilters,
+                                              onRecentRunningOnlyChanged:
+                                                  _setRecentRunningOnly,
+                                              onRecentUnreadOnlyChanged:
+                                                  _setRecentUnreadOnly,
+                                              onRecentFavoritesOnlyChanged:
+                                                  _setRecentFavoritesOnly,
+                                            ),
+                                          ),
                                         ),
-                                    onOpenPendingSession:
-                                        (host, session, seed) async {
-                                          _openSession(
-                                            host,
-                                            session,
-                                            composerSeed: seed,
-                                          );
-                                        },
-                                    onOpenHostDetail: _openHostDetail,
-                                    onAddHost: () => _showHostEditor(),
-                                    onStartSession: _startSessionFromSidebar,
-                                    onEditHost: (h) =>
-                                        _showHostEditor(initial: h),
-                                    onRemoveHost: _removeHost,
-                                    onToggleHostEnabled: _toggleHostEnabled,
-                                    onActiveCountChanged: (n) {
-                                      if (!mounted) return;
-                                      setState(() => _activeCount = n);
-                                    },
-                                    recentVerificationActive:
-                                        _recentVerificationActive,
-                                    onRecentVerificationChanged: (active) {
-                                      if (!mounted ||
-                                          active == _recentVerificationActive) {
-                                        return;
-                                      }
-                                      setState(
-                                        () =>
-                                            _recentVerificationActive = active,
-                                      );
-                                    },
-                                    onInboxCountChanged: (n) {
-                                      if (!mounted || n == _inboxCount) return;
-                                      setState(() => _inboxCount = n);
-                                    },
-                                    recentFilters: _recentFilters,
-                                    onRecentRunningOnlyChanged:
-                                        _setRecentRunningOnly,
-                                    onRecentUnreadOnlyChanged:
-                                        _setRecentUnreadOnly,
-                                    onRecentFavoritesOnlyChanged:
-                                        _setRecentFavoritesOnly,
+                                        _DesktopNavigation(
+                                          onSelectSection: (s) =>
+                                              setState(() => _section = s),
+                                          onShowShortcuts: _showShortcutsSheet,
+                                          onOpenSettings: _openSettings,
+                                          onOpenUsage: _openUsage,
+                                        ),
+                                      ],
+                                    ),
                                   ),
-                                ),
-                              ),
-                              _SidebarResizer(
-                                color: colors.border,
-                                onDrag: _resizeSidebar,
-                                onDragEnd: _persistSidebarWidth,
-                              ),
-                              SizedBox(
-                                width: widths.detail,
-                                child: _DetailPane(
-                                  titlebarInset: _titlebarInset,
-                                  active: _active,
-                                  draft: _draft,
-                                  activeHost: _activeHost,
-                                  showUsage: _showUsage,
-                                  hosts: _hosts,
-                                  enabledHosts: _enabledHosts,
-                                  api: _api,
-                                  onClose: () {
-                                    final current = _active;
-                                    if (current != null) {
-                                      _inspector.closeForOwner(
-                                        '${current.host.id}|${current.session.id}',
-                                      );
-                                    }
-                                    setState(() {
-                                      _active = null;
-                                      _activeHost = null;
-                                      _showUsage = false;
-                                    });
-                                  },
-                                  onOpenSession: _openSession,
-                                  onCreatedSession: (host, session) =>
-                                      _openSession(
-                                        host,
-                                        session,
-                                        clearDraft: true,
+                                  _SidebarResizer(
+                                    color: colors.border,
+                                    onDrag: _resizeSidebar,
+                                    onDragEnd: _persistSidebarWidth,
+                                  ),
+                                  SizedBox(
+                                    key: const ValueKey('desktop-session-area'),
+                                    width: widths.detail,
+                                    child:
+                                        _hosts.isEmpty &&
+                                            (_loading || _hostLoadError != null)
+                                        ? _SavedMachinesState(
+                                            loading: _loading,
+                                            slow: _hostLoadSlow,
+                                            onRetry: _loadHosts,
+                                          )
+                                        : _DetailPane(
+                                            titlebarInset: _titlebarInset,
+                                            active: _active,
+                                            draft: _draft,
+                                            activeHost: _activeHost,
+                                            showUsage: _showUsage,
+                                            hosts: _hosts,
+                                            enabledHosts: _enabledHosts,
+                                            api: _api,
+                                            onClose: () {
+                                              final current = _active;
+                                              if (current != null) {
+                                                _inspector.closeForOwner(
+                                                  '${current.host.id}|${current.session.id}',
+                                                );
+                                              }
+                                              setState(() {
+                                                _active = null;
+                                                _activeHost = null;
+                                                _showUsage = false;
+                                              });
+                                            },
+                                            onOpenSession: _openSession,
+                                            onCreatedSession: (host, session) =>
+                                                _openSession(
+                                                  host,
+                                                  session,
+                                                  clearDraft: true,
+                                                ),
+                                            onCancelDraft: () =>
+                                                setState(() => _draft = null),
+                                            onStartSession: () => unawaited(
+                                              _startSessionFromSidebar(),
+                                            ),
+                                            onArchived:
+                                                _handleActiveSessionArchived,
+                                            onAddHost: () => _showHostEditor(),
+                                            onShowHosts: () => setState(
+                                              () => _section =
+                                                  _SidebarSection.hosts,
+                                            ),
+                                          ),
+                                  ),
+                                  if (_inspector.current != null &&
+                                      !overlayInspector) ...[
+                                    _SidebarResizer(
+                                      color: colors.border,
+                                      onDrag: _resizeInspector,
+                                      onDragEnd: _persistInspectorWidth,
+                                      onDoubleTap: _resetInspectorWidth,
+                                    ),
+                                    SizedBox(
+                                      width: widths.inspector,
+                                      child: _InspectorPane(
+                                        surface: _inspector.current!,
+                                        onClose: _inspector.close,
                                       ),
-                                  onCancelDraft: () =>
-                                      setState(() => _draft = null),
-                                  onStartSession: () =>
-                                      unawaited(_startSessionFromSidebar()),
-                                  onArchived: _handleActiveSessionArchived,
-                                  onAddHost: () => _showHostEditor(),
-                                  onShowHosts: () => setState(
-                                    () => _section = _SidebarSection.hosts,
+                                    ),
+                                  ],
+                                ],
+                              ),
+                              if (overlayInspector) ...[
+                                Positioned.fill(
+                                  child: ModalBarrier(
+                                    key: const ValueKey('inspector-barrier'),
+                                    color: AppOverlayColors.modalBarrier,
+                                    dismissible: true,
+                                    onDismiss: _inspector.close,
                                   ),
                                 ),
-                              ),
-                              if (_inspector.current != null) ...[
-                                _SidebarResizer(
-                                  color: colors.border,
-                                  onDrag: _resizeInspector,
-                                  onDragEnd: _persistInspectorWidth,
-                                  onDoubleTap: _resetInspectorWidth,
-                                ),
-                                SizedBox(
-                                  width: widths.inspector,
-                                  child: _InspectorPane(
-                                    surface: _inspector.current!,
-                                    onClose: _inspector.close,
+                                Positioned(
+                                  top: _titlebarInset,
+                                  bottom: 0,
+                                  right: 0,
+                                  width: _inspectorWidth
+                                      .clamp(
+                                        _minInspectorWidth,
+                                        _maxInspectorWidth,
+                                      )
+                                      .clamp(0, constraints.maxWidth),
+                                  child: FocusScope(
+                                    autofocus: true,
+                                    child: CallbackShortcuts(
+                                      bindings: {
+                                        const SingleActivator(
+                                          LogicalKeyboardKey.escape,
+                                        ): _inspector.close,
+                                      },
+                                      child: Focus(
+                                        autofocus: true,
+                                        child: _InspectorPane(
+                                          surface: _inspector.current!,
+                                          onClose: _inspector.close,
+                                        ),
+                                      ),
+                                    ),
                                   ),
                                 ),
                               ],
@@ -1203,7 +1347,7 @@ class _DesktopShellState extends State<DesktopShell> {
               ),
             ),
           ),
-          if (_showWelcome)
+          if (_showWelcome && !_loading && _hostLoadError == null)
             DesktopWelcomeOverlay(
               themeController: ThemeScope.of(context),
               onDismissed: () {
@@ -1250,245 +1394,65 @@ String _sidebarSectionTitle(_SidebarSection section) {
   };
 }
 
-IconData _sidebarSectionIcon(_SidebarSection section) {
-  return switch (section) {
-    _SidebarSection.recent => Icons.chat_bubble_outline_rounded,
-    _SidebarSection.inbox => Icons.all_inbox_rounded,
-    _SidebarSection.hosts => Icons.devices_rounded,
-  };
-}
-
-class _DesktopRail extends StatelessWidget {
-  const _DesktopRail({
-    required this.titlebarInset,
-    required this.section,
-    required this.inboxCount,
-    required this.activeCount,
-    required this.hostCount,
+class _DesktopNavigation extends StatelessWidget {
+  const _DesktopNavigation({
     required this.onSelectSection,
     required this.onShowShortcuts,
     required this.onOpenSettings,
     required this.onOpenUsage,
   });
 
-  final double titlebarInset;
-  final _SidebarSection section;
-  final int inboxCount;
-  final int activeCount;
-  final int hostCount;
   final ValueChanged<_SidebarSection> onSelectSection;
   final VoidCallback onShowShortcuts;
   final VoidCallback onOpenSettings;
   final VoidCallback onOpenUsage;
 
   @override
-  Widget build(BuildContext context) {
-    final colors = context.colors;
-    return Container(
-      decoration: BoxDecoration(
-        color: colors.canvas,
-        border: Border(right: BorderSide(color: colors.borderStrong)),
+  Widget build(BuildContext context) => Material(
+    color: context.colors.canvas,
+    child: Padding(
+      padding: const EdgeInsets.symmetric(
+        horizontal: AppSpacing.md,
+        vertical: AppSpacing.sm,
       ),
-      child: Column(
+      child: Row(
         children: [
-          SizedBox(height: titlebarInset + 12),
-          Tooltip(
-            message: 'Sidemesh',
-            child: Container(
-              width: 34,
-              height: 34,
-              decoration: BoxDecoration(
-                color: colors.surfaceMuted,
-                borderRadius: BorderRadius.circular(11),
-              ),
-              alignment: Alignment.center,
-              child: Icon(
-                Icons.hub_rounded,
-                size: 18,
-                color: colors.textSecondary,
-              ),
-            ),
-          ),
-          const SizedBox(height: 16),
-          _RailItem(
-            selected: section == _SidebarSection.recent,
-            icon: _sidebarSectionIcon(_SidebarSection.recent),
-            label: 'Sessions',
-            badge: activeCount > 0 ? activeCount.toString() : null,
-            onTap: () => onSelectSection(_SidebarSection.recent),
-          ),
-          const SizedBox(height: 6),
-          _RailItem(
-            selected: section == _SidebarSection.inbox,
-            icon: _sidebarSectionIcon(_SidebarSection.inbox),
-            label: 'Inbox',
-            badge: inboxCount > 0 ? inboxCount.toString() : null,
-            onTap: () => onSelectSection(_SidebarSection.inbox),
-          ),
-          const SizedBox(height: 6),
-          _RailItem(
-            selected: section == _SidebarSection.hosts,
-            icon: _sidebarSectionIcon(_SidebarSection.hosts),
-            label: 'Machines',
-            badge: hostCount > 0 ? hostCount.toString() : null,
-            onTap: () => onSelectSection(_SidebarSection.hosts),
+          TextButton.icon(
+            onPressed: () => onSelectSection(_SidebarSection.hosts),
+            icon: const Icon(Icons.devices_outlined, size: AppSizes.inlineIcon),
+            label: const Text('Machines'),
+            style: AppControlStyles.foreground(context.colors.textSecondary),
           ),
           const Spacer(),
-          _RailUtilityButton(
-            icon: Icons.keyboard_rounded,
-            label: 'Shortcuts',
-            onTap: onShowShortcuts,
+          IconButton(
+            onPressed: onOpenSettings,
+            tooltip: 'Settings',
+            icon: const Icon(Icons.settings_outlined, size: AppSizes.icon),
           ),
-          const SizedBox(height: 8),
-          _RailUtilityButton(
-            icon: Icons.speed_rounded,
-            label: 'Usage',
-            onTap: onOpenUsage,
+          AppMenuButton(
+            tooltip: 'More',
+            children: [
+              AppMenuItem(
+                label: 'Needs you',
+                leadingIcon: Icons.inbox_outlined,
+                onPressed: () => onSelectSection(_SidebarSection.inbox),
+              ),
+              AppMenuItem(
+                label: 'Usage',
+                leadingIcon: Icons.data_usage_rounded,
+                onPressed: onOpenUsage,
+              ),
+              AppMenuItem(
+                label: 'Keyboard shortcuts',
+                leadingIcon: Icons.keyboard_outlined,
+                onPressed: onShowShortcuts,
+              ),
+            ],
           ),
-          const SizedBox(height: 8),
-          _RailUtilityButton(
-            icon: Icons.tune_rounded,
-            label: 'Settings',
-            onTap: onOpenSettings,
-          ),
-          const SizedBox(height: 14),
         ],
       ),
-    );
-  }
-}
-
-class _RailItem extends StatelessWidget {
-  const _RailItem({
-    required this.selected,
-    required this.icon,
-    required this.label,
-    required this.onTap,
-    this.badge,
-  });
-
-  final bool selected;
-  final IconData icon;
-  final String label;
-  final String? badge;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    final colors = context.colors;
-    final foreground = selected
-        ? visibleUiColorOn(
-            colors,
-            background: colors.canvas,
-            preferred: colors.accent,
-          )
-        : colors.textSecondary;
-    final badgeForeground = readableActionForeground(colors, colors.accent);
-    return Tooltip(
-      message: label,
-      child: Semantics(
-        selected: selected,
-        button: true,
-        label: label,
-        child: Material(
-          color: Colors.transparent,
-          child: InkWell(
-            borderRadius: BorderRadius.circular(14),
-            onTap: onTap,
-            child: SizedBox(
-              width: 54,
-              height: 48,
-              child: Stack(
-                alignment: Alignment.center,
-                clipBehavior: Clip.none,
-                children: [
-                  AnimatedContainer(
-                    duration: const Duration(milliseconds: 150),
-                    curve: Curves.easeOutCubic,
-                    width: 38,
-                    height: 38,
-                    decoration: BoxDecoration(
-                      color: selected
-                          ? colors.accentMuted.withValues(alpha: 0.72)
-                          : Colors.transparent,
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    alignment: Alignment.center,
-                    child: Icon(icon, size: 18, color: foreground),
-                  ),
-                  if (badge != null)
-                    Positioned(
-                      top: 3,
-                      right: 3,
-                      child: Container(
-                        constraints: const BoxConstraints(minWidth: 17),
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 5,
-                          vertical: 2,
-                        ),
-                        decoration: BoxDecoration(
-                          color: selected ? colors.accent : colors.canvas,
-                          borderRadius: BorderRadius.circular(999),
-                          border: Border.all(color: colors.border),
-                        ),
-                        child: Text(
-                          badge!,
-                          textAlign: TextAlign.center,
-                          style: Theme.of(context).textTheme.labelSmall
-                              ?.copyWith(
-                                color: selected
-                                    ? badgeForeground
-                                    : colors.textSecondary,
-                                fontWeight: AppWeights.emphasis,
-                                height: 1,
-                              ),
-                        ),
-                      ),
-                    ),
-                ],
-              ),
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class _RailUtilityButton extends StatelessWidget {
-  const _RailUtilityButton({
-    required this.icon,
-    required this.label,
-    required this.onTap,
-  });
-
-  final IconData icon;
-  final String label;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    final colors = context.colors;
-    return Tooltip(
-      message: label,
-      child: Semantics(
-        button: true,
-        label: label,
-        child: Material(
-          color: Colors.transparent,
-          child: InkWell(
-            borderRadius: BorderRadius.circular(12),
-            onTap: onTap,
-            child: SizedBox(
-              width: 48,
-              height: 38,
-              child: Icon(icon, size: 18, color: colors.textSecondary),
-            ),
-          ),
-        ),
-      ),
-    );
-  }
+    ),
+  );
 }
 
 class _Sidebar extends StatelessWidget {
@@ -1497,6 +1461,8 @@ class _Sidebar extends StatelessWidget {
     required this.width,
     required this.hosts,
     required this.loading,
+    required this.loadError,
+    required this.onRetry,
     required this.api,
     required this.section,
     required this.refreshTick,
@@ -1507,6 +1473,7 @@ class _Sidebar extends StatelessWidget {
     required this.searchFocus,
     required this.query,
     required this.onClearSearch,
+    required this.onSearch,
     required this.onOpenSession,
     required this.onOpenSessionFromAction,
     required this.onOpenPendingSession,
@@ -1530,6 +1497,8 @@ class _Sidebar extends StatelessWidget {
   final double width;
   final List<HostProfile> hosts;
   final bool loading;
+  final Object? loadError;
+  final VoidCallback onRetry;
   final ApiClient api;
   final _SidebarSection section;
   final int refreshTick;
@@ -1540,6 +1509,7 @@ class _Sidebar extends StatelessWidget {
   final FocusNode searchFocus;
   final String query;
   final VoidCallback onClearSearch;
+  final VoidCallback onSearch;
   final void Function(HostProfile, SessionSummary) onOpenSession;
   final void Function(HostProfile, PendingAction) onOpenSessionFromAction;
   final OpenPendingSessionCallback onOpenPendingSession;
@@ -1569,6 +1539,11 @@ class _Sidebar extends StatelessWidget {
       _SidebarSection.recent => Row(
         mainAxisSize: MainAxisSize.min,
         children: [
+          IconButton(
+            tooltip: 'Search sessions (⌘F)',
+            onPressed: onSearch,
+            icon: const Icon(Icons.search_rounded, size: AppSizes.icon),
+          ),
           RecentSessionControlsMenu(
             showGrouping: query.trim().isEmpty,
             filters: recentFilters,
@@ -1580,7 +1555,12 @@ class _Sidebar extends StatelessWidget {
           _ListPaneActionButton(
             icon: Icons.add_rounded,
             label: 'New',
-            onTap: hosts.isEmpty || canStartSession ? onStartSession : null,
+            onTap:
+                !loading &&
+                    loadError == null &&
+                    (hosts.isEmpty || canStartSession)
+                ? onStartSession
+                : null,
           ),
         ],
       ),
@@ -1594,13 +1574,18 @@ class _Sidebar extends StatelessWidget {
     return SizedBox(
       width: width,
       child: Container(
-        color: colors.surface,
+        color: colors.canvas,
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             SizedBox(height: titlebarInset + 12),
             Padding(
-              padding: const EdgeInsets.fromLTRB(16, 0, 16, 10),
+              padding: const EdgeInsets.fromLTRB(
+                AppSpacing.lg,
+                0,
+                AppSpacing.lg,
+                AppSpacing.compact,
+              ),
               child: _ListPaneHeader(
                 title: _sidebarSectionTitle(section),
                 trailing: headerAction,
@@ -1609,34 +1594,59 @@ class _Sidebar extends StatelessWidget {
                     recentVerificationActive,
               ),
             ),
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 0, 16, 10),
-              child: DesktopSidebarSearchField(
-                controller: searchController,
-                focusNode: searchFocus,
-                onClear: onClearSearch,
-              ),
-            ),
-            if (!canStartSession && section == _SidebarSection.recent)
+            if (section != _SidebarSection.recent)
               Padding(
-                padding: const EdgeInsets.fromLTRB(16, 0, 16, 10),
+                padding: const EdgeInsets.fromLTRB(
+                  AppSpacing.lg,
+                  0,
+                  AppSpacing.lg,
+                  AppSpacing.compact,
+                ),
+                child: DesktopSidebarSearchField(
+                  controller: searchController,
+                  focusNode: searchFocus,
+                  onClear: onClearSearch,
+                ),
+              ),
+            if (!loading &&
+                loadError == null &&
+                !canStartSession &&
+                section == _SidebarSection.recent)
+              Padding(
+                padding: const EdgeInsets.fromLTRB(
+                  AppSpacing.lg,
+                  0,
+                  AppSpacing.lg,
+                  AppSpacing.compact,
+                ),
                 child: Text(
                   hosts.isEmpty
                       ? 'Add a machine to start your first session.'
                       : 'Enable a machine before starting a new session.',
                   style: Theme.of(context).textTheme.bodySmall?.copyWith(
                     color: colors.textSecondary,
-                    height: 1.35,
+                    height: AppLineHeights.caption,
                   ),
                 ),
               ),
             const NotificationPermissionBanner(
-              margin: EdgeInsets.fromLTRB(16, 0, 16, 10),
+              margin: EdgeInsets.fromLTRB(
+                AppSpacing.lg,
+                0,
+                AppSpacing.lg,
+                AppSpacing.compact,
+              ),
               compact: true,
             ),
             Expanded(
               child: loading
-                  ? _DesktopSidebarLoadingState(section: section)
+                  ? const MeshLoader(label: 'Loading machines')
+                  : loadError != null
+                  ? _SavedMachinesState(
+                      loading: false,
+                      slow: false,
+                      onRetry: onRetry,
+                    )
                   : _SidebarPane(
                       key: ValueKey('pane-${section.name}-$refreshTick'),
                       section: section,
@@ -1662,56 +1672,6 @@ class _Sidebar extends StatelessWidget {
           ],
         ),
       ),
-    );
-  }
-}
-
-class _DesktopSidebarLoadingState extends StatelessWidget {
-  const _DesktopSidebarLoadingState({required this.section});
-
-  final _SidebarSection section;
-
-  @override
-  Widget build(BuildContext context) {
-    final spacing = section == _SidebarSection.hosts ? 8.0 : 10.0;
-    return ListView(
-      physics: const AlwaysScrollableScrollPhysics(),
-      padding: const EdgeInsets.fromLTRB(16, 4, 16, 24),
-      children: [
-        if (section != _SidebarSection.hosts) ...[
-          MeshListRowSkeleton(
-            dense: true,
-            titleWidthFactor: 0.56,
-            subtitleWidthFactor: 0.76,
-            showMeta: true,
-            badgeCount: section == _SidebarSection.inbox ? 1 : 2,
-          ),
-          SizedBox(height: spacing),
-        ],
-        MeshListRowSkeleton(
-          dense: true,
-          titleWidthFactor: section == _SidebarSection.hosts ? 0.42 : 0.48,
-          subtitleWidthFactor: section == _SidebarSection.hosts ? 0.68 : 0.7,
-          showMeta: section != _SidebarSection.inbox,
-          badgeCount: section == _SidebarSection.recent ? 1 : 0,
-        ),
-        SizedBox(height: spacing),
-        MeshListRowSkeleton(
-          dense: true,
-          titleWidthFactor: section == _SidebarSection.inbox ? 0.52 : 0.44,
-          subtitleWidthFactor: section == _SidebarSection.hosts ? 0.62 : 0.66,
-          showMeta: section != _SidebarSection.inbox,
-          showTrailing: section != _SidebarSection.hosts,
-        ),
-        SizedBox(height: spacing),
-        MeshListRowSkeleton(
-          dense: true,
-          titleWidthFactor: 0.5,
-          subtitleWidthFactor: 0.72,
-          showMeta: true,
-          badgeCount: section == _SidebarSection.recent ? 1 : 0,
-        ),
-      ],
     );
   }
 }
@@ -1758,7 +1718,7 @@ class _ListPaneHeader extends StatelessWidget {
               ],
             ),
           ),
-          const SizedBox(width: 10),
+          const SizedBox(width: AppSpacing.compact),
           trailing,
         ],
       ),
@@ -1789,9 +1749,12 @@ class _ListPaneActionButton extends StatelessWidget {
           borderRadius: AppShapes.badge,
           onTap: onTap,
           child: AnimatedContainer(
-            duration: const Duration(milliseconds: 140),
-            curve: Curves.easeOutCubic,
-            padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 7),
+            duration: AppMotion.quick,
+            curve: AppMotion.standard,
+            padding: const EdgeInsets.symmetric(
+              horizontal: AppSpacing.sm,
+              vertical: AppSpacing.sm,
+            ),
             decoration: BoxDecoration(
               color: enabled ? colors.canvas : colors.surfaceMuted,
               borderRadius: AppShapes.badge,
@@ -1802,10 +1765,10 @@ class _ListPaneActionButton extends StatelessWidget {
               children: [
                 Icon(
                   icon,
-                  size: 15,
+                  size: AppSizes.compactIcon,
                   color: enabled ? colors.accent : colors.textTertiary,
                 ),
-                const SizedBox(width: 5),
+                const SizedBox(width: AppSpacing.xs),
                 Text(
                   label,
                   style: Theme.of(context).textTheme.labelMedium?.copyWith(
@@ -1831,7 +1794,10 @@ class _SidebarCountPill extends StatelessWidget {
   Widget build(BuildContext context) {
     final colors = context.colors;
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 5),
+      padding: const EdgeInsets.symmetric(
+        horizontal: AppSpacing.sm,
+        vertical: AppSpacing.xs,
+      ),
       decoration: BoxDecoration(
         color: colors.canvas,
         borderRadius: AppShapes.badge,
@@ -2024,7 +1990,7 @@ class _DetailPaneState extends State<_DetailPane> {
       child = _buildEmpty(context, key: const ValueKey('empty'));
     }
     final primary = AnimatedSwitcher(
-      duration: const Duration(milliseconds: 180),
+      duration: AppMotion.quick,
       switchInCurve: Curves.easeOutCubic,
       switchOutCurve: Curves.easeInCubic,
       transitionBuilder: (child, animation) =>
@@ -2043,17 +2009,17 @@ class _DetailPaneState extends State<_DetailPane> {
           offstage: !draftVisible,
           child: TickerMode(
             enabled: draftVisible,
-            child: CreateSessionSheet(
+            child: CreateSessionHostForm(
               key: ValueKey(
                 'desktop-new-session-${draft.host.id}-${draft.serial}',
               ),
-              host: draft.host,
+              initialHost: draft.host,
+              hosts: widget.enabledHosts,
               api: widget.api,
               presentation: CreateSessionPresentation.pane,
               topPadding: widget.titlebarInset + 6,
               paneActive: draftVisible,
-              onCreated: (session) =>
-                  widget.onCreatedSession(draft.host, session),
+              onCreated: widget.onCreatedSession,
               onCancel: widget.onCancelDraft,
             ),
           ),
@@ -2086,7 +2052,7 @@ class _DetailPaneState extends State<_DetailPane> {
                           height: 56,
                           decoration: BoxDecoration(
                             color: colors.surfaceMuted,
-                            borderRadius: BorderRadius.circular(14),
+                            borderRadius: BorderRadius.circular(AppRadii.panel),
                             border: Border.all(color: colors.border),
                           ),
                           alignment: Alignment.center,
@@ -2097,29 +2063,29 @@ class _DetailPaneState extends State<_DetailPane> {
                             color: hasEnabledHosts
                                 ? colors.textSecondary
                                 : colors.textTertiary,
-                            size: 26,
+                            size: AppSizes.largeIcon,
                           ),
                         ),
-                        const SizedBox(height: 16),
+                        const SizedBox(height: AppSpacing.lg),
                         Text(
                           hasEnabledHosts
-                              ? 'Choose a session or start a new one'
-                              : 'Turn on a host',
+                              ? 'Ready when you are'
+                              : 'Turn on a machine',
                           style: Theme.of(context).textTheme.titleMedium
                               ?.copyWith(fontWeight: AppWeights.title),
                         ),
-                        const SizedBox(height: 6),
+                        const SizedBox(height: AppSpacing.tight),
                         ConstrainedBox(
                           constraints: const BoxConstraints(maxWidth: 360),
                           child: Text(
                             hasEnabledHosts
-                                ? 'Pick a session from the sidebar, or start a new one on any machine that is ready.'
+                                ? 'Choose a session from the sidebar to continue.'
                                 : 'Open Machines to enable a saved machine before you launch an agent.',
                             textAlign: TextAlign.center,
                             style: TextStyle(color: colors.textSecondary),
                           ),
                         ),
-                        const SizedBox(height: 18),
+                        const SizedBox(height: AppSpacing.lg),
                         FilledButton.icon(
                           onPressed: hasEnabledHosts
                               ? widget.onStartSession
@@ -2136,7 +2102,7 @@ class _DetailPaneState extends State<_DetailPane> {
                           ),
                         ),
                         if (widget.hosts.isNotEmpty) ...[
-                          const SizedBox(height: 10),
+                          const SizedBox(height: AppSpacing.compact),
                           MeshPill(
                             label:
                                 '${widget.enabledHosts.length} of ${widget.hosts.length} machines ready',
@@ -2220,14 +2186,14 @@ class _CloseSessionButton extends StatelessWidget {
             width: 28,
             height: 28,
             decoration: BoxDecoration(
-              color: colors.surface.withValues(alpha: 0.7),
+              color: colors.surface.withValues(alpha: AppEmphasis.secondary),
               borderRadius: AppShapes.badge,
               border: Border.all(color: colors.border),
             ),
             alignment: Alignment.center,
             child: Icon(
               Icons.close_rounded,
-              size: 15,
+              size: AppSizes.compactIcon,
               color: colors.textSecondary,
             ),
           ),
@@ -2280,9 +2246,11 @@ class _SidebarResizerState extends State<_SidebarResizer> {
           width: 5,
           child: Center(
             child: AnimatedContainer(
-              duration: const Duration(milliseconds: 120),
+              duration: AppMotion.quick,
               width: active ? 2 : 1,
-              color: widget.color.withValues(alpha: active ? 0.9 : 1.0),
+              color: widget.color.withValues(
+                alpha: active ? AppEmphasis.strong : AppEmphasis.full,
+              ),
             ),
           ),
         ),
@@ -2310,18 +2278,25 @@ class _InspectorPane extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           Container(
-            height: 40,
-            padding: const EdgeInsets.symmetric(horizontal: 12),
+            constraints: const BoxConstraints(minHeight: AppSizes.control),
+            padding: const EdgeInsets.symmetric(horizontal: AppSpacing.md),
             decoration: BoxDecoration(
               border: Border(
-                bottom: BorderSide(color: colors.border, width: 1),
+                bottom: BorderSide(
+                  color: colors.border,
+                  width: AppStrokes.border,
+                ),
               ),
             ),
             child: Row(
               children: [
                 if (surface.icon != null) ...[
-                  Icon(surface.icon, size: 16, color: colors.textSecondary),
-                  const SizedBox(width: 8),
+                  Icon(
+                    surface.icon,
+                    size: AppSizes.compactIcon,
+                    color: colors.textSecondary,
+                  ),
+                  const SizedBox(width: AppSpacing.sm),
                 ],
                 Expanded(
                   child: Text(
@@ -2335,17 +2310,13 @@ class _InspectorPane extends StatelessWidget {
                   ),
                 ),
                 ...actions,
-                if (actions.isNotEmpty) const SizedBox(width: 4),
-                InkResponse(
-                  radius: 18,
-                  onTap: onClose,
-                  child: Padding(
-                    padding: const EdgeInsets.all(6),
-                    child: Icon(
-                      Icons.close_rounded,
-                      size: 16,
-                      color: colors.textSecondary,
-                    ),
+                if (actions.isNotEmpty) const SizedBox(width: AppSpacing.xs),
+                IconButton(
+                  tooltip: 'Close panel',
+                  onPressed: onClose,
+                  icon: const Icon(
+                    Icons.close_rounded,
+                    size: AppSizes.compactIcon,
                   ),
                 ),
               ],
@@ -2356,4 +2327,49 @@ class _InspectorPane extends StatelessWidget {
       ),
     );
   }
+}
+
+/// Loading stored machines is not an empty fleet, including while keychain waits.
+class _SavedMachinesState extends StatelessWidget {
+  const _SavedMachinesState({
+    required this.loading,
+    required this.slow,
+    required this.onRetry,
+  });
+  final bool loading;
+  final bool slow;
+  final VoidCallback onRetry;
+
+  @override
+  Widget build(BuildContext context) => Center(
+    child: Padding(
+      padding: const EdgeInsets.all(AppSpacing.lg),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (loading)
+            const MeshLoader(label: 'Loading saved machines')
+          else
+            Text(
+              'Could not load saved machines',
+              style: Theme.of(context).textTheme.titleSmall,
+            ),
+          if (slow || !loading) ...[
+            const SizedBox(height: AppSpacing.md),
+            Text(
+              loading
+                  ? 'Waiting for secure storage. Complete the system access prompt if one is open.'
+                  : 'Your saved settings have not been changed. Try loading them again.',
+              textAlign: TextAlign.center,
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                color: context.colors.textSecondary,
+              ),
+            ),
+          ],
+          if (!loading)
+            TextButton(onPressed: onRetry, child: const Text('Retry')),
+        ],
+      ),
+    ),
+  );
 }
