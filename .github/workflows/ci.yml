@@ -69,6 +69,12 @@ jobs:
         working-directory: apps/mobile
         run: flutter analyze
 
+      - name: Check macOS keychain storage and profile validation
+        run: |
+          python3 scripts/test_macos_keychain_entitlements.py
+          cd apps/mobile
+          flutter test --dart-define=SIDEMESH_MACOS_USE_DATA_PROTECTION_KEYCHAIN=true test/host_store_test.dart
+
       - name: Build Flutter web app
         working-directory: apps/mobile
         run: flutter build web --release -t lib/main_web.dart --no-web-resources-cdn

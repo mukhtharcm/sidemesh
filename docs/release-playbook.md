@@ -288,11 +288,12 @@ The macOS workflow uses the same secret names as the other macOS apps in
 - `KEYCHAIN_PASSWORD`: temporary CI keychain password.
 - `SIGNING_IDENTITY`: exact Developer ID identity, for example
   `Developer ID Application: Example (TEAMID)`.
+- `MACOS_PROVISION_PROFILE_BASE64`: base64-encoded Developer ID provisioning
+  profile for `com.sidemesh.sidemeshMobile`, authorizing the signing certificate.
 - `APPLE_ID`: Apple ID used for notarization.
 - `APP_SPECIFIC_PASSWORD`: app-specific password for the Apple ID.
-- `TEAM_ID`: Apple Developer Team ID used by notarization. Do not inject it
-  into Developer ID app entitlements; macOS 26 rejects GUI launches when
-  restricted app-identifier entitlements are present without a matching profile.
+- `TEAM_ID`: Apple Developer Team ID used by notarization. Keychain entitlements
+  are derived from the signed provisioning profile, not this variable.
 - `SPARKLE_PUBLIC_ED_KEY`: Sparkle EdDSA public key embedded into the macOS
   app. This key is not secret, but the workflow reads it from Actions secrets
   so app updates stay disabled until update signing is configured.
@@ -300,17 +301,26 @@ The macOS workflow uses the same secret names as the other macOS apps in
   used to sign appcast update enclosures. Never commit this value.
 
 Without signing secrets, the workflow still produces unsigned/ad-hoc artifacts
-for internal smoke testing. With signing secrets only, it produces signed
+for internal smoke testing. With signing secrets and the profile, it produces signed
 artifacts. With signing and notary secrets, it notarizes and staples both the
 app and DMG.
 
-Developer ID packaging must sign with
-`apps/mobile/macos/Runner/Release.entitlements` directly. Do not inject
-`com.apple.application-identifier` or
-`com.apple.developer.team-identifier` into the app entitlements; `TEAM_ID`
-belongs only in the notarization step. macOS 26 launchd/AMFI rejects a
-Developer ID GUI app that claims those restricted entitlements without a
-matching provisioning profile.
+Signed packaging requires `MACOS_PROVISION_PROFILE_PATH` locally. It validates
+the profile's expiration, platform, app ID, keychain group, and signing identity
+before building. It embeds the profile at `Contents/embedded.provisionprofile`
+and adds its authorized app/team identifiers and app-specific keychain group to
+`apps/mobile/macos/Runner/Release.entitlements` in a temporary file. Never add
+restricted entitlements to an app without the matching profile: macOS rejects
+its launch. Never commit profiles or generated signing files.
+
+Signed releases enable the Data Protection Keychain. They use a fresh macOS
+host list and token service; users must pair their hosts again once. They do
+not read, migrate, or delete old keychain entries. Chat history is unchanged.
+Unsigned development builds retain the regular keychain in their dev flavor.
+
+Checks: `python3 scripts/test_macos_keychain_entitlements.py` and, from
+`apps/mobile/`, `flutter test --dart-define=SIDEMESH_MACOS_USE_DATA_PROTECTION_KEYCHAIN=true test/host_store_test.dart`.
+Before release, test pairing and two app launches with the signed build.
 
 With signing secrets, notary secrets, and Sparkle secrets, the workflow also
 generates `appcast-prod.xml` from the signed/notarized ZIP and uploads it to the
