@@ -16,3 +16,5 @@ apps/mobile/ios/Flutter/Signing.local.xcconfig
 apps/mobile/.config/
 apps/mobile/.flutter
 worktrees/
+
+.env.speedflight
