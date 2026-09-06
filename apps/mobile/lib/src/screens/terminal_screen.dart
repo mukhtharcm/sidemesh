@@ -16,6 +16,7 @@ import '../theme/app_colors.dart';
 import '../theme/app_tokens.dart';
 import '../theme/app_code_theme.dart';
 import '../widgets/app_snackbar.dart';
+import '../widgets/app_menu.dart';
 import '../widgets/terminal_keybar.dart';
 import '../host_reconnect_scheduler.dart';
 import '../host_status_store.dart';
@@ -83,8 +84,9 @@ class _TerminalScreenState extends State<TerminalScreen> {
               icon: const Icon(Icons.restart_alt_rounded),
             )
           else if (_appBarControls.showStop)
-            MenuAnchor(
-              menuChildren: [
+            AppMenuButton(
+              tooltip: 'Terminal actions',
+              children: [
                 MenuItemButton(
                   onPressed: _appBarControls.stopping
                       ? null
@@ -92,12 +94,6 @@ class _TerminalScreenState extends State<TerminalScreen> {
                   child: const Text('Stop terminal'),
                 ),
               ],
-              builder: (context, controller, child) => IconButton(
-                tooltip: 'Terminal actions',
-                onPressed: () =>
-                    controller.isOpen ? controller.close() : controller.open(),
-                icon: const Icon(Icons.more_horiz_rounded),
-              ),
             ),
           if (_appBarControls.status != null)
             Padding(

@@ -13,6 +13,7 @@ import '../theme/app_tokens.dart';
 import '../widgets/app_dialogs.dart';
 import '../widgets/app_sheets.dart';
 import '../widgets/app_snackbar.dart';
+import '../widgets/app_menu.dart';
 import '../widgets/mesh_widgets.dart';
 import '../widgets/app_primitives.dart';
 import 'create_session_sheet.dart';
@@ -60,7 +61,6 @@ class _HostDetailScreenState extends State<HostDetailScreen>
   bool _terminalOpen = false;
   String _terminalCwd = '/';
   Future<void>? _updateInfoRefresh;
-  bool _checkingUpdateInfo = false;
   AppLifecycleState? _lifecycleState;
   static const Duration _refreshInterval = Duration(minutes: 1);
 
@@ -165,9 +165,6 @@ class _HostDetailScreenState extends State<HostDetailScreen>
   }
 
   Future<void> _runUpdateInfoRefresh() async {
-    if (mounted) {
-      setState(() => _checkingUpdateInfo = true);
-    }
     try {
       final info = await widget.api.refreshUpdateInfo(widget.host);
       final node = await _future;
@@ -179,9 +176,6 @@ class _HostDetailScreenState extends State<HostDetailScreen>
       // Keep the existing snapshot if the update check cannot reach the remote.
     } finally {
       _updateInfoRefresh = null;
-      if (mounted) {
-        setState(() => _checkingUpdateInfo = false);
-      }
     }
   }
 
@@ -301,7 +295,6 @@ class _HostDetailScreenState extends State<HostDetailScreen>
                   host: widget.host,
                   api: widget.api,
                   node: node,
-                  checkingUpdateInfo: _checkingUpdateInfo,
                   onRefresh: _refresh,
                   onOpenTerminal: widget.embedded
                       ? () => setState(() {
@@ -581,7 +574,6 @@ class _HostManagementCard extends StatefulWidget {
     required this.host,
     required this.api,
     required this.node,
-    required this.checkingUpdateInfo,
     required this.onRefresh,
     required this.onNewSession,
     this.onOpenTerminal,
@@ -592,7 +584,6 @@ class _HostManagementCard extends StatefulWidget {
   final HostProfile host;
   final ApiClient api;
   final NodeInfo node;
-  final bool checkingUpdateInfo;
   final Future<void> Function() onRefresh;
 
   @override
@@ -1021,7 +1012,6 @@ class _HostManagementCardState extends State<_HostManagementCard> {
   }
 
   String _updateDetail() {
-    if (widget.checkingUpdateInfo) return 'Checking for updates…';
     return widget.node.updateAvailable ? 'Update available' : 'Up to date';
   }
 
@@ -1084,8 +1074,9 @@ class _HostManagementCardState extends State<_HostManagementCard> {
                       icon: const Icon(Icons.terminal_rounded),
                       label: const Text('Open terminal'),
                     ),
-                  MenuAnchor(
-                    menuChildren: [
+                  AppMenuButton(
+                    tooltip: 'More machine actions',
+                    children: [
                       if (_supportsChannelSelection)
                         MenuItemButton(
                           onPressed: isOffline || _savingUpdateChannel
@@ -1107,13 +1098,6 @@ class _HostManagementCardState extends State<_HostManagementCard> {
                         child: const Text('Restart Sidemesh'),
                       ),
                     ],
-                    builder: (context, controller, child) => IconButton(
-                      tooltip: 'More machine actions',
-                      onPressed: () => controller.isOpen
-                          ? controller.close()
-                          : controller.open(),
-                      icon: const Icon(Icons.more_horiz_rounded),
-                    ),
                   ),
                 ],
               ),
@@ -1133,9 +1117,7 @@ class _HostManagementCardState extends State<_HostManagementCard> {
                       ),
                     ),
                     const SizedBox(width: AppSpacing.sm),
-                    if (_updating ||
-                        widget.checkingUpdateInfo ||
-                        (_updateOperation?.isInProgress ?? false))
+                    if (_updating || (_updateOperation?.isInProgress ?? false))
                       const SizedBox.square(
                         dimension: AppSizes.icon,
                         child: CircularProgressIndicator(
