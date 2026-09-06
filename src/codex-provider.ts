@@ -9,12 +9,11 @@ import {
   type AgentAccessModeListOptions,
   type AgentModelListOptions,
   type AgentProfileListOptions,
-  type AgentPermissionProfileListOptions,
   type AgentSkillConfigWriteRequest,
   type AgentSkillListOptions,
   type AgentSessionListOptions,
   type AgentSessionResumeOptions,
-  type AgentCreateSessionRequest,
+  type AgentCreateSessionRequest as SharedCreateSessionRequest,
   type AgentCreateSessionResult,
   type AgentPendingAction,
   type AgentProvider,
@@ -22,7 +21,7 @@ import {
   type AgentProviderEvents,
   type AgentSessionLogOptions,
   type AgentSessionActivityDraft,
-  type AgentSubmitInputRequest,
+  type AgentSubmitInputRequest as SharedSubmitInputRequest,
   type AgentSubmitInputResult,
 } from "./agent-provider.js";
 import {
@@ -82,6 +81,18 @@ const CODEX_THREAD_SOURCES = [
   "appServer",
   "subAgentThreadSpawn",
 ] as const;
+
+interface CodexPermissionOverrides {
+  permissionProfile?: string | null;
+  approvalsReviewer?: string | null;
+}
+type AgentCreateSessionRequest = Omit<SharedCreateSessionRequest, "overrides"> & {
+  overrides: SharedCreateSessionRequest["overrides"] & CodexPermissionOverrides;
+};
+type AgentSubmitInputRequest = Omit<SharedSubmitInputRequest, "overrides"> & {
+  overrides: SharedSubmitInputRequest["overrides"] & CodexPermissionOverrides;
+};
+type AgentPermissionProfileListOptions = AgentAccessModeListOptions;
 
 interface ConfigModelProviderSummary {
   id: string;
@@ -2835,7 +2846,6 @@ export const CODEX_PROVIDER_CAPABILITIES: AgentProviderCapabilities = {
     compact: true,
     interrupt: true,
     history: true,
-    eventReplay: true,
     recentFallback: true,
     searchSessions: true,
   },
@@ -2861,7 +2871,6 @@ export const CODEX_PROVIDER_CAPABILITIES: AgentProviderCapabilities = {
     models: true,
     profiles: true,
     accessModes: true,
-    permissionProfiles: true,
     skills: true,
     skillManagement: true,
   },
@@ -2875,8 +2884,6 @@ export const CODEX_PROVIDER_CAPABILITIES: AgentProviderCapabilities = {
     networkAccess: true,
     webSearch: true,
     accessMode: true,
-    permissionProfile: true,
-    approvalsReviewer: true,
   },
   lifecycle: {
     restart: true,

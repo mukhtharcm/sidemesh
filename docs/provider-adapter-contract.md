@@ -171,18 +171,17 @@ surface it correctly. Track those shims in `BACKLOG.md`, keep them narrow, and
 prefer migrating back to the provider's native solution once it becomes
 reliable upstream.
 
-Compatibility endpoints:
+Metadata endpoints:
 
 - `/api/node` exposes the active provider, provider version,
   `defaultProviderCapabilities`, `hostCapabilities`, and supported provider
   metadata with per-provider capability maps.
 - `/api/providers` exposes daemon-supported provider definitions for future
   provider-selection UI.
-- `providerCapabilities` remains as a compatibility alias in `/api/node` for
-  `defaultProviderCapabilities`. New clients should prefer
-  `defaultProviderCapabilities` or `supportedProviders[].capabilities`.
-- `codexVersion` remains as a compatibility alias in `/api/node`; new code
-  should prefer `providerVersion`.
+- There are no `providerCapabilities` or `codexVersion` aliases.
+- Session refreshes use the adapter's `readSessionLog` implementation. The host
+  does not parse provider files through a separate replay index. See
+  [session synchronization](session-synchronization.md).
 
 ## Adding The Next Provider
 

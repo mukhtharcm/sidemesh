@@ -515,24 +515,6 @@ class ApiClient {
     return SessionResourcesResponse.fromJson(_decodeObject(response));
   }
 
-  Future<SessionEventsDelta> fetchEvents(
-    HostProfile host,
-    String sessionId, {
-    required int since,
-    int? baseUpdatedAt,
-  }) async {
-    final response = await _get(
-      host,
-      '/api/sessions/$sessionId/events',
-      queryParameters: {
-        'since': '$since',
-        if (baseUpdatedAt != null) 'baseUpdatedAt': '$baseUpdatedAt',
-      },
-      operation: 'catch up session events',
-    );
-    return SessionEventsDelta.fromJson(_decodeObject(response));
-  }
-
   Future<SessionStatus> fetchStatus(HostProfile host, String sessionId) async {
     final response = await _get(
       host,
@@ -587,12 +569,14 @@ class ApiClient {
     String? profile,
     String? accessMode,
   }) async {
-    final body = <String, dynamic>{'cwd': cwd, 'prompt': prompt};
+    final body = <String, dynamic>{
+      'cwd': cwd,
+      'input': input != null && input.isNotEmpty
+          ? input.map((item) => item.toJson()).toList()
+          : [{'type': 'text', 'text': prompt, 'text_elements': <dynamic>[]}],
+    };
     if ((provider ?? '').isNotEmpty) {
       body['provider'] = provider;
-    }
-    if (input != null && input.isNotEmpty) {
-      body['input'] = input.map((item) => item.toJson()).toList();
     }
     if ((model ?? '').isNotEmpty) {
       body['model'] = model;
@@ -650,9 +634,9 @@ class ApiClient {
     String? accessMode,
   }) async {
     final body = <String, dynamic>{
-      if (text.isNotEmpty) 'text': text,
-      if (input != null && input.isNotEmpty)
-        'input': input.map((item) => item.toJson()).toList(),
+      'input': input != null && input.isNotEmpty
+          ? input.map((item) => item.toJson()).toList()
+          : [{'type': 'text', 'text': text, 'text_elements': <dynamic>[]}],
       ...?clientMessageId == null
           ? null
           : <String, dynamic>{'clientMessageId': clientMessageId},
@@ -667,7 +651,7 @@ class ApiClient {
           : <String, dynamic>{'approvalPolicy': approvalPolicy},
       ...?sandboxMode == null
           ? null
-          : <String, dynamic>{'sandbox': sandboxMode},
+          : <String, dynamic>{'sandboxMode': sandboxMode},
       ...?networkAccess == null
           ? null
           : <String, dynamic>{'networkAccess': networkAccess},

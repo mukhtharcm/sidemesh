@@ -877,10 +877,10 @@ class _SessionScreenState extends State<SessionScreen>
   bool _initialDesktopComposerFocusQueued = false;
   bool _restoreComposerFocusOnResume = false;
   bool _keepSessionUnread = false;
-  int? _lastEventSeq;
   // Incremented whenever a fresh snapshot is requested so in-flight responses
   // from older requests can be discarded.
   int _snapshotRequestId = 0;
+  int? _snapshotRevision;
   // Buffer live events that arrive while a snapshot is in flight so we can
   // replay them after the snapshot's setState runs — prevents a stale
   // snapshot from clobbering an already-delivered action_opened / activity.
@@ -2244,8 +2244,7 @@ class _SessionScreenState extends State<SessionScreen>
       // OS can pause or silently kill the socket while backgrounded; the
       // normal onDone / onError path often doesn't fire until a write
       // actually fails. Force a reconnect + re-sync on resume so the user
-      // sees fresh state immediately — prefer the cheap events delta over
-      // a full snapshot whenever we have a known lastSeq.
+      // sees fresh state immediately from a provider snapshot.
       unawaited(_resyncAfterResume());
       _connectLive();
       _schedulePendingSendRetry();
@@ -2398,41 +2397,9 @@ class _SessionScreenState extends State<SessionScreen>
   }
 
   Future<void> _resyncAfterResume() async {
-    if (!mounted || _disposed) {
-      return;
-    }
-    final needsSnapshotVerification =
-        _showingCachedSnapshot ||
-        _showingPossiblyStaleSnapshot ||
-        _messages.isNotEmpty;
-    if (_messages.isNotEmpty && !_showingCachedSnapshot) {
-      setState(() {
-        _showingPossiblyStaleSnapshot = true;
-        _resumeSyncFailed = false;
-      });
-    }
-    await _refreshCachedSessionStatus();
-    if (!mounted || _disposed) {
-      return;
-    }
-    final applied = await _resyncDelta(
-      markTranscriptFresh: !needsSnapshotVerification,
-    );
-    if (!mounted || _disposed) {
-      return;
-    }
-    if (applied && !needsSnapshotVerification) {
-      setState(() {
-        _showingPossiblyStaleSnapshot = false;
-        _resumeSyncFailed = false;
-      });
-      return;
-    }
-    await _loadSnapshot(
-      messageLimit: _messageLimit,
-      activityLimit: _activityLimit,
-      scrollToBottom: false,
-    );
+    if (!mounted || _disposed) return;
+    _markTranscriptPossiblyStale();
+    await _loadSnapshot(scrollToBottom: false);
   }
 
   Future<void> _loadSnapshot({
@@ -2442,6 +2409,7 @@ class _SessionScreenState extends State<SessionScreen>
   }) async {
     final resolvedMessageLimit = messageLimit ?? _messageLimit;
     final resolvedActivityLimit = activityLimit ?? _activityLimit;
+    _flushPendingLiveUpdates();
     final requestId = ++_snapshotRequestId;
     setState(() => _snapshotInFlightRequestId = requestId);
     try {
@@ -2455,9 +2423,9 @@ class _SessionScreenState extends State<SessionScreen>
         return;
       }
       final pendingAction = log.pendingAction;
-      final livePersisted = _hasPersistedLiveAssistant(log.messages);
-      // Capture any live events delivered while the snapshot was in flight —
-      // we'll replay them after the snapshot setState so they aren't clobbered.
+      // Apply buffered events through the same revision check as events that
+      // arrive after the HTTP response. The two connections can arrive in
+      // either order.
       final bufferedEvents = List<LiveEvent>.from(_pendingLiveEvents);
       _pendingLiveEvents.clear();
       final snapshotActivities = _mergeIncomingActivities(
@@ -2466,6 +2434,7 @@ class _SessionScreenState extends State<SessionScreen>
         mode: _ActivityMergeMode.snapshot,
       );
       setState(() {
+        _snapshotRevision = log.revision;
         _session = log.session;
         _messages = log.messages;
         _optimisticMessages = _reconcileOptimisticMessages(log.messages);
@@ -2480,35 +2449,29 @@ class _SessionScreenState extends State<SessionScreen>
         // Snapshot responses are authoritative for pending actions. If a live
         // action_opened lands during this fetch, it is buffered and replayed
         // after this state update.
-        _pendingAction = pendingAction;
-        _running = log.session.isActive;
+        _applyFetchedSessionStatus(SessionStatus(
+          sessionId: log.session.id,
+          status: log.session.status,
+          isRunning: log.session.isActive,
+          activeTurnId: null,
+          pendingAction: pendingAction,
+        ));
         _loading = false;
-        if (!_running || livePersisted) {
-          _clearLiveAssistantMessage();
+        _clearLiveAssistantMessage();
+        if (_running && log.liveAssistantText.isNotEmpty) {
+          _liveAssistantNotifier.value = _appendLiveAssistantDelta(null, log.liveAssistantText);
+        }
+        if (_running && log.liveAssistantReasoning.isNotEmpty) {
+          _liveAssistantNotifier.value = _appendLiveAssistantReasoning(_liveAssistantMessage, log.liveAssistantReasoning);
         }
         _awaitingAssistantReply =
             log.session.isActive &&
             _liveAssistantText.isEmpty &&
             _pendingAction == null;
-        final restoredPlanSeq = _restoreLatestPlanUpdate(
+        _restoreLatestPlanUpdate(
           log.latestPlanUpdate,
           fallbackCreatedAt: log.session.updatedAt,
         );
-        // Seed lastSeq from the snapshot so subsequent resyncs can use the
-        // cheap delta endpoint instead of re-downloading everything.
-        var highestSeq = _lastEventSeq ?? 0;
-        for (final m in log.messages) {
-          if (m.seq > highestSeq) highestSeq = m.seq;
-        }
-        for (final a in snapshotActivities) {
-          if (a.seq > highestSeq) highestSeq = a.seq;
-        }
-        if (restoredPlanSeq != null && restoredPlanSeq > highestSeq) {
-          highestSeq = restoredPlanSeq;
-        }
-        if (highestSeq > 0) {
-          _lastEventSeq = highestSeq;
-        }
       });
       HostStatusStore.instance.markOnline(widget.host.id);
       unawaited(_dropResolvedPendingSends(log.messages));
@@ -2553,6 +2516,11 @@ class _SessionScreenState extends State<SessionScreen>
     } finally {
       if (_snapshotInFlightRequestId == requestId) {
         _snapshotInFlightRequestId = null;
+        final bufferedEvents = List<LiveEvent>.from(_pendingLiveEvents);
+        _pendingLiveEvents.clear();
+        for (final event in bufferedEvents) {
+          _handleEvent(event);
+        }
       }
     }
   }
@@ -2585,23 +2553,10 @@ class _SessionScreenState extends State<SessionScreen>
             log.session.isActive &&
             _liveAssistantText.isEmpty &&
             _pendingAction == null;
-        final restoredPlanSeq = _restoreLatestPlanUpdate(
+        _restoreLatestPlanUpdate(
           log.latestPlanUpdate,
           fallbackCreatedAt: log.session.updatedAt,
         );
-        var highestSeq = _lastEventSeq ?? 0;
-        for (final m in log.messages) {
-          if (m.seq > highestSeq) highestSeq = m.seq;
-        }
-        for (final a in log.activities) {
-          if (a.seq > highestSeq) highestSeq = a.seq;
-        }
-        if (restoredPlanSeq != null && restoredPlanSeq > highestSeq) {
-          highestSeq = restoredPlanSeq;
-        }
-        if (highestSeq > 0) {
-          _lastEventSeq = highestSeq;
-        }
       });
       _refreshThinkingState();
       _markCurrentSessionSeen();
@@ -2610,6 +2565,16 @@ class _SessionScreenState extends State<SessionScreen>
       // Cached transcripts are best-effort. A fresh snapshot is already queued.
       return false;
     }
+  }
+
+  void _scheduleTurnCompletionRefresh() {
+    // Providers can finish a turn before their last history write is readable.
+    // Keep this refresh even when a snapshot already covered the idle state.
+    Future<void>.delayed(const Duration(milliseconds: 1200), () {
+      if (!mounted) return;
+      unawaited(_loadSnapshot(scrollToBottom: false));
+      unawaited(_loadGitStatus(silent: true));
+    });
   }
 
   void _applyFetchedSessionStatus(SessionStatus status) {
@@ -2636,154 +2601,8 @@ class _SessionScreenState extends State<SessionScreen>
     _awaitingAssistantReply = false;
   }
 
-  void _markTranscriptFreshAfterDelta() {
-    _showingCachedSnapshot = false;
-    _showingPossiblyStaleSnapshot = false;
-    _resumeSyncFailed = false;
-  }
-
   Future<void> _refreshSessionFreshness({bool scrollToBottom = true}) async {
-    final needsSnapshotVerification =
-        _showingCachedSnapshot || _showingPossiblyStaleSnapshot;
-    await _refreshCachedSessionStatus();
-    if (!mounted || _disposed) {
-      return;
-    }
-    final applied = await _resyncDelta(
-      markTranscriptFresh: !needsSnapshotVerification,
-    );
-    if (!mounted || _disposed || (applied && !needsSnapshotVerification)) {
-      return;
-    }
-    await _loadSnapshot(
-      messageLimit: _messageLimit,
-      activityLimit: _activityLimit,
-      scrollToBottom: scrollToBottom,
-    );
-  }
-
-  Future<void> _refreshCachedSessionStatus() async {
-    try {
-      final status = await widget.api.fetchStatus(
-        widget.host,
-        widget.session.id,
-      );
-      if (!mounted || _disposed) {
-        return;
-      }
-      setState(() {
-        _applyFetchedSessionStatus(status);
-        _loading = false;
-      });
-      HostStatusStore.instance.markOnline(widget.host.id);
-      _refreshThinkingState();
-      _syncSessionLiveActivity();
-    } catch (_) {
-      // Keep the cached-transcript strip visible until the full snapshot lands.
-    }
-  }
-
-  /// Cheap catchup using the events endpoint. Returns true if the delta
-  /// was applied; false if we should fall back to a full snapshot.
-  Future<bool> _resyncDelta({bool markTranscriptFresh = true}) async {
-    final last = _lastEventSeq;
-    if (last == null) return false;
-    try {
-      final baseUpdatedAt = _session?.updatedAt.millisecondsSinceEpoch;
-      final delta = await widget.api.fetchEvents(
-        widget.host,
-        widget.session.id,
-        since: last,
-        baseUpdatedAt: baseUpdatedAt,
-      );
-      if (!mounted) return true;
-      final latestPlanUpdate = delta.latestPlanUpdate;
-      if (delta.messages.isEmpty &&
-          delta.activities.isEmpty &&
-          latestPlanUpdate == null &&
-          delta.pendingAction == null &&
-          delta.session == null) {
-        if (markTranscriptFresh &&
-            (_showingCachedSnapshot || _showingPossiblyStaleSnapshot)) {
-          setState(_markTranscriptFreshAfterDelta);
-        }
-        HostStatusStore.instance.markOnline(widget.host.id);
-        return true;
-      }
-      setState(() {
-        final previousMessages = _messages;
-        final previousActivities = _activities;
-        var mergedMessages = _messages;
-        var mergedActivities = _activities;
-        var nextRunning = _running;
-        if (delta.session != null) {
-          _session = delta.session!;
-          nextRunning = delta.session!.isActive;
-        }
-        if (delta.messages.isNotEmpty) {
-          final byId = <String, SessionMessage>{
-            for (final m in _messages) m.id: m,
-          };
-          for (final m in delta.messages) {
-            byId[m.id] = m;
-          }
-          mergedMessages = byId.values.toList()
-            ..sort((a, b) {
-              if (a.seq != b.seq) return a.seq.compareTo(b.seq);
-              return a.createdAt.compareTo(b.createdAt);
-            });
-        }
-        if (delta.activities.isNotEmpty) {
-          mergedActivities = _mergeIncomingActivities(
-            _activities,
-            delta.activities,
-            mode: _ActivityMergeMode.incremental,
-          );
-        }
-        _messages = mergedMessages;
-        _activities = mergedActivities;
-        _history = _updatedHistoryAfterDelta(
-          previous: _history,
-          previousMessages: previousMessages,
-          mergedMessages: mergedMessages,
-          previousActivities: previousActivities,
-          mergedActivities: mergedActivities,
-        );
-        _optimisticMessages = _reconcileOptimisticMessages(mergedMessages);
-        final restoredPlanSeq = _restoreLatestPlanUpdate(
-          latestPlanUpdate,
-          fallbackCreatedAt: delta.session?.updatedAt ?? DateTime.now(),
-        );
-        // The events endpoint returns the server's current pending-action
-        // snapshot, so a null here means any previously shown action is gone.
-        _pendingAction = delta.pendingAction;
-        _running = nextRunning;
-        if (!nextRunning || _hasPersistedLiveAssistant(mergedMessages)) {
-          _clearLiveAssistantMessage();
-        }
-        _awaitingAssistantReply =
-            nextRunning && _liveAssistantText.isEmpty && _pendingAction == null;
-        final highestSeq = math.max(
-          delta.nextSeq,
-          restoredPlanSeq ?? delta.nextSeq,
-        );
-        if (highestSeq > (_lastEventSeq ?? 0)) {
-          _lastEventSeq = highestSeq;
-        }
-        if (markTranscriptFresh) {
-          _markTranscriptFreshAfterDelta();
-        }
-      });
-      _refreshThinkingState();
-      _syncSessionLiveActivity();
-      _markCurrentSessionSeen();
-      _persistCurrentSessionLog();
-      HostStatusStore.instance.markOnline(widget.host.id);
-      return true;
-    } catch (_) {
-      HostStatusStore.instance.markOffline(widget.host.id);
-      return false;
-    }
+    await _loadSnapshot(scrollToBottom: scrollToBottom);
   }
 
   void _persistCurrentSessionLog() {
@@ -2814,42 +2633,6 @@ class _SessionScreenState extends State<SessionScreen>
       _sessionCachePersistTimer = null;
       _persistCurrentSessionLog();
     });
-  }
-
-  SessionLogHistorySummary? _updatedHistoryAfterDelta({
-    required SessionLogHistorySummary? previous,
-    required List<SessionMessage> previousMessages,
-    required List<SessionMessage> mergedMessages,
-    required List<SessionActivity> previousActivities,
-    required List<SessionActivity> mergedActivities,
-  }) {
-    if (previous == null) {
-      return null;
-    }
-    final previousMessageIds = previousMessages.map((m) => m.id).toSet();
-    final previousActivityIds = previousActivities.map((a) => a.id).toSet();
-    final mergedMessageIds = mergedMessages.map((m) => m.id).toSet();
-    final mergedActivityIds = mergedActivities.map((a) => a.id).toSet();
-    final newMessageCount = mergedMessageIds.length - previousMessageIds.length;
-    final newActivityCount =
-        mergedActivityIds.length - previousActivityIds.length;
-    final totalMessages = math.max(
-      previous.totalMessages + (newMessageCount > 0 ? newMessageCount : 0),
-      mergedMessages.length,
-    );
-    final totalActivities = math.max(
-      previous.totalActivities + (newActivityCount > 0 ? newActivityCount : 0),
-      mergedActivities.length,
-    );
-    return SessionLogHistorySummary(
-      isTruncated:
-          totalMessages > mergedMessages.length ||
-          totalActivities > mergedActivities.length,
-      totalMessages: totalMessages,
-      returnedMessages: mergedMessages.length,
-      totalActivities: totalActivities,
-      returnedActivities: mergedActivities.length,
-    );
   }
 
   Future<void> _loadOlderTranscript() async {
@@ -2970,37 +2753,39 @@ class _SessionScreenState extends State<SessionScreen>
       return;
     }
 
-    // Track server seq; if we detect a gap relative to what the server tells
-    // us it has emitted, trigger a snapshot re-fetch to re-sync.
     if (event.type == 'hello') {
+      _snapshotRevision = null;
+      _pendingLiveEvents.clear();
       unawaited(_loadSkills(forceReload: true));
-      final nextSeq = event.nextSeq;
-      final last = _lastEventSeq;
-      if (nextSeq != null && last != null && nextSeq > last + 1) {
-        // We missed events while disconnected; try the cheap delta first,
-        // fall back to a full snapshot if that fails.
-        unawaited(() async {
-          final needsSnapshotVerification =
-              _showingCachedSnapshot || _showingPossiblyStaleSnapshot;
-          final applied = await _resyncDelta(
-            markTranscriptFresh: !needsSnapshotVerification,
-          );
-          if (mounted && (!applied || needsSnapshotVerification)) {
-            await _loadSnapshot(
-              messageLimit: _messageLimit,
-              activityLimit: _activityLimit,
-              scrollToBottom: false,
-            );
-          }
-        }());
-      }
+      // Every connection verifies the snapshot, including daemon restarts and
+      // changes to existing transcript items that do not allocate a new seq.
+      _markTranscriptPossiblyStale();
+      unawaited(_loadSnapshot(scrollToBottom: false));
       return;
     }
-    final seq = event.seq;
-    if (seq != null) {
-      final last = _lastEventSeq;
-      if (last == null || seq > last) {
-        _lastEventSeq = seq;
+
+    final revision = event.revision;
+    if (revision != null &&
+        _snapshotRevision != null &&
+        revision <= _snapshotRevision!) {
+      // History can lag a live completion and use different message IDs.
+      // Preserve the reply without applying old status/draft transitions.
+      final message = event.messageItem;
+      if (message != null &&
+          !_messages.any((saved) =>
+              saved.id == message.id ||
+              _matchesPersistedMessage(saved, message))) {
+        setState(() => _upsertOptimisticMessage(message));
+      }
+      if (event.type == 'turn_completed') {
+        _scheduleTurnCompletionRefresh();
+      }
+      // These notifications are not represented in the session snapshot.
+      if (event.type != 'provider_warning' &&
+          event.type != 'queue_updated' &&
+          event.type != 'auto_retry_updated' &&
+          event.type != 'skills_changed') {
+        return;
       }
     }
 
@@ -3096,21 +2881,7 @@ class _SessionScreenState extends State<SessionScreen>
         });
         _thinkingNotifier.value = false;
         _syncSessionLiveActivity();
-        // Background reconcile; do not block UI. Delayed enough for the agent to
-        // finish flushing the rollout .jsonl file — otherwise the snapshot
-        // reads a partial file and the new assistant message appears to
-        // vanish until the user reloads.
-        Future<void>.delayed(const Duration(milliseconds: 1200), () {
-          if (!mounted) return;
-          unawaited(
-            _loadSnapshot(
-              messageLimit: _messageLimit,
-              activityLimit: _activityLimit,
-              scrollToBottom: false,
-            ),
-          );
-          unawaited(_loadGitStatus(silent: true));
-        });
+        _scheduleTurnCompletionRefresh();
       case 'activity_updated':
         final activity = event.activity;
         if (activity == null) {
@@ -5791,16 +5562,6 @@ class _SessionScreenState extends State<SessionScreen>
       return sessionCwd;
     }
     return trimmed.substring(0, slash);
-  }
-
-  bool _hasPersistedLiveAssistant(Iterable<SessionMessage> messages) {
-    final liveAssistant = _liveAssistantMessage;
-    if (liveAssistant == null) {
-      return false;
-    }
-    return messages.any(
-      (message) => _matchesPersistedMessage(message, liveAssistant.toMessage()),
-    );
   }
 
   _LiveAssistantMessageState _appendLiveAssistantDelta(

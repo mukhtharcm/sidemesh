@@ -11,7 +11,6 @@ import type {
   ModelSummary,
   ProviderModeCatalog,
   ProviderAccessModeCatalog,
-  ProviderPermissionProfileCatalog,
   PendingAction,
   PendingActionKind,
   ProviderProfileCatalog,
@@ -113,10 +112,6 @@ export interface AgentSessionOverrides {
   webSearch: string | null;
   profile: string | null;
   accessMode?: string | null;
-  /** @deprecated Legacy wire fields retained for older Sidemesh clients. */
-  permissionProfile?: string | null;
-  /** @deprecated Legacy wire fields retained for older Sidemesh clients. */
-  approvalsReviewer?: string | null;
 }
 
 export interface AgentCreateSessionRequest {
@@ -182,10 +177,6 @@ export interface AgentAccessModeListOptions {
   cwd: string | null;
 }
 
-export interface AgentPermissionProfileListOptions {
-  cwd: string | null;
-}
-
 export interface AgentModeListOptions {
   cwd: string | null;
 }
@@ -210,7 +201,6 @@ export interface AgentProviderCapabilities {
     compact: boolean;
     interrupt: boolean;
     history: boolean;
-    eventReplay: boolean;
     recentFallback: boolean;
     searchSessions: boolean;
   };
@@ -236,7 +226,6 @@ export interface AgentProviderCapabilities {
     models: boolean;
     profiles: boolean;
     accessModes: boolean;
-    permissionProfiles: boolean;
     skills: boolean;
     skillManagement: boolean;
   };
@@ -250,8 +239,6 @@ export interface AgentProviderCapabilities {
     networkAccess: boolean;
     webSearch: boolean;
     accessMode: boolean;
-    permissionProfile: boolean;
-    approvalsReviewer: boolean;
   };
   lifecycle: {
     restart: boolean;
@@ -425,9 +412,6 @@ export interface AgentConfigurationProvider {
   listAccessModes(
     options: AgentAccessModeListOptions,
   ): Promise<ProviderAccessModeCatalog>;
-  listPermissionProfiles(
-    options: AgentPermissionProfileListOptions,
-  ): Promise<ProviderPermissionProfileCatalog>;
   listModes(options: AgentModeListOptions): Promise<ProviderModeCatalog>;
 }
 

@@ -1,5 +1,9 @@
 # Legacy Surface Cleanup Implementation Plan
 
+> Historical plan: replay endpoints and Sidemesh compatibility aliases described
+> below have been removed. The current contract is documented in
+> [session synchronization](../session-synchronization.md).
+
 ## Goal
 
 Remove or quarantine older compatibility surfaces after the provider-runtime

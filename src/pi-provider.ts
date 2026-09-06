@@ -17,6 +17,8 @@ import { homedir } from "node:os";
 import nodePath from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 
+import { StateWriter } from "./state-writer.js";
+
 import {
   SessionManager,
   VERSION as PI_VERSION,
@@ -126,12 +128,6 @@ interface ActivePiTurn {
   status: string | null;
 }
 
-interface PiSaveWaiter {
-  generation: number;
-  resolve: () => void;
-  reject: (error: unknown) => void;
-}
-
 interface PiDraftAssistantMessage {
   id: string;
   turnId: string;
@@ -187,7 +183,6 @@ export const PI_PROVIDER_CAPABILITIES: AgentProviderCapabilities = {
     compact: true,
     interrupt: true,
     history: true,
-    eventReplay: true,
     recentFallback: true,
     searchSessions: false,
   },
@@ -213,7 +208,6 @@ export const PI_PROVIDER_CAPABILITIES: AgentProviderCapabilities = {
     models: true,
     profiles: false,
     accessModes: false,
-    permissionProfiles: false,
     skills: true,
     skillManagement: false,
   },
@@ -227,8 +221,6 @@ export const PI_PROVIDER_CAPABILITIES: AgentProviderCapabilities = {
     networkAccess: false,
     webSearch: false,
     accessMode: false,
-    permissionProfile: false,
-    approvalsReviewer: false,
   },
   lifecycle: {
     restart: false,
@@ -261,11 +253,7 @@ export class PiAgentProvider
   private readonly sessionSummariesByPath = new Map<string, PiSessionSummary>();
   private readonly sessionSummaryFingerprints = new Map<string, string>();
   private sessionSummaryRefresh: Promise<void> | null = null;
-  private saveGeneration = 0;
-  private attemptedSaveGeneration = 0;
-  private flushedSaveGeneration = 0;
-  private saveLoop: Promise<void> | null = null;
-  private readonly saveWaiters = new Set<PiSaveWaiter>();
+  private readonly stateWriter = new StateWriter(() => this.saveState());
 
   public constructor(options: PiAgentProviderOptions = {}) {
     super();
@@ -292,23 +280,10 @@ export class PiAgentProvider
     for (const session of this.sessions.values()) {
       this.unloadSession(session);
     }
-    while (this.saveLoop) {
-      await this.saveLoop;
-    }
-    if (this.flushedSaveGeneration < this.saveGeneration) {
-      try {
-        await this.persistSoon();
-      } catch (error) {
-        this.emit(
-          "stderr",
-          error instanceof Error
-            ? `Pi provider final state persistence failed: ${error.message}`
-            : "Pi provider final state persistence failed.",
-        );
-      }
-    }
-    while (this.saveLoop) {
-      await this.saveLoop;
+    try {
+      await this.stateWriter.flush();
+    } catch (error) {
+      this.emit("stderr", `Pi provider final state persistence failed: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
 
@@ -1846,11 +1821,11 @@ export class PiAgentProvider
   }
 
   private async persistSoon(): Promise<void> {
-    return this.requestStateSave();
+    return this.stateWriter.request();
   }
 
   private persistEventually(): void {
-    void this.requestStateSave().catch((error: unknown) => {
+    void this.stateWriter.request().catch((error: unknown) => {
       this.emit(
         "stderr",
         error instanceof Error
@@ -1858,58 +1833,6 @@ export class PiAgentProvider
           : "Pi provider state persistence failed.",
       );
     });
-  }
-
-  private requestStateSave(): Promise<void> {
-    const generation = ++this.saveGeneration;
-    const promise = new Promise<void>((resolve, reject) => {
-      this.saveWaiters.add({ generation, resolve, reject });
-    });
-    this.ensureSaveLoop();
-    return promise;
-  }
-
-  private ensureSaveLoop(): void {
-    if (this.saveLoop) {
-      return;
-    }
-    this.saveLoop = Promise.resolve().then(() => this.runSaveLoop());
-    void this.saveLoop.finally(() => {
-      this.saveLoop = null;
-      if (this.attemptedSaveGeneration < this.saveGeneration) {
-        this.ensureSaveLoop();
-      }
-    });
-  }
-
-  private async runSaveLoop(): Promise<void> {
-    while (this.attemptedSaveGeneration < this.saveGeneration) {
-      const failedGeneration = this.attemptedSaveGeneration + 1;
-      const targetGeneration = this.saveGeneration;
-      try {
-        await this.saveState();
-        this.flushedSaveGeneration = targetGeneration;
-        this.attemptedSaveGeneration = targetGeneration;
-        this.settleSaveWaiters(targetGeneration);
-      } catch (error) {
-        this.attemptedSaveGeneration = failedGeneration;
-        this.settleSaveWaiters(failedGeneration, error);
-      }
-    }
-  }
-
-  private settleSaveWaiters(generation: number, error?: unknown): void {
-    for (const waiter of this.saveWaiters) {
-      if (waiter.generation > generation) {
-        continue;
-      }
-      this.saveWaiters.delete(waiter);
-      if (error !== undefined) {
-        waiter.reject(error);
-      } else {
-        waiter.resolve();
-      }
-    }
   }
 
   private async saveState(): Promise<void> {

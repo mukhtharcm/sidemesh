@@ -52,12 +52,10 @@ class NodeInfo {
     required this.hostname,
     required this.platform,
     this.homeDirectory,
-    required this.codexVersion,
     required this.provider,
     required this.providerName,
     required this.providerVersion,
     required this.providerConfig,
-    required this.providerCapabilities,
     required this.defaultProviderCapabilities,
     required this.hostCapabilities,
     required this.supportedProviders,
@@ -77,12 +75,10 @@ class NodeInfo {
   final String hostname;
   final String platform;
   final String? homeDirectory;
-  final String codexVersion;
   final String provider;
   final String providerName;
   final String providerVersion;
   final ProviderConfigSummary providerConfig;
-  final ProviderCapabilities providerCapabilities;
   final ProviderCapabilities defaultProviderCapabilities;
   final ProviderCapabilities hostCapabilities;
   final List<ProviderDefinitionSummary> supportedProviders;
@@ -122,12 +118,10 @@ class NodeInfo {
       hostname: hostname,
       platform: platform,
       homeDirectory: homeDirectory,
-      codexVersion: codexVersion,
       provider: provider,
       providerName: providerName,
       providerVersion: providerVersion,
       providerConfig: providerConfig,
-      providerCapabilities: providerCapabilities,
       defaultProviderCapabilities: defaultProviderCapabilities,
       hostCapabilities: hostCapabilities,
       supportedProviders: supportedProviders,
@@ -150,10 +144,7 @@ class NodeInfo {
     return 'Codex';
   }
 
-  String get providerDisplayVersion {
-    if (providerVersion.isNotEmpty) return providerVersion;
-    return codexVersion;
-  }
+  String get providerDisplayVersion => providerVersion;
 
   String get providerPillLabel {
     final version = providerDisplayVersion;
@@ -224,9 +215,6 @@ class NodeInfo {
   }
 
   factory NodeInfo.fromJson(Map<String, dynamic> json) {
-    final providerCapabilities = ProviderCapabilities.fromJson(
-      json['providerCapabilities'],
-    );
     final defaultProviderCapabilities = ProviderCapabilities.fromJson(
       json['defaultProviderCapabilities'],
     );
@@ -235,20 +223,11 @@ class NodeInfo {
       hostname: _stringValue(json['hostname']),
       platform: _stringValue(json['platform']),
       homeDirectory: _stringOrNull(json['homeDirectory']),
-      codexVersion: _stringValue(json['codexVersion']),
       provider: _stringOrNull(json['provider']) ?? 'codex',
       providerName: _stringOrNull(json['providerName']) ?? 'Codex',
-      providerVersion:
-          _stringOrNull(json['providerVersion']) ??
-          _stringValue(json['codexVersion']),
+      providerVersion: _stringValue(json['providerVersion']),
       providerConfig: ProviderConfigSummary.fromJson(json['providerConfig']),
-      providerCapabilities: providerCapabilities,
-      // TODO: remove providerCapabilities fallback after the minimum supported
-      // daemon version no longer depends on it. New clients should use
-      // defaultProviderCapabilities or supportedProviders[].capabilities.
-      defaultProviderCapabilities: defaultProviderCapabilities.isEmpty
-          ? providerCapabilities
-          : defaultProviderCapabilities,
+      defaultProviderCapabilities: defaultProviderCapabilities,
       hostCapabilities: ProviderCapabilities.fromJson(json['hostCapabilities']),
       supportedProviders: ProviderDefinitionSummary.listFromJson(
         json['supportedProviders'],
@@ -3059,8 +3038,14 @@ class SessionLog {
     required this.pendingAction,
     required this.history,
     this.latestPlanUpdate,
+    this.revision,
+    this.liveAssistantText = '',
+    this.liveAssistantReasoning = '',
   });
 
+  final int? revision;
+  final String liveAssistantText;
+  final String liveAssistantReasoning;
   final SessionSummary session;
   final List<SessionMessage> messages;
   final List<SessionActivity> activities;
@@ -3100,6 +3085,9 @@ class SessionLog {
               json['history'] as Map<String, dynamic>,
             ),
       latestPlanUpdate: normalizedPlanUpdate,
+      revision: _intOrNull(json['revision']),
+      liveAssistantText: _stringValue(json['liveAssistantText']),
+      liveAssistantReasoning: _stringValue(json['liveAssistantReasoning']),
     );
   }
 
@@ -3113,55 +3101,6 @@ class SessionLog {
   };
 }
 
-class SessionEventsDelta {
-  const SessionEventsDelta({
-    required this.sessionId,
-    required this.since,
-    required this.nextSeq,
-    required this.messages,
-    required this.activities,
-    required this.latestPlanUpdate,
-    required this.pendingAction,
-    required this.session,
-  });
-
-  final String sessionId;
-  final int since;
-  final int nextSeq;
-  final List<SessionMessage> messages;
-  final List<SessionActivity> activities;
-  final LiveEvent? latestPlanUpdate;
-  final PendingAction? pendingAction;
-  final SessionSummary? session;
-
-  factory SessionEventsDelta.fromJson(
-    Map<String, dynamic> json,
-  ) => SessionEventsDelta(
-    sessionId: _stringValue(json['sessionId']),
-    since: _intValue(json['since']),
-    nextSeq: _intValue(json['nextSeq']),
-    messages: (json['messages'] as List<dynamic>? ?? [])
-        .map((item) => SessionMessage.fromJson(item as Map<String, dynamic>))
-        .toList(),
-    activities: (json['activities'] as List<dynamic>? ?? [])
-        .map((item) => SessionActivity.fromJson(item as Map<String, dynamic>))
-        .toList(),
-    latestPlanUpdate: json['latestPlanUpdate'] is Map<String, dynamic>
-        ? LiveEvent.fromJson(json['latestPlanUpdate'] as Map<String, dynamic>)
-        : json['latestPlanUpdate'] is Map<dynamic, dynamic>
-        ? LiveEvent.fromJson(
-            (json['latestPlanUpdate'] as Map<dynamic, dynamic>)
-                .cast<String, dynamic>(),
-          )
-        : null,
-    pendingAction: json['pendingAction'] == null
-        ? null
-        : PendingAction.fromJson(json['pendingAction'] as Map<String, dynamic>),
-    session: json['session'] == null
-        ? null
-        : SessionSummary.fromJson(json['session'] as Map<String, dynamic>),
-  );
-}
 
 class SessionLogHistorySummary {
   const SessionLogHistorySummary({
@@ -3280,7 +3219,7 @@ class LiveEvent {
     required this.type,
     required this.sessionId,
     this.seq,
-    this.nextSeq,
+    this.revision,
     this.turnId,
     this.itemId,
     this.delta,
@@ -3315,7 +3254,7 @@ class LiveEvent {
   final String type;
   final String sessionId;
   final int? seq;
-  final int? nextSeq;
+  final int? revision;
   final String? turnId;
   final String? itemId;
   final String? delta;
@@ -3350,7 +3289,7 @@ class LiveEvent {
     type: _stringValue(json['type']),
     sessionId: _stringValue(json['sessionId']),
     seq: _intOrNull(json['seq']),
-    nextSeq: _intOrNull(json['nextSeq']),
+    revision: _intOrNull(json['revision']),
     turnId: _stringOrNull(json['turnId']),
     itemId: _stringOrNull(json['itemId']),
     delta: _stringOrNull(json['delta']),
@@ -3405,7 +3344,7 @@ class LiveEvent {
     'type': type,
     'sessionId': sessionId,
     'seq': seq,
-    'nextSeq': nextSeq,
+    'revision': revision,
     'turnId': turnId,
     'itemId': itemId,
     'delta': delta,
