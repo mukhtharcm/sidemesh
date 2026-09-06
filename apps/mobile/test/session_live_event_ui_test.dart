@@ -61,6 +61,62 @@ void main() {
     expect(find.text('Hello world'), findsNothing);
   });
 
+  testWidgets('snapshot also covers live text delivered after the response', (tester) async {
+    final session = _session('snapshot-delayed-live', status: 'running');
+    final api = _RichEventFakeApi(sessionSummary: session)
+      ..revision = 3
+      ..liveAssistantText = 'Hello';
+    addTearDown(api.dispose);
+    await _pumpApp(tester, SessionScreen(
+      host: _host(session.id), session: session, api: api, desktopMode: true,
+    ), size: const Size(1180, 900));
+    await _pumpFrames(tester);
+    expect(find.text('Hello'), findsOneWidget);
+
+    // HTTP and WebSocket responses can arrive in either order.
+    api.emit({'type': 'assistant_delta', 'sessionId': session.id, 'delta': 'Hello', 'revision': 3});
+    api.emit({'type': 'assistant_delta', 'sessionId': session.id, 'delta': ' world', 'revision': 4});
+    await _pumpFrames(tester);
+    expect(find.text('Hello world'), findsOneWidget);
+    expect(find.textContaining('HelloHello'), findsNothing);
+  });
+
+  testWidgets('older snapshot response cannot overwrite a new connection', (tester) async {
+    final session = _session('snapshot-overlapping-reconnect', status: 'running');
+    final api = _RichEventFakeApi(sessionSummary: session);
+    addTearDown(api.dispose);
+    await _pumpApp(tester, SessionScreen(
+      host: _host(session.id), session: session, api: api, desktopMode: true,
+    ), size: const Size(1180, 900));
+    await _pumpFrames(tester);
+
+    final oldReady = Completer<void>();
+    api.fetchLogBlocker = oldReady.future;
+    api.emit({'type': 'hello', 'sessionId': session.id});
+    await _pumpFrames(tester);
+    api.emit({'type': 'assistant_delta', 'sessionId': session.id, 'delta': 'Old buffered text', 'revision': 20});
+    await _pumpFrames(tester);
+
+    final newReady = Completer<void>();
+    api.fetchLogBlocker = newReady.future;
+    api.emit({'type': 'hello', 'sessionId': session.id});
+    await _pumpFrames(tester);
+    api.revision = 1;
+    api.liveAssistantText = 'New connection';
+    newReady.complete();
+    await _pumpFrames(tester);
+
+    api.revision = 20;
+    api.liveAssistantText = 'Obsolete response';
+    oldReady.complete();
+    await _pumpFrames(tester);
+    api.emit({'type': 'assistant_delta', 'sessionId': session.id, 'delta': ' survives', 'revision': 2});
+    await _pumpFrames(tester);
+    expect(find.text('New connection survives'), findsOneWidget);
+    expect(find.textContaining('Old buffered text'), findsNothing);
+    expect(find.text('Obsolete response'), findsNothing);
+  });
+
   testWidgets('covered completion does not clear a newer snapshot draft', (tester) async {
     final session = _session('snapshot-completed-boundary', status: 'running');
     final api = _RichEventFakeApi(sessionSummary: session);
@@ -86,6 +142,67 @@ void main() {
     expect(find.text('Completed reply'), findsOneWidget);
     expect(find.text('Next reply in progress'), findsOneWidget);
     expect(find.text('Still show this warning'), findsOneWidget);
+  });
+
+  testWidgets('covered turn completion still refreshes newly saved history', (tester) async {
+    final session = _session('snapshot-turn-completion');
+    final api = _RichEventFakeApi();
+    addTearDown(api.dispose);
+    await _pumpApp(tester, SessionScreen(
+      host: _host(session.id), session: session, api: api, desktopMode: true,
+    ), size: const Size(1180, 900));
+    await _pumpFrames(tester);
+    api.emit({'type': 'turn_started', 'sessionId': session.id, 'revision': 1});
+    await _pumpFrames(tester);
+
+    final ready = Completer<void>();
+    api.fetchLogBlocker = ready.future;
+    api.emit({'type': 'hello', 'sessionId': session.id});
+    await _pumpFrames(tester);
+    api.revision = 3;
+    api.emit({'type': 'turn_completed', 'sessionId': session.id, 'revision': 3});
+    await _pumpFrames(tester);
+    ready.complete();
+    await _pumpFrames(tester);
+
+    // The first read preceded the provider's final history write.
+    api.messages = [_assistantMessage(
+      id: 'saved-final', text: 'Saved reply after completion',
+      content: const [TextBlock('Saved reply after completion')],
+    )];
+    await tester.pump(const Duration(milliseconds: 1200));
+    await _pumpFrames(tester);
+    expect(find.text('Saved reply after completion'), findsOneWidget);
+  });
+
+  testWidgets('covered message matches history with a different provider ID', (tester) async {
+    final session = _session('snapshot-message-identity');
+    final api = _RichEventFakeApi();
+    addTearDown(api.dispose);
+    await _pumpApp(tester, SessionScreen(
+      host: _host(session.id), session: session, api: api, desktopMode: true,
+    ), size: const Size(1180, 900));
+    await _pumpFrames(tester);
+    final ready = Completer<void>();
+    api.fetchLogBlocker = ready.future;
+    api.emit({'type': 'hello', 'sessionId': session.id});
+    await _pumpFrames(tester);
+    api.revision = 3;
+    api.messages = [_assistantMessage(
+      id: 'history-id', text: 'Only one completed reply',
+      content: const [TextBlock('Only one completed reply')],
+    )];
+    api.emit({
+      'type': 'assistant_message_completed', 'sessionId': session.id, 'revision': 3,
+      'messageItem': _assistantMessage(
+        id: 'live-id', text: 'Only one completed reply',
+        content: const [TextBlock('Only one completed reply')],
+      ).toJson(),
+    });
+    await _pumpFrames(tester);
+    ready.complete();
+    await _pumpFrames(tester);
+    expect(find.text('Only one completed reply'), findsOneWidget);
   });
 
   testWidgets('failed snapshot still applies live text buffered during the request', (tester) async {

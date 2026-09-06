@@ -2558,7 +2558,7 @@ describe("GET /api/node", () => {
     );
   });
 
-  it("with two providers: providerCapabilities reflects default; per-provider caps are preserved", async () => {
+  it("with two providers: default capabilities and per-provider capabilities remain distinct", async () => {
     const stateDir = await mkdtemp(nodePath.join(tmpdir(), "sidemesh-server-test-"));
     // Default provider: full profile (has models, skills, searchSessions, etc.)
     // Secondary provider: chat-only profile (no models, no skills, no searchSessions)
@@ -2581,9 +2581,9 @@ describe("GET /api/node", () => {
       assert.equal(body.provider, "fake");
       assert.equal(body.supportedProviders.length, 2);
 
-      // providerCapabilities and defaultProviderCapabilities both reflect the
-      // default (full) provider.
-      assert.equal(body.defaultProviderCapabilities.configuration.models, true);
+      // Only the canonical field exposes the default provider's capabilities.
+      assert.equal("providerCapabilities" in body, false);
+      assert.equal("codexVersion" in body, false);
       assert.equal(body.defaultProviderCapabilities.configuration.models, true);
 
       // The secondary (chat-only) entry must retain its own distinct flags.

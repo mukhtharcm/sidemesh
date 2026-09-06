@@ -21,14 +21,17 @@ shutdown completes.
 ## Events during a refresh
 
 `seq` orders transcript items; it is not a freshness cursor. `revision` is an
-in-memory counter used only to distinguish events covered by an in-flight
-snapshot from events arriving afterward. It is never persisted by the client or
-used to decide whether to refresh after reconnecting.
+in-memory counter used to distinguish events covered by the latest snapshot from
+newer events. Covered events may arrive after the HTTP response because the live
+stream uses a separate connection. The client resets the counter on each new
+connection; it never persists it or uses it to skip a reconnect refresh.
 
 The server finishes provider reads before capturing the live overlay and its
 revision. The client buffers events while fetching, installs the snapshot's
 partial text, and applies later deltas. Covered completed messages are preserved
-while provider history flushes, without replaying old draft/status transitions.
+while provider history flushes, without replaying old draft/status transitions or
+duplicating a saved message with a different provider ID. Covered turn completions
+still trigger the delayed history and Git refresh.
 Finished tool overlays remain until the provider snapshot confirms their content
 (or another turn begins), so a completion cannot erase updates from a read
 already in progress. Warnings, queue changes, and retry notifications remain observable. A failed
