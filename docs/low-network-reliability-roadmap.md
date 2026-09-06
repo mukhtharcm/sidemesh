@@ -1,5 +1,9 @@
 # Low-Network Reliability Roadmap
 
+> Historical plan: replay endpoints and Sidemesh compatibility aliases described
+> below have been removed. The current contract is documented in
+> [session synchronization](session-synchronization.md).
+
 Sidemesh is meant to work while travelling, on weak mobile data, and against
 small VPSes. The current implementation is good enough for normal private
 network use, but it is not yet Mosh-level. This document tracks the remaining

@@ -220,12 +220,10 @@ NodeInfo _nodeForProvider({
     label: 'Test',
     hostname: 'localhost',
     platform: 'darwin',
-    codexVersion: '0.0.0',
     provider: kind,
     providerName: kind,
     providerVersion: '0.0.0',
     providerConfig: ProviderConfigSummary(kind: kind, command: kind),
-    providerCapabilities: capabilities,
     defaultProviderCapabilities: capabilities,
     hostCapabilities: capabilities,
     supportedProviders: <ProviderDefinitionSummary>[

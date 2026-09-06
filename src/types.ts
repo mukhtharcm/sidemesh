@@ -889,7 +889,8 @@ export interface LiveEvent {
     | "error";
   sessionId: string;
   seq?: number;
-  nextSeq?: number;
+  /** Snapshot/live boundary only; not a replay cursor. */
+  revision?: number;
   turnId?: string;
   itemId?: string;
   delta?: string;
