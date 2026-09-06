@@ -2440,7 +2440,9 @@ void main() {
     expect(find.byType(BottomSheet), findsOneWidget);
   });
 
-  testWidgets('host detail exposes provider contract metadata', (tester) async {
+  testWidgets('host detail shows agents inline without contract diagnostics', (
+    tester,
+  ) async {
     final api = _CapabilityFakeApi(
       _nodeForCapabilities(
         _fullCapabilities,
@@ -2492,41 +2494,16 @@ void main() {
     );
     await _pumpFrames(tester);
 
-    expect(find.text('Agents on this machine'), findsAtLeastNWidgets(1));
-    expect(
-      find.text('Fake Test Provider in use, 2 agents available'),
-      findsOneWidget,
-    );
-
-    await tester.tap(find.text('Agents on this machine'));
-    await _pumpFrames(tester);
-
-    expect(find.text('Agents on this machine'), findsAtLeastNWidgets(1));
-    expect(
-      find.text('Fake Test Provider · fake-provider 1.0.0'),
-      findsOneWidget,
-    );
-    expect(find.text('In use: Fake Test Provider'), findsOneWidget);
+    expect(find.text('Agents'), findsOneWidget);
     expect(find.text('Fake Test Provider'), findsOneWidget);
-    expect(find.text('In use'), findsOneWidget);
+    expect(find.text('fake-provider 1.0.0'), findsOneWidget);
     expect(find.text('Codex'), findsOneWidget);
-    expect(find.text('Agent features'), findsOneWidget);
-    expect(find.text('Session controls'), findsOneWidget);
-    expect(find.text('web search'), findsOneWidget);
-    expect(find.text('Machine features'), findsOneWidget);
-    expect(find.text('git status'), findsOneWidget);
-
-    await tester.tap(find.text('Codex'));
-    await _pumpFrames(tester);
-
-    expect(find.text('Codex · codex-cli 0.125.0'), findsOneWidget);
-    expect(find.text('Viewing: Codex'), findsOneWidget);
-    expect(find.text('Command: codex'), findsOneWidget);
-    expect(find.text('Fake Test Provider'), findsOneWidget);
-    expect(find.text('2/5'), findsOneWidget);
-    expect(find.text('1/4'), findsOneWidget);
-    expect(find.text('0/3'), findsOneWidget);
-    expect(find.text('0/8'), findsOneWidget);
+    expect(find.text('codex-cli 0.125.0'), findsOneWidget);
+    expect(find.text('Default'), findsOneWidget);
+    expect(find.text('Agent features'), findsNothing);
+    expect(find.text('Machine features'), findsNothing);
+    expect(find.text('Command: codex'), findsNothing);
+    expect(tester.takeException(), isNull);
   });
 }
 

@@ -56,14 +56,11 @@ void main() {
               closeTo(tester.getCenter(find.text('New session')).dy, 1),
             );
           }
-          expect(find.text('Agents on this machine'), findsOneWidget);
+          expect(find.text('Agents'), findsOneWidget);
           expect(find.text('Open terminal'), findsOneWidget);
           expect(find.text('Update Sidemesh'), findsOneWidget);
           expect(api.sessionReads, 0);
-          final rowX = tester
-              .getTopLeft(find.text('Agents on this machine'))
-              .dx;
-          expect(tester.getTopLeft(find.text('Open terminal')).dx, rowX);
+          final rowX = tester.getTopLeft(find.text('Open terminal')).dx;
           expect(tester.getTopLeft(find.text('Update Sidemesh')).dx, rowX);
 
           await tester.tap(find.byTooltip('Refresh'));
