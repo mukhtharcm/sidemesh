@@ -8,33 +8,16 @@ import '../mobile_client_version_policy.dart';
 import '../models.dart';
 import '../host_status_store.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import '../session_local_store.dart';
-import '../session_overrides_store.dart';
-import '../session_read_store.dart';
 import '../theme/app_colors.dart';
-import '../theme/app_theme.dart';
 import '../theme/app_tokens.dart';
 import '../widgets/app_dialogs.dart';
 import '../widgets/app_sheets.dart';
 import '../widgets/app_snackbar.dart';
 import '../widgets/mesh_widgets.dart';
 import '../widgets/app_primitives.dart';
-import '../widgets/session_row_card.dart';
 import 'create_session_sheet.dart';
 import 'terminal_screen.dart';
 import '../theme/app_status_styles.dart';
-
-String _hostEndpointLabel(String baseUrl) {
-  final uri = Uri.tryParse(baseUrl.trim());
-  if (uri == null || uri.host.isEmpty) {
-    return baseUrl.trim();
-  }
-  final hasDefaultPort =
-      !uri.hasPort ||
-      (uri.scheme == 'http' && uri.port == 80) ||
-      (uri.scheme == 'https' && uri.port == 443);
-  return hasDefaultPort ? uri.host : '${uri.host}:${uri.port}';
-}
 
 String _agentAvailabilityLabel(int count) {
   final noun = count == 1 ? 'agent' : 'agents';
@@ -88,13 +71,11 @@ class HostDetailScreen extends StatefulWidget {
 
 class _HostDetailScreenState extends State<HostDetailScreen>
     with WidgetsBindingObserver {
-  final SessionLocalStore _localStore = SessionLocalStore.instance;
   final AppVersionStore _appVersionStore = AppVersionStore.instance;
-  late Future<_HostOverview> _future;
+  late Future<NodeInfo> _future;
   Timer? _refreshTimer;
   Future<void>? _updateInfoRefresh;
   bool _checkingUpdateInfo = false;
-  bool _showAllSessions = false;
   AppLifecycleState? _lifecycleState;
   static const Duration _refreshInterval = Duration(minutes: 1);
 
@@ -105,8 +86,6 @@ class _HostDetailScreenState extends State<HostDetailScreen>
     _lifecycleState =
         WidgetsBinding.instance.lifecycleState ?? AppLifecycleState.resumed;
     WidgetsBinding.instance.addObserver(this);
-    _localStore.ensureLoaded();
-    SessionReadStore.instance.ensureLoaded();
     if (widget.showMobileClientCompatibility) {
       _appVersionStore.addListener(_handleAppVersionChanged);
       unawaited(_appVersionStore.ensureLoaded());
@@ -167,68 +146,20 @@ class _HostDetailScreenState extends State<HostDetailScreen>
     try {
       final fresh = await _load();
       if (!mounted) return;
-      setState(() => _future = Future.value(fresh));
+      setState(() {
+        _future = Future.value(fresh);
+      });
     } catch (_) {
       // Keep the last good snapshot on transient errors.
     }
   }
 
-  Future<_HostOverview> _load() async {
-    final results = await Future.wait<Object>([
-      widget.api.fetchNode(widget.host),
-      widget.api.fetchSessions(widget.host, limit: 40),
-    ]);
-    final node = results[0] as NodeInfo;
-    final sessions = results[1] as List<SessionSummary>;
-
-    // Merge favorites in the background so the screen paints immediately.
-    _localStore.getFavoriteSessions(widget.host).then((favorites) async {
-      if (!mounted) return;
-      final ghosts = await _localStore.ghostsForHost(widget.host);
-      var displayNode = node;
-      try {
-        final latestNode = (await _future).node;
-        displayNode = node.copyWithUpdateInfo(latestNode.updateInfo);
-      } catch (_) {
-        displayNode = node;
-      }
-      if (!mounted) return;
-      final merged = _mergeSessions(sessions, [...favorites, ...ghosts]);
-      setState(() {
-        _future = Future.value(
-          _HostOverview(
-            node: displayNode,
-            workspaces: _buildWorkspaces(merged),
-            sessions: merged,
-          ),
-        );
-      });
-    });
-
-    final workspaces = _buildWorkspaces(sessions);
-    return _HostOverview(
-      node: node,
-      workspaces: workspaces,
-      sessions: sessions,
-    );
-  }
-
-  List<SessionSummary> _mergeSessions(
-    List<SessionSummary> recents,
-    List<SessionSummary> favorites,
-  ) {
-    final byId = <String, SessionSummary>{
-      for (final s in recents.where((session) => !session.isSubAgent)) s.id: s,
-    };
-    for (final fav in favorites.where((session) => !session.isSubAgent)) {
-      byId.putIfAbsent(fav.id, () => fav);
-    }
-    return byId.values.toList()
-      ..sort((a, b) => b.updatedAt.compareTo(a.updatedAt));
-  }
+  Future<NodeInfo> _load() => widget.api.fetchNode(widget.host);
 
   Future<void> _refresh() async {
-    setState(() => _future = _load());
+    setState(() {
+      _future = _load();
+    });
     try {
       await _future;
     } catch (_) {
@@ -254,12 +185,10 @@ class _HostDetailScreenState extends State<HostDetailScreen>
     }
     try {
       final info = await widget.api.refreshUpdateInfo(widget.host);
-      final overview = await _future;
+      final node = await _future;
       if (!mounted) return;
       setState(() {
-        _future = Future.value(
-          overview.copyWith(node: overview.node.copyWithUpdateInfo(info)),
-        );
+        _future = Future.value(node.copyWithUpdateInfo(info));
       });
     } catch (_) {
       // Keep the existing snapshot if the update check cannot reach the remote.
@@ -269,54 +198,6 @@ class _HostDetailScreenState extends State<HostDetailScreen>
         setState(() => _checkingUpdateInfo = false);
       }
     }
-  }
-
-  List<SessionSummary> _sortSessions(List<SessionSummary> sessions) {
-    final overrides = SessionOverridesStore.instance;
-    final sorted = sessions
-        .map((s) => overrides.overlay(widget.host.id, s))
-        .toList();
-    sorted.sort((left, right) {
-      final leftFavorite = _localStore.isFavorite(widget.host, left.id);
-      final rightFavorite = _localStore.isFavorite(widget.host, right.id);
-      if (leftFavorite != rightFavorite) {
-        return leftFavorite ? -1 : 1;
-      }
-      return right.updatedAt.compareTo(left.updatedAt);
-    });
-    return sorted;
-  }
-
-  List<WorkspaceSummary> _buildWorkspaces(List<SessionSummary> sessions) {
-    final grouped = <String, WorkspaceSummary>{};
-    for (final session in sessions) {
-      final parts = session.cwd.split('/').where((part) => part.isNotEmpty);
-      final label = parts.isEmpty ? session.cwd : parts.last;
-      final existing = grouped[session.cwd];
-      if (existing == null) {
-        grouped[session.cwd] = WorkspaceSummary(
-          cwd: session.cwd,
-          label: label.isEmpty ? session.cwd : label,
-          sessionCount: 1,
-          lastUsedAt: session.updatedAt,
-        );
-        continue;
-      }
-      grouped[session.cwd] = WorkspaceSummary(
-        cwd: existing.cwd,
-        label: existing.label,
-        sessionCount: existing.sessionCount + 1,
-        lastUsedAt: existing.lastUsedAt.isAfter(session.updatedAt)
-            ? existing.lastUsedAt
-            : session.updatedAt,
-      );
-    }
-
-    final workspaces = grouped.values.toList();
-    workspaces.sort(
-      (left, right) => right.lastUsedAt.compareTo(left.lastUsedAt),
-    );
-    return workspaces;
   }
 
   bool _shouldShowMobileCompatibility(NodeInfo node) {
@@ -332,12 +213,11 @@ class _HostDetailScreenState extends State<HostDetailScreen>
         MobileClientCompatibilityLevel.none;
   }
 
-  Future<void> _startSession({String? prefilledCwd}) async {
+  Future<void> _startSession() async {
     final created = await showCreateSessionLauncher(
       context,
       host: widget.host,
       api: widget.api,
-      initialCwd: prefilledCwd,
     );
     if (created != null && mounted) {
       widget.onOpenSession(created);
@@ -388,7 +268,7 @@ class _HostDetailScreenState extends State<HostDetailScreen>
 
   Widget _buildBody(BuildContext context) {
     final colors = context.colors;
-    return FutureBuilder<_HostOverview>(
+    return FutureBuilder<NodeInfo>(
       future: _future,
       builder: (context, snapshot) {
         if (snapshot.connectionState != ConnectionState.done &&
@@ -403,132 +283,40 @@ class _HostDetailScreenState extends State<HostDetailScreen>
             action: TextButton(onPressed: _refresh, child: const Text('Retry')),
           );
         }
-        final data = snapshot.data!;
-        return ListenableBuilder(
-          listenable: Listenable.merge([
-            SessionLocalStore.instance,
-            SessionOverridesStore.instance,
-          ]),
-          builder: (context, _) {
-            final sortedSessions = _sortSessions(data.sessions);
-            return AppContentColumn(
-              child: RefreshIndicator(
-                color: colors.accent,
-                onRefresh: _refresh,
-                child: ListView(
-                  padding: EdgeInsets.fromLTRB(
-                    widget.embedded
-                        ? AppSizes.desktopGutter
-                        : AppSizes.mobileGutter,
-                    AppSpacing.sm,
-                    widget.embedded
-                        ? AppSizes.desktopGutter
-                        : AppSizes.mobileGutter,
-                    widget.embedded
-                        ? AppSpacing.xxl
-                        : AppSizes.floatingActionClearance,
+        final node = snapshot.data!;
+        return AppContentColumn(
+          child: RefreshIndicator(
+            color: colors.accent,
+            onRefresh: _refresh,
+            child: ListView(
+              padding: widget.embedded
+                  ? AppPadding.desktopPage
+                  : AppPadding.mobilePage.copyWith(
+                      bottom: AppSizes.floatingActionClearance,
+                    ),
+              children: [
+                const AppSectionHeader(title: 'Connection'),
+                const SizedBox(height: AppSpacing.sm),
+                _NodeCard(host: widget.host, node: node),
+                _ProviderContractSummaryCard(node: node),
+                if (_shouldShowMobileCompatibility(node)) ...[
+                  const SizedBox(height: AppSpacing.md),
+                  _MobileClientCompatibilityCard(
+                    node: node,
+                    appVersionInfo: _appVersionStore.info,
                   ),
-                  children: [
-                    _NodeCard(host: widget.host, node: data.node),
-                    if (_shouldShowMobileCompatibility(data.node)) ...[
-                      const SizedBox(height: AppSpacing.sm),
-                      _MobileClientCompatibilityCard(
-                        node: data.node,
-                        appVersionInfo: _appVersionStore.info,
-                      ),
-                    ],
-                    const SizedBox(height: AppSpacing.sm),
-                    _ProviderContractSummaryCard(node: data.node),
-                    const SizedBox(height: AppSpacing.sm),
-                    if (data.workspaces.length > 1) ...[
-                      const SizedBox(height: AppSpacing.lg),
-                      _SectionHeader(
-                        icon: Icons.folder_open_rounded,
-                        title: 'Start from folder',
-                        subtitle:
-                            '${data.workspaces.length} recent ${data.workspaces.length == 1 ? "folder" : "folders"}',
-                      ),
-                      const SizedBox(height: AppSpacing.sm),
-                      _WorkspaceLaunchRow(
-                        workspaces: data.workspaces,
-                        onTap: (workspace) =>
-                            _startSession(prefilledCwd: workspace.cwd),
-                      ),
-                    ],
-                    const SizedBox(height: AppSpacing.xl),
-                    _SectionHeader(
-                      icon: Icons.history_rounded,
-                      title: 'Recent sessions',
-                      subtitle:
-                          '${data.sessions.length} ${data.sessions.length == 1 ? "session" : "sessions"}',
-                    ),
-                    const SizedBox(height: AppSpacing.sm),
-                    if (sortedSessions.isEmpty)
-                      const MeshEmptyState(
-                        icon: Icons.chat_bubble_outline_rounded,
-                        title: 'No sessions yet',
-                        body: 'Start a session on this machine to see it here.',
-                      )
-                    else
-                      ...(_showAllSessions
-                              ? sortedSessions
-                              : sortedSessions.take(6))
-                          .map(
-                            (session) => Padding(
-                              padding: const EdgeInsets.only(
-                                bottom: AppSpacing.sm,
-                              ),
-                              child: SessionRowCard(
-                                host: widget.host,
-                                session: session,
-                                favorite: _localStore.isFavorite(
-                                  widget.host,
-                                  session.id,
-                                ),
-                                showHost: false,
-                                onTap: () => widget.onOpenSession(session),
-                                onToggleFavorite: () {
-                                  _localStore.toggleFavorite(
-                                    widget.host,
-                                    session.id,
-                                  );
-                                },
-                              ),
-                            ),
-                          ),
-                    if (sortedSessions.length > 6)
-                      TextButton(
-                        onPressed: () => setState(
-                          () => _showAllSessions = !_showAllSessions,
-                        ),
-                        child: Text(
-                          _showAllSessions
-                              ? 'Show recent only'
-                              : 'View all ${sortedSessions.length} sessions',
-                        ),
-                      ),
-                    const SizedBox(height: AppSpacing.lg),
-                    ExpansionTile(
-                      tilePadding: const EdgeInsets.symmetric(
-                        horizontal: AppSpacing.md,
-                      ),
-                      title: const Text('Machine tools'),
-                      subtitle: const Text('Terminal and maintenance'),
-                      children: [
-                        _HostManagementCard(
-                          host: widget.host,
-                          api: widget.api,
-                          node: data.node,
-                          checkingUpdateInfo: _checkingUpdateInfo,
-                          onRefresh: _refresh,
-                        ),
-                      ],
-                    ),
-                  ],
+                ],
+                const SizedBox(height: AppSpacing.xl),
+                _HostManagementCard(
+                  host: widget.host,
+                  api: widget.api,
+                  node: node,
+                  checkingUpdateInfo: _checkingUpdateInfo,
+                  onRefresh: _refresh,
                 ),
-              ),
-            );
-          },
+              ],
+            ),
+          ),
         );
       },
     );
@@ -548,75 +336,33 @@ class _EmbeddedHostHeader extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final colors = context.colors;
-    return Container(
-      padding: const EdgeInsets.fromLTRB(
-        AppSpacing.xl,
-        AppSpacing.md,
-        AppSpacing.md,
-        AppSpacing.md,
-      ),
-      decoration: BoxDecoration(
-        border: Border(bottom: BorderSide(color: colors.border)),
-      ),
-      child: Row(
-        children: [
-          Container(
-            width: 32,
-            height: 32,
-            decoration: BoxDecoration(
-              color: colors.accentMuted,
-              borderRadius: AppShapes.iconWell,
-            ),
-            alignment: Alignment.center,
-            child: Icon(
-              Icons.dns_rounded,
-              size: AppSizes.inlineIcon,
-              color: colors.accent,
-            ),
+    return AppContentColumn(
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(
+          AppSizes.desktopGutter,
+          AppSpacing.md,
+          AppSizes.desktopGutter,
+          AppSpacing.md,
+        ),
+        child: AppSectionHeader(
+          title: host.label,
+          trailing: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              IconButton(
+                tooltip: 'Refresh',
+                icon: const Icon(Icons.refresh_rounded),
+                onPressed: onRefresh,
+              ),
+              const SizedBox(width: AppSpacing.sm),
+              FilledButton.icon(
+                onPressed: onNewSession,
+                icon: const Icon(Icons.add_rounded),
+                label: const Text('New session'),
+              ),
+            ],
           ),
-          const SizedBox(width: AppSpacing.md),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text(
-                  host.label,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                    fontWeight: AppWeights.emphasis,
-                  ),
-                ),
-                const SizedBox(height: AppSpacing.xxs),
-                Text(
-                  _hostEndpointLabel(host.baseUrl),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: monoStyle(
-                    color: colors.textTertiary,
-                    fontSize: AppFontSizes.metadata,
-                  ),
-                ),
-              ],
-            ),
-          ),
-          IconButton(
-            tooltip: 'Refresh',
-            icon: const Icon(Icons.refresh_rounded, size: AppSizes.inlineIcon),
-            onPressed: onRefresh,
-          ),
-          const SizedBox(width: AppSpacing.xs),
-          FilledButton.icon(
-            onPressed: onNewSession,
-            icon: const Icon(
-              Icons.play_arrow_rounded,
-              size: AppSizes.compactIcon,
-            ),
-            label: const Text('New session'),
-          ),
-        ],
+        ),
       ),
     );
   }
@@ -630,23 +376,24 @@ class _NodeCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final colors = context.colors;
-    return ExpansionTile(
-      tilePadding: const EdgeInsets.symmetric(horizontal: AppSpacing.md),
-      title: Text(
-        '${node.platform} · ${node.providerDisplayName}',
-        style: Theme.of(context).textTheme.bodyMedium,
-      ),
-      subtitle: node.updateAvailable ? const Text('Update available') : null,
+    return Column(
       children: [
-        Padding(
-          padding: const EdgeInsets.all(AppSpacing.md),
-          child: SelectableText(
-            '${host.baseUrl}\n${node.hostname}\n${node.providerPillLabel}',
-            style: Theme.of(
-              context,
-            ).textTheme.bodySmall?.copyWith(color: colors.textSecondary),
+        AppSettingsRow(
+          icon: Icons.lan_outlined,
+          title: node.hostname,
+          footer: SelectableText(
+            host.baseUrl,
+            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+              color: context.colors.textSecondary,
+            ),
           ),
+        ),
+        AppSettingsRow(
+          icon: Icons.computer_rounded,
+          title: node.platform,
+          subtitle: node.packageVersion == null
+              ? null
+              : 'Sidemesh ${node.packageVersion}',
         ),
       ],
     );
@@ -1423,105 +1170,18 @@ class _ProviderContractSummaryCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final colors = context.colors;
-    final supportedProviders = node.supportedProviders.length;
-    final providerCountLabel = _agentAvailabilityLabel(supportedProviders);
-    return MeshCard(
-      tone: MeshCardTone.muted,
-      bordered: false,
-      padding: EdgeInsets.zero,
-      child: Material(
-        color: Colors.transparent,
-        child: InkWell(
-          borderRadius: AppShapes.card,
-          onTap: () {
-            Navigator.of(context).push(
-              MaterialPageRoute<void>(
-                builder: (_) => HostProviderContractScreen(node: node),
-              ),
-            );
-          },
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(
-              AppSpacing.md,
-              AppSpacing.md,
-              AppSpacing.md,
-              AppSpacing.md,
-            ),
-            child: Row(
-              children: [
-                Container(
-                  width: 34,
-                  height: 34,
-                  decoration: BoxDecoration(
-                    color: colors.infoMuted,
-                    borderRadius: AppShapes.iconWell,
-                    border: Border.all(
-                      color: colors.info.withValues(
-                        alpha: AppEmphasis.borderTint,
-                      ),
-                    ),
-                  ),
-                  alignment: Alignment.center,
-                  child: Icon(
-                    Icons.hub_rounded,
-                    color: colors.info,
-                    size: AppSizes.inlineIcon,
-                  ),
-                ),
-                const SizedBox(width: AppSpacing.md),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        'Agents on this machine',
-                        style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                          fontWeight: AppWeights.title,
-                        ),
-                      ),
-                      const SizedBox(height: AppSpacing.xs),
-                      Text(
-                        '${node.providerDisplayName} in use, $providerCountLabel',
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                          color: colors.textSecondary,
-                          height: AppLineHeights.label,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-                const SizedBox(width: AppSpacing.sm),
-                Icon(
-                  Icons.chevron_right_rounded,
-                  color: colors.textTertiary,
-                  size: AppSizes.largeIcon,
-                ),
-              ],
-            ),
-          ),
+    return AppSettingsRow(
+      icon: Icons.hub_rounded,
+      title: 'Agents on this machine',
+      subtitle:
+          '${node.providerDisplayName} in use, ${_agentAvailabilityLabel(node.supportedProviders.length)}',
+      trailing: const Icon(Icons.chevron_right_rounded),
+      onTap: () => Navigator.of(context).push(
+        MaterialPageRoute<void>(
+          builder: (_) => HostProviderContractScreen(node: node),
         ),
       ),
     );
-  }
-}
-
-class _SectionHeader extends StatelessWidget {
-  const _SectionHeader({
-    required this.icon,
-    required this.title,
-    required this.subtitle,
-  });
-
-  final IconData icon;
-  final String title;
-  final String subtitle;
-
-  @override
-  Widget build(BuildContext context) {
-    return AppSectionHeader(icon: icon, title: title, subtitle: subtitle);
   }
 }
 
@@ -1648,86 +1308,6 @@ String _humanizeCamelCase(String value) {
     (match) => ' ${match.group(1)!.toLowerCase()}',
   );
   return withSpaces.replaceAll('_', ' ');
-}
-
-class _WorkspaceLaunchRow extends StatelessWidget {
-  const _WorkspaceLaunchRow({required this.workspaces, required this.onTap});
-
-  final List<WorkspaceSummary> workspaces;
-  final ValueChanged<WorkspaceSummary> onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    final colors = context.colors;
-    return SizedBox(
-      height: 36,
-      child: ListView.separated(
-        scrollDirection: Axis.horizontal,
-        padding: const EdgeInsets.symmetric(horizontal: AppSpacing.xxs),
-        itemCount: workspaces.length,
-        separatorBuilder: (_, _) => const SizedBox(width: AppSpacing.sm),
-        itemBuilder: (context, i) {
-          final ws = workspaces[i];
-          return InkWell(
-            borderRadius: AppShapes.pill,
-            onTap: () => onTap(ws),
-            child: Container(
-              padding: const EdgeInsets.symmetric(
-                horizontal: AppSpacing.md,
-                vertical: AppSpacing.tight,
-              ),
-              decoration: BoxDecoration(
-                color: colors.surfaceMuted,
-                borderRadius: AppShapes.pill,
-                border: Border.all(color: colors.border),
-              ),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(
-                    Icons.folder_rounded,
-                    size: AppSizes.smallIcon,
-                    color: colors.accent,
-                  ),
-                  const SizedBox(width: AppSpacing.tight),
-                  Text(
-                    ws.label,
-                    style: monoStyle(
-                      color: colors.textPrimary,
-                      fontSize: AppFontSizes.caption,
-                      fontWeight: AppWeights.emphasis,
-                    ),
-                  ),
-                  if (ws.sessionCount > 1) ...[
-                    const SizedBox(width: AppSpacing.tight),
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: AppSpacing.xs,
-                        vertical: AppSpacing.hairline,
-                      ),
-                      decoration: BoxDecoration(
-                        color: colors.surfaceElevated,
-                        borderRadius: AppShapes.badge,
-                        border: Border.all(color: colors.border),
-                      ),
-                      child: Text(
-                        '${ws.sessionCount}',
-                        style: monoStyle(
-                          color: colors.textTertiary,
-                          fontSize: AppFontSizes.micro,
-                          fontWeight: AppWeights.emphasis,
-                        ),
-                      ),
-                    ),
-                  ],
-                ],
-              ),
-            ),
-          );
-        },
-      ),
-    );
-  }
 }
 
 class _HostManagementCard extends StatefulWidget {
@@ -2243,95 +1823,82 @@ class _HostManagementCardState extends State<_HostManagementCard> {
             HostStatusStore.instance.statusFor(widget.host.id).reachability ==
             HostReachability.offline;
 
-        return MeshCard(
-          tone: MeshCardTone.muted,
-          bordered: false,
-          padding: EdgeInsets.zero,
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              if (_updateStartedAt != null) ...[
-                _UpdateProgressBanner(
-                  hostId: widget.host.id,
-                  startedAt: _updateStartedAt!,
-                  targetLabel: _updateTargetLabel,
-                  previousVersion: _updatePreviousVersion,
-                  previousCommitSha: _updatePreviousCommitSha,
-                  updateChannel:
-                      _updateChannelAtStart ?? widget.node.updateChannel,
-                  currentNode: widget.node,
-                  operation: _updateOperation,
-                  onDismiss: () => setState(() {
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            if (_updateStartedAt != null) ...[
+              _UpdateProgressBanner(
+                hostId: widget.host.id,
+                startedAt: _updateStartedAt!,
+                targetLabel: _updateTargetLabel,
+                previousVersion: _updatePreviousVersion,
+                previousCommitSha: _updatePreviousCommitSha,
+                updateChannel:
+                    _updateChannelAtStart ?? widget.node.updateChannel,
+                currentNode: widget.node,
+                operation: _updateOperation,
+                onDismiss: () => setState(() {
+                  _updateOperation = null;
+                  _updateStartedAt = null;
+                }),
+                onRetry: () {
+                  setState(() {
                     _updateOperation = null;
                     _updateStartedAt = null;
-                  }),
-                  onRetry: () {
-                    setState(() {
-                      _updateOperation = null;
-                      _updateStartedAt = null;
-                    });
-                    unawaited(_updateDaemon());
-                  },
-                ),
-                Divider(height: 1, color: colors.border),
-              ],
-              if (widget.node.supportsHostCapability('workspace', 'terminal'))
-                _ManagementRow(
-                  icon: Icons.terminal_rounded,
-                  label: 'Open terminal',
-                  detail: 'Open a shell on this machine.',
-                  busy: false,
-                  onTap: _openTerminal,
-                ),
-              if (widget.node.supportsHostCapability('workspace', 'terminal'))
-                Divider(height: 1, indent: 46, color: colors.border),
-              if (_supportsRestart)
-                _ManagementRow(
-                  icon: Icons.refresh_rounded,
-                  label: 'Restart $_providerDisplayName',
-                  detail: 'Leaves terminals running.',
-                  busy: _restartingProvider,
-                  onTap: _restartProvider,
-                ),
-              if (_supportsRestart)
-                Divider(height: 1, indent: 46, color: colors.border),
-              if (_supportsChannelSelection)
-                _ManagementRow(
-                  icon: Icons.alt_route_rounded,
-                  label: 'Release track',
-                  detail: _updateChannelDetail(),
-                  busy: _savingUpdateChannel,
-                  onTap: _pickUpdateChannel,
-                ),
-              if (_supportsChannelSelection)
-                Divider(height: 1, indent: 46, color: colors.border),
-              if (_updateSupported)
-                _ManagementRow(
-                  icon: _updateIcon,
-                  label: 'Update Sidemesh',
-                  detail: _updateDetail(),
-                  busy:
-                      _updating ||
-                      widget.checkingUpdateInfo ||
-                      (_updateOperation?.isInProgress ?? false),
-                  onTap:
-                      isOffline ||
-                          _updateStartedAt != null ||
-                          (_updateOperation?.isInProgress ?? false)
-                      ? null
-                      : () => unawaited(_updateDaemon()),
-                ),
-              if (_updateSupported)
-                Divider(height: 1, indent: 46, color: colors.border),
-              _ManagementRow(
-                icon: Icons.restart_alt_rounded,
-                label: 'Restart Sidemesh',
-                detail: 'Reconnects automatically after the restart.',
-                busy: _restartingDaemon,
-                onTap: _restartDaemon,
+                  });
+                  unawaited(_updateDaemon());
+                },
               ),
+              Divider(height: 1, color: colors.border),
             ],
-          ),
+            if (widget.node.supportsHostCapability('workspace', 'terminal'))
+              _ManagementRow(
+                icon: Icons.terminal_rounded,
+                label: 'Open terminal',
+                detail: 'Open a shell on this machine.',
+                busy: false,
+                onTap: _openTerminal,
+              ),
+            if (_supportsRestart)
+              _ManagementRow(
+                icon: Icons.refresh_rounded,
+                label: 'Restart $_providerDisplayName',
+                detail: 'Leaves terminals running.',
+                busy: _restartingProvider,
+                onTap: _restartProvider,
+              ),
+            if (_supportsChannelSelection)
+              _ManagementRow(
+                icon: Icons.alt_route_rounded,
+                label: 'Release track',
+                detail: _updateChannelDetail(),
+                busy: _savingUpdateChannel,
+                onTap: _pickUpdateChannel,
+              ),
+            if (_updateSupported)
+              _ManagementRow(
+                icon: _updateIcon,
+                label: 'Update Sidemesh',
+                detail: _updateDetail(),
+                busy:
+                    _updating ||
+                    widget.checkingUpdateInfo ||
+                    (_updateOperation?.isInProgress ?? false),
+                onTap:
+                    isOffline ||
+                        _updateStartedAt != null ||
+                        (_updateOperation?.isInProgress ?? false)
+                    ? null
+                    : () => unawaited(_updateDaemon()),
+              ),
+            _ManagementRow(
+              icon: Icons.restart_alt_rounded,
+              label: 'Restart Sidemesh',
+              detail: 'Reconnects automatically after the restart.',
+              busy: _restartingDaemon,
+              onTap: _restartDaemon,
+            ),
+          ],
         );
       },
     );
@@ -2642,69 +2209,19 @@ class _ManagementRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final colors = context.colors;
-    return MeshListRow(
-      framed: false,
-      dense: true,
-      radius: AppRadii.control,
-      enabled: !busy,
+    return AppSettingsRow(
+      icon: icon,
+      title: label,
+      subtitle: detail,
       onTap: busy ? null : onTap,
-      leading: Container(
-        width: 30,
-        height: 30,
-        decoration: BoxDecoration(
-          color: colors.surfaceMuted,
-          borderRadius: AppShapes.iconWell,
-          border: Border.all(color: colors.border),
-        ),
-        alignment: Alignment.center,
-        child: busy
-            ? SizedBox(
-                width: 14,
-                height: 14,
-                child: CircularProgressIndicator(
-                  strokeWidth: AppStrokes.focus,
-                  color: colors.textSecondary,
-                ),
-              )
-            : Icon(
-                icon,
-                size: AppSizes.compactIcon,
-                color: colors.textSecondary,
+      trailing: busy
+          ? const SizedBox.square(
+              dimension: AppSizes.icon,
+              child: CircularProgressIndicator(
+                strokeWidth: AppStrokes.indicator,
               ),
-      ),
-      title: Text(
-        label,
-        style: Theme.of(
-          context,
-        ).textTheme.bodyMedium?.copyWith(fontWeight: AppWeights.emphasis),
-      ),
-      subtitle: Text(
-        detail,
-        style: Theme.of(
-          context,
-        ).textTheme.bodySmall?.copyWith(color: colors.textSecondary),
-      ),
-    );
-  }
-}
-
-class _HostOverview {
-  const _HostOverview({
-    required this.node,
-    required this.workspaces,
-    required this.sessions,
-  });
-
-  final NodeInfo node;
-  final List<WorkspaceSummary> workspaces;
-  final List<SessionSummary> sessions;
-
-  _HostOverview copyWith({NodeInfo? node}) {
-    return _HostOverview(
-      node: node ?? this.node,
-      workspaces: workspaces,
-      sessions: sessions,
+            )
+          : const Icon(Icons.chevron_right_rounded),
     );
   }
 }
