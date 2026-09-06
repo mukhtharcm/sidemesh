@@ -344,11 +344,18 @@ class _EmbeddedHostHeader extends StatelessWidget {
           AppSizes.desktopGutter,
           AppSpacing.md,
         ),
-        child: AppSectionHeader(
-          title: host.label,
-          trailing: Row(
-            mainAxisSize: MainAxisSize.min,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: AppSpacing.md),
+          child: Row(
             children: [
+              Expanded(
+                child: Text(
+                  host.label,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: Theme.of(context).textTheme.titleMedium,
+                ),
+              ),
               IconButton(
                 tooltip: 'Refresh',
                 icon: const Icon(Icons.refresh_rounded),

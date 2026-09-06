@@ -50,6 +50,12 @@ void main() {
           expect(find.text('Machine tools'), findsNothing);
           expect(find.text('New session'), findsOneWidget);
           expect(find.text('Connection'), findsOneWidget);
+          if (desktop) {
+            expect(
+              tester.getCenter(find.text('Test machine')).dy,
+              closeTo(tester.getCenter(find.text('New session')).dy, 1),
+            );
+          }
           expect(find.text('Agents on this machine'), findsOneWidget);
           expect(find.text('Open terminal'), findsOneWidget);
           expect(find.text('Update Sidemesh'), findsOneWidget);
