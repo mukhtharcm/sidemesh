@@ -205,6 +205,19 @@ specific agent provider.
 
 ## Specific Gotchas
 
+- **Theme ownership**: run `python3 scripts/check_flutter_theme.py` before
+  Flutter tests. Use `lib/src/theme/` for tokens and component style recipes.
+  Do not restore local numeric typography, colors, padding, radii, button or
+  input recipes in screens. Message and status colors live in
+  `theme/message_text_styles.dart` and `theme/app_status_styles.dart`.
+  Transparent ownership surfaces, responsive layout constraints, and protocol
+  timings are not visual theme overrides.
+
+- **Trailing Flutter menus**: fixed-width action menus must set
+  `crossAxisUnconstrained: false` on `MenuAnchor`. Otherwise the visible panel
+  can shrink while its position still uses the fixed width, leaving a gap
+  beside the trigger. Check the visible panel with real fonts as well as tests.
+
 - **Duplicate daemon guard**: `sidemesh start` checks `healthz` and refuses to
   start if occupied. Use `--allow-duplicate` to skip.
 - **Config persistence**: `sidemesh setup` writes to `~/.sidemesh/config.json`
@@ -213,7 +226,12 @@ specific agent provider.
   Runtime `NodeConfig.port` may be `0` in tests or ephemeral dev servers;
   persisted config only allows `1-65535`, so serialization must omit `0`
   instead of writing it back to disk.
-- **macOS unsandboxed**: The macOS build runs unsandboxed by design. `file_picker` 11+ assumes sandboxed apps
+- **macOS launch callback**: `FlutterAppDelegate` can leave optional
+  `NSApplicationDelegate` callbacks unimplemented. Before calling
+  `super.applicationDidFinishLaunching`, check `instancesRespond(to:)` or
+  the launch can raise an unrecognized-selector exception on newer Flutter.
+- **macOS unsandboxed**: The macOS build runs unsandboxed by design.
+  `file_picker` 11+ assumes sandboxed apps
   and performs an entitlement check — we explicitly skip it in `main.dart`.
 - **macOS keychain**: Signed releases require a Developer ID provisioning
   profile and use the Data Protection Keychain. Packaging validates and embeds
@@ -226,8 +244,17 @@ specific agent provider.
   debug app bundle, early calls like `getApplicationSupportDirectory()` can
   crash at runtime. Prefer direct `~/Library/.../<bundle-id>` resolution for
   startup-critical local storage paths in this app.
+- **Platform density tests**: theme construction selects desktop or touch control
+  sizes from the active platform. Use `TargetPlatformVariant` in widget tests;
+  changing only `ThemeData.platform` after construction does not rebuild the
+  input and button themes.
 - **Flutter flavors**: Build/run commands must include `--flavor dev` or
   `--flavor prod`.
+- **Flutter control geometry**: shared button themes set platform-specific
+  minimum heights and `VisualDensity.standard`. Flutter's desktop density
+  otherwise reduces the painted button below that minimum. For a text field
+  inside an existing border, use `AppInputDecorations.borderless`; setting only
+  `border: InputBorder.none` leaves inherited enabled/focused borders active.
 - **TestFlight resume**: If App Store Connect accepts the IPA but a later
   metadata or internal-distribution step fails, rerun `Deploy to TestFlight`
   with `resume_existing_build` enabled. It resolves the exact committed

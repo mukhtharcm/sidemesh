@@ -61,19 +61,22 @@ jobs:
         working-directory: apps/mobile
         run: flutter pub get
 
-      - name: Run Flutter tests
-        working-directory: apps/mobile
-        run: flutter test
-
       - name: Analyze Flutter app
         working-directory: apps/mobile
         run: flutter analyze
+
+      - name: Check theme ownership
+        run: python3 scripts/check_flutter_theme.py
 
       - name: Check macOS keychain storage and profile validation
         run: |
           python3 scripts/test_macos_keychain_entitlements.py
           cd apps/mobile
           flutter test --dart-define=SIDEMESH_MACOS_USE_DATA_PROTECTION_KEYCHAIN=true test/host_store_test.dart
+
+      - name: Run Flutter tests
+        working-directory: apps/mobile
+        run: flutter test
 
       - name: Build Flutter web app
         working-directory: apps/mobile

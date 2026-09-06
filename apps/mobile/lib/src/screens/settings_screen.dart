@@ -18,6 +18,7 @@ import '../theme/app_colors.dart';
 import '../theme/app_tokens.dart';
 import '../theme/theme_controller.dart';
 import '../widgets/app_dialogs.dart';
+import '../widgets/app_menu.dart';
 import '../widgets/app_primitives.dart';
 import '../widgets/app_snackbar.dart';
 import '../widgets/appearance_sheet.dart';
@@ -31,32 +32,22 @@ Future<void> openSettingsScreen(
   VoidCallback? onResetSidebarWidth,
   VoidCallback? onResetInspectorWidth,
 }) {
-  final desktop = !kIsWeb && defaultTargetPlatform == TargetPlatform.macOS;
-  if (desktop) {
-    final colors = context.colors;
+  if (!kIsWeb &&
+      defaultTargetPlatform == TargetPlatform.macOS &&
+      MediaQuery.sizeOf(context).width >= 760) {
     return showDialog<void>(
       context: context,
-      builder: (dialogContext) => Dialog(
-        backgroundColor: Colors.transparent,
-        insetPadding: const EdgeInsets.symmetric(horizontal: 28, vertical: 22),
+      builder: (_) => Dialog(
+        clipBehavior: Clip.antiAlias,
         child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 920, maxHeight: 860),
-          child: DecoratedBox(
-            decoration: BoxDecoration(
-              color: colors.surfaceElevated,
-              borderRadius: AppShapes.dialog,
-              border: Border.all(color: colors.border),
-              boxShadow: AppShadows.dialog(colors.textPrimary),
-            ),
-            child: ClipRRect(
-              borderRadius: AppShapes.dialog,
-              child: SettingsScreen(
-                embedded: true,
-                onClose: () => Navigator.of(dialogContext).pop(),
-                onResetSidebarWidth: onResetSidebarWidth,
-                onResetInspectorWidth: onResetInspectorWidth,
-              ),
-            ),
+          constraints: const BoxConstraints(
+            maxWidth: AppSizes.settingsWidth,
+            maxHeight: AppSizes.settingsHeight,
+          ),
+          child: SettingsScreen(
+            embedded: true,
+            onResetSidebarWidth: onResetSidebarWidth,
+            onResetInspectorWidth: onResetInspectorWidth,
           ),
         ),
       ),
@@ -76,12 +67,14 @@ class SettingsScreen extends StatefulWidget {
   const SettingsScreen({
     super.key,
     this.embedded = false,
+    this.initialCategory,
     this.onClose,
     this.onResetSidebarWidth,
     this.onResetInspectorWidth,
   });
 
   final bool embedded;
+  final String? initialCategory;
   final VoidCallback? onClose;
   final VoidCallback? onResetSidebarWidth;
   final VoidCallback? onResetInspectorWidth;
@@ -91,6 +84,8 @@ class SettingsScreen extends StatefulWidget {
 }
 
 class _SettingsScreenState extends State<SettingsScreen> {
+  String _category = 'General';
+
   final AppUpdateSettingsStore _appUpdateStore =
       AppUpdateSettingsStore.instance;
   final AppVersionStore _appVersionStore = AppVersionStore.instance;
@@ -153,30 +148,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   Future<void> _editLaunchDefaults() async {
     if (!mounted) return;
-    final desktop = widget.embedded;
-    bool? updated;
-    if (desktop) {
-      updated = await showDialog<bool>(
-        context: context,
-        builder: (_) => Dialog(
-          backgroundColor: Colors.transparent,
-          insetPadding: const EdgeInsets.symmetric(
-            horizontal: 36,
-            vertical: 28,
-          ),
-          child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 520),
-            child: const _LaunchDefaultsSheet(embedded: true),
-          ),
-        ),
-      );
-    } else {
-      updated = await Navigator.of(context).push<bool>(
-        MaterialPageRoute<bool>(
-          builder: (_) => const _LaunchDefaultsSheet(page: true),
-        ),
-      );
-    }
+    final updated = await Navigator.of(context).push<bool>(
+      MaterialPageRoute<bool>(
+        builder: (_) => const _LaunchDefaultsSheet(page: true),
+      ),
+    );
     if (!mounted) return;
     if (updated == true) {
       showAppSnackBar(context, 'New session defaults updated.');
@@ -308,8 +284,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
         widget.onResetSidebarWidth != null ||
         widget.onResetInspectorWidth != null;
     final content = _SettingsContent(
-      embedded: widget.embedded,
-      onClose: widget.onClose,
+      category: widget.embedded ? _category : widget.initialCategory,
+      onAppearance: widget.embedded
+          ? () => setState(() => _category = 'Appearance')
+          : null,
       appUpdateStore: _appUpdateStore,
       appVersionStore: _appVersionStore,
       themeController: themeController,
@@ -337,11 +315,92 @@ class _SettingsScreenState extends State<SettingsScreen> {
       onReplayOnboarding: _replayOnboarding,
     );
     if (widget.embedded) {
-      return content;
+      return Column(
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(
+              AppSpacing.xl,
+              AppSpacing.md,
+              AppSpacing.md,
+              AppSpacing.md,
+            ),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    'Settings',
+                    style: Theme.of(context).textTheme.titleLarge,
+                  ),
+                ),
+                IconButton(
+                  tooltip: 'Close settings',
+                  icon: const Icon(Icons.close_rounded),
+                  onPressed: () => Navigator.of(context).pop(),
+                ),
+              ],
+            ),
+          ),
+          Expanded(
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                SizedBox(
+                  width: 168,
+                  child: Material(
+                    color: colors.surface,
+                    child: ListView(
+                      padding: const EdgeInsets.all(AppSpacing.md),
+                      children: [
+                        for (final category in [
+                          'General',
+                          'Appearance',
+                          'New sessions',
+                          'App updates',
+                          'Local data',
+                          'About',
+                        ])
+                          ListTile(
+                            dense: true,
+                            minTileHeight: AppSizes.desktopChoiceRow,
+                            contentPadding: const EdgeInsets.symmetric(
+                              horizontal: AppSpacing.md,
+                            ),
+                            title: Text(
+                              category,
+                              style: Theme.of(context).textTheme.bodyMedium,
+                            ),
+                            selected: _category == category,
+                            selectedTileColor: colors.surfaceMuted,
+                            selectedColor: colors.textPrimary,
+                            shape: RoundedRectangleBorder(
+                              borderRadius: AppShapes.input,
+                            ),
+                            onTap: () => setState(() => _category = category),
+                          ),
+                      ],
+                    ),
+                  ),
+                ),
+                VerticalDivider(width: 1, color: colors.border),
+                Expanded(
+                  child: switch (_category) {
+                    'Appearance' => const AppearanceSettings(embedded: true),
+                    'New sessions' => const Padding(
+                      padding: EdgeInsets.all(AppSpacing.xl),
+                      child: _LaunchDefaultsSheet(embedded: true),
+                    ),
+                    _ => content,
+                  },
+                ),
+              ],
+            ),
+          ),
+        ],
+      );
     }
     return Scaffold(
       backgroundColor: colors.canvas,
-      appBar: AppBar(title: const Text('Settings')),
+      appBar: AppBar(title: Text(widget.initialCategory ?? 'Settings')),
       body: content,
     );
   }
@@ -358,7 +417,7 @@ class _LaunchDefaultsSheet extends StatefulWidget {
 }
 
 class _LaunchDefaultsSheetState extends State<_LaunchDefaultsSheet> {
-  late final CreateSessionDefaults _initial;
+  late CreateSessionDefaults _initial;
   late CreateSessionDefaults _draft;
   bool _saving = false;
 
@@ -380,7 +439,15 @@ class _LaunchDefaultsSheetState extends State<_LaunchDefaultsSheet> {
     setState(() => _saving = true);
     await CreateSessionDefaultsStore.instance.setDefaults(_draft);
     if (!mounted) return;
-    Navigator.of(context).pop(true);
+    if (widget.embedded) {
+      setState(() {
+        _initial = _draft;
+        _saving = false;
+      });
+      showAppSnackBar(context, 'New session defaults saved.');
+    } else {
+      Navigator.of(context).pop(true);
+    }
   }
 
   Future<void> _pickApproval() async {
@@ -460,7 +527,9 @@ class _LaunchDefaultsSheetState extends State<_LaunchDefaultsSheet> {
                       ),
                       if (index != values.length - 1)
                         Padding(
-                          padding: const EdgeInsets.only(left: 52),
+                          padding: const EdgeInsets.only(
+                            left: AppSizes.nestedRowIndent,
+                          ),
                           child: Divider(
                             height: 1,
                             color: context.colors.border,
@@ -508,22 +577,11 @@ class _LaunchDefaultsSheetState extends State<_LaunchDefaultsSheet> {
     required String Function(T value) label,
     required ValueChanged<T> onChanged,
   }) {
-    return DropdownButtonHideUnderline(
-      child: DropdownButton<T>(
-        value: value,
-        isDense: true,
-        borderRadius: AppShapes.input,
-        icon: const Icon(Icons.expand_more_rounded),
-        items: [
-          for (final option in values)
-            DropdownMenuItem<T>(value: option, child: Text(label(option))),
-        ],
-        onChanged: _saving
-            ? null
-            : (next) {
-                if (next != null) onChanged(next);
-              },
-      ),
+    return AppSelect<T>(
+      value: value,
+      values: values,
+      label: label,
+      onChanged: _saving ? null : onChanged,
     );
   }
 
@@ -543,7 +601,7 @@ class _LaunchDefaultsSheetState extends State<_LaunchDefaultsSheet> {
             Row(
               children: [
                 Icon(Icons.rocket_launch_rounded, color: colors.accent),
-                const SizedBox(width: 10),
+                const SizedBox(width: AppSpacing.compact),
                 Expanded(
                   child: Text(
                     'New session defaults',
@@ -559,15 +617,15 @@ class _LaunchDefaultsSheetState extends State<_LaunchDefaultsSheet> {
                 ),
               ],
             ),
-            const SizedBox(height: 8),
+            const SizedBox(height: AppSpacing.sm),
             Text(
               'Used when you start a new session.',
               style: Theme.of(context).textTheme.bodySmall?.copyWith(
                 color: colors.textSecondary,
-                height: 1.35,
+                height: AppLineHeights.caption,
               ),
             ),
-            const SizedBox(height: 16),
+            const SizedBox(height: AppSpacing.lg),
           ],
           AppSettingsRow(
             icon: Icons.bolt_rounded,
@@ -638,14 +696,16 @@ class _LaunchDefaultsSheetState extends State<_LaunchDefaultsSheet> {
           ),
           if (_draft.sandbox == SandboxMode.dangerFullAccess ||
               _draft.approval == ApprovalPolicy.never) ...[
-            const SizedBox(height: 16),
+            const SizedBox(height: AppSpacing.lg),
             Container(
-              padding: const EdgeInsets.all(12),
+              padding: const EdgeInsets.all(AppSpacing.md),
               decoration: BoxDecoration(
-                color: colors.warning.withValues(alpha: 0.11),
+                color: colors.warning.withValues(alpha: AppEmphasis.tint),
                 borderRadius: AppShapes.input,
                 border: Border.all(
-                  color: colors.warning.withValues(alpha: 0.3),
+                  color: colors.warning.withValues(
+                    alpha: AppEmphasis.borderTint,
+                  ),
                 ),
               ),
               child: Text(
@@ -654,7 +714,7 @@ class _LaunchDefaultsSheetState extends State<_LaunchDefaultsSheet> {
                     : 'New sessions will run without asking for approval.',
                 style: Theme.of(context).textTheme.bodySmall?.copyWith(
                   color: colors.textPrimary,
-                  height: 1.35,
+                  height: AppLineHeights.caption,
                 ),
               ),
             ),
@@ -711,6 +771,7 @@ class _LaunchDefaultsSheetState extends State<_LaunchDefaultsSheet> {
         ),
       );
     }
+    if (widget.embedded) return content;
     return Padding(
       padding: widget.embedded
           ? EdgeInsets.zero
@@ -733,8 +794,8 @@ typedef _ThemeModeLabelFor = String Function(ThemeMode mode);
 
 class _SettingsContent extends StatelessWidget {
   const _SettingsContent({
-    required this.embedded,
-    required this.onClose,
+    this.category,
+    this.onAppearance,
     required this.appUpdateStore,
     required this.appVersionStore,
     required this.themeController,
@@ -762,8 +823,8 @@ class _SettingsContent extends StatelessWidget {
     required this.onReplayOnboarding,
   });
 
-  final bool embedded;
-  final VoidCallback? onClose;
+  final String? category;
+  final VoidCallback? onAppearance;
   final AppUpdateSettingsStore appUpdateStore;
   final AppVersionStore appVersionStore;
   final ThemeController themeController;
@@ -805,91 +866,95 @@ class _SettingsContent extends StatelessWidget {
         !kIsWeb && defaultTargetPlatform == TargetPlatform.macOS;
     final list = ListView(
       padding: EdgeInsets.fromLTRB(
-        embedded ? AppSpacing.xl : AppSpacing.lg,
         AppSpacing.lg,
-        embedded ? AppSpacing.xl : AppSpacing.lg,
+        AppSpacing.lg,
+        AppSpacing.lg,
         AppSpacing.xxl,
       ),
       children: [
-        _SettingsSection(
-          icon: Icons.palette_rounded,
-          title: 'Appearance & device',
-          subtitle: 'Theme, text, and screen behavior.',
-          children: [
-            ListenableBuilder(
-              listenable: themeController,
-              builder: (context, _) => _SettingsCard(
-                icon: Icons.palette_rounded,
-                title: 'Appearance',
-                subtitle:
-                    '${themeModeLabelFor(themeController.mode)} · ${themeController.variant.label} · ${themeController.typography.interfaceFont.label}',
-                trailing: TextButton(
-                  onPressed: () => showAppearanceSheet(context),
-                  child: const Text('Customize'),
+        if (category == null || category == 'General')
+          _SettingsSection(
+            icon: Icons.palette_rounded,
+            title: 'Appearance & device',
+            subtitle: 'Theme, text, and screen behavior.',
+            children: [
+              ListenableBuilder(
+                listenable: themeController,
+                builder: (context, _) => _ActionRow(
+                  icon: Icons.palette_outlined,
+                  title: 'Appearance',
+                  subtitle:
+                      '${themeModeLabelFor(themeController.mode)} · ${themeController.variant.label} · ${themeController.typography.interfaceFont.label}',
+                  onTap: onAppearance ?? () => showAppearanceSheet(context),
                 ),
               ),
-            ),
-            const SizedBox(height: AppSpacing.md),
-            ListenableBuilder(
-              listenable: screenAwakeStore,
-              builder: (context, _) {
-                final enabled = screenAwakeStore.keepScreenAwakeWhileAgentRuns;
-                return _ToggleTile(
-                  icon: Icons.screen_lock_portrait_rounded,
-                  title: 'Keep screen awake while agent runs',
-                  subtitle: enabled
-                      ? 'Stays awake during active work.'
-                      : 'The device can sleep normally.',
-                  value: enabled,
-                  onChanged: (value) => unawaited(
-                    screenAwakeStore.setKeepScreenAwakeWhileAgentRuns(value),
-                  ),
-                );
-              },
-            ),
-          ],
-        ),
-        const SizedBox(height: AppSpacing.xl),
-        _SettingsSection(
-          icon: Icons.notifications_rounded,
-          title: 'Alerts',
-          subtitle: 'Notification permissions and background support.',
-          children: [
-            _SettingsCard(
-              icon: Icons.notifications_rounded,
-              title: 'Notifications',
-              subtitle: notificationsLoading
-                  ? 'Checking device notification status...'
-                  : notificationsSupported
-                  ? notificationsAllowed
-                        ? 'Agent and approval alerts are enabled.'
-                        : 'Agent and approval alerts are available but currently disabled.'
-                  : 'This platform does not support agent alerts.',
-              trailing: notificationsSupported && !notificationsAllowed
-                  ? FilledButton(
-                      onPressed: notificationsRequesting
-                          ? null
-                          : () => unawaited(onRequestNotifications()),
-                      child: Text(
-                        notificationsRequesting ? 'Enabling...' : 'Enable',
-                      ),
-                    )
-                  : IconButton(
-                      tooltip: 'Refresh notification status',
-                      onPressed: notificationsLoading
-                          ? null
-                          : () => unawaited(onRefreshNotifications()),
-                      icon: const Icon(Icons.refresh_rounded),
+              const Divider(
+                height: 1,
+                indent: AppSpacing.md + AppSizes.icon + AppSpacing.sm,
+                endIndent: AppSpacing.md,
+              ),
+              ListenableBuilder(
+                listenable: screenAwakeStore,
+                builder: (context, _) {
+                  final enabled =
+                      screenAwakeStore.keepScreenAwakeWhileAgentRuns;
+                  return _ToggleTile(
+                    icon: Icons.screen_lock_portrait_rounded,
+                    title: 'Keep screen awake',
+                    subtitle: enabled
+                        ? 'While an agent is running.'
+                        : 'The device can sleep normally.',
+                    value: enabled,
+                    onChanged: (value) => unawaited(
+                      screenAwakeStore.setKeepScreenAwakeWhileAgentRuns(value),
                     ),
-            ),
-          ],
-        ),
-        const SizedBox(height: AppSpacing.xl),
-        if (showAppUpdateSection) ...[
+                  );
+                },
+              ),
+            ],
+          ),
+        if (category == null || category == 'General')
+          _SettingsSection(
+            icon: Icons.notifications_rounded,
+            title: 'Alerts',
+            subtitle: 'Notification permissions and background support.',
+            children: [
+              _SettingsCard(
+                icon: Icons.notifications_rounded,
+                title: 'Notifications',
+                subtitle: notificationsLoading
+                    ? 'Checking device notification status...'
+                    : notificationsSupported
+                    ? notificationsAllowed
+                          ? 'Agent and approval alerts are enabled.'
+                          : 'Agent and approval alerts are available but currently disabled.'
+                    : 'This platform does not support agent alerts.',
+                trailing: notificationsSupported && !notificationsAllowed
+                    ? FilledButton(
+                        onPressed: notificationsRequesting
+                            ? null
+                            : () => unawaited(onRequestNotifications()),
+                        child: Text(
+                          notificationsRequesting ? 'Enabling...' : 'Enable',
+                        ),
+                      )
+                    : IconButton(
+                        tooltip: 'Refresh notification status',
+                        onPressed: notificationsLoading
+                            ? null
+                            : () => unawaited(onRefreshNotifications()),
+                        icon: const Icon(Icons.refresh_rounded),
+                      ),
+              ),
+            ],
+          ),
+        if (showAppUpdateSection &&
+            (category == null || category == 'App updates')) ...[
           _SettingsSection(
             icon: Icons.system_update_rounded,
             title: 'App updates',
-            subtitle: 'Sparkle checks and release cadence.',
+            openAsPage: category == null,
+            subtitle: 'Automatic checks and installed version.',
             children: [
               _AppUpdateSettingsCard(
                 appUpdateStore: appUpdateStore,
@@ -901,192 +966,109 @@ class _SettingsContent extends StatelessWidget {
               ),
             ],
           ),
-          const SizedBox(height: AppSpacing.xl),
         ],
-        _SettingsSection(
-          icon: Icons.rocket_launch_rounded,
-          title: 'Session defaults',
-          subtitle: 'Starting values before host-specific overrides.',
-          children: [
-            ListenableBuilder(
-              listenable: defaultsStore,
-              builder: (context, _) {
-                final defaults = defaultsStore.defaults;
-                return _SettingsCard(
-                  icon: Icons.rocket_launch_rounded,
-                  title: 'New session defaults',
-                  subtitle:
-                      '${defaults.approval.label} · ${defaults.sandbox.label}',
-                  footer: Wrap(
-                    spacing: AppSpacing.sm,
-                    runSpacing: AppSpacing.sm,
-                    children: [
-                      MeshPill(
-                        label: defaults.fastMode
-                            ? 'fast mode on'
-                            : 'fast mode off',
-                        icon: Icons.bolt_rounded,
-                        tone: defaults.fastMode
-                            ? MeshPillTone.accent
-                            : MeshPillTone.neutral,
-                      ),
-                      MeshPill(
-                        label: defaults.webSearch
-                            ? 'web search on'
-                            : 'web search off',
-                        icon: Icons.public_rounded,
-                        tone: defaults.webSearch
-                            ? MeshPillTone.info
-                            : MeshPillTone.neutral,
-                      ),
-                    ],
-                  ),
-                  trailing: TextButton(
-                    onPressed: () => unawaited(onEditLaunchDefaults()),
-                    child: const Text('Edit'),
-                  ),
-                );
-              },
-            ),
-          ],
-        ),
-        const SizedBox(height: AppSpacing.xl),
-        _SettingsSection(
-          icon: Icons.warning_amber_rounded,
-          title: 'Local data',
-          subtitle: 'Clear information saved only on this device.',
-          children: [
-            Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                _ActionRow(
-                  icon: Icons.history_rounded,
-                  title: 'Clear saved transcript cache',
-                  danger: true,
-                  subtitle: 'Drop saved recent sessions and saved logs.',
-                  busy: busyAction == 'transcript-cache',
-                  onTap: () => unawaited(
-                    onRunStorageAction(
-                      key: 'transcript-cache',
-                      title: 'Clear saved transcript cache?',
-                      body:
-                          'This removes saved recent sessions and saved transcripts from this device. Open panes keep their current contents until refreshed.',
-                      action: SessionLocalStore.instance.clearAll,
-                      successMessage: 'Saved transcript cache cleared.',
-                    ),
-                  ),
-                ),
-                Divider(color: colors.border, indent: 52),
-                _ActionRow(
-                  icon: Icons.image_rounded,
-                  title: 'Clear saved image cache',
-                  danger: true,
-                  subtitle: 'Remove saved image blobs from disk.',
-                  busy: busyAction == 'image-cache',
-                  onTap: () => unawaited(
-                    onRunStorageAction(
-                      key: 'image-cache',
-                      title: 'Clear saved image cache?',
-                      body:
-                          'This removes downloaded image blobs saved on this device. Images already open may remain visible until reopened.',
-                      action: ImageBlobCacheStore.instance.clearAll,
-                      successMessage: 'Saved image cache cleared.',
-                    ),
-                  ),
-                ),
-                Divider(color: colors.border, indent: 52),
-                _ActionRow(
-                  icon: Icons.outbox_rounded,
-                  title: 'Clear queued sends',
-                  danger: true,
-                  subtitle:
-                      'Discard queued retries that have not already started.',
-                  busy: busyAction == 'queued-sends',
-                  onTap: () => unawaited(
-                    onRunStorageAction(
-                      key: 'queued-sends',
-                      title: 'Clear queued sends?',
-                      body:
-                          'This discards locally queued messages waiting for retry. A retry already in progress may still finish. Remote sessions are unchanged.',
-                      action: SessionSendOutboxStore.instance.clearAll,
-                      successMessage: 'Queued sends cleared.',
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ],
-        ),
-
-        const SizedBox(height: AppSpacing.xl),
-        _AboutFooter(
-          platformLabel: platformLabel,
-          hasDesktopControls: hasDesktopControls,
-          onResetSidebarWidth: onResetSidebarWidth,
-          onResetInspectorWidth: onResetInspectorWidth,
-          onReplayOnboarding: onReplayOnboarding,
-        ),
-      ],
-    );
-
-    final centered = AppContentColumn(child: list);
-
-    if (!embedded) {
-      return centered;
-    }
-
-    return Column(
-      children: [
-        Padding(
-          padding: const EdgeInsets.fromLTRB(24, 22, 24, 18),
-          child: Row(
+        if (category == null)
+          _SettingsSection(
+            icon: Icons.rocket_launch_rounded,
+            title: 'Session defaults',
+            subtitle: 'Starting values before host-specific overrides.',
             children: [
-              Container(
-                width: 38,
-                height: 38,
-                decoration: BoxDecoration(
-                  color: colors.accentMuted,
-                  borderRadius: AppShapes.input,
-                  border: Border.all(
-                    color: colors.accent.withValues(alpha: 0.28),
-                  ),
-                ),
-                alignment: Alignment.center,
-                child: Icon(Icons.tune_rounded, size: 20, color: colors.accent),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      'Settings',
-                      style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                        fontWeight: AppWeights.title,
-                      ),
-                    ),
-                    const SizedBox(height: 2),
-                    Text(
-                      'Global app controls for appearance, alerts, defaults, and local data.',
-                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                        color: colors.textSecondary,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              MeshIconButton(
-                icon: Icons.close_rounded,
-                tooltip: 'Close',
-                onTap: onClose ?? () => Navigator.of(context).maybePop(),
+              ListenableBuilder(
+                listenable: defaultsStore,
+                builder: (context, _) {
+                  final defaults = defaultsStore.defaults;
+                  return _ActionRow(
+                    icon: Icons.tune_rounded,
+                    title: 'New session defaults',
+                    subtitle:
+                        '${defaults.approval.label} · ${defaults.sandbox.label}',
+                    onTap: () => unawaited(onEditLaunchDefaults()),
+                  );
+                },
               ),
             ],
           ),
-        ),
-        Divider(height: 1, color: colors.border),
-        Expanded(child: centered),
+        if (category == null || category == 'Local data')
+          _SettingsSection(
+            icon: Icons.warning_amber_rounded,
+            title: 'Local data',
+            openAsPage: category == null,
+            subtitle: 'Clear information saved only on this device.',
+            children: [
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  _ActionRow(
+                    icon: Icons.history_rounded,
+                    title: 'Clear saved transcript cache',
+                    danger: true,
+                    subtitle: 'Drop saved recent sessions and saved logs.',
+                    busy: busyAction == 'transcript-cache',
+                    onTap: () => unawaited(
+                      onRunStorageAction(
+                        key: 'transcript-cache',
+                        title: 'Clear saved transcript cache?',
+                        body:
+                            'This removes saved recent sessions and saved transcripts from this device. Open panes keep their current contents until refreshed.',
+                        action: SessionLocalStore.instance.clearAll,
+                        successMessage: 'Saved transcript cache cleared.',
+                      ),
+                    ),
+                  ),
+                  Divider(color: colors.border, indent: 52),
+                  _ActionRow(
+                    icon: Icons.image_rounded,
+                    title: 'Clear saved image cache',
+                    danger: true,
+                    subtitle: 'Remove saved image blobs from disk.',
+                    busy: busyAction == 'image-cache',
+                    onTap: () => unawaited(
+                      onRunStorageAction(
+                        key: 'image-cache',
+                        title: 'Clear saved image cache?',
+                        body:
+                            'This removes downloaded image blobs saved on this device. Images already open may remain visible until reopened.',
+                        action: ImageBlobCacheStore.instance.clearAll,
+                        successMessage: 'Saved image cache cleared.',
+                      ),
+                    ),
+                  ),
+                  Divider(color: colors.border, indent: 52),
+                  _ActionRow(
+                    icon: Icons.outbox_rounded,
+                    title: 'Clear queued sends',
+                    danger: true,
+                    subtitle:
+                        'Discard queued retries that have not already started.',
+                    busy: busyAction == 'queued-sends',
+                    onTap: () => unawaited(
+                      onRunStorageAction(
+                        key: 'queued-sends',
+                        title: 'Clear queued sends?',
+                        body:
+                            'This discards locally queued messages waiting for retry. A retry already in progress may still finish. Remote sessions are unchanged.',
+                        action: SessionSendOutboxStore.instance.clearAll,
+                        successMessage: 'Queued sends cleared.',
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+
+        if (category == null || category == 'About')
+          _AboutFooter(
+            platformLabel: platformLabel,
+            hasDesktopControls: hasDesktopControls,
+            onResetSidebarWidth: onResetSidebarWidth,
+            onResetInspectorWidth: onResetInspectorWidth,
+            onReplayOnboarding: onReplayOnboarding,
+          ),
       ],
     );
+
+    return AppContentColumn(child: list);
   }
 }
 
@@ -1096,27 +1078,67 @@ class _SettingsSection extends StatelessWidget {
     required this.title,
     required this.subtitle,
     required this.children,
+    this.openAsPage = false,
   });
 
   final IconData icon;
   final String title;
   final String subtitle;
   final List<Widget> children;
+  final bool openAsPage;
 
   @override
   Widget build(BuildContext context) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        AppSectionHeader(icon: icon, title: title, subtitle: subtitle),
-        Padding(
-          padding: const EdgeInsets.only(top: AppSpacing.sm),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: children,
+    if (openAsPage) {
+      return Padding(
+        padding: const EdgeInsets.only(bottom: AppSpacing.xl),
+        child: Material(
+          color: context.colors.surfaceElevated,
+          borderRadius: AppShapes.card,
+          child: AppSettingsRow(
+            icon: icon,
+            title: title,
+            subtitle: subtitle,
+            trailing: const Icon(Icons.chevron_right_rounded),
+            onTap: () => Navigator.of(context).push(
+              MaterialPageRoute<void>(
+                builder: (_) => SettingsScreen(initialCategory: title),
+              ),
+            ),
           ),
         ),
-      ],
+      );
+    }
+    return Padding(
+      padding: const EdgeInsets.only(bottom: AppSpacing.xl),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(
+              AppSpacing.md,
+              0,
+              AppSpacing.md,
+              AppSpacing.sm,
+            ),
+            child: Text(
+              title,
+              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                color: context.colors.textSecondary,
+              ),
+            ),
+          ),
+          Material(
+            color: context.colors.surfaceElevated,
+            borderRadius: AppShapes.card,
+            clipBehavior: Clip.antiAlias,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: children,
+            ),
+          ),
+        ],
+      ),
     );
   }
 }
@@ -1165,7 +1187,7 @@ class _AppUpdateSettingsCard extends StatelessWidget {
             ? automaticChecks
                   ? '${settings.intervalLabel} background checks are on.'
                   : 'Automatic checks are off. Manual checks still work.'
-            : 'This build does not include the signed Sparkle feed.';
+            : 'Automatic updates are unavailable in this build.';
         final versionLabel = versionInfo.loaded
             ? versionInfo.displayVersion
             : 'Version unavailable';
@@ -1174,7 +1196,7 @@ class _AppUpdateSettingsCard extends StatelessWidget {
             : loadFailed
             ? 'Sidemesh could not reach its macOS updater. Retry the connection, or restart the app if the problem continues.'
             : supported
-            ? 'You are on $versionLabel. Release builds can check for newer signed macOS downloads in the background.'
+            ? 'You are on $versionLabel. '
             : 'You are on $versionLabel. Install the signed production macOS build if you want in-app update checks.';
         final selectedInterval = settings.selectedIntervalOption;
         return _SettingsCard(
@@ -1206,8 +1228,7 @@ class _AppUpdateSettingsCard extends StatelessWidget {
                     _ToggleTile(
                       icon: Icons.schedule_rounded,
                       title: 'Check automatically',
-                      subtitle:
-                          'Let Sidemesh ask Sparkle for new releases on a schedule. Manual checks stay available either way.',
+                      subtitle: 'Check for updates in the background.',
                       value: automaticChecks,
                       onChanged: !appUpdateStore.saving
                           ? (value) =>
@@ -1244,7 +1265,7 @@ class _AppUpdateSettingsCard extends StatelessWidget {
                         'Automatic checks are off, so this cadence is currently paused.',
                         style: Theme.of(context).textTheme.bodySmall?.copyWith(
                           color: colors.textSecondary,
-                          height: 1.3,
+                          height: AppLineHeights.label,
                         ),
                       ),
                     ],
@@ -1275,26 +1296,26 @@ class _UpdateIntervalOptionButton extends StatelessWidget {
     final colors = context.colors;
     final background = selected ? colors.accentMuted : colors.surfaceMuted;
     final borderColor = selected
-        ? colors.accent.withValues(alpha: 0.32)
+        ? colors.accent.withValues(alpha: AppEmphasis.borderTint)
         : colors.border;
     final titleColor = enabled
         ? colors.textPrimary
-        : colors.textSecondary.withValues(alpha: 0.9);
+        : colors.textSecondary.withValues(alpha: AppEmphasis.strong);
     final detailColor = enabled
         ? colors.textSecondary
-        : colors.textSecondary.withValues(alpha: 0.72);
+        : colors.textSecondary.withValues(alpha: AppEmphasis.secondary);
     return Opacity(
-      opacity: enabled ? 1 : 0.58,
+      opacity: enabled ? AppEmphasis.full : AppEmphasis.disabled,
       child: InkWell(
         borderRadius: AppShapes.input,
         onTap: enabled ? onTap : null,
         child: AnimatedContainer(
-          duration: const Duration(milliseconds: 160),
-          curve: Curves.easeOut,
+          duration: AppMotion.quick,
+          curve: AppMotion.standard,
           width: 148,
           padding: const EdgeInsets.symmetric(
             horizontal: AppSpacing.md,
-            vertical: 10,
+            vertical: AppSpacing.compact,
           ),
           decoration: BoxDecoration(
             color: background,
@@ -1311,7 +1332,7 @@ class _UpdateIntervalOptionButton extends StatelessWidget {
                   color: titleColor,
                 ),
               ),
-              const SizedBox(height: 2),
+              const SizedBox(height: AppSpacing.xxs),
               Text(
                 option.detail,
                 style: Theme.of(context).textTheme.bodySmall?.copyWith(
@@ -1366,7 +1387,7 @@ class _AboutFooter extends StatelessWidget {
             'Sidemesh on $platformLabel. Hosts, tokens, favorites, caches, and other local state stay inside this app install.',
             style: Theme.of(context).textTheme.bodySmall?.copyWith(
               color: colors.textSecondary,
-              height: 1.35,
+              height: AppLineHeights.caption,
             ),
           ),
           if (onReplayOnboarding != null ||
@@ -1381,19 +1402,28 @@ class _AboutFooter extends StatelessWidget {
                 if (onReplayOnboarding != null)
                   OutlinedButton.icon(
                     onPressed: onReplayOnboarding,
-                    icon: const Icon(Icons.replay_rounded, size: 16),
+                    icon: const Icon(
+                      Icons.replay_rounded,
+                      size: AppSizes.compactIcon,
+                    ),
                     label: const Text('Replay onboarding'),
                   ),
                 if (hasDesktopControls && onResetSidebarWidth != null)
                   OutlinedButton.icon(
                     onPressed: onResetSidebarWidth,
-                    icon: const Icon(Icons.view_sidebar_rounded, size: 16),
+                    icon: const Icon(
+                      Icons.view_sidebar_rounded,
+                      size: AppSizes.compactIcon,
+                    ),
                     label: const Text('Reset sidebar'),
                   ),
                 if (hasDesktopControls && onResetInspectorWidth != null)
                   OutlinedButton.icon(
                     onPressed: onResetInspectorWidth,
-                    icon: const Icon(Icons.tune_rounded, size: 16),
+                    icon: const Icon(
+                      Icons.tune_rounded,
+                      size: AppSizes.compactIcon,
+                    ),
                     label: const Text('Reset inspector'),
                   ),
               ],
@@ -1480,7 +1510,9 @@ class _ActionRow extends StatelessWidget {
       trailing: busy
           ? const SizedBox.square(
               dimension: AppSizes.icon,
-              child: CircularProgressIndicator(strokeWidth: 2),
+              child: CircularProgressIndicator(
+                strokeWidth: AppStrokes.indicator,
+              ),
             )
           : const Icon(Icons.chevron_right_rounded),
     );

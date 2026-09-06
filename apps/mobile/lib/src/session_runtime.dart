@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import 'models.dart';
 import 'widgets/mesh_widgets.dart';
+import 'theme/app_status_styles.dart';
 
 List<String> buildRuntimeHighlights(SessionRuntimeSummary? runtime) {
   if (runtime == null) {
@@ -85,7 +86,9 @@ List<String> buildRuntimeCardHighlights(SessionRuntimeSummary? runtime) {
   if (runtime == null) return const [];
   final labels = <String>[];
   if ((runtime.model ?? '').isNotEmpty) labels.add(runtime.model!);
-  if ((runtime.mode ?? '').isNotEmpty) labels.add(sessionModeLabel(runtime.mode!));
+  if ((runtime.mode ?? '').isNotEmpty) {
+    labels.add(sessionModeLabel(runtime.mode!));
+  }
   return labels;
 }
 

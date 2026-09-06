@@ -21,7 +21,7 @@ Future<void> showWorkspaceBrowserDialog(
 }) {
   return showDialog<void>(
     context: context,
-    barrierColor: Colors.black.withValues(alpha: 0.32),
+    barrierColor: AppOverlayColors.modalBarrier,
     builder: (dialogContext) => _WorkspaceBrowserDialog(
       host: host,
       api: api,
@@ -74,7 +74,12 @@ class _WorkspaceBrowserDialogState extends State<_WorkspaceBrowserDialog> {
 
     return Dialog(
       backgroundColor: Colors.transparent,
-      insetPadding: const EdgeInsets.symmetric(horizontal: 40, vertical: 40),
+      shape: const RoundedRectangleBorder(),
+      elevation: 0,
+      insetPadding: const EdgeInsets.symmetric(
+        horizontal: AppSpacing.xxxl,
+        vertical: AppSpacing.xxxl,
+      ),
       child: ConstrainedBox(
         constraints: BoxConstraints(
           maxWidth: maxWidth.toDouble(),
@@ -149,9 +154,7 @@ class _WorkspaceBrowserDialogState extends State<_WorkspaceBrowserDialog> {
                               title: _selected == null
                                   ? 'Preview'
                                   : baseName(_selected!),
-                              subtitle: _selected == null
-                                  ? 'Choose a file to open it here.'
-                                  : _selected!,
+                              subtitle: _selected == null ? '' : _selected!,
                               trailing: _selected == null
                                   ? null
                                   : ListenableBuilder(
@@ -220,12 +223,21 @@ class _DialogHeader extends StatelessWidget {
     final theme = Theme.of(context);
     final rootLabel = baseName(root).isEmpty ? root : baseName(root);
     return Padding(
-      padding: const EdgeInsets.fromLTRB(18, 14, 10, 14),
+      padding: const EdgeInsets.fromLTRB(
+        AppSpacing.lg,
+        AppSpacing.md,
+        AppSpacing.compact,
+        AppSpacing.md,
+      ),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.center,
         children: [
-          Icon(Icons.folder_open_rounded, size: 18, color: colors.accent),
-          const SizedBox(width: 10),
+          Icon(
+            Icons.folder_open_rounded,
+            size: AppSizes.inlineIcon,
+            color: colors.accent,
+          ),
+          const SizedBox(width: AppSpacing.compact),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -236,10 +248,10 @@ class _DialogHeader extends StatelessWidget {
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: theme.textTheme.titleMedium?.copyWith(
-                    fontWeight: FontWeight.w700,
+                    fontWeight: AppWeights.strong,
                   ),
                 ),
-                const SizedBox(height: 2),
+                const SizedBox(height: AppSpacing.xxs),
                 Text(
                   '${host.label} · $rootLabel',
                   maxLines: 1,
@@ -254,7 +266,7 @@ class _DialogHeader extends StatelessWidget {
           IconButton(
             tooltip: 'Close',
             onPressed: onClose,
-            icon: const Icon(Icons.close_rounded, size: 20),
+            icon: const Icon(Icons.close_rounded, size: AppSizes.icon),
           ),
         ],
       ),
@@ -280,7 +292,12 @@ class _DialogPaneHeader extends StatelessWidget {
     final colors = context.colors;
     final theme = Theme.of(context);
     return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 12, 12, 12),
+      padding: const EdgeInsets.fromLTRB(
+        AppSpacing.lg,
+        AppSpacing.md,
+        AppSpacing.md,
+        AppSpacing.md,
+      ),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -293,9 +310,9 @@ class _DialogPaneHeader extends StatelessWidget {
               border: Border.all(color: colors.border),
             ),
             alignment: Alignment.center,
-            child: Icon(icon, size: 17, color: colors.accent),
+            child: Icon(icon, size: AppSizes.inlineIcon, color: colors.accent),
           ),
-          const SizedBox(width: 10),
+          const SizedBox(width: AppSpacing.compact),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -305,23 +322,28 @@ class _DialogPaneHeader extends StatelessWidget {
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: theme.textTheme.labelLarge?.copyWith(
-                    fontWeight: FontWeight.w700,
+                    fontWeight: AppWeights.strong,
                     color: colors.textPrimary,
                   ),
                 ),
-                const SizedBox(height: 2),
-                Text(
-                  subtitle,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: theme.textTheme.bodySmall?.copyWith(
-                    color: colors.textSecondary,
+                if (subtitle.isNotEmpty) ...[
+                  const SizedBox(height: AppSpacing.xxs),
+                  Text(
+                    subtitle,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: colors.textSecondary,
+                    ),
                   ),
-                ),
+                ],
               ],
             ),
           ),
-          if (trailing != null) ...[const SizedBox(width: 8), trailing!],
+          if (trailing != null) ...[
+            const SizedBox(width: AppSpacing.sm),
+            trailing!,
+          ],
         ],
       ),
     );

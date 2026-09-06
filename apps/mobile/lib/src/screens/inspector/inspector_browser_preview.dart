@@ -4,6 +4,7 @@ import '../../api_client.dart';
 import '../../models.dart';
 import 'inspector_controller.dart';
 import '../browser_preview_screen.dart';
+import '../../theme/app_tokens.dart';
 
 InspectorSurface buildInspectorBrowserPreviewSurface({
   required String ownerKey,
@@ -23,7 +24,10 @@ InspectorSurface buildInspectorBrowserPreviewSurface({
             IconButton(
               tooltip: 'Open in new window',
               onPressed: onOpenInWindow,
-              icon: const Icon(Icons.open_in_new_rounded, size: 18),
+              icon: const Icon(
+                Icons.open_in_new_rounded,
+                size: AppSizes.inlineIcon,
+              ),
               visualDensity: VisualDensity.compact,
             ),
           ],
@@ -32,6 +36,7 @@ InspectorSurface buildInspectorBrowserPreviewSurface({
       api: api,
       preview: preview,
       showHeader: false,
+      autoResizeViewport: true,
     ),
   );
 }

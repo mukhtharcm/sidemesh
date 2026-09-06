@@ -8,7 +8,12 @@ class AppDelegate: FlutterAppDelegate {
   private var updaterChannel: FlutterMethodChannel?
 
   override func applicationDidFinishLaunching(_ notification: Notification) {
-    super.applicationDidFinishLaunching(notification)
+    // NSApplicationDelegate callbacks are optional on FlutterAppDelegate.
+    if FlutterAppDelegate.instancesRespond(
+      to: #selector(NSApplicationDelegate.applicationDidFinishLaunching(_:))
+    ) {
+      super.applicationDidFinishLaunching(notification)
+    }
     configureUpdater()
   }
 

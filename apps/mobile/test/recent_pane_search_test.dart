@@ -2,12 +2,14 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:sidemesh_mobile/src/api_client.dart';
 import 'package:sidemesh_mobile/src/db.dart';
 import 'package:sidemesh_mobile/src/models.dart';
 import 'package:sidemesh_mobile/src/recent_session_view_store.dart';
+import 'package:sidemesh_mobile/src/recent_sessions_live_store.dart';
 import 'package:sidemesh_mobile/src/screens/home_screen.dart';
 import 'package:sidemesh_mobile/src/session_local_store.dart';
 import 'package:sidemesh_mobile/src/session_read_store.dart';
@@ -49,6 +51,79 @@ void main() {
     RecentSessionViewStore.instance.resetForTest();
     await SessionReadStore.instance.ensureLoaded();
   });
+
+  for (final dark in [false, true]) {
+    testWidgets(
+      'session search supports keyboard selection and return ($dark)',
+      (tester) async {
+        final now = DateTime(2026, 1, 1);
+        final api = _FakeSearchApiClient(
+          sessions: [
+            _session(id: 'first', title: 'First session', updatedAt: now),
+            _session(
+              id: 'second',
+              title: 'Second session',
+              updatedAt: now.subtract(const Duration(minutes: 1)),
+            ),
+          ],
+          searchResults: {
+            'needle': [
+              _session(id: 'match', title: 'Found session', updatedAt: now),
+            ],
+          },
+        );
+        RemoteSessionEntry? picked;
+        final theme = ThemeVariant.codexAmber;
+        await tester.pumpWidget(
+          MaterialApp(
+            theme: dark
+                ? buildDarkTheme(theme.dark)
+                : buildLightTheme(theme.light),
+            home: Builder(
+              builder: (context) => Scaffold(
+                body: TextButton(
+                  onPressed: () async => picked = await showSessionSearch(
+                    context,
+                    hosts: [host],
+                    api: api,
+                  ),
+                  child: const Text('Open search'),
+                ),
+              ),
+            ),
+          ),
+        );
+        await tester.tap(find.text('Open search'));
+        await tester.pumpAndSettle();
+        expect(find.text('First session'), findsOneWidget);
+        await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+        await tester.pump();
+        await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+        await tester.pumpAndSettle();
+        expect(picked?.session.id, 'second');
+        expect(find.byType(Dialog), findsNothing);
+
+        await tester.tap(find.text('Open search'));
+        await tester.pumpAndSettle();
+        await tester.enterText(
+          find.byKey(const ValueKey('session-search-input')),
+          'needle',
+        );
+        await tester.pump(const Duration(milliseconds: 350));
+        await tester.pumpAndSettle();
+        expect(find.text('Found session'), findsOneWidget);
+        expect(find.text('First session'), findsNothing);
+        await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+        await tester.pumpAndSettle();
+        expect(find.byType(Dialog), findsNothing);
+        expect(picked, isNull);
+        expect(tester.takeException(), isNull);
+        await tester.pumpWidget(const SizedBox());
+        await tester.pumpAndSettle();
+      },
+      variant: TargetPlatformVariant.only(TargetPlatform.macOS),
+    );
+  }
 
   testWidgets(
     'falls back to local filtering when query shrinks below two characters',

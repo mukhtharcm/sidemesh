@@ -4,6 +4,7 @@ import '../theme/app_colors.dart';
 import '../theme/app_tokens.dart';
 import 'app_primitives.dart';
 import 'mesh_widgets.dart';
+import '../theme/app_status_styles.dart';
 
 /// Shared visual atoms used by launch-option surfaces (create-session,
 /// new-session defaults in settings, per-session overrides).
@@ -37,14 +38,19 @@ class LaunchFieldFrame extends StatelessWidget {
     return MeshSurface(
       tone: MeshSurfaceTone.muted,
       radius: AppRadii.control,
-      padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
+      padding: const EdgeInsets.fromLTRB(
+        AppSpacing.md,
+        AppSpacing.compact,
+        AppSpacing.md,
+        AppSpacing.compact,
+      ),
       child: Row(
         crossAxisAlignment: alignTop
             ? CrossAxisAlignment.start
             : CrossAxisAlignment.center,
         children: [
           Padding(
-            padding: EdgeInsets.only(top: alignTop ? 2 : 0),
+            padding: EdgeInsets.only(top: alignTop ? AppSpacing.xxs : 0),
             child: _IconChip(icon: icon, tone: _IconChipTone.surface),
           ),
           const SizedBox(width: AppSpacing.md),
@@ -53,7 +59,7 @@ class LaunchFieldFrame extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 _CapsLabel(text: label),
-                const SizedBox(height: 6),
+                const SizedBox(height: AppSpacing.tight),
                 child,
               ],
             ),
@@ -94,7 +100,12 @@ class LaunchSelectorRow extends StatelessWidget {
       tone: MeshSurfaceTone.muted,
       radius: AppRadii.control,
       onTap: onTap,
-      padding: const EdgeInsets.fromLTRB(12, 10, 10, 10),
+      padding: const EdgeInsets.fromLTRB(
+        AppSpacing.md,
+        AppSpacing.compact,
+        AppSpacing.compact,
+        AppSpacing.compact,
+      ),
       child: Row(
         children: [
           _IconChip(icon: icon, tone: _IconChipTone.accent),
@@ -104,7 +115,7 @@ class LaunchSelectorRow extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 _CapsLabel(text: label),
-                const SizedBox(height: 3),
+                const SizedBox(height: AppSpacing.xs),
                 Text(
                   value,
                   style: Theme.of(context).textTheme.bodyMedium?.copyWith(
@@ -113,7 +124,7 @@ class LaunchSelectorRow extends StatelessWidget {
                   ),
                 ),
                 if (detail.trim().isNotEmpty) ...[
-                  const SizedBox(height: 1),
+                  const SizedBox(height: AppSpacing.hairline),
                   Text(
                     detail,
                     maxLines: 1,
@@ -208,8 +219,8 @@ class LaunchChoiceWrap<T> extends StatelessWidget {
       children: [
         Row(
           children: [
-            Icon(icon, size: 14, color: colors.textSecondary),
-            const SizedBox(width: 6),
+            Icon(icon, size: AppSizes.smallIcon, color: colors.textSecondary),
+            const SizedBox(width: AppSpacing.tight),
             Text(
               label,
               style: Theme.of(context).textTheme.labelMedium?.copyWith(
@@ -219,7 +230,7 @@ class LaunchChoiceWrap<T> extends StatelessWidget {
             ),
           ],
         ),
-        const SizedBox(height: 7),
+        const SizedBox(height: AppSpacing.sm),
         Wrap(
           spacing: 7,
           runSpacing: 7,
@@ -229,14 +240,14 @@ class LaunchChoiceWrap<T> extends StatelessWidget {
             final accent = optionDanger ? colors.danger : colors.accent;
             return InkWell(
               onTap: () => onChanged(option),
-              borderRadius: BorderRadius.circular(999),
+              borderRadius: BorderRadius.circular(AppRadii.capsule),
               child: Container(
                 padding: AppPadding.pill,
                 decoration: BoxDecoration(
                   color: selected
-                      ? accent.withValues(alpha: 0.14)
+                      ? accent.withValues(alpha: AppEmphasis.tint)
                       : colors.surfaceMuted,
-                  borderRadius: BorderRadius.circular(999),
+                  borderRadius: BorderRadius.circular(AppRadii.capsule),
                   border: selected ? Border.all(color: accent) : null,
                 ),
                 child: Row(
@@ -250,7 +261,7 @@ class LaunchChoiceWrap<T> extends StatelessWidget {
                       ),
                     ),
                     if (isDefault?.call(option) ?? false) ...[
-                      const SizedBox(width: 5),
+                      const SizedBox(width: AppSpacing.xs),
                       Text(
                         'Default',
                         style: Theme.of(context).textTheme.labelSmall?.copyWith(
@@ -314,14 +325,14 @@ class LaunchInfoLine extends StatelessWidget {
     return Row(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Icon(icon, size: 15, color: colors.textTertiary),
-        const SizedBox(width: 7),
+        Icon(icon, size: AppSizes.compactIcon, color: colors.textTertiary),
+        const SizedBox(width: AppSpacing.sm),
         Expanded(
           child: Text(
             text,
             style: Theme.of(context).textTheme.bodySmall?.copyWith(
               color: colors.textSecondary,
-              height: 1.3,
+              height: AppLineHeights.label,
             ),
           ),
         ),
@@ -362,7 +373,7 @@ class _CapsLabel extends StatelessWidget {
       style: Theme.of(context).textTheme.labelSmall?.copyWith(
         color: colors.textSecondary,
         fontWeight: AppWeights.emphasis,
-        letterSpacing: 0.1,
+        letterSpacing: AppLetterSpacing.caps,
       ),
     );
   }

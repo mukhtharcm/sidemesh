@@ -10,6 +10,7 @@ import '../widgets/mesh_widgets.dart';
 import '../workspace_live_store.dart';
 import 'file_viewer_pane.dart';
 import 'file_viewer_screen.dart';
+import '../theme/app_tokens.dart';
 
 /// Embeddable workspace browser tree. Manages its own live subscription,
 /// changed-path badges, and expansion state. Use [FileBrowserScreen] for
@@ -104,7 +105,12 @@ class _FileBrowserTreeState extends State<FileBrowserTree> {
   @override
   Widget build(BuildContext context) {
     return ListView(
-      padding: const EdgeInsets.fromLTRB(8, 6, 8, 24),
+      padding: const EdgeInsets.fromLTRB(
+        AppSpacing.sm,
+        AppSpacing.tight,
+        AppSpacing.sm,
+        AppSpacing.xl,
+      ),
       children: [
         _DirectoryNode(
           host: widget.host,
@@ -168,9 +174,9 @@ class FileBrowserScreen extends StatelessWidget {
               overflow: TextOverflow.ellipsis,
               style: Theme.of(
                 context,
-              ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700),
+              ).textTheme.titleMedium?.copyWith(fontWeight: AppWeights.strong),
             ),
-            const SizedBox(height: 2),
+            const SizedBox(height: AppSpacing.xxs),
             Text(
               'On ${host.label}',
               maxLines: 1,
@@ -294,13 +300,15 @@ class _DirectoryNodeState extends State<_DirectoryNode> {
               ? const SizedBox(
                   width: 14,
                   height: 14,
-                  child: CircularProgressIndicator(strokeWidth: 2),
+                  child: CircularProgressIndicator(
+                    strokeWidth: AppStrokes.indicator,
+                  ),
                 )
               : Icon(
                   _expanded
                       ? Icons.keyboard_arrow_down_rounded
                       : Icons.keyboard_arrow_right_rounded,
-                  size: 18,
+                  size: AppSizes.inlineIcon,
                   color: colors.textTertiary,
                 ),
           onTap: () {
@@ -310,7 +318,12 @@ class _DirectoryNodeState extends State<_DirectoryNode> {
         ),
         if (_expanded && _error != null)
           Padding(
-            padding: EdgeInsets.fromLTRB(indent + 22, 4, 8, 8),
+            padding: EdgeInsets.fromLTRB(
+              indent + AppSpacing.xl,
+              AppSpacing.xs,
+              AppSpacing.sm,
+              AppSpacing.sm,
+            ),
             child: Row(
               crossAxisAlignment: CrossAxisAlignment.center,
               children: [
@@ -322,7 +335,7 @@ class _DirectoryNodeState extends State<_DirectoryNode> {
                     ).textTheme.bodySmall?.copyWith(color: colors.danger),
                   ),
                 ),
-                const SizedBox(width: 8),
+                const SizedBox(width: AppSpacing.sm),
                 TextButton(onPressed: _load, child: const Text('Retry')),
               ],
             ),
@@ -420,28 +433,35 @@ class _Row extends StatelessWidget {
     final colors = context.colors;
     return Material(
       color: selected ? colors.accentMuted : Colors.transparent,
-      borderRadius: BorderRadius.circular(8),
+      borderRadius: BorderRadius.circular(AppRadii.control),
       child: InkWell(
         onTap: onTap,
-        borderRadius: BorderRadius.circular(8),
+        borderRadius: BorderRadius.circular(AppRadii.control),
         child: Padding(
-          padding: EdgeInsets.fromLTRB(indent + 8, 6, 8, 6),
+          padding: EdgeInsets.fromLTRB(
+            indent + AppSpacing.sm,
+            AppSpacing.tight,
+            AppSpacing.sm,
+            AppSpacing.tight,
+          ),
           child: Row(
             children: [
-              Icon(icon, size: 16, color: iconColor),
-              const SizedBox(width: 8),
+              Icon(icon, size: AppSizes.compactIcon, color: iconColor),
+              const SizedBox(width: AppSpacing.sm),
               Expanded(
                 child: Text(
                   title,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                    fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+                    fontWeight: selected
+                        ? AppWeights.strong
+                        : AppWeights.emphasis,
                   ),
                 ),
               ),
               if (modified) ...[
-                const SizedBox(width: 6),
+                const SizedBox(width: AppSpacing.tight),
                 Container(
                   width: 6,
                   height: 6,
@@ -451,7 +471,10 @@ class _Row extends StatelessWidget {
                   ),
                 ),
               ],
-              if (trailing != null) ...[const SizedBox(width: 6), trailing!],
+              if (trailing != null) ...[
+                const SizedBox(width: AppSpacing.tight),
+                trailing!,
+              ],
             ],
           ),
         ),

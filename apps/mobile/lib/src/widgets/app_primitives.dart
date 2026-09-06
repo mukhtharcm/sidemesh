@@ -55,8 +55,12 @@ class AppSectionHeader extends StatelessWidget {
             SizedBox(
               width: AppSizes.icon,
               child: Padding(
-                padding: const EdgeInsets.only(top: 1),
-                child: Icon(icon, size: AppSizes.icon, color: colors.accent),
+                padding: const EdgeInsets.only(top: AppSpacing.hairline),
+                child: Icon(
+                  icon,
+                  size: AppSizes.icon,
+                  color: colors.textSecondary,
+                ),
               ),
             ),
             const SizedBox(width: AppSpacing.sm),
@@ -101,7 +105,7 @@ class AppSettingsRow extends StatelessWidget {
     this.danger = false,
   });
 
-  final IconData icon;
+  final IconData? icon;
   final String title;
   final String? subtitle;
   final Widget? trailing;
@@ -112,14 +116,21 @@ class AppSettingsRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colors = context.colors;
+    final desktop = AppSizes.usesPointerControls(Theme.of(context).platform);
     final foreground = danger ? colors.danger : colors.textPrimary;
     final iconColor = danger ? colors.danger : colors.textSecondary;
     final content = ConstrainedBox(
-      constraints: const BoxConstraints(minHeight: AppSizes.rowMinHeight),
+      constraints: BoxConstraints(
+        minHeight: AppSizes.usesPointerControls(Theme.of(context).platform)
+            ? AppSizes.menuItem
+            : AppSizes.rowMinHeight,
+      ),
       child: Padding(
-        padding: const EdgeInsets.symmetric(
+        padding: EdgeInsets.symmetric(
           horizontal: AppSpacing.md,
-          vertical: AppSpacing.sm,
+          vertical: AppSizes.usesPointerControls(Theme.of(context).platform)
+              ? AppSpacing.xs
+              : AppSpacing.sm,
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -127,14 +138,16 @@ class AppSettingsRow extends StatelessWidget {
             Row(
               crossAxisAlignment: CrossAxisAlignment.center,
               children: [
-                SizedBox(
-                  width: AppSizes.icon,
-                  child: Align(
-                    alignment: Alignment.centerLeft,
-                    child: Icon(icon, size: AppSizes.icon, color: iconColor),
+                if (icon != null) ...[
+                  SizedBox(
+                    width: AppSizes.icon,
+                    child: Align(
+                      alignment: Alignment.centerLeft,
+                      child: Icon(icon, size: AppSizes.icon, color: iconColor),
+                    ),
                   ),
-                ),
-                const SizedBox(width: AppSpacing.sm),
+                  const SizedBox(width: AppSpacing.sm),
+                ],
                 Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
@@ -142,16 +155,21 @@ class AppSettingsRow extends StatelessWidget {
                     children: [
                       Text(
                         title,
-                        style: Theme.of(
-                          context,
-                        ).textTheme.titleSmall?.copyWith(color: foreground),
+                        style:
+                            (desktop
+                                    ? Theme.of(context).textTheme.bodyMedium
+                                    : Theme.of(context).textTheme.bodyLarge)
+                                ?.copyWith(color: foreground),
                       ),
                       if (subtitle != null && subtitle!.trim().isNotEmpty) ...[
                         const SizedBox(height: AppSpacing.xs),
                         Text(
                           subtitle!,
-                          style: Theme.of(context).textTheme.bodySmall
-                              ?.copyWith(color: colors.textSecondary),
+                          style:
+                              (desktop
+                                      ? Theme.of(context).textTheme.bodySmall
+                                      : Theme.of(context).textTheme.bodyMedium)
+                                  ?.copyWith(color: colors.textSecondary),
                         ),
                       ],
                     ],
@@ -166,8 +184,8 @@ class AppSettingsRow extends StatelessWidget {
             if (footer != null) ...[
               const SizedBox(height: AppSpacing.sm),
               Padding(
-                padding: const EdgeInsets.only(
-                  left: AppSizes.icon + AppSpacing.sm,
+                padding: EdgeInsets.only(
+                  left: icon == null ? 0 : AppSizes.icon + AppSpacing.sm,
                 ),
                 child: footer!,
               ),
@@ -274,7 +292,7 @@ class AppChoiceRow extends StatelessWidget {
       selected: selected,
       child: Material(
         color: selected
-            ? selectedBackground ?? colors.accentMuted
+            ? selectedBackground ?? colors.surfaceMuted
             : Colors.transparent,
         borderRadius: AppShapes.input,
         child: InkWell(
@@ -290,12 +308,12 @@ class AppChoiceRow extends StatelessWidget {
                   height: AppSizes.iconWell,
                   child: Icon(
                     selected
-                        ? Icons.radio_button_checked_rounded
+                        ? Icons.check_rounded
                         : icon ?? Icons.radio_button_off_rounded,
                     size: AppSizes.icon,
                     color: interactive
                         ? signalColor
-                        : signalColor.withValues(alpha: 0.45),
+                        : signalColor.withValues(alpha: AppEmphasis.disabled),
                   ),
                 ),
                 const SizedBox(width: AppSpacing.sm),
@@ -316,7 +334,7 @@ class AppChoiceRow extends StatelessWidget {
                           style: Theme.of(context).textTheme.bodySmall
                               ?.copyWith(
                                 color: colors.textSecondary,
-                                height: 1.35,
+                                height: AppLineHeights.caption,
                               ),
                         ),
                       ],
@@ -384,7 +402,10 @@ class AppListSection extends StatelessWidget {
           children[index],
           if (index != children.length - 1)
             Padding(
-              padding: EdgeInsets.only(left: dividerIndent),
+              padding: EdgeInsets.only(
+                left: dividerIndent,
+                right: AppSpacing.md,
+              ),
               child: Divider(height: 1, color: colors.border),
             ),
         ],

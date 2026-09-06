@@ -1,6 +1,8 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+
+import '../theme/app_tokens.dart';
 import 'package:flutter/services.dart';
 
 import '../theme/app_colors.dart';
@@ -86,7 +88,7 @@ Future<void> showImageGalleryViewer(
   if (resolved == ImageViewerPresentation.dialog) {
     return showDialog<void>(
       context: context,
-      barrierColor: Colors.black.withValues(alpha: 0.4),
+      barrierColor: AppOverlayColors.modalBarrier,
       builder: (_) =>
           _ImageViewerDialog(sources: sources, initialIndex: clampedIndex),
     );
@@ -164,16 +166,16 @@ class _ImageViewerScreenState extends State<ImageViewerScreen> {
   void _goPrevious() {
     if (!_canGoPrevious) return;
     _pageController.previousPage(
-      duration: const Duration(milliseconds: 180),
-      curve: Curves.easeOutCubic,
+      duration: AppMotion.quick,
+      curve: AppMotion.standard,
     );
   }
 
   void _goNext() {
     if (!_canGoNext) return;
     _pageController.nextPage(
-      duration: const Duration(milliseconds: 180),
-      curve: Curves.easeOutCubic,
+      duration: AppMotion.quick,
+      curve: AppMotion.standard,
     );
   }
 
@@ -206,7 +208,7 @@ class _ImageViewerScreenState extends State<ImageViewerScreen> {
       onClose: () => Navigator.of(context).maybePop(),
       onToggleChrome: _toggleChrome,
       child: Scaffold(
-        backgroundColor: Colors.black,
+        backgroundColor: AppMediaColors.background,
         body: Stack(
           children: [
             Positioned.fill(
@@ -232,16 +234,26 @@ class _ImageViewerScreenState extends State<ImageViewerScreen> {
               child: IgnorePointer(
                 ignoring: !_chromeVisible,
                 child: AnimatedOpacity(
-                  duration: const Duration(milliseconds: 180),
-                  opacity: _chromeVisible ? 1 : 0,
+                  duration: AppMotion.quick,
+                  opacity: _chromeVisible ? AppEmphasis.full : 0,
                   child: SafeArea(
                     bottom: false,
                     child: Container(
-                      margin: const EdgeInsets.fromLTRB(12, 12, 12, 0),
-                      padding: const EdgeInsets.fromLTRB(8, 8, 10, 8),
+                      margin: const EdgeInsets.fromLTRB(
+                        AppSpacing.md,
+                        AppSpacing.md,
+                        AppSpacing.md,
+                        0,
+                      ),
+                      padding: const EdgeInsets.fromLTRB(
+                        AppSpacing.sm,
+                        AppSpacing.sm,
+                        AppSpacing.compact,
+                        AppSpacing.sm,
+                      ),
                       decoration: BoxDecoration(
-                        color: const Color.fromRGBO(0, 0, 0, 0.72),
-                        borderRadius: BorderRadius.circular(18),
+                        color: AppMediaColors.overlay,
+                        borderRadius: AppShapes.panel,
                       ),
                       child: Row(
                         children: [
@@ -249,7 +261,7 @@ class _ImageViewerScreenState extends State<ImageViewerScreen> {
                             onPressed: () => Navigator.of(context).maybePop(),
                             icon: const Icon(
                               Icons.arrow_back_rounded,
-                              color: Colors.white,
+                              color: AppMediaColors.foreground,
                             ),
                           ),
                           if (countLabel != null)
@@ -258,8 +270,8 @@ class _ImageViewerScreenState extends State<ImageViewerScreen> {
                                 countLabel,
                                 style: Theme.of(context).textTheme.titleMedium
                                     ?.copyWith(
-                                      color: Colors.white,
-                                      fontWeight: FontWeight.w700,
+                                      color: AppMediaColors.foreground,
+                                      fontWeight: AppWeights.strong,
                                     ),
                               ),
                             )
@@ -290,13 +302,18 @@ class _ImageViewerScreenState extends State<ImageViewerScreen> {
               child: IgnorePointer(
                 ignoring: !_chromeVisible,
                 child: AnimatedOpacity(
-                  duration: const Duration(milliseconds: 180),
-                  opacity: _chromeVisible ? 1 : 0,
+                  duration: AppMotion.quick,
+                  opacity: _chromeVisible ? AppEmphasis.full : 0,
                   child: _ImageViewerCaption(
                     title: _currentSource.title,
                     subtitle: _currentSource.subtitle,
                     dark: true,
-                    margin: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+                    margin: const EdgeInsets.fromLTRB(
+                      AppSpacing.md,
+                      0,
+                      AppSpacing.md,
+                      AppSpacing.md,
+                    ),
                   ),
                 ),
               ),
@@ -352,7 +369,7 @@ class ImageViewerPaneState extends State<ImageViewerPane>
     super.initState();
     _animationController = AnimationController(
       vsync: this,
-      duration: const Duration(milliseconds: 180),
+      duration: AppMotion.quick,
     );
     _transformController.addListener(_handleTransformChanged);
     unawaited(_resolveImageProvider());
@@ -423,6 +440,16 @@ class ImageViewerPaneState extends State<ImageViewerPane>
     }
   }
 
+  Future<void> _retryImage() async {
+    final provider = _resolvedImageProvider;
+    setState(() {
+      _resolvedImageProvider = null;
+      _loadError = null;
+    });
+    await provider?.evict();
+    if (mounted) await _resolveImageProvider();
+  }
+
   void _handleTransformChanged() => changes.value++;
 
   double get scale => _transformController.value.getMaxScaleOnAxis();
@@ -473,7 +500,7 @@ class ImageViewerPaneState extends State<ImageViewerPane>
     controller.stop();
     _matrixAnimation?.removeListener(_handleMatrixAnimationTick);
     _matrixAnimation = Matrix4Tween(begin: begin, end: end).animate(
-      CurvedAnimation(parent: controller, curve: Curves.easeOutCubic),
+      CurvedAnimation(parent: controller, curve: AppMotion.standard),
     )..addListener(_handleMatrixAnimationTick);
     controller
       ..reset()
@@ -520,18 +547,18 @@ class ImageViewerPaneState extends State<ImageViewerPane>
     Widget child;
     if (imageProvider == null) {
       child = _loadError == null
-          ? const _ImageViewerLoadingState()
-          : _ImageViewerErrorState(title: widget.source.title);
+          ? const MeshLoader(label: 'Loading image')
+          : _ImageViewerErrorState(onRetry: _retryImage);
     } else {
       child = Image(
         image: imageProvider,
         fit: BoxFit.contain,
         frameBuilder: (context, imageChild, frame, _) {
           if (frame != null) return imageChild;
-          return const _ImageViewerLoadingState();
+          return const MeshLoader(label: 'Loading image');
         },
         errorBuilder: (context, error, stackTrace) =>
-            _ImageViewerErrorState(title: widget.source.title),
+            _ImageViewerErrorState(onRetry: _retryImage),
       );
       final heroTag = widget.source.heroTag;
       if ((heroTag ?? '').isNotEmpty) {
@@ -550,6 +577,9 @@ class ImageViewerPaneState extends State<ImageViewerPane>
     return LayoutBuilder(
       builder: (context, constraints) {
         _viewportSize = Size(constraints.maxWidth, constraints.maxHeight);
+        if (_resolvedImageProvider == null) {
+          return _buildImageChild(constraints);
+        }
         return GestureDetector(
           onTap: widget.onTap,
           onDoubleTapDown: (details) =>
@@ -560,7 +590,7 @@ class ImageViewerPaneState extends State<ImageViewerPane>
               transformationController: _transformController,
               minScale: _minScale,
               maxScale: _maxScale,
-              boundaryMargin: const EdgeInsets.all(72),
+              boundaryMargin: const EdgeInsets.all(AppSizes.previewGutter),
               clipBehavior: Clip.hardEdge,
               trackpadScrollCausesScale: true,
               scaleFactor: 200,
@@ -577,15 +607,25 @@ class ImageViewerPaneState extends State<ImageViewerPane>
     final colors = context.colors;
     if (widget.immersive) {
       return ColoredBox(
-        color: Colors.black,
+        color: AppMediaColors.background,
         child: _buildInteractiveViewport(context),
       );
     }
 
     final outerPadding = widget.dense
-        ? const EdgeInsets.fromLTRB(10, 8, 10, 12)
-        : const EdgeInsets.fromLTRB(12, 10, 12, 24);
-    final panelRadius = BorderRadius.circular(widget.dense ? 18 : 22);
+        ? const EdgeInsets.fromLTRB(
+            AppSpacing.compact,
+            AppSpacing.sm,
+            AppSpacing.compact,
+            AppSpacing.md,
+          )
+        : const EdgeInsets.fromLTRB(
+            AppSpacing.md,
+            AppSpacing.compact,
+            AppSpacing.md,
+            AppSpacing.xl,
+          );
+    final panelRadius = AppShapes.panel;
 
     return Padding(
       padding: outerPadding,
@@ -594,13 +634,7 @@ class ImageViewerPaneState extends State<ImageViewerPane>
           color: colors.surface,
           borderRadius: panelRadius,
           border: Border.all(color: colors.border),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withValues(alpha: 0.08),
-              blurRadius: 18,
-              offset: const Offset(0, 8),
-            ),
-          ],
+          boxShadow: [AppShadows.surface(colors.textPrimary)],
         ),
         child: ClipRRect(
           borderRadius: panelRadius,
@@ -608,38 +642,6 @@ class ImageViewerPaneState extends State<ImageViewerPane>
             decoration: BoxDecoration(color: colors.surfaceMuted),
             child: _buildInteractiveViewport(context),
           ),
-        ),
-      ),
-    );
-  }
-}
-
-class _ImageViewerLoadingState extends StatelessWidget {
-  const _ImageViewerLoadingState();
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.all(20),
-      child: MeshCard(
-        tone: MeshCardTone.muted,
-        padding: const EdgeInsets.all(18),
-        child: const Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            MeshSectionHeadingSkeleton(
-              titleWidthFactor: 0.22,
-              subtitleWidthFactor: 0.42,
-            ),
-            SizedBox(height: 16),
-            Expanded(
-              child: MeshSkeleton(
-                width: double.infinity,
-                height: double.infinity,
-                radius: 18,
-              ),
-            ),
-          ],
         ),
       ),
     );
@@ -661,8 +663,8 @@ class ImageViewerActions extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final s = state;
-    final foreground = dark ? Colors.white : null;
-    final iconSize = compact ? 17.0 : 18.0;
+    final foreground = dark ? AppMediaColors.foreground : null;
+    final iconSize = AppSizes.inlineIcon;
     final spacing = compact ? 2.0 : 4.0;
     return IconTheme(
       data: IconThemeData(color: foreground),
@@ -752,16 +754,16 @@ class _ImageViewerDialogState extends State<_ImageViewerDialog> {
   void _goPrevious() {
     if (!_canGoPrevious) return;
     _pageController.previousPage(
-      duration: const Duration(milliseconds: 180),
-      curve: Curves.easeOutCubic,
+      duration: AppMotion.quick,
+      curve: AppMotion.standard,
     );
   }
 
   void _goNext() {
     if (!_canGoNext) return;
     _pageController.nextPage(
-      duration: const Duration(milliseconds: 180),
-      curve: Curves.easeOutCubic,
+      duration: AppMotion.quick,
+      curve: AppMotion.standard,
     );
   }
 
@@ -797,15 +799,22 @@ class _ImageViewerDialogState extends State<_ImageViewerDialog> {
       onClose: () => Navigator.of(context).maybePop(),
       child: Dialog(
         backgroundColor: colors.surface,
-        insetPadding: const EdgeInsets.symmetric(horizontal: 40, vertical: 40),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+        insetPadding: const EdgeInsets.symmetric(
+          horizontal: AppSpacing.xxxl,
+          vertical: AppSpacing.xxxl,
+        ),
         child: ConstrainedBox(
           constraints: BoxConstraints(maxWidth: maxWidth, maxHeight: maxHeight),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               Padding(
-                padding: const EdgeInsets.fromLTRB(18, 14, 10, 14),
+                padding: const EdgeInsets.fromLTRB(
+                  AppSpacing.lg,
+                  AppSpacing.md,
+                  AppSpacing.compact,
+                  AppSpacing.md,
+                ),
                 child: Row(
                   children: [
                     Container(
@@ -813,19 +822,21 @@ class _ImageViewerDialogState extends State<_ImageViewerDialog> {
                       height: 34,
                       decoration: BoxDecoration(
                         color: colors.accentMuted,
-                        borderRadius: BorderRadius.circular(12),
+                        borderRadius: AppShapes.iconWell,
                         border: Border.all(
-                          color: colors.accent.withValues(alpha: 0.32),
+                          color: colors.accent.withValues(
+                            alpha: AppEmphasis.borderTint,
+                          ),
                         ),
                       ),
                       alignment: Alignment.center,
                       child: Icon(
                         Icons.image_rounded,
-                        size: 18,
+                        size: AppSizes.inlineIcon,
                         color: colors.accent,
                       ),
                     ),
-                    const SizedBox(width: 12),
+                    const SizedBox(width: AppSpacing.md),
                     Expanded(
                       child: _ImageViewerHeaderText(
                         title: source.title,
@@ -836,19 +847,25 @@ class _ImageViewerDialogState extends State<_ImageViewerDialog> {
                       IconButton(
                         tooltip: 'Previous',
                         onPressed: _canGoPrevious ? _goPrevious : null,
-                        icon: const Icon(Icons.chevron_left_rounded, size: 20),
+                        icon: const Icon(
+                          Icons.chevron_left_rounded,
+                          size: AppSizes.icon,
+                        ),
                       ),
                       IconButton(
                         tooltip: 'Next',
                         onPressed: _canGoNext ? _goNext : null,
-                        icon: const Icon(Icons.chevron_right_rounded, size: 20),
+                        icon: const Icon(
+                          Icons.chevron_right_rounded,
+                          size: AppSizes.icon,
+                        ),
                       ),
-                      const SizedBox(width: 4),
+                      const SizedBox(width: AppSpacing.xs),
                       MeshPill(
                         label: '${_index + 1} / ${widget.sources.length}',
                         mono: true,
                       ),
-                      const SizedBox(width: 8),
+                      const SizedBox(width: AppSpacing.sm),
                     ],
                     ListenableBuilder(
                       listenable: _observables[_index],
@@ -859,7 +876,10 @@ class _ImageViewerDialogState extends State<_ImageViewerDialog> {
                     IconButton(
                       tooltip: 'Close',
                       onPressed: () => Navigator.of(context).pop(),
-                      icon: const Icon(Icons.close_rounded, size: 20),
+                      icon: const Icon(
+                        Icons.close_rounded,
+                        size: AppSizes.icon,
+                      ),
                     ),
                   ],
                 ),
@@ -1037,22 +1057,27 @@ class _ImageViewerCaption extends StatelessWidget {
   Widget build(BuildContext context) {
     final subtitleText = (subtitle ?? '').trim();
     final titleStyle = Theme.of(context).textTheme.titleSmall?.copyWith(
-      color: dark ? Colors.white : null,
-      fontWeight: FontWeight.w700,
+      color: dark ? AppMediaColors.foreground : null,
+      fontWeight: AppWeights.strong,
     );
     final subtitleStyle = Theme.of(context).textTheme.bodySmall?.copyWith(
-      color: dark ? Colors.white70 : context.colors.textTertiary,
-      height: 1.35,
+      color: dark ? AppMediaColors.secondary : context.colors.textTertiary,
+      height: AppLineHeights.caption,
     );
     return SafeArea(
       top: false,
       child: Container(
         width: double.infinity,
         margin: margin,
-        padding: const EdgeInsets.fromLTRB(16, 12, 16, 18),
+        padding: const EdgeInsets.fromLTRB(
+          AppSpacing.lg,
+          AppSpacing.md,
+          AppSpacing.lg,
+          AppSpacing.lg,
+        ),
         decoration: BoxDecoration(
-          color: dark ? const Color.fromRGBO(0, 0, 0, 0.72) : null,
-          borderRadius: BorderRadius.circular(18),
+          color: dark ? AppMediaColors.overlay : null,
+          borderRadius: AppShapes.panel,
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -1065,7 +1090,7 @@ class _ImageViewerCaption extends StatelessWidget {
               style: titleStyle,
             ),
             if (subtitleText.isNotEmpty) ...[
-              const SizedBox(height: 4),
+              const SizedBox(height: AppSpacing.xs),
               Text(
                 subtitleText,
                 maxLines: 2,
@@ -1100,10 +1125,10 @@ class _ImageViewerHeaderText extends StatelessWidget {
           overflow: TextOverflow.ellipsis,
           style: Theme.of(
             context,
-          ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700),
+          ).textTheme.titleMedium?.copyWith(fontWeight: AppWeights.strong),
         ),
         if (subtitleText.isNotEmpty) ...[
-          const SizedBox(height: 2),
+          const SizedBox(height: AppSpacing.xxs),
           Text(
             subtitleText,
             maxLines: 1,
@@ -1119,51 +1144,12 @@ class _ImageViewerHeaderText extends StatelessWidget {
 }
 
 class _ImageViewerErrorState extends StatelessWidget {
-  const _ImageViewerErrorState({required this.title});
-
-  final String title;
-
+  const _ImageViewerErrorState({required this.onRetry});
+  final VoidCallback onRetry;
   @override
-  Widget build(BuildContext context) {
-    final colors = context.colors;
-    return Container(
-      padding: const EdgeInsets.all(24),
-      alignment: Alignment.center,
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Container(
-            width: 60,
-            height: 60,
-            decoration: BoxDecoration(
-              color: colors.dangerMuted,
-              borderRadius: BorderRadius.circular(18),
-              border: Border.all(color: colors.danger.withValues(alpha: 0.25)),
-            ),
-            alignment: Alignment.center,
-            child: Icon(
-              Icons.broken_image_rounded,
-              size: 28,
-              color: colors.danger,
-            ),
-          ),
-          const SizedBox(height: 14),
-          Text(
-            'Could not load image',
-            style: Theme.of(
-              context,
-            ).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w700),
-          ),
-          const SizedBox(height: 6),
-          Text(
-            'Try opening it again.',
-            textAlign: TextAlign.center,
-            style: Theme.of(
-              context,
-            ).textTheme.bodySmall?.copyWith(color: colors.textSecondary),
-          ),
-        ],
-      ),
-    );
-  }
+  Widget build(BuildContext context) => MeshEmptyState.compact(
+    icon: Icons.broken_image_rounded,
+    title: 'Could not load image',
+    action: TextButton(onPressed: onRetry, child: const Text('Retry')),
+  );
 }

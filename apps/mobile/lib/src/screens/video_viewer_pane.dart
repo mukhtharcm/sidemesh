@@ -11,6 +11,8 @@ import '../models.dart';
 import '../theme/app_colors.dart';
 import '../theme/app_theme.dart';
 import '../widgets/mesh_widgets.dart';
+import '../theme/app_tokens.dart';
+import '../theme/app_status_styles.dart';
 
 class VideoViewerPane extends StatelessWidget {
   const VideoViewerPane({
@@ -125,6 +127,7 @@ class _VideoPlayerVideoViewerPaneState
       _error = null;
     });
     await previous?.dispose();
+    if (!mounted || generation != _loadGeneration) return;
 
     final controller = VideoPlayerController.networkUrl(
       widget.api.fsBlobUri(
@@ -143,7 +146,7 @@ class _VideoPlayerVideoViewerPaneState
       await controller.setLooping(false);
     } catch (error) {
       controller.removeListener(_handleControllerChanged);
-      await controller.dispose();
+      unawaited(controller.dispose());
       if (!mounted || generation != _loadGeneration) {
         return;
       }
@@ -204,12 +207,18 @@ class _VideoPlayerVideoViewerPaneState
         (controller?.value.hasError == true
             ? controller?.value.errorDescription
             : null);
-    if (error != null && controller == null) {
-      return _VideoViewerErrorState(error: friendlyError(error));
+    if (error != null) {
+      return _VideoViewerErrorState(
+        error: friendlyError(error),
+        onRetry: _initialize,
+      );
     }
     if (controller == null || !controller.value.isInitialized) {
       if (error != null) {
-        return _VideoViewerErrorState(error: friendlyError(error));
+        return _VideoViewerErrorState(
+          error: friendlyError(error),
+          onRetry: _initialize,
+        );
       }
       return const _VideoViewerLoadingState();
     }
@@ -217,8 +226,18 @@ class _VideoPlayerVideoViewerPaneState
     final value = controller.value;
     final colors = context.colors;
     final controlPadding = widget.dense
-        ? const EdgeInsets.fromLTRB(12, 10, 12, 12)
-        : const EdgeInsets.fromLTRB(14, 12, 14, 14);
+        ? const EdgeInsets.fromLTRB(
+            AppSpacing.md,
+            AppSpacing.compact,
+            AppSpacing.md,
+            AppSpacing.md,
+          )
+        : const EdgeInsets.fromLTRB(
+            AppSpacing.md,
+            AppSpacing.md,
+            AppSpacing.md,
+            AppSpacing.md,
+          );
     final aspectRatio = value.aspectRatio > 0 ? value.aspectRatio : 16 / 9;
     final mimeLabel = widget.mimeHint.isEmpty ? 'video' : widget.mimeHint;
 
@@ -227,7 +246,7 @@ class _VideoPlayerVideoViewerPaneState
       child: Stack(
         fit: StackFit.expand,
         children: [
-          const ColoredBox(color: Colors.black),
+          const ColoredBox(color: AppMediaColors.background),
           Center(child: VideoPlayer(controller)),
           if (!value.isPlaying)
             Center(
@@ -235,18 +254,22 @@ class _VideoPlayerVideoViewerPaneState
                 width: 68,
                 height: 68,
                 decoration: BoxDecoration(
-                  color: Colors.black.withValues(alpha: 0.62),
+                  color: AppMediaColors.background.withValues(
+                    alpha: AppEmphasis.medium,
+                  ),
                   shape: BoxShape.circle,
                   border: Border.all(
-                    color: Colors.white.withValues(alpha: 0.12),
+                    color: AppMediaColors.foreground.withValues(
+                      alpha: AppEmphasis.tint,
+                    ),
                   ),
                 ),
                 child: Icon(
                   value.isCompleted
                       ? Icons.replay_rounded
                       : Icons.play_arrow_rounded,
-                  color: Colors.white,
-                  size: 34,
+                  color: AppMediaColors.foreground,
+                  size: AppSizes.iconWell,
                 ),
               ),
             ),
@@ -307,7 +330,7 @@ class _VideoPlayerVideoViewerPaneState
                             '${_formatDuration(value.position)} / ${_formatDuration(value.duration)}',
                             style: monoStyle(
                               color: colors.textSecondary,
-                              fontSize: 11.5,
+                              fontSize: AppFontSizes.caption,
                             ),
                           ),
                         ),
@@ -322,9 +345,11 @@ class _VideoPlayerVideoViewerPaneState
                         bufferedColor: colors.accentMuted,
                         backgroundColor: colors.surfaceMuted,
                       ),
-                      padding: const EdgeInsets.symmetric(vertical: 6),
+                      padding: const EdgeInsets.symmetric(
+                        vertical: AppSpacing.tight,
+                      ),
                     ),
-                    const SizedBox(height: 2),
+                    const SizedBox(height: AppSpacing.xxs),
                     Text(
                       'Tap the video to play or pause.',
                       style: Theme.of(context).textTheme.bodySmall?.copyWith(
@@ -554,6 +579,7 @@ class _MediaKitVideoViewerPaneState extends State<_MediaKitVideoViewerPane> {
     if (_error != null) {
       return _VideoViewerErrorState(
         error: friendlyError(_error ?? 'Unknown video error'),
+        onRetry: _initialize,
       );
     }
     if (player == null || controller == null) {
@@ -563,8 +589,18 @@ class _MediaKitVideoViewerPaneState extends State<_MediaKitVideoViewerPane> {
     final state = player.state;
     final colors = context.colors;
     final controlPadding = widget.dense
-        ? const EdgeInsets.fromLTRB(12, 10, 12, 12)
-        : const EdgeInsets.fromLTRB(14, 12, 14, 14);
+        ? const EdgeInsets.fromLTRB(
+            AppSpacing.md,
+            AppSpacing.compact,
+            AppSpacing.md,
+            AppSpacing.md,
+          )
+        : const EdgeInsets.fromLTRB(
+            AppSpacing.md,
+            AppSpacing.md,
+            AppSpacing.md,
+            AppSpacing.md,
+          );
     final width = state.width ?? 0;
     final height = state.height ?? 0;
     final aspectRatio = width > 0 && height > 0 ? width / height : 16 / 9;
@@ -587,7 +623,7 @@ class _MediaKitVideoViewerPaneState extends State<_MediaKitVideoViewerPane> {
       child: Stack(
         fit: StackFit.expand,
         children: [
-          const ColoredBox(color: Colors.black),
+          const ColoredBox(color: AppMediaColors.background),
           Center(
             child: Video(
               controller: controller,
@@ -603,18 +639,22 @@ class _MediaKitVideoViewerPaneState extends State<_MediaKitVideoViewerPane> {
                 width: 68,
                 height: 68,
                 decoration: BoxDecoration(
-                  color: Colors.black.withValues(alpha: 0.62),
+                  color: AppMediaColors.background.withValues(
+                    alpha: AppEmphasis.medium,
+                  ),
                   shape: BoxShape.circle,
                   border: Border.all(
-                    color: Colors.white.withValues(alpha: 0.12),
+                    color: AppMediaColors.foreground.withValues(
+                      alpha: AppEmphasis.tint,
+                    ),
                   ),
                 ),
                 child: Icon(
                   state.completed
                       ? Icons.replay_rounded
                       : Icons.play_arrow_rounded,
-                  color: Colors.white,
-                  size: 34,
+                  color: AppMediaColors.foreground,
+                  size: AppSizes.iconWell,
                 ),
               ),
             ),
@@ -658,9 +698,7 @@ class _MediaKitVideoViewerPaneState extends State<_MediaKitVideoViewerPane> {
                     Row(
                       children: [
                         IconButton(
-                          tooltip: state.playing
-                              ? 'Pause video'
-                              : 'Play video',
+                          tooltip: state.playing ? 'Pause video' : 'Play video',
                           onPressed: _togglePlayback,
                           icon: Icon(
                             state.playing
@@ -675,34 +713,21 @@ class _MediaKitVideoViewerPaneState extends State<_MediaKitVideoViewerPane> {
                             '${_formatDuration(position)} / ${_formatDuration(duration)}',
                             style: monoStyle(
                               color: colors.textSecondary,
-                              fontSize: 11.5,
+                              fontSize: AppFontSizes.caption,
                             ),
                           ),
                         ),
                         MeshPill(label: mimeLabel, mono: true),
                       ],
                     ),
-                    SliderTheme(
-                      data: SliderTheme.of(context).copyWith(
-                        trackHeight: 3,
-                        overlayShape: SliderComponentShape.noOverlay,
-                        thumbShape: const RoundSliderThumbShape(
-                          enabledThumbRadius: 7,
-                        ),
-                        activeTrackColor: colors.accent,
-                        inactiveTrackColor: colors.surfaceMuted,
-                        thumbColor: colors.accent,
-                      ),
-                      child: Slider(
-                        min: 0,
-                        max: sliderMax,
-                        value: sliderValue,
-                        onChanged: durationMs > 0 ? _handleSeekChanged : null,
-                        onChangeEnd:
-                            durationMs > 0 ? _handleSeekCommitted : null,
-                      ),
+                    Slider(
+                      min: 0,
+                      max: sliderMax,
+                      value: sliderValue,
+                      onChanged: durationMs > 0 ? _handleSeekChanged : null,
+                      onChangeEnd: durationMs > 0 ? _handleSeekCommitted : null,
                     ),
-                    const SizedBox(height: 2),
+                    const SizedBox(height: AppSpacing.xxs),
                     Text(
                       'Tap the video to play or pause.',
                       style: Theme.of(context).textTheme.bodySmall?.copyWith(
@@ -722,33 +747,22 @@ class _MediaKitVideoViewerPaneState extends State<_MediaKitVideoViewerPane> {
 
 class _VideoViewerLoadingState extends StatelessWidget {
   const _VideoViewerLoadingState();
-
   @override
-  Widget build(BuildContext context) {
-    return MeshSurface(
-      padding: EdgeInsets.zero,
-      tone: MeshSurfaceTone.surface,
-      child: const AspectRatio(
-        aspectRatio: 16 / 9,
-        child: Center(child: CircularProgressIndicator()),
-      ),
-    );
-  }
+  Widget build(BuildContext context) =>
+      const MeshLoader(label: 'Loading video');
 }
 
 class _VideoViewerErrorState extends StatelessWidget {
-  const _VideoViewerErrorState({required this.error});
-
+  const _VideoViewerErrorState({required this.error, required this.onRetry});
   final String error;
-
+  final VoidCallback onRetry;
   @override
-  Widget build(BuildContext context) {
-    return MeshEmptyState(
-      icon: Icons.error_outline_rounded,
-      title: 'Could not load video',
-      body: error,
-    );
-  }
+  Widget build(BuildContext context) => MeshEmptyState.compact(
+    icon: Icons.error_outline_rounded,
+    title: 'Could not load video',
+    body: error,
+    action: TextButton(onPressed: onRetry, child: const Text('Retry')),
+  );
 }
 
 String _formatDuration(Duration value) {

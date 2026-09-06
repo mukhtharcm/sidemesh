@@ -10,7 +10,12 @@ import 'app_snackbar.dart';
 class NotificationPermissionBanner extends StatefulWidget {
   const NotificationPermissionBanner({
     super.key,
-    this.margin = const EdgeInsets.fromLTRB(16, 2, 16, 4),
+    this.margin = const EdgeInsets.fromLTRB(
+      AppSpacing.lg,
+      AppSpacing.xxs,
+      AppSpacing.lg,
+      AppSpacing.xs,
+    ),
     this.compact = false,
   });
 
@@ -87,10 +92,10 @@ class _NotificationPermissionBannerState
           borderRadius: AppShapes.input,
         ),
         padding: EdgeInsets.fromLTRB(
-          widget.compact ? 10 : 12,
-          widget.compact ? 8 : 6,
-          widget.compact ? 6 : 4,
-          widget.compact ? 8 : 6,
+          widget.compact ? AppSpacing.compact : AppSpacing.md,
+          widget.compact ? AppSpacing.sm : AppSpacing.tight,
+          widget.compact ? AppSpacing.tight : AppSpacing.xs,
+          widget.compact ? AppSpacing.sm : AppSpacing.tight,
         ),
         child: widget.compact
             ? _CompactBannerBody(
@@ -138,18 +143,17 @@ class _BannerBody extends StatelessWidget {
             ),
           ),
         ),
-        const SizedBox(width: 6),
+        const SizedBox(width: AppSpacing.tight),
         TextButton(
           onPressed: requesting ? null : onEnable,
-          style: TextButton.styleFrom(
-            minimumSize: const Size(44, 44),
-            padding: const EdgeInsets.symmetric(horizontal: 8),
-          ),
+
           child: requesting
               ? const SizedBox(
                   width: 16,
                   height: 16,
-                  child: CircularProgressIndicator(strokeWidth: 2),
+                  child: CircularProgressIndicator(
+                    strokeWidth: AppStrokes.indicator,
+                  ),
                 )
               : const Text('Enable'),
         ),
@@ -192,30 +196,30 @@ class _CompactBannerBody extends StatelessWidget {
                 'Turn on alerts',
                 style: Theme.of(context).textTheme.labelLarge?.copyWith(
                   color: colors.textPrimary,
-                  fontWeight: FontWeight.w800,
+                  fontWeight: AppWeights.strong,
                 ),
               ),
             ),
             InkResponse(
-              radius: 16,
+              radius: AppSizes.touchFeedbackRadius,
               onTap: onDismiss,
               child: Icon(
                 Icons.close_rounded,
-                size: 17,
+                size: AppSizes.inlineIcon,
                 color: colors.textSecondary,
               ),
             ),
           ],
         ),
-        const SizedBox(height: 8),
+        const SizedBox(height: AppSpacing.sm),
         Text(
           'Get a notification when an agent finishes or needs your attention.',
           style: Theme.of(context).textTheme.bodySmall?.copyWith(
             color: colors.textSecondary,
-            height: 1.25,
+            height: AppLineHeights.title,
           ),
         ),
-        const SizedBox(height: 10),
+        const SizedBox(height: AppSpacing.compact),
         _EnableButton(requesting: requesting, onPressed: onEnable),
       ],
     );
@@ -233,7 +237,7 @@ class _BellBadge extends StatelessWidget {
       width: AppSizes.iconWell,
       height: AppSizes.iconWell,
       decoration: BoxDecoration(
-        color: colors.accent.withValues(alpha: 0.16),
+        color: colors.accent.withValues(alpha: AppEmphasis.soft),
         borderRadius: AppShapes.input,
       ),
       alignment: Alignment.center,
@@ -257,22 +261,17 @@ class _EnableButton extends StatelessWidget {
     final colors = context.colors;
     final foreground = readableActionForeground(colors, colors.accent);
     return FilledButton.icon(
-      style: FilledButton.styleFrom(
-        visualDensity: VisualDensity.compact,
-        backgroundColor: colors.accent,
-        foregroundColor: foreground,
-      ),
       onPressed: requesting ? null : onPressed,
       icon: requesting
           ? SizedBox(
               width: 14,
               height: 14,
               child: CircularProgressIndicator(
-                strokeWidth: 2,
+                strokeWidth: AppStrokes.indicator,
                 color: foreground,
               ),
             )
-          : const Icon(Icons.notifications_rounded, size: 16),
+          : const Icon(Icons.notifications_rounded, size: AppSizes.compactIcon),
       label: Text(requesting ? 'Opening...' : 'Turn on'),
     );
   }

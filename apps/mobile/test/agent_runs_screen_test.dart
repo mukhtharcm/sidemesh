@@ -7,6 +7,67 @@ import 'package:sidemesh_mobile/src/theme/app_palettes.dart';
 import 'package:sidemesh_mobile/src/theme/app_theme.dart';
 
 void main() {
+  for (final dark in [false, true]) {
+    testWidgets('agent states keep errors and waiting distinct: $dark', (
+      tester,
+    ) async {
+      final runs =
+          [
+                'errored',
+                'waiting_for_approval',
+                'waiting_for_input',
+                'idle',
+                'closed',
+              ]
+              .map(
+                (status) => AgentRunSummary(
+                  id: status,
+                  parentSessionId: 'parent',
+                  title: 'Agent $status',
+                  preview: '',
+                  cwd: '/repo',
+                  createdAt: DateTime.now(),
+                  updatedAt: DateTime.now(),
+                  provider: 'codex',
+                  status: status,
+                ),
+              )
+              .toList();
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: dark
+              ? buildDarkTheme(ThemeVariant.nord.dark)
+              : buildLightTheme(ThemeVariant.nord.light),
+          home: AgentRunsScreen(
+            host: const HostProfile(
+              id: 'h',
+              label: 'Host',
+              baseUrl: 'http://localhost:4099',
+              token: 'test',
+            ),
+            session: _session(),
+            api: _AgentRunsApi(runs),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      for (final label in [
+        'Error',
+        'Needs approval',
+        'Needs input',
+        'Idle',
+        'Stopped',
+      ]) {
+        expect(find.text(label), findsOneWidget);
+      }
+      expect(find.text('Done'), findsNothing);
+      await tester.tap(find.text('Agent errored'));
+      await tester.pumpAndSettle();
+      expect(find.text('Error'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    });
+  }
+
   testWidgets('shows parent-owned agent runs and their state', (tester) async {
     final api = _AgentRunsApi([
       AgentRunSummary(
@@ -54,8 +115,8 @@ void main() {
 
     expect(find.text('Agents'), findsOneWidget);
     expect(find.text('2 agents'), findsOneWidget);
-    expect(find.text('1 active'), findsOneWidget);
-    expect(find.text('1 done'), findsOneWidget);
+    expect(find.text('Running'), findsOneWidget);
+    expect(find.text('Completed'), findsOneWidget);
     expect(find.text('explorer'), findsOneWidget);
     expect(find.text('reviewer'), findsOneWidget);
     expect(
