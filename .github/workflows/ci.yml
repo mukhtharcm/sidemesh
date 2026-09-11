@@ -78,9 +78,44 @@ jobs:
         working-directory: apps/mobile
         run: flutter test
 
+      - name: Check browser SQLite migration and pending input
+        run: bash scripts/test-flutter-web-storage.sh
+
       - name: Build Flutter web app
         working-directory: apps/mobile
         run: flutter build web --release -t lib/main_web.dart --no-web-resources-cdn
+
+  storage-platforms:
+    name: Storage checks (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      - name: Check daemon state and recovery
+        run: node --import tsx --test src/session-store.test.ts src/session-history.test.ts src/session-coordinator.test.ts
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: "3.44.7"
+          channel: stable
+          cache: true
+      - run: flutter pub get
+        working-directory: apps/mobile
+      - run: flutter analyze
+        working-directory: apps/mobile
+      - run: python scripts/check_flutter_theme.py
+      - name: Check client storage and provider controls
+        working-directory: apps/mobile
+        run: flutter test test/session_local_store_test.dart test/session_send_outbox_store_test.dart test/session_configuration_controls_test.dart
 
   web:
     name: Website checks

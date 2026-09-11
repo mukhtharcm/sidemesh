@@ -317,6 +317,10 @@ specific agent provider.
   remote daemon URLs over HTTPS/WSS. Browser WebSocket authentication uses the
   `sidemesh.auth.<base64url-token>` subprotocol, while the server selects only
   the non-secret `sidemesh` protocol in its response.
+- **Client storage checks**: `bash scripts/test-flutter-web-storage.sh` runs the
+  existing migration and outbox tests in Chrome with the real SQLite worker.
+  It temporarily copies web runtime assets into the test server root and removes
+  them on exit. `FLUTTER_BIN` selects the pinned SDK. Do not commit those copies.
 - **Flutter web SQLite**: `apps/mobile/web/sqlite3.wasm` and
   `apps/mobile/web/sqflite_sw.js` are generated runtime assets. Regenerate them
   from `apps/mobile/` with
@@ -380,7 +384,7 @@ specific agent provider.
 - **Spawned agent sessions**: child sessions are not peer rows in Recent or
   session search. Discover them through the parent-scoped agent-runs path.
   Provider adapters must filter before applying the requested limit, and
-  multi-provider wrapping must namespace `subAgent.parentSessionId` as well as
+  provider runtime routing must namespace `subAgent.parentSessionId` as well as
   the child thread id.
 - **Provider snapshots and input proof**: `readSessionSnapshot` returns native
   history, runtime, thread data, busy state, and available turn identity after
