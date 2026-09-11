@@ -315,10 +315,8 @@ export class AcpAgentProvider extends EventEmitter<AgentProviderEvents> implemen
 
   private async connectSession(id: string): Promise<ConnectedSession> {
     const record = this.record(id);
-    const host = new AcpHost(id, record.cwd, this.permissionMode, (event) => this.emit("liveEvent", event));
-    host.nativeSessionId = record.nativeId;
     let state: ConnectedSession | undefined;
-    host.app.onNotification(methods.client.session.update, ({ params }) => {
+    const host = new AcpHost(id, record.cwd, this.permissionMode, (event) => this.emit("liveEvent", event), (params) => {
       if (!state) return;
       try {
         if (!state.host.nativeSessionId) state.earlyUpdates.push(params);
@@ -329,6 +327,7 @@ export class AcpAgentProvider extends EventEmitter<AgentProviderEvents> implemen
         state.transport.connection.close(error);
       }
     });
+    host.nativeSessionId = record.nativeId;
     const transport = this.dependencies.connect ? await this.dependencies.connect(host.app, record.cwd)
       : await this.spawnConnection(host.app, record.cwd);
     state = { host, transport, initialized: { protocolVersion: PROTOCOL_VERSION }, transcript: this.transcript(id), earlyUpdates: [] };

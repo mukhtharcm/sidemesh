@@ -8,7 +8,7 @@ import {
   type ReadTextFileRequest, type WriteTextFileRequest,
   type RequestPermissionRequest, type RequestPermissionResponse,
   type CreateElicitationResponse, type TerminalExitStatus,
-  type AuthMethod,
+  type AuthMethod, type SessionNotification,
 } from "@agentclientprotocol/sdk";
 
 import { parsePendingActionDecision, parsePendingActionElicitationResponse,
@@ -45,9 +45,13 @@ export class AcpHost {
     readonly cwd: string,
     private readonly permissionMode: AcpxPermissionMode,
     private readonly emit: (event: AgentProviderLiveEvent) => void,
+    onUpdate?: (notification: SessionNotification) => void,
   ) {
-    this.app = client()
-      .onRequest(methods.client.session.requestPermission, (ctx) => this.permission(ctx))
+    this.app = client();
+    // SDK 1.4 walks each handler asynchronously. Keep this synchronous handler
+    // first so a following prompt/load response cannot overtake transcript writes.
+    if (onUpdate) this.app.onNotification(methods.client.session.update, ({ params }) => onUpdate(params));
+    this.app.onRequest(methods.client.session.requestPermission, (ctx) => this.permission(ctx))
       .onRequest(methods.client.fs.readTextFile, (ctx) => this.readTextFile(ctx))
       .onRequest(methods.client.fs.writeTextFile, (ctx) => this.writeTextFile(ctx))
       .onRequest(methods.client.terminal.create, (ctx) => this.createTerminal(ctx))
