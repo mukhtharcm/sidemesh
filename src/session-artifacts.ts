@@ -17,7 +17,7 @@ import { randomUUID } from "node:crypto";
 
 import type { Hono } from "hono";
 
-import type { HonoServerEnv } from "./hono-route-adapter.js";
+import type { HonoServerEnv } from "./server-http.js";
 
 const MAX_SESSION_ARTIFACT_BYTES = 12 * 1024 * 1024;
 const MAX_SESSION_ARTIFACT_CACHE_BYTES = 200 * 1024 * 1024;

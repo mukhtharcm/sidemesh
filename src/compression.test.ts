@@ -8,7 +8,7 @@ import { compress } from "hono/compress";
 import { cors } from "hono/cors";
 import { Hono } from "hono";
 
-import { jsonRoute, type HonoServerEnv } from "./hono-route-adapter.js";
+import { jsonResponse, type HonoServerEnv } from "./server-http.js";
 
 function testApp(): Hono<HonoServerEnv> {
   const app = new Hono<HonoServerEnv>();
@@ -22,17 +22,17 @@ function testApp(): Hono<HonoServerEnv> {
     return compressionMiddleware(c, next);
   });
 
-  app.get("/healthz", jsonRoute((_request, response) => {
-    response.json({ ok: true });
-  }));
+  app.get("/healthz", (c) => {
+    return jsonResponse(c, { ok: true });
+  });
 
-  app.get("/api/large", jsonRoute((_request, response) => {
-    response.json({ data: "x".repeat(10_000) });
-  }));
+  app.get("/api/large", (c) => {
+    return jsonResponse(c, { data: "x".repeat(10_000) });
+  });
 
-  app.get("/api/small", jsonRoute((_request, response) => {
-    response.json({ ok: true });
-  }));
+  app.get("/api/small", (c) => {
+    return jsonResponse(c, { ok: true });
+  });
 
   return app;
 }

@@ -112,12 +112,7 @@ import {
   UpdateAlreadyInProgressError,
 } from "./update-status.js";
 import { PushNotificationDispatcher } from "./push-notifications.js";
-import {
-  jsonRoute,
-  type HonoServerEnv,
-  type JsonRouteRequest,
-  type JsonRouteResponse,
-} from "./hono-route-adapter.js";
+import { jsonResponse, readJsonBody, readQuery, type HonoServerEnv } from "./server-http.js";
 
 const CLIENT_MESSAGE_ID_MAX_LENGTH = 128;
 const CLIENT_MESSAGE_ID_PATTERN = /^[A-Za-z0-9._:-]+$/;
@@ -678,9 +673,9 @@ export async function startServer(
     onError: (c) => c.json({ error: "payload too large" }, 413),
   }));
 
-  app.get("/healthz", jsonRoute((_request, response) => {
-    response.json({ ok: true, label: config.label });
-  }));
+  app.get("/healthz", (c) => {
+    return jsonResponse(c, { ok: true, label: config.label });
+  });
 
   const authMiddleware = createMiddleware<HonoServerEnv>(async (c, next) => {
     if (isHealthCheckPath(c.req.path)) {
@@ -709,7 +704,7 @@ export async function startServer(
   });
   registerHostResourceRoutes(app);
 
-  app.get("/api/node", jsonRoute((_request, response) => {
+  app.get("/api/node", (c) => {
     const defaultProvider = providerRuntime.defaultProvider;
     const defaultProviderCapabilities = defaultProvider.capabilities;
     const supportedProviders = providerRuntime.providers.map((entry) => ({
@@ -722,7 +717,7 @@ export async function startServer(
       error: entry.error,
       isDefault: entry === providerRuntime.defaultProvider,
     }));
-    response.json({
+    return jsonResponse(c, {
       label: config.label,
       hostname: hostname(),
       platform: platform(),
@@ -754,28 +749,28 @@ export async function startServer(
         config.recommendedMobileClientVersion ?? null,
       minimumMobileClientVersion: config.minimumMobileClientVersion ?? null,
     });
-  }));
+  });
 
   app.post(
     "/api/admin/update-check",
-    asyncRoute(async (_request, response) => {
+    async (c) => {
       const result = await refreshInstallInfo({ force: true });
-      response.json(updateInfoPayload(result));
-    }),
+      return jsonResponse(c, updateInfoPayload(result));
+    },
   );
 
   app.get(
     "/api/admin/update-status",
-    asyncRoute(async (_request, response) => {
-      response.json({
+    async (c) => {
+      return jsonResponse(c, {
         ok: true,
         update: await dependencies.readUpdateStatus(runtimeConfig.stateDir),
       });
-    }),
+    },
   );
 
-  app.get("/api/providers", jsonRoute((_request, response) => {
-    response.json({
+  app.get("/api/providers", (c) => {
+    return jsonResponse(c, {
       currentProvider: providerRuntime.defaultProviderKind,
       currentProviderId: providerRuntime.defaultProviderId,
       sessionAliases: providerRuntime.sessionAliases,
@@ -790,22 +785,22 @@ export async function startServer(
         isDefault: entry === providerRuntime.defaultProvider,
       })),
     });
-  }));
+  });
 
-  app.get("/api/push/subscriptions", jsonRoute((_request, response) => {
-    response.json({ subscriptions: pushNotifications.listSubscriptions() });
-  }));
+  app.get("/api/push/subscriptions", (c) => {
+    return jsonResponse(c, { subscriptions: pushNotifications.listSubscriptions() });
+  });
 
   app.post(
     "/api/push/subscriptions",
-    asyncRoute(async (request, response) => {
-      const installationId = asString(request.body?.installationId);
-      const hostId = asString(request.body?.hostId);
-      const relayUrl = asString(request.body?.relayUrl);
-      const publishToken = asString(request.body?.publishToken);
+    async (c) => {
+      const body = await readJsonBody(c);
+      const installationId = asString(body?.installationId);
+      const hostId = asString(body?.hostId);
+      const relayUrl = asString(body?.relayUrl);
+      const publishToken = asString(body?.publishToken);
       if (!installationId || !hostId || !relayUrl || !publishToken) {
-        response.status(400).json({ error: "invalid push subscription" });
-        return;
+        return jsonResponse(c, { error: "invalid push subscription" }, 400);
       }
       try {
         const subscription = await pushNotifications.upsertSubscription({
@@ -814,30 +809,30 @@ export async function startServer(
           relayUrl,
           publishToken,
         });
-        response.json({ ok: true, subscription });
+        return jsonResponse(c, { ok: true, subscription });
       } catch (error) {
-        response.status(400).json({
+        return jsonResponse(c, {
           error:
             error instanceof Error
               ? error.message
               : "invalid push subscription",
-        });
+        }, 400);
       }
-    }),
+    },
   );
 
   app.delete(
     "/api/push/subscriptions/:installationId",
-    asyncRoute(async (request, response) => {
-      const installationId = pathParam(request.params.installationId);
+    async (c) => {
+      const installationId = (c.req.param("installationId") ?? "");
       const removed = await pushNotifications.removeSubscription(installationId);
-      response.status(removed ? 200 : 404).json({ ok: removed });
-    }),
+      return jsonResponse(c, { ok: removed }, removed ? 200 : 404);
+    },
   );
 
   app.get(
     "/api/usage",
-    asyncRoute(async (_request, response) => {
+    async (c) => {
       const generatedAt = Date.now();
       const observations = await collectUsageObservations(
         providerRuntime,
@@ -853,11 +848,11 @@ export async function startServer(
         },
         observations,
       };
-      response.json(payload);
-    }),
+      return jsonResponse(c, payload);
+    },
   );
 
-  app.get("/api/diagnostics", jsonRoute((_request, response) => {
+  app.get("/api/diagnostics", (c) => {
     let sessionLiveSockets = 0;
     for (const sockets of socketsBySession.values()) {
       sessionLiveSockets += sockets.size;
@@ -867,7 +862,7 @@ export async function startServer(
       liveActivityItems += activities.size;
     }
 
-    response.json({
+    return jsonResponse(c, {
       label: config.label,
       hostname: hostname(),
       platform: platform(),
@@ -896,31 +891,30 @@ export async function startServer(
         browserPreviews: browserPreviewRegistry.list().length,
       },
     });
-  }));
+  });
 
-  app.get("/api/debug/codex-rpc-audit", jsonRoute((_request, response) => {
-    response.json(getCodexRpcAuditSnapshot());
-  }));
+  app.get("/api/debug/codex-rpc-audit", (c) => {
+    return jsonResponse(c, getCodexRpcAuditSnapshot());
+  });
 
   app.post(
     "/api/admin/provider/:kind/restart",
-    asyncRoute(async (request, response) => {
-      const kind = Array.isArray(request.params.kind) ? request.params.kind[0] : request.params.kind;
+    async (c) => {
+      const kind = c.req.param("kind");
       const selectedProvider = providerRuntime.providerForKind(kind);
       if (!selectedProvider) {
-        response.status(400).json({ error: "unknown provider kind" });
-        return;
+        return jsonResponse(c, { error: "unknown provider kind" }, 400);
       }
       await providerRuntime.restart(selectedProvider);
       await clearProviderScopedRuntimeState(selectedProvider.id ?? selectedProvider.kind);
-      response.json({ ok: true, kind });
-    }),
+      return jsonResponse(c, { ok: true, kind });
+    },
   );
 
   app.post(
     "/api/admin/restart",
-    asyncRoute(async (_request, response) => {
-      response.json({ ok: true, message: "daemon is restarting" });
+    async (c) => {
+      const response = jsonResponse(c, { ok: true, message: "daemon is restarting" });
       setTimeout(async () => {
         try {
           await runningServerRef!.close();
@@ -928,16 +922,17 @@ export async function startServer(
           dependencies.exitProcess(0);
         }
       }, 100);
-    }),
+      return response;
+    },
   );
 
   app.post(
     "/api/admin/update-channel",
-    asyncRoute(async (request, response) => {
-      const requestedChannel = parseUpdateChannel(request.body?.channel);
+    async (c) => {
+      const body = await readJsonBody(c);
+      const requestedChannel = parseUpdateChannel(body?.channel);
       if (requestedChannel === null) {
-        response.status(400).json({ error: "channel must be stable or bleeding-edge" });
-        return;
+        return jsonResponse(c, { error: "channel must be stable or bleeding-edge" }, 400);
       }
 
       const nextConfig: NodeConfig = {
@@ -950,24 +945,24 @@ export async function startServer(
 
       const result = await refreshInstallInfo({ force: true });
 
-      response.json({
+      return jsonResponse(c, {
         ...updateInfoPayload(result),
         ok: true,
       });
-    }),
+    },
   );
 
   app.post(
     "/api/admin/update",
-    asyncRoute(async (request, response) => {
-      const requestedChannelRaw = request.body?.channel;
+    async (c) => {
+      const body = await readJsonBody(c);
+      const requestedChannelRaw = body?.channel;
       const requestedChannel =
         requestedChannelRaw === undefined
           ? null
           : parseUpdateChannel(requestedChannelRaw);
       if (requestedChannelRaw !== undefined && requestedChannel === null) {
-        response.status(400).json({ error: "channel must be stable or bleeding-edge" });
-        return;
+        return jsonResponse(c, { error: "channel must be stable or bleeding-edge" }, 400);
       }
 
       const effectiveConfig =
@@ -985,8 +980,7 @@ export async function startServer(
       await refreshInstallInfo({ force: true });
       const info = installInfo;
       if (!info.updateSupported) {
-        response.status(501).json({ error: "update not supported for this install type" });
-        return;
+        return jsonResponse(c, { error: "update not supported for this install type" }, 501);
       }
 
       let update;
@@ -996,72 +990,68 @@ export async function startServer(
         });
       } catch (error) {
         if (error instanceof UpdateAlreadyInProgressError) {
-          response.status(409).json({
+          return jsonResponse(c, {
             error: error.message,
             updateId: error.updateId,
-          });
-          return;
+          }, 409);
         }
         throw error;
       }
 
-      response.json({ ok: true, message: "daemon is updating", update });
-    }),
+      return jsonResponse(c, { ok: true, message: "daemon is updating", update });
+    },
   );
 
   app.get(
     "/api/sessions",
-    asyncRoute(async (_request, response) => {
+    async (c) => {
       if (!providerRuntime.providers.some((entry) => entry.capabilities.sessions.history)) {
-        response.status(501).json({ error: "No provider supports session history" });
-        return;
+        return jsonResponse(c, { error: "No provider supports session history" }, 501);
       }
       const requestedLimit = asInteger(
-        (_request.query as Record<string, unknown>)?.limit,
+        readQuery(c)?.limit,
       );
       const runtimeMode = parseSessionRuntimeListMode(
-        (_request.query as Record<string, unknown>)?.runtime,
+        readQuery(c)?.runtime,
       );
       const sessions = await loadRecentSessions(requestedLimit, runtimeMode);
-      response.json(sessions);
-    }),
+      return jsonResponse(c, sessions);
+    },
   );
 
   app.get(
     "/api/sessions/search",
-    asyncRoute(async (request, response) => {
+    async (c) => {
       if (!hostCapabilities.sessions.search) {
-        response.status(503).json({ error: "Session search is not available" });
-        return;
+        return jsonResponse(c, { error: "Session search is not available" }, 503);
       }
-      const rawQuery = asString((request.query as Record<string, unknown>)?.q);
+      const rawQuery = asString(readQuery(c)?.q);
       const normalizedQuery = rawQuery?.trim() ?? "";
       const limit = Math.min(
-        asInteger((request.query as Record<string, unknown>)?.limit) ?? 20,
+        asInteger(readQuery(c)?.limit) ?? 20,
         100,
       );
       if (normalizedQuery.length < 2) {
         const hasFilters =
-          asString((request.query as Record<string, unknown>)?.provider) ||
-          asString((request.query as Record<string, unknown>)?.cwd) ||
-          (request.query as Record<string, unknown>)?.archived !== undefined ||
-          asString((request.query as Record<string, unknown>)?.updatedAfter) ||
-          asString((request.query as Record<string, unknown>)?.updatedBefore);
+          asString(readQuery(c)?.provider) ||
+          asString(readQuery(c)?.cwd) ||
+          readQuery(c)?.archived !== undefined ||
+          asString(readQuery(c)?.updatedAfter) ||
+          asString(readQuery(c)?.updatedBefore);
         if (!hasFilters) {
-          response.status(400).json({ error: "Query must be at least 2 characters" });
-          return;
+          return jsonResponse(c, { error: "Query must be at least 2 characters" }, 400);
         }
       }
       const filter: SearchFilter = {};
-      const providerFilter = asString((request.query as Record<string, unknown>)?.provider);
+      const providerFilter = asString(readQuery(c)?.provider);
       if (providerFilter) {
         filter.providerKind = providerFilter;
       }
-      const cwdFilter = asString((request.query as Record<string, unknown>)?.cwd);
+      const cwdFilter = asString(readQuery(c)?.cwd);
       if (cwdFilter) {
         filter.cwd = cwdFilter;
       }
-      const archivedFilter = (request.query as Record<string, unknown>)?.archived;
+      const archivedFilter = readQuery(c)?.archived;
       if (archivedFilter === "true") {
         filter.archived = true;
       } else if (archivedFilter === "false") {
@@ -1069,11 +1059,11 @@ export async function startServer(
       } else {
         filter.archived = false;
       }
-      const updatedAfter = parseTimestamp((request.query as Record<string, unknown>)?.updatedAfter);
+      const updatedAfter = parseTimestamp(readQuery(c)?.updatedAfter);
       if (updatedAfter != null) {
         filter.updatedAfter = updatedAfter;
       }
-      const updatedBefore = parseTimestamp((request.query as Record<string, unknown>)?.updatedBefore);
+      const updatedBefore = parseTimestamp(readQuery(c)?.updatedBefore);
       if (updatedBefore != null) {
         filter.updatedBefore = updatedBefore;
       }
@@ -1118,34 +1108,23 @@ export async function startServer(
       const sessions = [...sessionsById.values()]
         .sort(compareSessionSearchSummary)
         .slice(0, limit);
-      response.json(sessions);
-    }),
+      return jsonResponse(c, sessions);
+    },
   );
 
   app.get(
     "/api/sessions/:sessionId/agent-runs",
-    asyncRoute(async (request, response) => {
-      const sessionId = providerRuntime.resolveSession(pathParam(request.params.sessionId)).sessionId;
+    async (c) => {
+      const sessionId = providerRuntime.resolveSession((c.req.param("sessionId") ?? "")).sessionId;
       const sessionProvider = await startedSessionProvider(sessionId);
       if (!sessionProvider) {
-        response.status(400).json({ error: "unknown provider" });
-        return;
+        return jsonResponse(c, { error: "unknown provider" }, 400);
       }
-      if (
-        !requireProviderCapability(
-          response,
-          sessionProvider.provider,
-          sessionProvider.provider.capabilities.sessions.history,
-          "agent runs",
-          "listSessionThreads",
-        )
-      ) {
-        return;
-      }
+      requireProviderCapability(sessionProvider.provider, sessionProvider.provider.capabilities.sessions.history, "agent runs", "listSessionThreads");
       const requestedLimit = Math.max(
         1,
         Math.min(
-          asInteger((request.query as Record<string, unknown>)?.limit) ?? 100,
+          asInteger(readQuery(c)?.limit) ?? 100,
           200,
         ),
       );
@@ -1160,20 +1139,19 @@ export async function startServer(
         )
         .sort((left, right) => right.updatedAt - left.updatedAt)
         .slice(0, requestedLimit);
-      response.json(runs);
-    }),
+      return jsonResponse(c, runs);
+    },
   );
 
   app.get(
     "/api/workspaces",
-    asyncRoute(async (_request, response) => {
+    async (c) => {
       if (!providerRuntime.providers.some((entry) => entry.capabilities.sessions.history)) {
-        response.status(501).json({ error: "No provider supports workspace history" });
-        return;
+        return jsonResponse(c, { error: "No provider supports workspace history" }, 501);
       }
       const sessions = await loadRecentSessions(null, "none");
-      response.json(buildWorkspaces(sessions));
-    }),
+      return jsonResponse(c, buildWorkspaces(sessions));
+    },
   );
 
   registerFsRoutes(app, {
@@ -1213,191 +1191,114 @@ export async function startServer(
     },
   });
 
-  app.get("/api/terminals", jsonRoute((_request, response) => {
-    if (
-      !requireHostCapability(
-        response,
-        hostCapabilities.workspace.terminal,
-        "integrated terminal",
-      )
-    ) {
-      return;
-    }
-    response.json({ terminals: terminalRegistry.list() });
-  }));
+  app.get("/api/terminals", (c) => {
+    requireHostCapability(hostCapabilities.workspace.terminal, "integrated terminal");
+    return jsonResponse(c, { terminals: terminalRegistry.list() });
+  });
 
   app.post(
     "/api/terminals",
-    asyncRoute(async (request, response) => {
-      if (
-        !requireHostCapability(
-          response,
-          hostCapabilities.workspace.terminal,
-          "integrated terminal",
-        )
-      ) {
-        return;
-      }
-      const cwd = asString(request.body?.cwd);
+    async (c) => {
+      const body = await readJsonBody(c);
+      requireHostCapability(hostCapabilities.workspace.terminal, "integrated terminal");
+      const cwd = asString(body?.cwd);
       if (!cwd) {
-        response.status(400).json({ error: "cwd is required" });
-        return;
+        return jsonResponse(c, { error: "cwd is required" }, 400);
       }
       const terminal = await terminalRegistry.create({
         cwd,
-        title: asString(request.body?.title),
-        sessionId: asString(request.body?.sessionId),
-        cols: asInteger(request.body?.cols),
-        rows: asInteger(request.body?.rows),
-        replaceExisting: request.body?.replaceExisting === true,
+        title: asString(body?.title),
+        sessionId: asString(body?.sessionId),
+        cols: asInteger(body?.cols),
+        rows: asInteger(body?.rows),
+        replaceExisting: body?.replaceExisting === true,
       });
-      response.status(201).json(terminal);
-    }),
+      return jsonResponse(c, terminal, 201);
+    },
   );
 
   app.post(
     "/api/terminals/:terminalId/resize",
-    asyncRoute(async (request, response) => {
-      if (
-        !requireHostCapability(
-          response,
-          hostCapabilities.workspace.terminal,
-          "integrated terminal",
-        )
-      ) {
-        return;
-      }
-      const terminalId = pathParam(request.params.terminalId);
-      response.json(
-        terminalRegistry.resize(
+    async (c) => {
+      const body = await readJsonBody(c);
+      requireHostCapability(hostCapabilities.workspace.terminal, "integrated terminal");
+      const terminalId = (c.req.param("terminalId") ?? "");
+      return jsonResponse(c, terminalRegistry.resize(
           terminalId,
-          asInteger(request.body?.cols),
-          asInteger(request.body?.rows),
-        ),
-      );
-    }),
+          asInteger(body?.cols),
+          asInteger(body?.rows),
+        ));
+    },
   );
 
   app.post(
     "/api/terminals/:terminalId/kill",
-    asyncRoute(async (request, response) => {
-      if (
-        !requireHostCapability(
-          response,
-          hostCapabilities.workspace.terminal,
-          "integrated terminal",
-        )
-      ) {
-        return;
-      }
-      response.json(terminalRegistry.kill(pathParam(request.params.terminalId)));
-    }),
+    async (c) => {
+      requireHostCapability(hostCapabilities.workspace.terminal, "integrated terminal");
+      return jsonResponse(c, terminalRegistry.kill((c.req.param("terminalId") ?? "")));
+    },
   );
 
-  app.get("/api/browser-previews", jsonRoute((_request, response) => {
-    if (
-      !requireHostCapability(
-        response,
-        hostCapabilities.workspace.browserPreview,
-        "browser",
-      )
-    ) {
-      return;
-    }
-    response.json({ previews: browserPreviewRegistry.list() });
-  }));
+  app.get("/api/browser-previews", (c) => {
+    requireHostCapability(hostCapabilities.workspace.browserPreview, "browser");
+    return jsonResponse(c, { previews: browserPreviewRegistry.list() });
+  });
 
   app.post(
     "/api/browser-previews",
-    asyncRoute(async (request, response) => {
-      if (
-        !requireHostCapability(
-          response,
-          hostCapabilities.workspace.browserPreview,
-          "browser",
-        )
-      ) {
-        return;
-      }
+    async (c) => {
+      const body = await readJsonBody(c);
+      requireHostCapability(hostCapabilities.workspace.browserPreview, "browser");
       const preview = await browserPreviewRegistry.create({
-        targetPort: asInteger(request.body?.targetPort),
-        targetHost: asString(request.body?.targetHost),
-        targetUrl: asString(request.body?.targetUrl),
-        scheme: asString(request.body?.scheme),
-        label: asString(request.body?.label),
-        cwd: asString(request.body?.cwd),
-        sessionId: asString(request.body?.sessionId),
-        width: asInteger(request.body?.width),
-        height: asInteger(request.body?.height),
-        profileMode: asString(request.body?.profileMode),
-        reuseExisting: asBoolean(request.body?.reuseExisting),
+        targetPort: asInteger(body?.targetPort),
+        targetHost: asString(body?.targetHost),
+        targetUrl: asString(body?.targetUrl),
+        scheme: asString(body?.scheme),
+        label: asString(body?.label),
+        cwd: asString(body?.cwd),
+        sessionId: asString(body?.sessionId),
+        width: asInteger(body?.width),
+        height: asInteger(body?.height),
+        profileMode: asString(body?.profileMode),
+        reuseExisting: asBoolean(body?.reuseExisting),
       });
-      response.status(201).json(preview);
-    }),
+      return jsonResponse(c, preview, 201);
+    },
   );
 
   app.delete(
     "/api/browser-previews/:previewId",
-    asyncRoute(async (request, response) => {
-      if (
-        !requireHostCapability(
-          response,
-          hostCapabilities.workspace.browserPreview,
-          "browser",
-        )
-      ) {
-        return;
-      }
-      response.json(
-        await browserPreviewRegistry.stop(pathParam(request.params.previewId)),
-      );
-    }),
+    async (c) => {
+      requireHostCapability(hostCapabilities.workspace.browserPreview, "browser");
+      return jsonResponse(c, await browserPreviewRegistry.stop((c.req.param("previewId") ?? "")));
+    },
   );
 
   app.get(
     "/api/actions",
-    asyncRoute(async (_request, response) => {
-      response.json(
-        await listPendingActions(
+    async (c) => {
+      return jsonResponse(c, await listPendingActions(
           providerRuntime,
           pendingActions,
-        ),
-      );
-    }),
+        ));
+    },
   );
 
   app.get(
     "/api/sessions/:sessionId/log",
-    asyncRoute(async (request, response) => {
-      const sessionId = providerRuntime.resolveSession(pathParam(request.params.sessionId)).sessionId;
+    async (c) => {
+      const sessionId = providerRuntime.resolveSession((c.req.param("sessionId") ?? "")).sessionId;
       const sessionProvider = await startedSessionProvider(sessionId);
       if (!sessionProvider) {
-        response.status(400).json({ error: "unknown provider" });
-        return;
+        return jsonResponse(c, { error: "unknown provider" }, 400);
       }
-      if (
-        !requireProviderCapability(
-          response,
-          sessionProvider.provider,
-          sessionProvider.provider.capabilities.sessions.history,
-          "session history",
-          "readSessionThread",
-        ) ||
-        !requireProviderCapability(
-          response,
-          sessionProvider.provider,
-          sessionProvider.provider.capabilities.sessions.history,
-          "session log",
-          "readSessionLog",
-        )
-      ) {
-        return;
-      }
-      const query = request.query as Record<string, unknown>;
+      requireProviderCapability(sessionProvider.provider, sessionProvider.provider.capabilities.sessions.history, "session history", "readSessionThread");
+      requireProviderCapability(sessionProvider.provider, sessionProvider.provider.capabilities.sessions.history, "session log", "readSessionLog");
+      const query = readQuery(c);
       const messageLimit = Math.max(1, asInteger(query.messageLimit) ?? 200);
       const activityLimit = Math.max(1, asInteger(query.activityLimit) ?? 200);
       const snapshot = await sessionState.snapshot(sessionId, { messageLimit, activityLimit });
-      response.json({
+      return jsonResponse(c, {
         session: mapSession(snapshot.thread, snapshot.runtime, snapshot.status),
         revision: snapshot.revision,
         liveAssistantText: snapshot.liveAssistantText,
@@ -1409,214 +1310,117 @@ export async function startServer(
           snapshot.totalActivities, snapshot.activities.length),
         latestPlanUpdate: snapshot.latestPlanUpdate,
       });
-    }),
+    },
   );
 
   app.get(
     "/api/sessions/:sessionId/resources",
-    asyncRoute(async (request, response) => {
-      const sessionId = providerRuntime.resolveSession(pathParam(request.params.sessionId)).sessionId;
+    async (c) => {
+      const sessionId = providerRuntime.resolveSession((c.req.param("sessionId") ?? "")).sessionId;
       const sessionProvider = await startedSessionProvider(sessionId);
       if (!sessionProvider) {
-        response.status(400).json({ error: "unknown provider" });
-        return;
+        return jsonResponse(c, { error: "unknown provider" }, 400);
       }
-      if (
-        !requireProviderCapability(
-          response,
-          sessionProvider.provider,
-          sessionProvider.provider.capabilities.sessions.history,
-          "session resources",
-          "readSessionThread",
-        ) ||
-        !requireProviderCapability(
-          response,
-          sessionProvider.provider,
-          sessionProvider.provider.capabilities.sessions.history,
-          "session resources",
-          "readSessionLog",
-        )
-      ) {
-        return;
-      }
-      response.json(
-        await readSessionResources(
+      requireProviderCapability(sessionProvider.provider, sessionProvider.provider.capabilities.sessions.history, "session resources", "readSessionThread");
+      requireProviderCapability(sessionProvider.provider, sessionProvider.provider.capabilities.sessions.history, "session resources", "readSessionLog");
+      return jsonResponse(c, await readSessionResources(
           sessionId,
           sessionState,
-        ),
-      );
-    }),
+        ));
+    },
   );
 
   app.get(
     "/api/sessions/:sessionId/status",
-    asyncRoute(async (request, response) => {
-      const sessionId = providerRuntime.resolveSession(pathParam(request.params.sessionId)).sessionId;
+    async (c) => {
+      const sessionId = providerRuntime.resolveSession((c.req.param("sessionId") ?? "")).sessionId;
       const sessionProvider = await startedSessionProvider(sessionId);
       if (!sessionProvider) {
-        response.status(400).json({ error: "unknown provider" });
-        return;
+        return jsonResponse(c, { error: "unknown provider" }, 400);
       }
-      if (
-        !requireProviderCapability(
-          response,
-          sessionProvider.provider,
-          sessionProvider.provider.capabilities.sessions.history,
-          "session status",
-          "readSessionThread",
-        )
-      ) {
-        return;
-      }
+      requireProviderCapability(sessionProvider.provider, sessionProvider.provider.capabilities.sessions.history, "session status", "readSessionThread");
       const snapshot = await sessionState.snapshot(sessionId, { messageLimit: 1, activityLimit: 1 });
-      response.json({ sessionId, status: snapshot.status, isRunning: snapshot.busy,
+      return jsonResponse(c, { sessionId, status: snapshot.status, isRunning: snapshot.busy,
         activeTurnId: snapshot.activeTurnId,
         pendingAction: findPendingActionForSession(pendingActions, sessionId) });
-    }),
+    },
   );
 
   app.get(
     "/api/sessions/:sessionId/git",
-    asyncRoute(async (request, response) => {
-      const sessionId = providerRuntime.resolveSession(pathParam(request.params.sessionId)).sessionId;
+    async (c) => {
+      const sessionId = providerRuntime.resolveSession((c.req.param("sessionId") ?? "")).sessionId;
       const sessionProvider = await startedSessionProvider(sessionId);
       if (!sessionProvider) {
-        response.status(400).json({ error: "unknown provider" });
-        return;
+        return jsonResponse(c, { error: "unknown provider" }, 400);
       }
-      if (
-        !requireProviderCapability(
-          response,
-          sessionProvider.provider,
-          sessionProvider.provider.capabilities.sessions.history,
-          "session history",
-          "readSessionThread",
-        ) ||
-        !requireHostCapability(
-          response,
-          HOST_CAPABILITIES.workspace.gitStatus,
-          "git status",
-        )
-      ) {
-        return;
-      }
+      requireProviderCapability(sessionProvider.provider, sessionProvider.provider.capabilities.sessions.history, "session history", "readSessionThread");
+      requireHostCapability(HOST_CAPABILITIES.workspace.gitStatus, "git status");
       const session = await readSession(providerRuntime, sessionId, false);
-      response.json(
-        await readGitStatus(session.cwd, mapGitInfo(session.gitInfo)),
-      );
-    }),
+      return jsonResponse(c, await readGitStatus(session.cwd, mapGitInfo(session.gitInfo)));
+    },
   );
 
   app.get(
     "/api/sessions/:sessionId/git/diff",
-    asyncRoute(async (request, response) => {
-      const sessionId = providerRuntime.resolveSession(pathParam(request.params.sessionId)).sessionId;
+    async (c) => {
+      const sessionId = providerRuntime.resolveSession((c.req.param("sessionId") ?? "")).sessionId;
       const sessionProvider = await startedSessionProvider(sessionId);
       if (!sessionProvider) {
-        response.status(400).json({ error: "unknown provider" });
-        return;
+        return jsonResponse(c, { error: "unknown provider" }, 400);
       }
       const kind = parseGitDiffKind(
-        (request.query as Record<string, unknown>).kind,
+        readQuery(c).kind,
       );
       if (!kind) {
-        response
-          .status(400)
-          .json({ error: "kind must be working, staged, unstaged, or remote" });
-        return;
+        return jsonResponse(c, { error: "kind must be working, staged, unstaged, or remote" }, 400);
       }
 
-      if (
-        !requireProviderCapability(
-          response,
-          sessionProvider.provider,
-          sessionProvider.provider.capabilities.sessions.history,
-          "session history",
-          "readSessionThread",
-        )
-      ) {
-        return;
-      }
+      requireProviderCapability(sessionProvider.provider, sessionProvider.provider.capabilities.sessions.history, "session history", "readSessionThread");
       const session = await readSession(providerRuntime, sessionId, false);
-      if (
-        !requireHostCapability(
-          response,
-          HOST_CAPABILITIES.workspace.gitDiff,
-          "git diff",
-        )
-      ) {
-        return;
-      }
-      response.json(await readGitDiff(session.cwd, kind));
-    }),
+      requireHostCapability(HOST_CAPABILITIES.workspace.gitDiff, "git diff");
+      return jsonResponse(c, await readGitDiff(session.cwd, kind));
+    },
   );
 
   app.get(
     "/api/skills",
-    asyncRoute(async (request, response) => {
-      const query = request.query as Record<string, unknown>;
+    async (c) => {
+      const query = readQuery(c);
       const agentProvider = asString(query.agentProvider) || null;
       const selectedProvider = await startedProviderForKind(agentProvider);
       if (!selectedProvider) {
-        response.status(400).json({ error: "unknown provider" });
-        return;
+        return jsonResponse(c, { error: "unknown provider" }, 400);
       }
-      if (
-        !requireProviderCapability(
-          response,
-          selectedProvider.provider,
-          selectedProvider.provider.capabilities.configuration.skills,
-          "skill listing",
-          "listSkills",
-        )
-      ) {
-        return;
-      }
+      requireProviderCapability(selectedProvider.provider, selectedProvider.provider.capabilities.configuration.skills, "skill listing", "listSkills");
       const cwd = asString(query.cwd);
       if (!cwd) {
-        response.status(400).json({ error: "cwd is required" });
-        return;
+        return jsonResponse(c, { error: "cwd is required" }, 400);
       }
 
       const forceReload = parseQueryBool(query.forceReload);
-      response.json(
-        await selectedProvider.provider.listSkills!({ cwd, forceReload }),
-      );
-    }),
+      return jsonResponse(c, await selectedProvider.provider.listSkills!({ cwd, forceReload }));
+    },
   );
 
   app.post(
     "/api/skills/config/write",
-    asyncRoute(async (request, response) => {
-      const requestedProvider = asString(request.body?.agentProvider) || null;
+    async (c) => {
+      const body = await readJsonBody(c);
+      const requestedProvider = asString(body?.agentProvider) || null;
       const selectedProvider = await startedProviderForKind(requestedProvider);
       if (!selectedProvider) {
-        response.status(400).json({ error: "unknown provider" });
-        return;
+        return jsonResponse(c, { error: "unknown provider" }, 400);
       }
-      if (
-        !requireProviderCapability(
-          response,
-          selectedProvider.provider,
-          selectedProvider.provider.capabilities.configuration.skillManagement,
-          "skill configuration",
-          "writeSkillConfig",
-        )
-      ) {
-        return;
-      }
-      const path = asString(request.body?.path);
-      const name = asString(request.body?.name);
-      const enabled = parseOptionalBool(request.body?.enabled);
+      requireProviderCapability(selectedProvider.provider, selectedProvider.provider.capabilities.configuration.skillManagement, "skill configuration", "writeSkillConfig");
+      const path = asString(body?.path);
+      const name = asString(body?.name);
+      const enabled = parseOptionalBool(body?.enabled);
       if (enabled === null) {
-        response.status(400).json({ error: "enabled is required" });
-        return;
+        return jsonResponse(c, { error: "enabled is required" }, 400);
       }
       if ((path && name) || (!path && !name)) {
-        response
-          .status(400)
-          .json({ error: "provide exactly one of path or name" });
-        return;
+        return jsonResponse(c, { error: "provide exactly one of path or name" }, 400);
       }
 
       const result = await selectedProvider.provider.writeSkillConfig!({
@@ -1624,160 +1428,101 @@ export async function startServer(
         name,
         enabled,
       });
-      response.json(result);
-    }),
+      return jsonResponse(c, result);
+    },
   );
 
   app.get(
     "/api/modes",
-    asyncRoute(async (request, response) => {
-      const query = request.query as Record<string, unknown>;
+    async (c) => {
+      const query = readQuery(c);
       const agentProvider = asString(query.agentProvider) || null;
       const selectedProvider = await startedProviderForKind(agentProvider);
       if (!selectedProvider) {
-        response.status(400).json({ error: "unknown provider" });
-        return;
+        return jsonResponse(c, { error: "unknown provider" }, 400);
       }
-      if (
-        !requireProviderCapability(
-          response,
-          selectedProvider.provider,
-          selectedProvider.provider.capabilities.runtimeControls.mode,
-          "mode listing",
-          "listModes",
-        )
-      ) {
-        return;
-      }
+      requireProviderCapability(selectedProvider.provider, selectedProvider.provider.capabilities.runtimeControls.mode, "mode listing", "listModes");
       if (!hasProviderMethod(selectedProvider.provider, "listModes")) {
-        response.status(501).json({ error: "mode listing not supported" });
-        return;
+        return jsonResponse(c, { error: "mode listing not supported" }, 501);
       }
       const cwd = asString(query.cwd) || null;
-      response.json(await selectedProvider.provider.listModes({ cwd }));
-    }),
+      return jsonResponse(c, await selectedProvider.provider.listModes({ cwd }));
+    },
   );
 
   app.get(
     "/api/models",
-    asyncRoute(async (request, response) => {
-      const query = request.query as Record<string, unknown>;
+    async (c) => {
+      const query = readQuery(c);
       const agentProvider = asString(query.agentProvider) || null;
       const selectedProvider = await startedProviderForKind(agentProvider);
       if (!selectedProvider) {
-        response.status(400).json({ error: "unknown provider" });
-        return;
+        return jsonResponse(c, { error: "unknown provider" }, 400);
       }
-      if (
-        !requireProviderCapability(
-          response,
-          selectedProvider.provider,
-          selectedProvider.provider.capabilities.configuration.models,
-          "model listing",
-          "listModels",
-        )
-      ) {
-        return;
-      }
+      requireProviderCapability(selectedProvider.provider, selectedProvider.provider.capabilities.configuration.models, "model listing", "listModels");
       const cwd = asString(query.cwd) || null;
       const profile = asString(query.profile) || null;
       const modelProvider = asString(query.provider) || null;
-      response.json(
-        await selectedProvider.provider.listModels!({
+      return jsonResponse(c, await selectedProvider.provider.listModels!({
           cwd,
           profile,
           provider: modelProvider,
-        }),
-      );
-    }),
+        }));
+    },
   );
 
   app.get(
     "/api/profiles",
-    asyncRoute(async (request, response) => {
-      const query = request.query as Record<string, unknown>;
+    async (c) => {
+      const query = readQuery(c);
       const agentProvider = asString(query.agentProvider) || null;
       const selectedProvider = await startedProviderForKind(agentProvider);
       if (!selectedProvider) {
-        response.status(400).json({ error: "unknown provider" });
-        return;
+        return jsonResponse(c, { error: "unknown provider" }, 400);
       }
-      if (
-        !requireProviderCapability(
-          response,
-          selectedProvider.provider,
-          selectedProvider.provider.capabilities.configuration.profiles,
-          "profile listing",
-          "listProfiles",
-        )
-      ) {
-        return;
-      }
+      requireProviderCapability(selectedProvider.provider, selectedProvider.provider.capabilities.configuration.profiles, "profile listing", "listProfiles");
       const cwd = asString(query.cwd) || null;
-      response.json(await selectedProvider.provider.listProfiles!({ cwd }));
-    }),
+      return jsonResponse(c, await selectedProvider.provider.listProfiles!({ cwd }));
+    },
   );
 
   app.get(
     "/api/access-modes",
-    asyncRoute(async (request, response) => {
-      const query = request.query as Record<string, unknown>;
+    async (c) => {
+      const query = readQuery(c);
       const agentProvider = asString(query.agentProvider) || null;
       const selectedProvider = await startedProviderForKind(agentProvider);
       if (!selectedProvider) {
-        response.status(400).json({ error: "unknown provider" });
-        return;
+        return jsonResponse(c, { error: "unknown provider" }, 400);
       }
-      if (
-        !requireProviderCapability(
-          response,
-          selectedProvider.provider,
-          selectedProvider.provider.capabilities.configuration.accessModes,
-          "access mode listing",
-          "listAccessModes",
-        )
-      ) {
-        return;
-      }
+      requireProviderCapability(selectedProvider.provider, selectedProvider.provider.capabilities.configuration.accessModes, "access mode listing", "listAccessModes");
       const cwd = asString(query.cwd) || null;
-      response.json(await selectedProvider.provider.listAccessModes!({ cwd }));
-    }),
+      return jsonResponse(c, await selectedProvider.provider.listAccessModes!({ cwd }));
+    },
   );
 
   app.post(
     "/api/sessions/create",
-    asyncRoute(async (request, response) => {
-      const requestedProvider = asString(request.body?.provider) || null;
+    async (c) => {
+      const body = await readJsonBody(c);
+      const requestedProvider = asString(body?.provider) || null;
       const selectedProvider = await startedProviderForKind(requestedProvider);
       if (!selectedProvider) {
-        response.status(400).json({ error: "unknown provider" });
-        return;
+        return jsonResponse(c, { error: "unknown provider" }, 400);
       }
-      if (
-        !requireProviderCapability(
-          response,
-          selectedProvider.provider,
-          selectedProvider.provider.capabilities.sessions.create,
-          "session creation",
-          "createSession",
-        )
-      ) {
-        return;
-      }
-      const cwd = asString(request.body?.cwd);
-      const input = parseInputItems(request.body?.input);
-      const overrides = parseCreateSessionOverrides(request.body);
+      requireProviderCapability(selectedProvider.provider, selectedProvider.provider.capabilities.sessions.create, "session creation", "createSession");
+      const cwd = asString(body?.cwd);
+      const input = parseInputItems(body?.input);
+      const overrides = parseCreateSessionOverrides(body);
       if (!cwd) {
-        response.status(400).json({ error: "cwd is required" });
-        return;
+        return jsonResponse(c, { error: "cwd is required" }, 400);
       }
       const unsupportedOverride = unsupportedOverrideCapability(
         selectedProvider.provider,
         overrides,
       );
       if (unsupportedOverride) {
-        response.status(501).json({ error: unsupportedOverride });
-        return;
+        return jsonResponse(c, { error: unsupportedOverride }, 501);
       }
 
       const unsupportedInput = unsupportedInputCapability(
@@ -1785,21 +1530,19 @@ export async function startServer(
         input,
       );
       if (unsupportedInput) {
-        response.status(501).json({ error: unsupportedInput });
-        return;
+        return jsonResponse(c, { error: unsupportedInput }, 501);
       }
       const scopedInput = await resolveFileInputItemsForCwd(
         input,
         cwd,
       );
-      const clientMessageId = asString(request.body?.clientMessageId) || randomUUID();
+      const clientMessageId = asString(body?.clientMessageId) || randomUUID();
       if (!isValidClientMessageId(clientMessageId)) {
-        response.status(400).json({ error: "clientMessageId must be 1-128 URL-safe characters" });
-        return;
+        return jsonResponse(c, { error: "clientMessageId must be 1-128 URL-safe characters" }, 400);
       }
       const native = await selectedProvider.provider.createSession!({ cwd, input: [], overrides });
       const started = { ...native, thread: providerRuntime.wrapThread(selectedProvider, native.thread) };
-      const inputOverrides = parseTurnOverrides(request.body);
+      const inputOverrides = parseTurnOverrides(body);
       let receipt = null;
       try {
         if (scopedInput.length) receipt = await inputs.submit({
@@ -1809,105 +1552,80 @@ export async function startServer(
         });
       } catch (error) {
         // Creation succeeded even when dispatch did not. Keep the recoverable session visible.
-        response.status(error instanceof AgentProviderRequestError ? error.status : 502).json({
+        return jsonResponse(c, {
           error: error instanceof Error ? error.message : String(error),
           session: mapSession(started.thread, started.runtime), clientMessageId,
           code: error instanceof SessionInputError ? error.code : "initial_input_failed",
-        });
-        return;
+        }, (error instanceof AgentProviderRequestError ? error.status : 502) as ContentfulStatusCode);
       }
-      response.status(201).json({
+      const response = jsonResponse(c, {
         session: mapSession(started.thread, started.runtime, sessionStatusOverrideForDisplay(started.thread.id)),
         activeTurnId: sessionState.get(started.thread.id).activeTurn?.turnId ?? null,
         input: receipt,
-      });
+      }, 201);
       scheduleRecentSessionUpsert(started.thread.id, 0);
       void indexSessionForSearch(searchIndex, providerRuntime, started.thread.id).catch(() => {});
-    }),
+      return response;
+    },
   );
 
   app.post(
     "/api/sessions/:sessionId/input",
-    asyncRoute(async (request, response) => {
-      const sessionId = providerRuntime.resolveSession(pathParam(request.params.sessionId)).sessionId;
+    async (c) => {
+      const body = await readJsonBody(c);
+      const sessionId = providerRuntime.resolveSession((c.req.param("sessionId") ?? "")).sessionId;
       const sessionProvider = await startedSessionProvider(sessionId);
       if (!sessionProvider) {
-        response.status(400).json({ error: "unknown provider" });
-        return;
+        return jsonResponse(c, { error: "unknown provider" }, 400);
       }
-      if (
-        !requireProviderCapability(
-          response,
-          sessionProvider.provider,
-          true,
-          "session input submission",
-          "submitInput",
-        )
-      ) {
-        return;
-      }
-      const input = parseInputItems(request.body?.input);
-      const clientMessageId = asString(request.body?.clientMessageId);
+      requireProviderCapability(sessionProvider.provider, true, "session input submission", "submitInput");
+      const input = parseInputItems(body?.input);
+      const clientMessageId = asString(body?.clientMessageId);
       if (clientMessageId && !isValidClientMessageId(clientMessageId)) {
-        response.status(400).json({
+        return jsonResponse(c, {
           error: "clientMessageId must be 1-128 URL-safe characters",
-        });
-        return;
+        }, 400);
       }
       if (input.length === 0) {
-        response.status(400).json({ error: "input is required" });
-        return;
+        return jsonResponse(c, { error: "input is required" }, 400);
       }
       const unsupportedInput = unsupportedInputCapability(
         sessionProvider.provider,
         input,
       );
       if (unsupportedInput) {
-        response.status(501).json({ error: unsupportedInput });
-        return;
+        return jsonResponse(c, { error: unsupportedInput }, 501);
       }
 
-      const turnOverrides = parseTurnOverrides(request.body);
+      const turnOverrides = parseTurnOverrides(body);
       const unsupportedOverride = unsupportedOverrideCapability(
         sessionProvider.provider,
         turnOverrides,
       );
       if (unsupportedOverride) {
-        response.status(501).json({ error: unsupportedOverride });
-        return;
+        return jsonResponse(c, { error: unsupportedOverride }, 501);
       }
       const inputSignatureHash = hashSessionInputSignature(
         input,
         turnOverrides,
       );
       const dedupeKey = `${sessionId}:${clientMessageId || randomUUID()}`;
-      response.json(await inputs.submit({
+      return jsonResponse(c, await inputs.submit({
         key: dedupeKey, sessionId, signatureHash: inputSignatureHash,
         payload: { input, overrides: turnOverrides },
       }));
-    }),
+    },
   );
 
   app.post(
     "/api/sessions/:sessionId/stop",
-    asyncRoute(async (request, response) => {
-      const sessionId = providerRuntime.resolveSession(pathParam(request.params.sessionId)).sessionId;
+    async (c) => {
+      const sessionId = providerRuntime.resolveSession((c.req.param("sessionId") ?? "")).sessionId;
       const sessionProvider = await startedSessionProvider(sessionId);
       if (!sessionProvider) {
-        response.status(400).json({ error: "unknown provider" });
-        return;
+        return jsonResponse(c, { error: "unknown provider" }, 400);
       }
-      if (
-        !requireProviderCapability(
-          response,
-          sessionProvider.provider,
-          sessionProvider.provider.capabilities.sessions.interrupt,
-          "session interruption",
-          "interruptTurn",
-        )
-      ) {
-        return;
-      }
+      requireProviderCapability(sessionProvider.provider, sessionProvider.provider.capabilities.sessions.interrupt, "session interruption", "interruptTurn");
       let turnId: string | null = null;
       let stopped = false;
       await inputs.stop(sessionId, async () => {
@@ -1918,92 +1636,54 @@ export async function startServer(
           stopped = !(result && typeof result === "object" && "interrupted" in result && result.interrupted === false);
         }
       });
-      response.json({ stopped, turnId });
-    }),
+      return jsonResponse(c, { stopped, turnId });
+    },
   );
 
   app.post(
     "/api/sessions/:sessionId/compact",
-    asyncRoute(async (request, response) => {
-      const sessionId = providerRuntime.resolveSession(pathParam(request.params.sessionId)).sessionId;
+    async (c) => {
+      const sessionId = providerRuntime.resolveSession((c.req.param("sessionId") ?? "")).sessionId;
       const sessionProvider = await startedSessionProvider(sessionId);
       if (!sessionProvider) {
-        response.status(400).json({ error: "unknown provider" });
-        return;
+        return jsonResponse(c, { error: "unknown provider" }, 400);
       }
-      if (
-        !requireProviderCapability(
-          response,
-          sessionProvider.provider,
-          sessionProvider.provider.capabilities.sessions.compact,
-          "session compaction",
-          "compactSession",
-        )
-      ) {
-        return;
-      }
+      requireProviderCapability(sessionProvider.provider, sessionProvider.provider.capabilities.sessions.compact, "session compaction", "compactSession");
       const state = await sessionState.snapshot(sessionId, { messageLimit: 1, activityLimit: 1 });
       if (state.busy) {
-        response.status(409).json({
+        return jsonResponse(c, {
           error: "Cannot compact while a turn is running",
           turnId: state.activeTurnId,
-        });
-        return;
+        }, 409);
       }
       const result = await sessionProvider.provider.compactSession!(sessionProvider.rawId);
 
-      response.json({ compacted: true, result: result ?? null });
+      const response = jsonResponse(c, { compacted: true, result: result ?? null });
       scheduleRecentSessionUpsert(sessionId, 0);
-    }),
+      return response;
+    },
   );
 
   app.post(
     "/api/sessions/:sessionId/name",
-    asyncRoute(async (request, response) => {
-      const sessionId = providerRuntime.resolveSession(pathParam(request.params.sessionId)).sessionId;
+    async (c) => {
+      const body = await readJsonBody(c);
+      const sessionId = providerRuntime.resolveSession((c.req.param("sessionId") ?? "")).sessionId;
       const sessionProvider = await startedSessionProvider(sessionId);
       if (!sessionProvider) {
-        response.status(400).json({ error: "unknown provider" });
-        return;
+        return jsonResponse(c, { error: "unknown provider" }, 400);
       }
-      if (
-        !requireProviderCapability(
-          response,
-          sessionProvider.provider,
-          sessionProvider.provider.capabilities.sessions.rename,
-          "session renaming",
-          "setSessionName",
-        ) ||
-        !requireProviderCapability(
-          response,
-          sessionProvider.provider,
-          sessionProvider.provider.capabilities.sessions.history,
-          "session history",
-          "readSessionThread",
-        )
-      ) {
-        return;
-      }
-      const name = asString(request.body?.name);
+      requireProviderCapability(sessionProvider.provider, sessionProvider.provider.capabilities.sessions.rename, "session renaming", "setSessionName");
+      requireProviderCapability(sessionProvider.provider, sessionProvider.provider.capabilities.sessions.history, "session history", "readSessionThread");
+      const name = asString(body?.name);
       if (!name) {
-        response.status(400).json({ error: "name is required" });
-        return;
+        return jsonResponse(c, { error: "name is required" }, 400);
       }
       if (
         hasProviderMethod(sessionProvider.provider, "listLoadedSessionIds") &&
         !(await isThreadLoaded(sessionProvider.provider, sessionProvider.rawId))
       ) {
-        if (
-          !requireProviderCapability(
-            response,
-            sessionProvider.provider,
-            sessionProvider.provider.capabilities.sessions.resume,
-            "session resume",
-            "resumeSessionThread",
-          )
-        ) {
-          return;
-        }
+        requireProviderCapability(sessionProvider.provider, sessionProvider.provider.capabilities.sessions.resume, "session resume", "resumeSessionThread");
         await sessionProvider.provider.resumeSessionThread!(sessionProvider.rawId, {
           persistExtendedHistory: true,
         });
@@ -2015,79 +1695,59 @@ export async function startServer(
         null,
         await sessionStatusOverrideForDisplay(thread.id),
       );
-      response.json({ session });
+      const response = jsonResponse(c, { session });
       scheduleRecentSessionUpsert(sessionId, 0);
       void indexSessionForSearch(searchIndex, providerRuntime, sessionId).catch(() => {});
-    }),
+      return response;
+    },
   );
 
   app.post(
     "/api/sessions/:sessionId/archive",
-    asyncRoute(async (request, response) => {
-      const sessionId = providerRuntime.resolveSession(pathParam(request.params.sessionId)).sessionId;
+    async (c) => {
+      const sessionId = providerRuntime.resolveSession((c.req.param("sessionId") ?? "")).sessionId;
       const sessionProvider = await startedSessionProvider(sessionId);
       if (!sessionProvider) {
-        response.status(400).json({ error: "unknown provider" });
-        return;
+        return jsonResponse(c, { error: "unknown provider" }, 400);
       }
-      if (
-        !requireProviderCapability(
-          response,
-          sessionProvider.provider,
-          sessionProvider.provider.capabilities.sessions.archive,
-          "session archiving",
-          "archiveSession",
-        )
-      ) {
-        return;
-      }
+      requireProviderCapability(sessionProvider.provider, sessionProvider.provider.capabilities.sessions.archive, "session archiving", "archiveSession");
       await inputs.stop(sessionId, async () => { await sessionProvider.provider.archiveSession!(sessionProvider.rawId); });
       sessionState.invalidate(sessionId);
       broadcastRecentSessionRemove(sessionId);
       void indexSessionForSearch(searchIndex, providerRuntime, sessionId, true).catch(() => {});
-    }),
+      return c.body(null, 200);
+    },
   );
 
   app.post(
     "/api/sessions/:sessionId/unarchive",
-    asyncRoute(async (request, response) => {
-      const sessionId = providerRuntime.resolveSession(pathParam(request.params.sessionId)).sessionId;
+    async (c) => {
+      const sessionId = providerRuntime.resolveSession((c.req.param("sessionId") ?? "")).sessionId;
       const sessionProvider = await startedSessionProvider(sessionId);
       if (!sessionProvider) {
-        response.status(400).json({ error: "unknown provider" });
-        return;
+        return jsonResponse(c, { error: "unknown provider" }, 400);
       }
-      if (
-        !requireProviderCapability(
-          response,
-          sessionProvider.provider,
-          sessionProvider.provider.capabilities.sessions.archive,
-          "session unarchiving",
-          "unarchiveSession",
-        )
-      ) {
-        return;
-      }
+      requireProviderCapability(sessionProvider.provider, sessionProvider.provider.capabilities.sessions.archive, "session unarchiving", "unarchiveSession");
       await sessionProvider.provider.unarchiveSession!(sessionProvider.rawId);
-      response.json({ unarchived: true });
+      const response = jsonResponse(c, { unarchived: true });
       scheduleRecentSessionUpsert(sessionId, 0);
       void indexSessionForSearch(searchIndex, providerRuntime, sessionId, false).catch(() => {});
-    }),
+      return response;
+    },
   );
 
   app.post(
     "/api/actions/:actionId/respond",
-    asyncRoute(async (request, response) => {
-      const actionId = providerRuntime.resolveSession(pathParam(request.params.actionId)).sessionId;
+    async (c) => {
+      const body = await readJsonBody(c);
+      const actionId = providerRuntime.resolveSession((c.req.param("actionId") ?? "")).sessionId;
       const action = pendingActions.get(actionId);
       if (!action) {
-        response.status(404).json({ error: "action not found" });
-        return;
+        return jsonResponse(c, { error: "action not found" }, 404);
       }
-      const decision = parsePendingActionResponseBody(request.body, action);
+      const decision = parsePendingActionResponseBody(body, action);
       if (!decision) {
-        response.status(400).json({ error: "invalid action response" });
-        return;
+        return jsonResponse(c, { error: "invalid action response" }, 400);
       }
 
       const resolved = providerRuntime.resolveSession(action.sessionId);
@@ -2097,13 +1757,12 @@ export async function startServer(
       const handled = requireProviderMethod(provider, "respondToPendingAction", "pending action responses").call(provider,
         { ...action, id: actionReference.rawId, sessionId: resolved.rawId }, decision);
       if (!handled) {
-        response.status(400).json({ error: "unsupported decision" });
-        return;
+        return jsonResponse(c, { error: "unsupported decision" }, 400);
       }
 
       sessionState.handle({ type: "action_resolved", sessionId: action.sessionId, actionId });
-      response.json({ ok: true });
-    }),
+      return jsonResponse(c, { ok: true });
+    },
   );
 
   const wsServer = new WebSocketServer({
@@ -2471,60 +2130,24 @@ async function closeWebSocketServer(server: WebSocketServer): Promise<void> {
 }
 
 
-function asyncRoute(
-  handler: (
-    request: JsonRouteRequest,
-    response: JsonRouteResponse,
-  ) => Promise<void>,
-): ReturnType<typeof jsonRoute> {
-  return jsonRoute(handler);
-}
-
-function pathParam(value: string | string[] | undefined): string {
-  if (Array.isArray(value)) {
-    return value[0] || "";
-  }
-  return value || "";
-}
-
 function isHealthCheckPath(path: string): boolean {
   return path === "/healthz";
 }
 
 function requireProviderCapability(
-  response: JsonRouteResponse,
   provider: AgentProvider,
   supported: boolean,
   feature: string,
   method?: AgentProviderMethodName,
-): boolean {
-  if (!supported) {
-    response.status(501).json({
-      error: `${provider.displayName} does not support ${feature}`,
-    });
-    return false;
-  }
+): void {
+  if (!supported) throw new HTTPException(501, { message: `${provider.displayName} does not support ${feature}` });
   if (method && !hasProviderMethod(provider, method)) {
-    response.status(501).json({
-      error: `${provider.displayName} does not implement ${feature}`,
-    });
-    return false;
+    throw new HTTPException(501, { message: `${provider.displayName} does not implement ${feature}` });
   }
-  return true;
 }
 
-function requireHostCapability(
-  response: JsonRouteResponse,
-  supported: boolean,
-  feature: string,
-): boolean {
-  if (!supported) {
-    response.status(501).json({
-      error: `Sidemesh host does not support ${feature}`,
-    });
-    return false;
-  }
-  return true;
+function requireHostCapability(supported: boolean, feature: string): void {
+  if (!supported) throw new HTTPException(501, { message: `Sidemesh host does not support ${feature}` });
 }
 
 function unsupportedInputCapability(
