@@ -903,6 +903,7 @@ export interface LiveEvent {
     | "action_opened"
     | "action_resolved"
     | "skills_changed"
+    | "history_invalidated"
     | "error";
   sessionId: string;
   seq?: number;
