@@ -23,7 +23,7 @@ function harness() {
       options: [{ value: "first", name: "First" }, { value: "second", name: "Second" }, { value: "broken", name: "Unavailable" }] },
     { id: "auto", type: "boolean", name: "Automatic", currentValue: false },
   ];
-  const result = { history, sessions, connects: 0, prompts: [] as string[], promptBlocks: [] as ContentBlock[][], images: false, loadFails: false, loadCalls: 0,
+  const result = { history, sessions, connects: 0, prompts: [] as string[], promptBlocks: [] as ContentBlock[][], images: false, audio: false, resources: false, loadFails: false, loadCalls: 0,
     onPrompt: null as (() => void) | null, deleteSupported: true, deleteFails: false, deleted: [] as string[],
     authMethods: [{ id: "first", name: "First account" }, { id: "second", name: "Second account" }] as AuthMethod[],
     terminalAuthAdvertised: false, authenticateCalls: 0, logoutSupported: false, logoutCalls: 0, holdReady: false,
@@ -37,7 +37,7 @@ function harness() {
           result.terminalAuthAdvertised = params.clientCapabilities?.auth?.terminal === true;
           return { protocolVersion: PROTOCOL_VERSION,
           agentInfo: { name: "wire-fixture", version: "1" },
-          agentCapabilities: { auth: result.logoutSupported ? { logout: {} } : {}, loadSession: result.loadSupported, promptCapabilities: { image: result.images }, sessionCapabilities: {
+          agentCapabilities: { auth: result.logoutSupported ? { logout: {} } : {}, loadSession: result.loadSupported, promptCapabilities: { image: result.images, audio: result.audio, embeddedContext: result.resources }, sessionCapabilities: {
             list: {}, resume: {}, close: {}, ...(result.deleteSupported ? { delete: {} } : {}),
           } },
           authMethods: result.authMethods,
@@ -152,6 +152,35 @@ describe("AcpAgentProvider", () => {
     await provider.start();
   });
   afterEach(async () => { await provider.close(); store.close(); await rm(directory, { recursive: true, force: true }); });
+
+  it("sends negotiated audio, embedded content, and references and preserves their bytes", async () => {
+    wire.audio = true;
+    wire.resources = true;
+    const input = [
+      { type: "audio" as const, data: "UklGRg==", mimeType: "audio/wav", name: "clip.wav" },
+      { type: "resource" as const, uri: "attachment:///note.txt", mimeType: "text/plain", text: "Full resource text" },
+      { type: "resource" as const, uri: "attachment:///raw.bin", mimeType: "application/octet-stream", blob: "AP8=" },
+      { type: "resourceLink" as const, uri: "https://example.com/reference", name: "Reference" },
+    ];
+    const done = completion(provider);
+    const created = await provider.createSession({ cwd: directory, input, overrides });
+    await done;
+    assert.equal(provider.capabilities.input.audio, true);
+    assert.equal(provider.capabilities.input.embeddedResources, true);
+    assert.deepEqual(wire.promptBlocks[0]!.map((block) => block.type), ["audio", "resource", "resource", "resource_link"]);
+    const snapshot = await provider.readSessionSnapshot(created.thread.id);
+    const user = snapshot.messages.find((message) => message.role === "user")!;
+    assert.ok(user.attachments.some((item) => item.url === "data:audio/wav;base64,UklGRg=="));
+    assert.ok(user.attachments.some((item) => item.url === "data:application/octet-stream;base64,AP8="));
+    await provider.close();
+    wire.audio = false;
+    wire.resources = false;
+    provider = createProvider();
+    await provider.start();
+    await assert.rejects(provider.submitInput({ sessionId: created.thread.id, input: [input[0]!], activeTurnId: null, overrides }), /does not support audio/);
+    await assert.rejects(provider.submitInput({ sessionId: created.thread.id, input: [input[1]!], activeTurnId: null, overrides }), /does not support embedded resources/);
+    assert.equal(wire.promptBlocks.length, 1);
+  });
 
   it("gates sign-out, rejects active work, and preserves saved history", async () => {
     await assert.rejects(provider.logout(), /No connected agent supports/);

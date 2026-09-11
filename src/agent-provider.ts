@@ -88,6 +88,9 @@ export interface AgentSessionSnapshot extends SessionLogSnapshot {
 }
 
 export type AgentSessionInputItem =
+  | { type: "audio"; data: string; mimeType: string; name?: string }
+  | { type: "resource"; uri: string; name?: string; mimeType?: string; text?: string; blob?: string }
+  | { type: "resourceLink"; uri: string; name: string; mimeType?: string }
   | {
       type: "text";
       text: string;
@@ -221,6 +224,9 @@ export interface AgentProviderCapabilities {
     text: boolean;
     /** False means the host must keep follow-up input in its durable queue. */
     steer?: boolean;
+    audio?: boolean;
+    embeddedResources?: boolean;
+    resourceLinks?: boolean;
     imageUrl: boolean;
     localImage: boolean;
     skills: boolean;

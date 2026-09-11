@@ -1437,6 +1437,9 @@ class _MessageAttachmentTile extends StatelessWidget {
         path: attachment.path!,
       );
     }
+    if (const {'audio', 'resource', 'resourceLink'}.contains(attachment.type)) {
+      return Text('${attachment.type == 'audio' ? 'Audio' : 'Resource'}: ${attachment.name ?? attachment.mimeType ?? 'Attachment'}');
+    }
     return const SizedBox.shrink();
   }
 }

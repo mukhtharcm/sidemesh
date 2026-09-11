@@ -96,6 +96,45 @@ void main() {
     });
   }
 
+  for (final mode in [ThemeMode.light, ThemeMode.dark]) {
+    for (final desktop in [true, false]) {
+      testWidgets('content inputs stay in the composer in $mode, desktop=$desktop', (tester) async {
+        final api = _CapabilityFakeApi(_nodeForCapabilities({
+          ..._minimalCapabilities,
+          'input': {'text': true, 'audio': true, 'embeddedResources': true, 'resourceLinks': true},
+        }));
+        addTearDown(api.dispose);
+        await _pumpApp(tester, SessionScreen(
+          host: _host('content-input'), session: _session('content-session'), api: api, desktopMode: desktop,
+          initialComposerSeed: const SessionComposerSeed(text: '', inputItems: [
+            SessionInputItem.audio('UklGRg==', 'audio/wav', name: 'clip.wav'),
+            SessionInputItem.resource('attachment:///note.txt', name: 'note.txt', text: 'Resource content'),
+          ]),
+        ), size: desktop ? const Size(1180, 900) : const Size(390, 840), themeMode: mode);
+        await _pumpFrames(tester);
+        expect(tester.widget<AppComposer>(find.byType(AppComposer)).hasSendableContext, isTrue);
+        expect(find.text('clip.wav'), findsOneWidget);
+        expect(find.text('note.txt'), findsOneWidget);
+        await tester.tap(find.byTooltip('Attach content'));
+        await tester.pumpAndSettle();
+        expect(find.text('Attach audio'), findsOneWidget);
+        expect(find.text('Attach file content'), findsOneWidget);
+        await tester.tap(find.text('Attach resource reference'));
+        await tester.pumpAndSettle();
+        await tester.enterText(find.descendant(of: find.byType(AlertDialog), matching: find.byType(TextField)), 'urn:example:record');
+        await tester.tap(find.text('Attach').last);
+        await tester.pumpAndSettle();
+        expect(find.text('urn:example:record'), findsOneWidget);
+        tester.widget<AppComposer>(find.byType(AppComposer)).onSend();
+        await _pumpFrames(tester);
+        expect(api.sentInput?.map((item) => item.type).toList(), ['audio', 'resource', 'resourceLink']);
+        expect(api.sentInput?.first.data, 'UklGRg==');
+        expect(api.sentInput?[1].text, 'Resource content');
+        expect(tester.takeException(), isNull);
+      });
+    }
+  }
+
   testWidgets('session screen hides unsupported composer and menu actions', (
     tester,
   ) async {
@@ -114,6 +153,7 @@ void main() {
     );
     await _pumpFrames(tester);
 
+    expect(find.byTooltip('Attach content'), findsNothing);
     expect(find.byTooltip('Attach images'), findsNothing);
     expect(find.byTooltip('Paste image from clipboard'), findsNothing);
 
@@ -2999,6 +3039,15 @@ class _CapabilityFakeApi extends ApiClient {
   final _IdleWebSocketChannel _actionsChannel = _IdleWebSocketChannel()
     ..addIncoming(jsonEncode({'type': 'snapshot', 'actions': []}));
   _CapturedCreateSessionRequest? lastCreateRequest;
+  List<SessionInputItem>? sentInput;
+
+  @override
+  Future<void> sendInput(HostProfile host, {
+    required String sessionId, String text = '', List<SessionInputItem>? input,
+    String? clientMessageId, String? model, String? mode, String? reasoningEffort,
+    bool? fastMode, String? approvalPolicy, String? sandboxMode, bool? networkAccess, String? accessMode,
+  }) async { sentInput = input; }
+
   String? deletedSession;
 
   @override

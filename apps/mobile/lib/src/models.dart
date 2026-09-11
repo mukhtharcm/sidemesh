@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'session_identity.dart';
 
 class HostProfile {
@@ -2166,11 +2168,13 @@ class ThinkingBlock extends ContentBlock {
 }
 
 class SessionMessageAttachment {
-  const SessionMessageAttachment({required this.type, this.url, this.path});
+  const SessionMessageAttachment({required this.type, this.url, this.path, this.name, this.mimeType});
 
   final String type;
   final String? url;
   final String? path;
+  final String? name;
+  final String? mimeType;
 
   bool get isImage => type == 'image' && (url?.isNotEmpty ?? false);
   bool get isLocalImage => type == 'localImage' && (path?.isNotEmpty ?? false);
@@ -2180,9 +2184,12 @@ class SessionMessageAttachment {
         type: _stringValue(json['type']),
         url: _stringOrNull(json['url']),
         path: _stringOrNull(json['path']),
+        name: _stringOrNull(json['name']),
+        mimeType: _stringOrNull(json['mimeType']),
       );
 
-  Map<String, dynamic> toJson() => {'type': type, 'url': url, 'path': path};
+  Map<String, dynamic> toJson() => {'type': type, 'url': url, 'path': path,
+    if (name != null) 'name': name, if (mimeType != null) 'mimeType': mimeType};
 }
 
 class SessionResource {
@@ -2274,6 +2281,10 @@ class SessionInputItem {
     this.name,
     this.path,
     this.isDirectory,
+    this.data,
+    this.uri,
+    this.mimeType,
+    this.blob,
   });
 
   const SessionInputItem.text(String text) : this._(type: 'text', text: text);
@@ -2289,6 +2300,27 @@ class SessionInputItem {
   const SessionInputItem.file(String path, {bool isDirectory = false})
     : this._(type: 'file', path: path, isDirectory: isDirectory);
 
+  const SessionInputItem.audio(String data, String mimeType, {String? name})
+    : this._(type: 'audio', data: data, mimeType: mimeType, name: name);
+
+  const SessionInputItem.resource(String uri, {String? name, String? mimeType, String? text, String? blob})
+    : this._(type: 'resource', uri: uri, name: name, mimeType: mimeType, text: text, blob: blob);
+
+  const SessionInputItem.resourceLink(String uri, String name, {String? mimeType})
+    : this._(type: 'resourceLink', uri: uri, name: name, mimeType: mimeType);
+
+  final String? data;
+  final String? uri;
+  final String? mimeType;
+  final String? blob;
+  bool get isContent => const {'audio', 'resource', 'resourceLink'}.contains(type);
+  String get contentLabel => name ?? (type == 'audio' ? 'Audio' : uri ?? 'Resource');
+  SessionMessageAttachment get contentAttachment => SessionMessageAttachment(
+    type: type, name: contentLabel, mimeType: mimeType,
+    url: type == 'resourceLink' ? uri : type == 'audio' ? 'data:$mimeType;base64,$data' :
+      'data:${mimeType ?? (text != null ? 'text/plain' : 'application/octet-stream')};base64,${text != null ? base64Encode(utf8.encode(text!)) : blob}',
+  );
+
   final String type;
   final String? text;
   final String? url;
@@ -2299,6 +2331,13 @@ class SessionInputItem {
   factory SessionInputItem.fromJson(Map<String, dynamic> json) {
     final type = _stringValue(json['type']);
     switch (type) {
+      case 'audio':
+        return SessionInputItem.audio(_stringValue(json['data']), _stringValue(json['mimeType']), name: _stringOrNull(json['name']));
+      case 'resource':
+        return SessionInputItem.resource(_stringValue(json['uri']), name: _stringOrNull(json['name']),
+          mimeType: _stringOrNull(json['mimeType']), text: json['text'] is String ? json['text'] as String : null, blob: _stringOrNull(json['blob']));
+      case 'resourceLink':
+        return SessionInputItem.resourceLink(_stringValue(json['uri']), _stringValue(json['name']), mimeType: _stringOrNull(json['mimeType']));
       case 'text':
         return SessionInputItem.text(_stringValue(json['text']));
       case 'image':
@@ -2321,6 +2360,13 @@ class SessionInputItem {
   }
 
   Map<String, dynamic> toJson() {
+    if (isContent) {
+      return {
+      'type': type, if (data != null) 'data': data, if (uri != null) 'uri': uri,
+      if (name != null) 'name': name, if (mimeType != null) 'mimeType': mimeType,
+      if (text != null) 'text': text, if (blob != null) 'blob': blob,
+      };
+    }
     switch (type) {
       case 'text':
         return {

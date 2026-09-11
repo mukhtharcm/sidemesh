@@ -1755,6 +1755,27 @@ describe("session input item parsing", () => {
     }
   });
 
+  it("rejects unsupported or malformed content without replacing it with fallback text", async () => {
+    const stateDir = await mkdtemp(nodePath.join(tmpdir(), "sidemesh-server-test-"));
+    const cwd = await prepareFileInputWorkspace(stateDir);
+    const provider = new NoFileMentionProvider();
+    await withServerRuntime(makeConfig(stateDir), makeCustomSingleProviderRuntime(provider), async (server, config) => {
+      for (const [input, status] of [
+        [{ type: "audio", mimeType: "audio/wav", data: "UklGRg==" }, 501],
+        [{ type: "resource", uri: "attachment:///note", text: "content" }, 501],
+        [{ type: "resourceLink", uri: "https://example.com", name: "Reference" }, 501],
+        [{ type: "audio", mimeType: "audio/wav", data: "invalid" }, 400],
+        [{ type: "resource", uri: "javascript:alert(1)", text: "content" }, 400],
+      ] as const) {
+        const response = await request({ hostname: "127.0.0.1", port: server.port, path: "/api/sessions/create", method: "POST",
+          headers: { Authorization: "Bearer " + config.token, "content-type": "application/json" },
+          body: JSON.stringify({ cwd, prompt: "fallback", input: [input] }) });
+        assert.equal(response.statusCode, status);
+      }
+      assert.equal(provider.lastCreateInput, null);
+    });
+  });
+
   it("rejects file inputs when the selected provider lacks file mention support", async () => {
     const stateDir = await mkdtemp(nodePath.join(tmpdir(), "sidemesh-server-test-"));
     const cwd = await prepareFileInputWorkspace(stateDir);

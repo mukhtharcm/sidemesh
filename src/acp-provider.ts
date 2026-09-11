@@ -86,7 +86,7 @@ interface ConnectedSession {
 export const ACP_PROVIDER_CAPABILITIES: AgentProviderCapabilities = {
   sessions: { create: true, resume: true, rename: true, archive: true, compact: false,
     interrupt: true, history: true, recentFallback: true, searchSessions: true },
-  input: { text: true, imageUrl: false, localImage: false, skills: false, fileMentions: true, steer: false },
+  input: { resourceLinks: true, text: true, imageUrl: false, localImage: false, skills: false, fileMentions: true, steer: false },
   interaction: { userInput: true, elicitation: true },
   approvals: { command: true, tool: true, fileChange: true, permissions: true, approveForSession: true },
   configuration: { sessionOptions: true, commands: true, models: true, profiles: false, accessModes: false, skills: false, skillManagement: false },
@@ -696,6 +696,8 @@ export class AcpAgentProvider extends EventEmitter<AgentProviderEvents> implemen
     return (record.metadata ?? {}) as AcpSessionMetadata;
   }
   private applyPromptCapabilities(value: PromptCapabilities): void {
+    this.capabilities.input.audio = value.audio === true;
+    this.capabilities.input.embeddedResources = value.embeddedContext === true;
     this.capabilities.input.imageUrl = value.image === true;
     this.capabilities.input.localImage = value.image === true;
   }

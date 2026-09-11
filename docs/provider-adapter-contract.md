@@ -301,3 +301,18 @@ ACP enables it after a connected agent declares `agentCapabilities.auth.logout`.
 Sign-out rejects active operations, blocks new prompts during logout, closes idle
 connections after success, and keeps saved session history. It never signs out
 as part of startup, restart, or shutdown.
+
+### Inline audio and resources
+
+The input contract supports `audio` (`data`, `mimeType`, optional `name`),
+`resource` (`uri`, exactly one of `text` or base64 `blob`, optional `name` and
+`mimeType`), and `resourceLink` (`uri`, `name`, optional `mimeType`). The server
+validates the content and rejects unsupported types before input submission.
+Inline content is limited to 5 MiB per item. URI values are references; Sidemesh
+does not fetch them or read them as host paths.
+
+ACP maps these to audio, embedded resource, and resource-link content blocks.
+Audio and embedded resources require the connected agent's prompt capabilities.
+Resource links use the base ACP contract. Saved input and message attachments
+retain the content through retries and history reads. The session composer shows
+Content actions for supported instances and can send an attachment without text.

@@ -1,3 +1,4 @@
+import { contentInputAttachment } from "./input-content.js";
 import { randomUUID } from "node:crypto";
 import type { ContentBlock, SessionUpdate } from "@agentclientprotocol/sdk";
 import { materializeAgentActivityDraft, type AgentProviderLiveEvent } from "./agent-provider.js";
@@ -53,7 +54,9 @@ export class AcpTranscript {
           : { type: "text", text });
         const value = { ...message, text: thinking ? message.text : message.text + text,
           content, attachments: mergeSessionAttachments(message.attachments, extractSessionAttachments(update.content),
-            update.content.type === "audio" ? [{ type: "file", url: `data:${update.content.mimeType};base64,${update.content.data}` }] : []) };
+            update.content.type === "audio" ? [contentInputAttachment(update.content)] :
+            update.content.type === "resource" ? [contentInputAttachment({ type: "resource", ...update.content.resource, mimeType: update.content.resource.mimeType ?? undefined })] :
+            update.content.type === "resource_link" ? [contentInputAttachment({ ...update.content, type: "resourceLink", mimeType: update.content.mimeType ?? undefined })] : []) };
         this.write({ kind: "message", value, nativeId: update.messageId ?? previous?.nativeId ?? null, authority: "recovery" });
         if (role === "assistant" && text) this.emit?.(thinking ? {
           type: "reasoning_delta", sessionId: this.sessionId, turnId: this.turnId, itemId: id, reasoningId: id, delta: text, summary: false,
