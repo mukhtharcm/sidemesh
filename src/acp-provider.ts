@@ -248,9 +248,9 @@ export class AcpAgentProvider extends EventEmitter<AgentProviderEvents> implemen
     return { mode: "turn", turnId };
   }
 
-  async interruptTurn(id: string, turnId: string): Promise<unknown> {
+  async interruptTurn(id: string, turnId: string | null): Promise<unknown> {
     const state = this.sessions.get(id);
-    if (!state?.active || state.active.turnId !== turnId) return { interrupted: false };
+    if (!state?.active || (turnId !== null && state.active.turnId !== turnId)) return { interrupted: false };
     state.active.interrupted = true;
     state.host.cancelPending();
     const done = state.active.done;

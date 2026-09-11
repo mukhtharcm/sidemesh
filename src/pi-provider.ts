@@ -267,11 +267,15 @@ export class PiAgentProvider extends EventEmitter<AgentProviderEvents> implement
     }
   }
 
-  async interruptTurn(id: string, turnId: string): Promise<unknown> {
-    const state = this.connections.get(id);
-    if (!state?.active || state.active.id !== turnId) return { interrupted: false };
+  async interruptTurn(id: string, turnId: string | null): Promise<unknown> {
+    const state = await this.connect(id);
+    if (turnId !== null && state.active?.id !== turnId) return { interrupted: false };
+    if (!state.active) {
+      const native = await this.readState(id, state);
+      if (!native.isStreaming && !native.isCompacting && native.pendingMessageCount === 0) return { interrupted: false };
+    }
     state.stopping = true;
-    state.active.status = "interrupted";
+    if (state.active) state.active.status = "interrupted";
     this.cancelActions(id, state);
     try {
       await state.rpc.request({ type: "clear_queue" });

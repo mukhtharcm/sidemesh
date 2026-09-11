@@ -59,7 +59,7 @@ src/
   git.ts                       # Git operations
   workspace-scope.ts           # Workspace path resolution / sandboxing
   session-store.ts             # Durable SQLite input records and saved plans
-  session-state.ts             # Current session overlay and transcript ordering
+  session-coordinator.ts       # Published session view, native snapshots, durable input queue
   state-writer.ts              # Coalesced durable snapshot writes
 apps/mobile/lib/src/
   screens/                     # Flutter screens
@@ -380,6 +380,13 @@ specific agent provider.
   become confirmed only through explicit native identity or a completed protocol
   operation; matching display IDs or repeated prompt text is not proof. Pi needs
   an observed native timestamp and matching content in its durable entry file.
+- **Host session coordinator**: log, status, resource, and input-dispatch reads use
+  one complete `readSessionSnapshot`. An input receipt does not start a turn.
+  `busy` can be true without a native turn ID; providers own cancellation in
+  that case. Initial input uses the same durable queue as later input. The
+  coordinator stores unconfirmed messages, drafts, and tool updates in SQLite
+  `session_recovery`; native history must cover their content before removal.
+  Keep provider events attached through provider close so final output is saved.
 - **Snapshot/live boundary**: finish provider reads before capturing live state
   and its revision. The client buffers live events during a snapshot, discards
   covered additive text, and preserves newer events and informational warnings.

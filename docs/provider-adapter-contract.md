@@ -46,6 +46,7 @@ Session history:
 
 - `listSessionThreads`
 - `readSessionThread`
+- `readSessionSnapshot`
 - `readSessionLog`
 - `readSessionRuntime`
 - `listRecentUnindexedSessionThreads`
@@ -69,7 +70,8 @@ Session lifecycle:
 - `unarchiveSession`
 - `interruptTurn`
 
-`SessionInputCoordinator` serializes host input dispatch and saves queue payloads
+`SessionCoordinator` owns the published view and its `SessionInputCoordinator`
+serializes host input dispatch. It saves queue payloads
 and receipts in SQLite. An adapter that cannot accept input while busy sets
 `input.steer` to `false`; the host returns `mode: "queued"` after saving the
 request. Only known unsent rows can run automatically after restart. Native
@@ -78,6 +80,26 @@ their payload and return `input_delivery_uncertain` on retry. Stop and archive
 cancel queued rows before interruption; daemon shutdown retains those rows.
 Adapters can set `AgentProviderRequestError.inputNotDispatched` only when the
 prompt was never sent.
+
+The create route creates an empty native session, then saves and dispatches its
+first input through the same queue. If this dispatch fails, the error response
+includes the created session and client input ID. An input receipt cannot start
+or restore a turn. `interruptTurn` can receive a null turn ID: use native session
+cancellation when available, or report that a native turn ID is required.
+
+`readSessionSnapshot` returns one complete normalized native view, including
+`thread`, `busy`, `activeTurnId`, and any `confirmedInputIds` backed by native
+proof. Busy work need not have a turn ID. The host serializes snapshot reads for
+each session and applies client limits after recovery reconciliation. It uses
+this path for logs, status, resources, and input dispatch. Only execution and
+runtime events received during the read can override the returned native state.
+
+The coordinator saves unconfirmed messages, drafts, and tool updates in SQLite
+`session_recovery` before publishing them. A failed read, turn completion,
+provider restart, or new turn does not discard that content. A matching native
+item must cover its content before removal. Recovered drafts remain display
+content until a new native event makes them live. Provider listeners stay
+attached through shutdown so final output reaches this store.
 
 Approvals:
 
@@ -189,7 +211,7 @@ Metadata endpoints:
 - `/api/providers` exposes daemon-supported provider definitions for future
   provider-selection UI.
 - There are no `providerCapabilities` or `codexVersion` aliases.
-- Session refreshes use the adapter's `readSessionLog` implementation. The host
+- Session refreshes use the adapter's `readSessionSnapshot` implementation. The host
   does not parse provider files through a separate replay index. See
   [session synchronization](session-synchronization.md).
 

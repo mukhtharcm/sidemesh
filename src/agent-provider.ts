@@ -423,7 +423,7 @@ export interface AgentSessionLifecycleProvider {
   compactSession(threadId: string): Promise<unknown>;
   createSession(request: AgentCreateSessionRequest): Promise<AgentCreateSessionResult>;
   submitInput(request: AgentSubmitInputRequest): Promise<AgentSubmitInputResult>;
-  interruptTurn(threadId: string, turnId: string): Promise<unknown>;
+  interruptTurn(threadId: string, turnId: string | null): Promise<unknown>;
 }
 
 export interface AgentApprovalProvider {

@@ -420,7 +420,8 @@ export class CodexAgentProvider
     };
   }
 
-  public interruptTurn(threadId: string, turnId: string): Promise<unknown> {
+  public interruptTurn(threadId: string, turnId: string | null): Promise<unknown> {
+    if (!turnId) throw new AgentProviderRequestError("The native turn ID is not available for interruption", 409);
     return this.bridge.request("turn/interrupt", { threadId, turnId });
   }
 

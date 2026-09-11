@@ -21,7 +21,7 @@ import { secureHeaders } from "hono/secure-headers";
 import type { ContentfulStatusCode } from "hono/utils/http-status";
 import { WebSocketServer, type WebSocket } from "ws";
 
-import { SessionStateStore } from "./session-state.js";
+import { SessionCoordinator } from "./session-coordinator.js";
 import {
   AgentProviderRequestError,
   hasProviderMethod,
@@ -38,9 +38,7 @@ import type {
   ApprovalLiveEvent,
   GitInfoSummary,
   HostCapabilities,
-  LatestPlanUpdate,
   LiveEvent,
-  LivePlanStep,
   LiveThreadStatus,
   NodeConfig,
   PendingAction,
@@ -50,18 +48,13 @@ import type {
   SessionMessage,
   SessionResourcesResponse,
   SessionRuntimeSummary,
-  SessionResource,
   SessionSubAgentInfo,
   SessionSummary,
   ThreadRecord,
-  TurnRecord,
   UsageObservation,
   UsageSnapshotResponse,
   WorkspaceSummary,
 } from "./types.js";
-import {
-  mergeSessionActivities,
-} from "./activity.js";
 import {
   parsePendingActionResponseBody,
   toPublicPendingAction,
@@ -105,7 +98,7 @@ import {
   resolveWorkspacePath,
 } from "./workspace-scope.js";
 import { SessionStore } from "./session-store.js";
-import { SessionInputCoordinator, SessionInputError } from "./session-input-coordinator.js";
+import { SessionInputError } from "./session-input-coordinator.js";
 import { startupSummaryLines } from "./startup-summary.js";
 import { getCodexRpcAuditSnapshot } from "./codex-rpc-audit.js";
 import { SessionSearchIndex, type SearchFilter } from "./session-search-index.js";
@@ -129,7 +122,6 @@ const CLIENT_MESSAGE_ID_PATTERN = /^[A-Za-z0-9._:-]+$/;
 const RECENT_UNINDEXED_SESSION_SCAN_LIMIT = 50;
 const RECENT_LIVE_LIMIT = 40;
 const RECENT_SESSIONS_CACHE_TTL_MS = 1_500;
-const TERMINAL_LIVE_STATUS_GRACE_MS = 1_000;
 const RECENT_SESSION_RUNTIME_CONCURRENCY = 4;
 const INSTALL_INFO_REFRESH_TTL_MS = 60_000;
 type SessionRuntimeListMode = "all" | "active" | "none";
@@ -203,6 +195,7 @@ export async function startServer(
     throw error;
   }
   let runningServerRef: RunningServer | null = null;
+  let closing = false;
   const hostCapabilities: HostCapabilities = {
     ...HOST_CAPABILITIES,
     workspace: {
@@ -225,8 +218,35 @@ export async function startServer(
     promise?: Promise<SessionSummary[]>;
     value?: SessionSummary[];
   }>();
-  const sessionState = new SessionStateStore();
-  const pendingActions = new Map<string, AgentPendingAction>();
+  const sessionState = new SessionCoordinator(sessionStore, {
+    readSnapshot: async (id, options) => {
+      const resolved = provider instanceof MultiAgentProvider ? provider.resolveSessionProvider(id) : null;
+      const entry = providerEntryForSessionId(id);
+      if (!entry) throw new AgentProviderRequestError("Unknown provider", 404);
+      const snapshot = await requireProviderMethod(entry.provider, "readSessionSnapshot", "session snapshot")
+        .call(entry.provider, resolved?.rawId ?? id, options);
+      return { ...snapshot, latestPlanUpdate: snapshot.latestPlanUpdate ? { ...snapshot.latestPlanUpdate, sessionId: id } : null,
+        thread: { ...snapshot.thread, id, providerId: entry.id ?? entry.kind, providerKind: entry.kind,
+          subAgent: snapshot.thread.subAgent && resolved ? { ...snapshot.thread.subAgent,
+            parentSessionId: snapshot.thread.subAgent.parentSessionId ? wrapProviderScopedId(resolved.id, snapshot.thread.subAgent.parentSessionId) : null,
+          } : snapshot.thread.subAgent } };
+    },
+    publish: publishSessionEvent,
+    input: {
+      canSteer: (id) => providerEntryForSessionId(id)?.provider.capabilities.input.steer !== false,
+      prepare: async (id, payload) => ({ ...payload,
+        input: await resolveFileInputItemsForSession(provider, id, payload.input) }),
+      dispatch: (request) => provider.submitInput!(request),
+      submitted: async (request, receipt) => {
+        broadcastLive(request.sessionId, { type: "user_message_submitted", sessionId: request.sessionId,
+          turnId: receipt.turnId ?? undefined,
+          messageItem: buildSubmittedUserMessage(request.input, receipt.messageId, allocSeq(request.sessionId)) });
+        scheduleRecentSessionUpsert(request.sessionId, 0);
+      },
+    },
+  });
+  const pendingActions = sessionState.pendingActions;
+  const inputs = sessionState.inputs;
   const searchIndex = new SessionSearchIndex(
     nodePath.join(config.stateDir, "search-index-v1.db"),
   );
@@ -342,272 +362,10 @@ export async function startServer(
     quality: config.browserPreview.quality,
   });
 
-  function allocSeq(sessionId: string): number {
-    const current = Math.max(
-      sessionState.get(sessionId).nextSeq ?? 0,
-      nextSeqForLatestPlanUpdate(0, latestPlanUpdateForSession(sessionId)),
-    );
-    sessionState.get(sessionId).nextSeq = current + 1;
-    return current;
-  }
+  function allocSeq(sessionId: string): number { return sessionState.allocSeq(sessionId); }
 
-  function ensureSeqCursor(sessionId: string, minimum: number): void {
-    const current = sessionState.get(sessionId).nextSeq ?? 0;
-    if (minimum > current) {
-      sessionState.get(sessionId).nextSeq = minimum;
-    }
-  }
-
-  function latestPlanUpdateForSession(sessionId: string): LatestPlanUpdate | null {
-    return sessionStore.getPlan(sessionId);
-  }
-
-  function latestThreadStatusForSession(sessionId: string): LiveThreadStatus | null {
-    return sessionState.get(sessionId).status ?? null;
-  }
-
-  function setLatestThreadStatusForSession(
-    sessionId: string,
-    status: LiveThreadStatus | null,
-  ): void {
-    if (status == null) {
-      sessionState.get(sessionId).status = null;
-      sessionState.get(sessionId).statusUpdatedAt = 0;
-      return;
-    }
-    sessionState.get(sessionId).status = status;
-    sessionState.get(sessionId).statusUpdatedAt = Date.now();
-  }
-
-  function sessionStatusOverrideForDisplay(
-    sessionId: string,
-  ): LiveThreadStatus | null {
-    const recoveredTerminalStatus = sessionState.get(sessionId).recoveredStatus;
-    if (recoveredTerminalStatus) {
-      return recoveredTerminalStatus;
-    }
-    const status = latestThreadStatusForSession(sessionId);
-    if (status == null) {
-      return null;
-    }
-    if (isRunningThreadStatus(status)) {
-      return status;
-    }
-    if (!isTerminalThreadStatus(status)) {
-      return null;
-    }
-    const updatedAt = sessionState.get(sessionId).statusUpdatedAt ?? 0;
-    return Date.now() - updatedAt <= TERMINAL_LIVE_STATUS_GRACE_MS ? status : null;
-  }
-
-  function clearConfirmedTerminalSessionState(sessionId: string): void {
-    sessionState.get(sessionId).activeTurn = null;
-    sessionState.get(sessionId).unverifiedTurn = false;
-    sessionState.get(sessionId).activities.clear();
-    sessionState.clearDraft(sessionId);
-
-    clearActionsForSession(
-      pendingActions,
-      sessionId,
-      broadcastLive,
-      broadcastApprovalLive,
-    );
-  }
-
-  function clearRecoveredTerminalSessionState(sessionId: string): void {
-    sessionState.get(sessionId).activeTurn = null;
-    sessionState.get(sessionId).unverifiedTurn = false;
-    clearActionsForSession(
-      pendingActions,
-      sessionId,
-      broadcastLive,
-      broadcastApprovalLive,
-    );
-  }
-
-  function reconcileObservedThreadStatus(
-    sessionId: string,
-    observedStatus: LiveThreadStatus,
-  ): void {
-    const nextStatus = reconciledThreadStatus(sessionId, observedStatus);
-    if (isTerminalThreadStatus(observedStatus)) {
-      sessionState.get(sessionId).recoveredStatus = null;
-      clearConfirmedTerminalSessionState(sessionId);
-    }
-    const previousStatus = latestThreadStatusForSession(sessionId);
-    if (previousStatus === nextStatus) {
-      return;
-    }
-    setLatestThreadStatusForSession(sessionId, nextStatus);
-    scheduleRecentSessionUpsert(sessionId, 0);
-  }
-
-  function reconciledThreadStatus(
-    sessionId: string,
-    observedStatus: LiveThreadStatus,
-  ): LiveThreadStatus {
-    if (isTerminalThreadStatus(observedStatus)) {
-      return observedStatus;
-    }
-    const terminalOverride = sessionStatusOverrideForDisplay(sessionId);
-    if (terminalOverride && isTerminalThreadStatus(terminalOverride)) {
-      return terminalOverride;
-    }
-    if (hasPendingActionForSession(pendingActions, sessionId)) {
-      return "waiting_for_approval";
-    }
-    if (isRunningThreadStatus(observedStatus)) {
-      return observedStatus;
-    }
-    if (observedStatus === "idle" && (sessionState.get(sessionId).activeTurn != null)) {
-      return "running";
-    }
-    return observedStatus;
-  }
-
-  async function shouldTrackProviderTurn(
-    agentProvider: AgentProvider,
-    sessionId: string,
-    turnId: string | null | undefined,
-  ): Promise<boolean> {
-    if (!turnId) {
-      return false;
-    }
-    const observedStatus = latestThreadStatusForSession(sessionId);
-    let state: Awaited<ReturnType<typeof loadFastRunState>>;
-    try {
-      state = await loadFastRunState(
-        agentProvider,
-        sessionId,
-        new SessionStateStore(),
-        isRunningThreadStatus(observedStatus) ? observedStatus : null,
-      );
-    } catch (error) {
-      if (isTransientTurnSnapshotReadError(error)) {
-        const turnState = await providerTurnState(
-          agentProvider,
-          sessionId,
-          turnId,
-        );
-        if (turnState.kind === "terminal") {
-          sessionState.get(sessionId).unverifiedTurn = false;
-          return false;
-        }
-        if (turnState.kind === "missing" || turnState.kind === "unknown") {
-          sessionState.get(sessionId).unverifiedTurn = true;
-        } else {
-          sessionState.get(sessionId).unverifiedTurn = false;
-        }
-        return true;
-      }
-      throw error;
-    }
-    if (state.isRunning) {
-      if (state.turnId == null) {
-        sessionState.get(sessionId).unverifiedTurn = true;
-      } else {
-        sessionState.get(sessionId).unverifiedTurn = false;
-      }
-      return state.turnId == null || state.turnId === turnId;
-    }
-    const turnState = await providerTurnState(agentProvider, sessionId, turnId);
-    if (turnState.kind === "terminal") {
-      sessionState.get(sessionId).unverifiedTurn = false;
-      return false;
-    }
-    if (turnState.kind === "unknown") {
-      sessionState.get(sessionId).unverifiedTurn = true;
-    } else {
-      sessionState.get(sessionId).unverifiedTurn = false;
-    }
-    return true;
-  }
-
-  async function reconcileUnverifiedActiveTurn(
-    sessionId: string,
-    agentProvider: AgentProvider,
-  ): Promise<LiveThreadStatus | null> {
-    if (!sessionState.get(sessionId).unverifiedTurn) {
-      return null;
-    }
-    const activeTurn = sessionState.get(sessionId).activeTurn;
-    if (!activeTurn) {
-      sessionState.get(sessionId).unverifiedTurn = false;
-      return null;
-    }
-    const turnState = await providerTurnState(
-      agentProvider,
-      sessionId,
-      activeTurn.turnId,
-    );
-    const currentActiveTurn = sessionState.get(sessionId).activeTurn;
-    if (
-      !sessionState.get(sessionId).unverifiedTurn ||
-      !currentActiveTurn ||
-      currentActiveTurn.turnId !== activeTurn.turnId ||
-      currentActiveTurn.startedAt !== activeTurn.startedAt
-    ) {
-      return null;
-    }
-    if (turnState.kind === "active") {
-      sessionState.get(sessionId).unverifiedTurn = false;
-      return null;
-    }
-    if (turnState.kind === "terminal") {
-      clearRecoveredTerminalSessionState(sessionId);
-      const status = turnState.status;
-      if (isTerminalThreadStatus(status)) {
-        sessionState.get(sessionId).recoveredStatus = status;
-      }
-      setLatestThreadStatusForSession(sessionId, status);
-      broadcastLive(sessionId, {
-        type: "thread_status_changed",
-        sessionId,
-        status,
-      });
-      scheduleRecentSessionUpsert(sessionId, 0);
-      return status;
-    }
-    if (
-      turnState.kind === "missing" &&
-      (turnState.threadStatus === "idle" ||
-        isTerminalThreadStatus(turnState.threadStatus))
-    ) {
-      clearRecoveredTerminalSessionState(sessionId);
-      const status: LiveThreadStatus =
-        isTerminalThreadStatus(turnState.threadStatus)
-          ? turnState.threadStatus
-          : "idle";
-      if (isTerminalThreadStatus(status)) {
-        sessionState.get(sessionId).recoveredStatus = status;
-      }
-      setLatestThreadStatusForSession(sessionId, status);
-      broadcastLive(sessionId, {
-        type: "thread_status_changed",
-        sessionId,
-        status,
-      });
-      scheduleRecentSessionUpsert(sessionId, 0);
-      return status;
-    }
-    return null;
-  }
-
-  async function sessionStatusOverrideForSnapshot(
-    sessionId: string,
-    agentProvider: AgentProvider = provider,
-  ): Promise<LiveThreadStatus | null> {
-    return (
-      (await reconcileUnverifiedActiveTurn(sessionId, agentProvider)) ??
-      sessionStatusOverrideForDisplay(sessionId)
-    );
-  }
-
-  function setLatestPlanUpdateForSession(
-    sessionId: string,
-    latestPlanUpdate: LatestPlanUpdate | null,
-  ): void {
-    sessionStore.setPlan(sessionId, normalizeLatestPlanUpdate(latestPlanUpdate, sessionId));
+  function sessionStatusOverrideForDisplay(sessionId: string): LiveThreadStatus | null {
+    return sessionState.get(sessionId).status;
   }
 
   async function clearInterruptedSessionInputDedupe(
@@ -625,57 +383,17 @@ export async function startServer(
   }
 
   async function clearProviderScopedRuntimeState(kind: string): Promise<void> {
-    const sessionIds = new Set<string>();
-    const sessionIdsNeedingIdleBroadcast = new Set<string>();
     const interruptedTurnIds = new Map<string, string>();
-    const isProviderSession = (sessionId: string): boolean =>
-      (providerEntryForSessionId(sessionId)?.id ?? providerEntryForSessionId(sessionId)?.kind) === kind;
-
     for (const sessionId of sessionState.keys()) {
-      if (!isProviderSession(sessionId)) continue;
-      sessionIds.add(sessionId);
-      const activeTurn = sessionState.get(sessionId).activeTurn;
-      if (activeTurn || hasPendingActionForSession(pendingActions, sessionId)) {
-        sessionIdsNeedingIdleBroadcast.add(sessionId);
-      }
-      if (activeTurn) interruptedTurnIds.set(sessionId, activeTurn.turnId);
-    }
-
-    await clearInterruptedSessionInputDedupe(interruptedTurnIds);
-    recentSessionsCache.clear();
-    for (const sessionId of sessionIds) {
-      const interruptedTurnId = interruptedTurnIds.get(sessionId);
-      if (interruptedTurnId) {
-        broadcastLive(sessionId, {
-          type: "turn_completed",
-          sessionId,
-          turnId: interruptedTurnId,
-          status: "interrupted",
-        });
-      }
-      sessionState.get(sessionId).activeTurn = null;
-      sessionState.get(sessionId).unverifiedTurn = false;
-      sessionState.get(sessionId).recoveredStatus = null;
-      sessionState.get(sessionId).activities.clear();
-      sessionState.clearDraft(sessionId);
-      sessionState.get(sessionId).runtime = null;
-
-      clearActionsForSession(
-        pendingActions,
-        sessionId,
-        broadcastLive,
-        broadcastApprovalLive,
-      );
-      if (sessionIdsNeedingIdleBroadcast.has(sessionId)) {
-        setLatestThreadStatusForSession(sessionId, "idle");
-        broadcastLive(sessionId, {
-          type: "thread_status_changed",
-          sessionId,
-          status: "idle",
-        });
-      }
+      const entry = providerEntryForSessionId(sessionId);
+      if ((entry?.id ?? entry?.kind) !== kind) continue;
+      const active = sessionState.get(sessionId).activeTurn;
+      if (active) interruptedTurnIds.set(sessionId, active.turnId);
+      sessionState.invalidate(sessionId);
       scheduleRecentSessionUpsert(sessionId, 0);
     }
+    await clearInterruptedSessionInputDedupe(interruptedTurnIds);
+    recentSessionsCache.clear();
   }
 
   async function getSessionCwd(sessionId: string): Promise<string | null> {
@@ -694,34 +412,29 @@ export async function startServer(
     return session?.cwd || null;
   }
 
-  function mergeRuntimeSummary(
-    previous: SessionRuntimeSummary | null,
-    next: SessionRuntimeSummary | null,
-  ): SessionRuntimeSummary | null {
-    if (!previous) {
-      return next;
-    }
-    if (!next) {
-      return previous;
-    }
-    return {
-      ...previous,
-      ...next,
-      telemetry: {
-        ...(previous.telemetry ?? {}),
-        ...(next.telemetry ?? {}),
-      },
-    };
+  function broadcastLive(sessionId: string, event: LiveEvent): LiveEvent {
+    return sessionState.publish({ ...event, sessionId });
   }
 
-  // Sequence values order transcript items, not reconnect recovery.
-  function broadcastLive(sessionId: string, event: LiveEvent): LiveEvent {
-    const state = sessionState.get(sessionId);
-    const stamped: LiveEvent = {
-      ...event, seq: event.seq ?? allocSeq(sessionId), revision: ++state.revision,
-    };
-    broadcast(socketsBySession, sessionId, stamped);
-    return stamped;
+  function publishSessionEvent(event: LiveEvent): void {
+    if (closing) return;
+    broadcast(socketsBySession, event.sessionId, event);
+    if (event.type === "action_opened" && event.action) {
+      broadcastApprovalLive({ type: "action_opened", action: event.action });
+      void pushNotifications.enqueue({
+        kind: event.action.kind === "user_input" || event.action.kind === "elicitation" ? "input_required" : "approval_required",
+        sessionId: event.sessionId, actionId: event.action.id,
+      });
+    } else if (event.type === "action_resolved") {
+      broadcastApprovalLive({ type: "action_resolved", actionId: event.actionId });
+    } else if (event.type === "turn_completed") {
+      void pushNotifications.enqueue({ kind: /error|fail/i.test(event.status ?? "") ? "turn_failed" : "turn_completed",
+        sessionId: event.sessionId, turnId: event.turnId });
+      void indexSessionForSearch(searchIndex, providerRuntime, event.sessionId).catch(() => {});
+    }
+    if (!["assistant_delta", "reasoning_delta", "activity_updated", "plan_updated", "provider_warning"].includes(event.type)) {
+      scheduleRecentSessionUpsert(event.sessionId, 0);
+    }
   }
 
   function broadcastProviderWarning(event: {
@@ -793,7 +506,7 @@ export async function startServer(
       sessionState,
       limit,
       runtimeMode,
-      sessionStatusOverrideForSnapshot,
+      sessionStatusOverrideForDisplay,
     );
     recentSessionsCache.set(cacheKey, {
       limit,
@@ -803,6 +516,7 @@ export async function startServer(
     });
     try {
       const value = await promise;
+      if (recentSessionsCache.get(cacheKey)?.promise !== promise) return loadRecentSessions(limit, runtimeMode);
       recentSessionsCache.set(cacheKey, {
         limit,
         runtimeMode,
@@ -852,7 +566,7 @@ export async function startServer(
           sessionState,
           thread,
           "active",
-          sessionStatusOverrideForSnapshot,
+          sessionStatusOverrideForDisplay,
         );
         broadcastRecentSessionsLive({ type: "upsert", session });
       } catch {
@@ -897,310 +611,10 @@ export async function startServer(
 
   const fsWatchRegistry = new FsWatchRegistry();
 
-  const inputs = new SessionInputCoordinator(sessionStore, {
-    canSteer: (id) => providerEntryForSessionId(id)?.provider.capabilities.input.steer !== false,
-    runState: async (id) => {
-      const state = await loadFastRunState(provider, id, sessionState);
-      return { turnId: state.turnId, busy: state.isRunning || state.status === "unknown" };
-    },
-    prepare: async (id, payload) => ({ ...payload,
-      input: await resolveFileInputItemsForSession(provider, id, payload.input) }),
-    dispatch: (request) => provider.submitInput!(request),
-    submitted: async (request, receipt) => {
-      const id = request.sessionId;
-      if (await shouldTrackProviderTurn(provider, id, receipt.turnId)) {
-        const previousStartedAt = request.activeTurnId ? sessionState.get(id).activeTurn?.startedAt : undefined;
-        sessionState.get(id).activeTurn = { turnId: receipt.turnId!, startedAt: previousStartedAt ?? Date.now() };
-        sessionState.get(id).recoveredStatus = null;
-        setLatestThreadStatusForSession(id, hasPendingActionForSession(pendingActions, id) ? "waiting_for_approval" : "running");
-      }
-      broadcastLive(id, { type: "user_message_submitted", sessionId: id, turnId: receipt.turnId ?? undefined,
-        messageItem: buildSubmittedUserMessage(request.input, receipt.messageId, allocSeq(id)) });
-      scheduleRecentSessionUpsert(id, 0);
-    },
-    queueChanged: (id, queued) => {
-      if (providerEntryForSessionId(id)?.provider.capabilities.input.steer !== false) return;
-      broadcastLive(id, { type: "queue_updated", sessionId: id, steeringCount: 0, followUpCount: queued.length,
-        steeringPreview: [], followUpPreview: queued.map((item) => buildSubmittedUserMessageText(item.payload?.input ?? [])) });
-    },
-    warning: (id, error) => broadcastProviderWarning({ level: "warning", sessionId: id,
-      code: "queued_input_failed", message: error instanceof Error ? error.message : String(error) }),
-  });
-
   const onProviderLiveEvent = (event: AgentProviderLiveEvent): void => {
-    switch (event.type) {
-      case "input_confirmed":
-        sessionStore.confirmInputs(event.sessionId, [event.clientInputId]);
-        return;
-      case "skills_changed":
-        broadcastSkillsChanged(socketsBySession);
-        return;
-      case "history_invalidated":
-        broadcastLive(event.sessionId, event);
-        scheduleRecentSessionUpsert(event.sessionId, 0);
-        return;
-      case "turn_started":
-        sessionState.get(event.sessionId).activities.clear();
-        sessionState.clearDraft(event.sessionId);
-        sessionState.get(event.sessionId).unverifiedTurn = false;
-        sessionState.get(event.sessionId).recoveredStatus = null;
-        sessionState.get(event.sessionId).activeTurn = {
-          turnId: event.turnId,
-          startedAt: Date.now(),
-        };
-        setLatestThreadStatusForSession(event.sessionId, "running");
-        broadcastLive(event.sessionId, {
-          type: "turn_started",
-          sessionId: event.sessionId,
-          turnId: event.turnId,
-        });
-        scheduleRecentSessionUpsert(event.sessionId, 0);
-        return;
-      case "assistant_delta":
-        sessionState.get(event.sessionId).assistantText += event.delta;
-        broadcastLive(event.sessionId, {
-          type: "assistant_delta",
-          sessionId: event.sessionId,
-          delta: event.delta,
-          turnId: event.turnId,
-          itemId: event.itemId,
-        });
-        return;
-      case "assistant_message_completed": {
-        sessionState.clearDraft(event.sessionId);
-        const seq = allocSeq(event.sessionId);
-        broadcastLive(event.sessionId, {
-          type: "assistant_message_completed",
-          sessionId: event.sessionId,
-          turnId: event.turnId,
-          seq,
-          messageItem: {
-            id: event.message.id,
-            role: "assistant",
-            text: event.message.text,
-            content: event.message.content ?? [],
-            attachments: event.message.attachments ?? [],
-            createdAt: Date.now(),
-            seq,
-            phase: event.message.phase,
-          },
-        });
-        scheduleRecentSessionUpsert(event.sessionId);
-        return;
-      }
-      case "activity_updated": {
-        const next = sessionState.updateActivity(event.sessionId, event.activity, () => allocSeq(event.sessionId));
-        broadcastLive(event.sessionId, {
-          type: "activity_updated",
-          sessionId: event.sessionId,
-          turnId: event.turnId,
-          activity: next,
-        });
-        return;
-      }
-      case "activity_output_delta": {
-        const next = sessionState.appendOutput(
-          event.sessionId,
-          event.activityId,
-          event.delta,
-        );
-        if (next) {
-          broadcastLive(event.sessionId, {
-            type: "activity_updated",
-            sessionId: event.sessionId,
-            turnId: event.turnId,
-            activity: next,
-          });
-        }
-        return;
-      }
-      case "activity_terminal_input": {
-        const next = sessionState.terminalInput(
-          event.sessionId,
-          event.activityId,
-          event.stdin,
-        );
-        if (next) {
-          broadcastLive(event.sessionId, {
-            type: "activity_updated",
-            sessionId: event.sessionId,
-            turnId: event.turnId,
-            activity: next,
-          });
-        }
-        return;
-      }
-      case "runtime_updated": {
-        const previousRuntime =
-          sessionState.get(event.sessionId).runtime?.runtime ??
-          null;
-        const runtime = mergeRuntimeSummary(previousRuntime, event.runtime);
-        sessionState.get(event.sessionId).runtime = {
-          threadUpdatedAt: Date.now() / 1000,
-          runtime,
-        };
-        broadcastLive(event.sessionId, {
-          type: "runtime_updated",
-          sessionId: event.sessionId,
-          runtime: runtime ?? undefined,
-        });
-        scheduleRecentSessionUpsert(event.sessionId, 0);
-        return;
-      }
-      case "provider_warning": {
-        broadcastProviderWarning(event);
-        return;
-      }
-      case "thread_status_changed": {
-        const status = reconciledThreadStatus(event.sessionId, event.status);
-        setLatestThreadStatusForSession(event.sessionId, status);
-        broadcastLive(event.sessionId, {
-          type: "thread_status_changed",
-          sessionId: event.sessionId,
-          status,
-          message: event.message,
-          pendingActionKind: event.pendingActionKind,
-        });
-        scheduleRecentSessionUpsert(event.sessionId, 0);
-        return;
-      }
-      case "plan_updated": {
-        const stamped = broadcastLive(event.sessionId, {
-          type: "plan_updated",
-          sessionId: event.sessionId,
-          turnId: event.turnId,
-          explanation: event.explanation,
-          plan: event.plan,
-        });
-        setLatestPlanUpdateForSession(
-          event.sessionId,
-          stamped.type === "plan_updated"
-            ? {
-                type: "plan_updated",
-                sessionId: event.sessionId,
-                seq: stamped.seq,
-                turnId: stamped.turnId,
-                explanation: stamped.explanation,
-                plan: stamped.plan ?? event.plan,
-              }
-            : null,
-        );
-        return;
-      }
-      case "reasoning_delta": {
-        sessionState.get(event.sessionId).assistantReasoning += event.delta;
-        broadcastLive(event.sessionId, {
-          type: "reasoning_delta",
-          sessionId: event.sessionId,
-          turnId: event.turnId,
-          itemId: event.itemId,
-          reasoningId: event.reasoningId,
-          delta: event.delta,
-          summary: event.summary,
-        });
-        return;
-      }
-      case "queue_updated": {
-        broadcastLive(event.sessionId, {
-          type: "queue_updated",
-          sessionId: event.sessionId,
-          steeringCount: event.steeringCount,
-          followUpCount: event.followUpCount,
-          steeringPreview: event.steeringPreview,
-          followUpPreview: event.followUpPreview,
-        });
-        return;
-      }
-      case "auto_retry_updated": {
-        broadcastLive(event.sessionId, {
-          type: "auto_retry_updated",
-          sessionId: event.sessionId,
-          phase: event.phase,
-          attempt: event.attempt,
-          maxAttempts: event.maxAttempts,
-          delayMs: event.delayMs,
-          errorMessage: event.errorMessage,
-          success: event.success,
-          finalError: event.finalError,
-        });
-        return;
-      }
-      case "turn_completed":
-        sessionState.clearDraft(event.sessionId);
-        // Broadcast the completion first so any concurrent snapshot reader
-        // sees both the provider-flushed history AND the live state still in
-        // memory. Clearing liveActivities before the broadcast can briefly
-        // leave both the snapshot and live stream blank for a second client.
-        broadcastLive(event.sessionId, {
-          type: "turn_completed",
-          sessionId: event.sessionId,
-          turnId: event.turnId,
-          status: event.status,
-        });
-        void pushNotifications.enqueue({
-          kind: /error|fail/i.test(event.status)
-            ? "turn_failed"
-            : "turn_completed",
-          sessionId: event.sessionId,
-          turnId: event.turnId,
-        });
-        clearActionsForSession(
-          pendingActions,
-          event.sessionId,
-          broadcastLive,
-          broadcastApprovalLive,
-        );
-        sessionState.get(event.sessionId).activeTurn = null;
-        sessionState.get(event.sessionId).unverifiedTurn = false;
-        sessionState.get(event.sessionId).recoveredStatus = null;
-        setLatestThreadStatusForSession(
-          event.sessionId,
-          event.status === "errored" ? "errored" : "idle",
-        );
-        // Keep the finished tool overlay until provider history catches up.
-        // A snapshot may have started reading just before this completion.
-
-        scheduleRecentSessionUpsert(event.sessionId, 0);
-        void indexSessionForSearch(searchIndex, providerRuntime, event.sessionId).catch(() => {});
-        inputs.wake(event.sessionId);
-        // Transcript order remains stable across turns.
-        return;
-      case "action_resolved":
-        if (!pendingActions.delete(event.actionId)) return;
-        setLatestThreadStatusForSession(event.sessionId,
-          sessionState.get(event.sessionId).activeTurn ? "running" : null);
-        broadcastLive(event.sessionId, event);
-        broadcastApprovalLive({ type: "action_resolved", actionId: event.actionId });
-        scheduleRecentSessionUpsert(event.sessionId, 0);
-        return;
-      case "action_opened":
-        pendingActions.set(event.action.id, event.action);
-        setLatestThreadStatusForSession(
-          event.action.sessionId,
-          "waiting_for_approval",
-        );
-        const publicAction = toPublicPendingAction(event.action);
-        broadcastLive(event.action.sessionId, {
-          type: "action_opened",
-          sessionId: event.action.sessionId,
-          action: publicAction,
-        });
-        broadcastApprovalLive({
-          type: "action_opened",
-          action: publicAction,
-        });
-        void pushNotifications.enqueue({
-          kind:
-            event.action.kind === "user_input" ||
-            event.action.kind === "elicitation"
-              ? "input_required"
-              : "approval_required",
-          sessionId: event.action.sessionId,
-          actionId: event.action.id,
-        });
-        scheduleRecentSessionUpsert(event.action.sessionId);
-        return;
-    }
+    if (event.type === "skills_changed") { broadcastSkillsChanged(socketsBySession); return; }
+    if (event.type === "provider_warning" && !event.sessionId) { broadcastProviderWarning(event); return; }
+    sessionState.handle(event);
   };
   provider.on("liveEvent", onProviderLiveEvent);
 
@@ -1689,7 +1103,7 @@ export async function startServer(
           const session = mapSession(
             thread,
             runtime,
-            await sessionStatusOverrideForSnapshot(thread.id),
+            await sessionStatusOverrideForDisplay(thread.id),
           );
           const summary: SessionSummary = {
             ...session,
@@ -1965,7 +1379,6 @@ export async function startServer(
         await listPendingActions(
           provider,
           pendingActions,
-          reconcileObservedThreadStatus,
         ),
       );
     }),
@@ -2001,41 +1414,18 @@ export async function startServer(
       const query = request.query as Record<string, unknown>;
       const messageLimit = Math.max(1, asInteger(query.messageLimit) ?? 200);
       const activityLimit = Math.max(1, asInteger(query.activityLimit) ?? 200);
-      const runtimeBeforeRead = sessionState.get(sessionId).runtime;
-      const session = await readSession(provider, sessionId, false);
-      reconcileObservedThreadStatus(session.id, threadStatusPhase(session));
-      const log = await provider.readSessionLog!(session, {
-        messageLimit,
-        activityLimit,
-      });
-      // Finish provider reads before taking the live overlay and its revision.
-      // Otherwise events delivered during an await could be marked as included
-      // in a snapshot that was assembled before they arrived.
-      const statusOverride = await sessionStatusOverrideForSnapshot(session.id);
-      const state = sessionState.get(sessionId);
-      if (state.runtime === runtimeBeforeRead) {
-        state.runtime = { threadUpdatedAt: session.updatedAt, runtime: log.runtime };
-      }
-      const latestPlanUpdate = mergeLatestPlanUpdate(
-        sessionId, log.latestPlanUpdate ?? null, latestPlanUpdateForSession(sessionId),
-      );
-      ensureSeqCursor(sessionId, nextSeqForLatestPlanUpdate(log.nextSeq, latestPlanUpdate));
-      const mergedActivities = mergeSessionActivities(log.activities, [...state.activities.values()]);
-      const activities = mergedActivities.slice(-activityLimit);
-      sessionState.confirmActivities(sessionId, log.activities);
-      const history = buildSessionHistorySummary(
-        log.totalMessages, log.messages.length, Math.max(log.totalActivities, mergedActivities.length), activities.length,
-      );
+      const snapshot = await sessionState.snapshot(sessionId, { messageLimit, activityLimit });
       response.json({
-        session: mapSession(session, state.runtime?.runtime ?? log.runtime, statusOverride),
-        revision: state.revision,
-        liveAssistantText: state.assistantText,
-        liveAssistantReasoning: state.assistantReasoning,
-        messages: log.messages,
-        activities,
+        session: mapSession(snapshot.thread, snapshot.runtime, snapshot.status),
+        revision: snapshot.revision,
+        liveAssistantText: snapshot.liveAssistantText,
+        liveAssistantReasoning: snapshot.liveAssistantReasoning,
+        messages: snapshot.messages,
+        activities: snapshot.activities,
         pendingAction: findPendingActionForSession(pendingActions, sessionId),
-        history,
-        latestPlanUpdate,
+        history: buildSessionHistorySummary(snapshot.totalMessages, snapshot.messages.length,
+          snapshot.totalActivities, snapshot.activities.length),
+        latestPlanUpdate: snapshot.latestPlanUpdate,
       });
     }),
   );
@@ -2072,7 +1462,6 @@ export async function startServer(
           provider,
           sessionId,
           sessionState,
-          reconcileObservedThreadStatus,
         ),
       );
     }),
@@ -2098,24 +1487,10 @@ export async function startServer(
       ) {
         return;
       }
-      const reconciledStatus = await reconcileUnverifiedActiveTurn(sessionId, provider);
-      const statusOverride = reconciledStatus ?? sessionStatusOverrideForDisplay(sessionId);
-      const state = await loadFastRunState(
-        provider,
-        sessionId,
-        sessionState,
-        statusOverride,
-      );
-      if (!isTerminalThreadStatus(statusOverride)) {
-        reconcileObservedThreadStatus(sessionId, state.status);
-      }
-      response.json({
-        sessionId,
-        status: state.status,
-        isRunning: state.isRunning,
-        activeTurnId: state.turnId,
-        pendingAction: findPendingActionForSession(pendingActions, sessionId),
-      });
+      const snapshot = await sessionState.snapshot(sessionId, { messageLimit: 1, activityLimit: 1 });
+      response.json({ sessionId, status: snapshot.status, isRunning: snapshot.busy,
+        activeTurnId: snapshot.activeTurnId,
+        pendingAction: findPendingActionForSession(pendingActions, sessionId) });
     }),
   );
 
@@ -2436,40 +1811,34 @@ export async function startServer(
         input,
         cwd,
       );
-      const started = await provider.createSession!({
-        cwd,
-        input: scopedInput,
-        overrides,
-        provider: selectedProvider.id ?? selectedProvider.kind,
-      });
-      if (
-        await shouldTrackProviderTurn(
-          provider,
-          started.thread.id,
-          started.activeTurnId,
-        )
-      ) {
-        sessionState.get(started.thread.id).activeTurn = {
-          turnId: started.activeTurnId!,
-          startedAt: Date.now(),
-        };
-        sessionState.get(started.thread.id).recoveredStatus = null;
-        setLatestThreadStatusForSession(
-          started.thread.id,
-          hasPendingActionForSession(pendingActions, started.thread.id)
-            ? "waiting_for_approval"
-            : "running",
-        );
+      const clientMessageId = asString(request.body?.clientMessageId) || randomUUID();
+      if (!isValidClientMessageId(clientMessageId)) {
+        response.status(400).json({ error: "clientMessageId must be 1-128 URL-safe characters" });
+        return;
       }
-
-      const session = mapSession(
-        started.thread,
-        started.runtime,
-        sessionStatusOverrideForDisplay(started.thread.id),
-      );
+      const started = await provider.createSession!({ cwd, input: [], overrides,
+        provider: selectedProvider.id ?? selectedProvider.kind });
+      const inputOverrides = parseTurnOverrides(request.body);
+      let receipt = null;
+      try {
+        if (scopedInput.length) receipt = await inputs.submit({
+          key: `${started.thread.id}:${clientMessageId}`, sessionId: started.thread.id,
+          signatureHash: hashSessionInputSignature(input, inputOverrides),
+          payload: { input: scopedInput, overrides: inputOverrides },
+        });
+      } catch (error) {
+        // Creation succeeded even when dispatch did not. Keep the recoverable session visible.
+        response.status(error instanceof AgentProviderRequestError ? error.status : 502).json({
+          error: error instanceof Error ? error.message : String(error),
+          session: mapSession(started.thread, started.runtime), clientMessageId,
+          code: error instanceof SessionInputError ? error.code : "initial_input_failed",
+        });
+        return;
+      }
       response.status(201).json({
-        session,
-        activeTurnId: started.activeTurnId,
+        session: mapSession(started.thread, started.runtime, sessionStatusOverrideForDisplay(started.thread.id)),
+        activeTurnId: sessionState.get(started.thread.id).activeTurn?.turnId ?? null,
+        input: receipt,
       });
       scheduleRecentSessionUpsert(started.thread.id, 0);
       void indexSessionForSearch(searchIndex, providerRuntime, started.thread.id).catch(() => {});
@@ -2559,15 +1928,16 @@ export async function startServer(
         return;
       }
       let turnId: string | null = null;
+      let stopped = false;
       await inputs.stop(sessionId, async () => {
-        const state = await loadRunState(provider, sessionId, sessionState);
-        turnId = state.turnId;
-        if (turnId) await provider.interruptTurn!(sessionId, turnId);
-        sessionState.get(sessionId).activeTurn = null;
-        sessionState.get(sessionId).unverifiedTurn = false;
-        sessionState.get(sessionId).recoveredStatus = null;
+        const state = await sessionState.snapshot(sessionId, { messageLimit: 1, activityLimit: 1 });
+        turnId = state.activeTurnId;
+        if (state.busy) {
+          const result = await provider.interruptTurn!(sessionId, turnId);
+          stopped = !(result && typeof result === "object" && "interrupted" in result && result.interrupted === false);
+        }
       });
-      response.json({ stopped: turnId !== null, turnId });
+      response.json({ stopped, turnId });
     }),
   );
 
@@ -2591,11 +1961,11 @@ export async function startServer(
       ) {
         return;
       }
-      const state = await loadRunState(provider, sessionId, sessionState);
-      if (state.turnId) {
+      const state = await sessionState.snapshot(sessionId, { messageLimit: 1, activityLimit: 1 });
+      if (state.busy) {
         response.status(409).json({
           error: "Cannot compact while a turn is running",
-          turnId: state.turnId,
+          turnId: state.activeTurnId,
         });
         return;
       }
@@ -2662,7 +2032,7 @@ export async function startServer(
       const session = mapSession(
         thread,
         null,
-        await sessionStatusOverrideForSnapshot(thread.id),
+        await sessionStatusOverrideForDisplay(thread.id),
       );
       response.json({ session });
       scheduleRecentSessionUpsert(sessionId, 0);
@@ -2691,15 +2061,7 @@ export async function startServer(
         return;
       }
       await inputs.stop(sessionId, async () => { await provider.archiveSession!(sessionId); });
-      sessionState.get(sessionId).activeTurn = null;
-      sessionState.get(sessionId).unverifiedTurn = false;
-      sessionState.get(sessionId).recoveredStatus = null;
-      sessionState.get(sessionId).status = null;
-      sessionState.get(sessionId).activities.clear();
-      sessionState.clearDraft(sessionId);
-
-      sessionState.get(sessionId).nextSeq = 0;
-      response.json({ archived: true });
+      sessionState.invalidate(sessionId);
       broadcastRecentSessionRemove(sessionId);
       void indexSessionForSearch(searchIndex, providerRuntime, sessionId, true).catch(() => {});
     }),
@@ -2764,22 +2126,7 @@ export async function startServer(
         return;
       }
 
-      pendingActions.delete(actionId);
-      setLatestThreadStatusForSession(
-        action.sessionId,
-        (sessionState.get(action.sessionId).activeTurn != null) ? "running" : null,
-      );
-      scheduleRecentSessionUpsert(action.sessionId, 0);
-      broadcastLive(action.sessionId, {
-        type: "action_resolved",
-        sessionId: action.sessionId,
-        actionId,
-      });
-      broadcastApprovalLive({
-        type: "action_resolved",
-        actionId,
-      });
-      scheduleRecentSessionUpsert(action.sessionId);
+      sessionState.handle({ type: "action_resolved", sessionId: action.sessionId, actionId });
       response.json({ ok: true });
     }),
   );
@@ -3114,7 +2461,10 @@ export async function startServer(
   runningServerRef = {
     port: boundPort,
     close: async () => {
+      closing = true;
       inputs.close();
+      const httpClosing = closeHttpServer(server);
+      void httpClosing.catch(() => {});
       healthMonitorStopped = true;
       if (healthMonitor) clearTimeout(healthMonitor);
       terminalRegistry.dispose();
@@ -3125,15 +2475,15 @@ export async function startServer(
         for (const socket of sockets) socket.close();
       }
       await closeWebSocketServer(wsServer);
-      await closeHttpServer(server);
-      provider.off("liveEvent", onProviderLiveEvent);
       for (const timer of recentSessionBroadcastTimers.values()) clearTimeout(timer);
       recentSessionBroadcastTimers.clear();
-      await searchIndexBackfill.catch(() => undefined);
-      await searchIndex.close();
       try {
         await provider.close?.();
       } finally {
+        await httpClosing;
+        await searchIndexBackfill.catch(() => undefined);
+        await searchIndex.close();
+        provider.off("liveEvent", onProviderLiveEvent);
         provider.off("stderr", onProviderStderr);
         await inputs.drain();
         sessionStore.close();
@@ -3411,7 +2761,7 @@ function unsupportedOverrideCapability(
 
 async function resolveTerminalCwd(
   provider: AgentProvider,
-  sessionState: SessionStateStore,
+  sessionState: SessionCoordinator,
   cwd: string,
   sessionId: string | null | undefined,
   configuredRoots: string[],
@@ -3473,7 +2823,7 @@ async function enrichSessionsWithGitCommonDir(
 // enrichment behavior.
 async function buildRecentSessionSummary(
   provider: AgentProvider,
-  sessionState: SessionStateStore,
+  sessionState: SessionCoordinator,
   thread: ThreadRecord,
   runtimeMode: SessionRuntimeListMode = "active",
   statusOverrideForSession?: (
@@ -3492,7 +2842,7 @@ async function buildRecentSessionSummary(
 
 async function buildRecentSessionSummaries(
   provider: AgentProvider,
-  sessionState: SessionStateStore,
+  sessionState: SessionCoordinator,
   threads: ThreadRecord[],
   runtimeMode: SessionRuntimeListMode = "active",
   statusOverrideForSession?: (
@@ -3525,7 +2875,7 @@ async function buildRecentSessionSummaries(
 
 async function listSessions(
   provider: AgentProvider,
-  sessionState: SessionStateStore,
+  sessionState: SessionCoordinator,
   limitOverride: number | null = null,
   runtimeMode: SessionRuntimeListMode = "active",
   statusOverrideForSession?: (
@@ -3895,138 +3245,6 @@ function chunkArray<T>(array: T[], size: number): T[][] {
   return chunks;
 }
 
-async function loadRunState(
-  provider: AgentProvider,
-  sessionId: string,
-  sessionState: SessionStateStore,
-): Promise<{ turnId: string | null }> {
-  const known = sessionState.get(sessionId).activeTurn;
-  if (known) {
-    return { turnId: known.turnId };
-  }
-
-  let session: ThreadRecord;
-  try {
-    if (!hasProviderMethod(provider, "readSessionThread")) {
-      return { turnId: null };
-    }
-    session = await readSession(provider, sessionId, true);
-  } catch (error) {
-    if (isTransientTurnSnapshotReadError(error)) {
-      return { turnId: null };
-    }
-    throw error;
-  }
-  const turns = Array.isArray(session.turns) ? session.turns : [];
-  for (let index = turns.length - 1; index >= 0; index -= 1) {
-    const turn = turns[index] as TurnRecord;
-    if (isActiveTurnStatus(turn.status)) {
-      sessionState.get(sessionId).activeTurn = {
-        turnId: turn.id,
-        startedAt: Date.now(),
-      };
-      return { turnId: turn.id };
-    }
-  }
-
-  return { turnId: null };
-}
-
-async function loadFastRunState(
-  provider: AgentProvider,
-  sessionId: string,
-  sessionState: SessionStateStore,
-  liveStatusOverride: LiveThreadStatus | null = null,
-): Promise<{ status: LiveThreadStatus; isRunning: boolean; turnId: string | null }> {
-  if (liveStatusOverride != null) {
-    return {
-      status: liveStatusOverride,
-      isRunning: isRunningThreadStatus(liveStatusOverride),
-      turnId: isRunningThreadStatus(liveStatusOverride)
-        ? sessionState.get(sessionId).activeTurn?.turnId ?? null
-        : null,
-    };
-  }
-  const known = sessionState.get(sessionId).activeTurn;
-  if (known) {
-    return { status: "running", isRunning: true, turnId: known.turnId };
-  }
-  if (!hasProviderMethod(provider, "readSessionThread")) {
-    return { status: "unknown", isRunning: false, turnId: null };
-  }
-  const session = await readSession(provider, sessionId, false);
-  const status = threadStatusPhase(session);
-  if (isRunningThreadStatus(status)) {
-    return { status, isRunning: true, turnId: null };
-  }
-  try {
-    const sessionWithTurns = await readSession(provider, sessionId, true);
-    const turns = Array.isArray(sessionWithTurns.turns) ? sessionWithTurns.turns : [];
-    for (let index = turns.length - 1; index >= 0; index -= 1) {
-      const turn = turns[index] as TurnRecord;
-      if (isActiveTurnStatus(turn.status)) {
-        return { status: "running", isRunning: true, turnId: turn.id };
-      }
-    }
-  } catch (error) {
-    if (isTransientTurnSnapshotReadError(error)) {
-      return { status, isRunning: false, turnId: null };
-    }
-    throw error;
-  }
-  return { status, isRunning: false, turnId: null };
-}
-
-type ProviderTurnState =
-  | { kind: "active" }
-  | { kind: "terminal"; status: LiveThreadStatus }
-  | { kind: "missing"; threadStatus: LiveThreadStatus }
-  | { kind: "unknown" };
-
-async function providerTurnState(
-  provider: AgentProvider,
-  sessionId: string,
-  turnId: string,
-): Promise<ProviderTurnState> {
-  if (!hasProviderMethod(provider, "readSessionThread")) {
-    return { kind: "unknown" };
-  }
-  let session: ThreadRecord;
-  try {
-    session = await readSession(provider, sessionId, true);
-  } catch (error) {
-    if (isTransientTurnSnapshotReadError(error)) {
-      return { kind: "unknown" };
-    }
-    throw error;
-  }
-  const threadStatus = threadStatusPhase(session);
-  const turns = Array.isArray(session.turns) ? session.turns : [];
-  const turn = turns.find((candidate) => candidate.id === turnId);
-  if (!turn) {
-    return { kind: "missing", threadStatus };
-  }
-  if (turn.completedAt != null || isTerminalTurnStatus(turn.status)) {
-    return {
-      kind: "terminal",
-      status: terminalThreadStatusForTurn(turn.status, threadStatus),
-    };
-  }
-  return isActiveTurnStatus(turn.status)
-    ? { kind: "active" }
-    : { kind: "unknown" };
-}
-
-function terminalThreadStatusForTurn(
-  turnStatus: string | null | undefined,
-  threadStatus: LiveThreadStatus,
-): LiveThreadStatus {
-  if (isTerminalThreadStatus(threadStatus)) {
-    return threadStatus;
-  }
-  return isErroredTurnStatus(turnStatus) ? "errored" : "idle";
-}
-
 async function isThreadLoaded(
   provider: AgentProvider,
   sessionId: string,
@@ -4337,7 +3555,7 @@ function buildSubmittedUserMessage(
 async function loadCachedSessionRuntime(
   provider: AgentProvider,
   thread: ThreadRecord,
-  sessionState: SessionStateStore,
+  sessionState: SessionCoordinator,
   runtimeMode: SessionRuntimeListMode,
 ): Promise<SessionRuntimeSummary | null> {
   if (runtimeMode === "none") {
@@ -4367,35 +3585,6 @@ async function loadCachedSessionRuntime(
     sessionState.get(thread.id).runtime = { threadUpdatedAt: thread.updatedAt, runtime };
   }
   return runtime;
-}
-
-function isActiveTurnStatus(status: string | null | undefined): boolean {
-  return status === "inProgress" || status === "in_progress";
-}
-
-function isTransientTurnSnapshotReadError(error: unknown): boolean {
-  const message = error instanceof Error ? error.message.toLowerCase() : "";
-  return (
-    message.includes("includeturns is unavailable before first user message") ||
-    message.includes("rollout file not found") ||
-    (message.includes("rollout") && message.includes("is empty"))
-  );
-}
-
-function isTerminalTurnStatus(status: string | null | undefined): boolean {
-  return (
-    status === "completed" ||
-    status === "failed" ||
-    status === "interrupted" ||
-    status === "error" ||
-    status === "errored" ||
-    status === "cancelled" ||
-    status === "canceled"
-  );
-}
-
-function isErroredTurnStatus(status: string | null | undefined): boolean {
-  return status === "failed" || status === "error" || status === "errored";
 }
 
 function isActiveThread(thread: ThreadRecord): boolean {
@@ -4469,71 +3658,6 @@ async function mapWithConcurrency<T, R>(
   return results;
 }
 
-function normalizeLatestPlanUpdate(
-  latestPlanUpdate: LatestPlanUpdate | null | undefined,
-  sessionId?: string,
-): LatestPlanUpdate | null {
-  if (!latestPlanUpdate) {
-    return null;
-  }
-  const normalizedSessionId = latestPlanUpdate.sessionId.trim() || sessionId?.trim() || "";
-  if (!normalizedSessionId) {
-    return null;
-  }
-  const rawPlan = Array.isArray(latestPlanUpdate.plan)
-    ? latestPlanUpdate.plan
-    : [];
-  const plan = rawPlan.flatMap((step) => {
-    const typed = step && typeof step === "object"
-      ? (step as unknown as Record<string, unknown>)
-      : null;
-    const label = typeof typed?.step === "string" ? typed.step.trim() : "";
-    const status = typeof typed?.status === "string" ? typed.status.trim() : "";
-    return label && status ? [{ step: label, status } as LivePlanStep] : [];
-  });
-  return {
-    type: "plan_updated",
-    sessionId: normalizedSessionId,
-    seq: latestPlanUpdate.seq,
-    turnId: latestPlanUpdate.turnId?.trim() || undefined,
-    explanation: latestPlanUpdate.explanation?.trim() || undefined,
-    plan,
-  };
-}
-
-function mergeLatestPlanUpdate(
-  sessionId: string,
-  ...candidates: Array<LatestPlanUpdate | null | undefined>
-): LatestPlanUpdate | null {
-  let best: LatestPlanUpdate | null = null;
-  for (const candidate of candidates) {
-    const normalized = normalizeLatestPlanUpdate(candidate, sessionId);
-    if (normalized == null) {
-      continue;
-    }
-    if (best == null) {
-      best = normalized;
-      continue;
-    }
-    const bestSeq = best.seq ?? -1;
-    const nextSeq = normalized.seq ?? -1;
-    if (nextSeq > bestSeq) {
-      best = normalized;
-    }
-  }
-  return best;
-}
-
-function nextSeqForLatestPlanUpdate(
-  nextSeq: number,
-  latestPlanUpdate: LatestPlanUpdate | null,
-): number {
-  if (latestPlanUpdate?.seq == null) {
-    return nextSeq;
-  }
-  return Math.max(nextSeq, latestPlanUpdate.seq + 1);
-}
-
 function buildSessionHistorySummary(
   totalMessages: number,
   returnedMessages: number,
@@ -4551,70 +3675,13 @@ function buildSessionHistorySummary(
 }
 
 async function readSessionResources(
-  provider: AgentProvider,
+  _provider: AgentProvider,
   sessionId: string,
-  sessionState: SessionStateStore,
-  reconcileStatus?: (
-    sessionId: string,
-    observedStatus: LiveThreadStatus,
-  ) => void,
+  sessionState: SessionCoordinator,
 ): Promise<SessionResourcesResponse> {
-  const session = await readSession(provider, sessionId, false);
-  reconcileStatus?.(session.id, threadStatusPhase(session));
-  const readLog = requireProviderMethod(
-    provider,
-    "readSessionLog",
-    "session resources",
-  );
-  const log = await readLog.call(provider, session);
-  const activities = mergeSessionActivities(
-    log.activities,
-    [...sessionState.get(sessionId).activities.values()],
-  );
-  const resources: SessionResource[] = buildSessionResources(
-    log.messages,
-    activities,
-  );
-  return {
-    sessionId,
-    updatedAt: session.updatedAt,
-    resources,
-  };
-}
-
-function clearActionsForSession(
-  pendingActions: Map<string, AgentPendingAction>,
-  sessionId: string,
-  broadcastLive: (sessionId: string, event: LiveEvent) => void,
-  broadcastApprovalLive: (event: ApprovalLiveEvent) => void,
-): void {
-  const toDelete = [...pendingActions.values()].filter(
-    (action) => action.sessionId === sessionId,
-  );
-  for (const action of toDelete) {
-    pendingActions.delete(action.id);
-    broadcastLive(sessionId, {
-      type: "action_resolved",
-      sessionId,
-      actionId: action.id,
-    });
-    broadcastApprovalLive({
-      type: "action_resolved",
-      actionId: action.id,
-    });
-  }
-}
-
-function hasPendingActionForSession(
-  pendingActions: Map<string, AgentPendingAction>,
-  sessionId: string,
-): boolean {
-  for (const action of pendingActions.values()) {
-    if (action.sessionId === sessionId) {
-      return true;
-    }
-  }
-  return false;
+  const snapshot = await sessionState.snapshot(sessionId);
+  return { sessionId, updatedAt: snapshot.thread.updatedAt,
+    resources: buildSessionResources(snapshot.messages, snapshot.activities) };
 }
 
 function findPendingActionForSession(
