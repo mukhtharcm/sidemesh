@@ -5,6 +5,7 @@ import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'models.dart';
+import 'session_identity_store.dart';
 
 /// Tracks when the user last "saw" each session on this device.
 ///
@@ -38,6 +39,7 @@ class SessionReadStore extends ChangeNotifier {
   }
 
   Future<void> _load() async {
+    await SessionIdentityStore.instance.ensureLoaded();
     final prefs = await SharedPreferences.getInstance();
     _prefs = prefs;
     var epoch = prefs.getInt(_installEpochKey);
@@ -71,7 +73,7 @@ class SessionReadStore extends ChangeNotifier {
   }
 
   String _keyFor(HostProfile host, String sessionId) =>
-      '${host.id}:$sessionId';
+      SessionIdentityStore.instance.preferenceKey(host.id, sessionId, _seenAtMs);
 
   /// Returns the last-seen timestamp for a session, or null if the user
   /// has never opened it on this device.

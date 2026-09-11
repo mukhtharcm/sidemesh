@@ -8,6 +8,7 @@ import 'package:web_socket_channel/io.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
 
 import 'models.dart';
+import 'session_local_store.dart';
 import 'fs_models.dart';
 import 'usage_models.dart';
 
@@ -45,7 +46,11 @@ class ApiClient {
       timeout: _quickReadTimeout,
       operation: 'reach ${host.label}',
     );
-    return NodeInfo.fromJson(_decodeObject(response));
+    final node = NodeInfo.fromJson(_decodeObject(response));
+    if (node.sessionAliases != null) {
+      await SessionLocalStore.instance.adoptSessionAliases(host, node.sessionAliases!);
+    }
+    return node;
   }
 
   Future<ProviderMetadata> fetchProviders(HostProfile host) async {

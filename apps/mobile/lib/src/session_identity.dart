@@ -37,6 +37,18 @@ class SessionAliases {
     return (sessionId: wrap(providerId, scoped?.rawId ?? id), providerId: providerId);
   }
 
+  List<String> references(String id) {
+    final resolved = resolve(id);
+    if (resolved == null) return [id];
+    final rawId = _unwrap(resolved.sessionId)!.rawId;
+    return {
+      resolved.sessionId,
+      for (final entry in aliases.entries)
+        if (entry.value == resolved.providerId) wrap(entry.key, rawId),
+      if (resolved.providerId == rawProviderId) rawId,
+    }.toList(growable: false);
+  }
+
   static String wrap(String providerId, String rawId) =>
       '$providerId:${base64Url.encode(utf8.encode(rawId)).replaceAll('=', '')}';
 

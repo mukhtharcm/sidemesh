@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'models.dart';
+import 'session_identity_store.dart';
 
 @immutable
 class PinnedSessionMessage {
@@ -177,6 +178,7 @@ class SessionPinsStore extends ChangeNotifier {
   }
 
   Future<void> _load() async {
+    await SessionIdentityStore.instance.ensureLoaded();
     final prefs = await SharedPreferences.getInstance();
     final raw = prefs.getString(_prefsKey);
     if (raw != null && raw.isNotEmpty) {
@@ -223,7 +225,13 @@ class SessionPinsStore extends ChangeNotifier {
     return sorted.take(_maxPinsPerSession).toList(growable: false);
   }
 
-  String _keyFor(String hostId, String sessionId) => '$hostId:$sessionId';
+  String _keyFor(String hostId, String sessionId) =>
+      SessionIdentityStore.instance.preferenceKey(hostId, sessionId, _pinsBySession,
+        merge: (left, right) {
+          final pins = [...left, ...right]..sort((a, b) => b.pinnedAt.compareTo(a.pinnedAt));
+          final seen = <String>{};
+          return pins.where((pin) => seen.add(pin.messageId)).take(_maxPinsPerSession).toList();
+        });
 }
 
 String _stringValue(Object? value) => value == null ? '' : value.toString();

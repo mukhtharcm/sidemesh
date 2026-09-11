@@ -6,6 +6,7 @@ import 'package:sqflite/sqflite.dart';
 
 import 'db.dart';
 import 'models.dart';
+import 'session_identity_store.dart';
 
 class PendingSessionSend {
   const PendingSessionSend({
@@ -166,10 +167,12 @@ class SessionSendOutboxStore extends ChangeNotifier {
     String sessionId,
   ) async {
     final db = await _database();
+    await SessionIdentityStore.instance.ensureLoaded();
+    final ids = SessionIdentityStore.instance.references(host.id, sessionId);
     final rows = await db.query(
       'session_outbox',
-      where: 'host_id = ? AND host_fingerprint = ? AND session_id = ?',
-      whereArgs: [host.id, hostFingerprint(host), sessionId],
+      where: 'host_id = ? AND host_fingerprint = ? AND session_id IN (${List.filled(ids.length, '?').join(',')})',
+      whereArgs: [host.id, hostFingerprint(host), ...ids],
     );
     return _decodeRows(rows);
   }
@@ -200,10 +203,12 @@ class SessionSendOutboxStore extends ChangeNotifier {
     required String clientMessageId,
   }) async {
     final db = await _database();
+    await SessionIdentityStore.instance.ensureLoaded();
+    final ids = SessionIdentityStore.instance.references(hostId, sessionId);
     final removed = await db.delete(
       'session_outbox',
-      where: _identityWhere,
-      whereArgs: [hostId, hostFingerprint, sessionId, clientMessageId],
+      where: 'host_id = ? AND host_fingerprint = ? AND client_message_id = ? AND session_id IN (${List.filled(ids.length, '?').join(',')})',
+      whereArgs: [hostId, hostFingerprint, clientMessageId, ...ids],
     );
     if (removed > 0) notifyListeners();
   }
