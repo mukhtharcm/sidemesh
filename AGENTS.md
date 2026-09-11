@@ -208,6 +208,16 @@ specific agent provider.
 
 ## Specific Gotchas
 
+- **ACP integration**: use `src/acp-provider.ts` and the official ACP SDK.
+  The stored kind remains `acpx` for compatibility; the ACPx runtime is removed.
+  Keep exact permission option IDs. Boolean configuration requests need
+  `type: "boolean"`; the SDK's generic request overload can otherwise hide a
+  bad payload behind an `unknown` return type. A completed `session/load` ends
+  a staged replay; `session/resume` does not replay history. ACP display data
+  and local metadata use the host's `sessions-v1.db`. Preserve old JSON files
+  during the transactional import. Cold session lists and archive operations
+  must not launch the agent.
+
 - **Theme ownership**: run `python3 scripts/check_flutter_theme.py` before
   Flutter tests. Use `lib/src/theme/` for tokens and component style recipes.
   Do not restore local numeric typography, colors, padding, radii, button or

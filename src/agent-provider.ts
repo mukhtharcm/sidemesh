@@ -43,6 +43,7 @@ export class AgentProviderRequestError extends Error {
   public constructor(
     message: string,
     public readonly status = 400,
+    public readonly inputNotDispatched = false,
   ) {
     super(message);
     this.name = "AgentProviderRequestError";
@@ -62,6 +63,7 @@ export interface AgentMessageDraft {
   id: string;
   text: string;
   content?: SessionMessageContentBlock[];
+  attachments?: SessionMessage["attachments"];
   phase?: SessionMessage["phase"];
 }
 
@@ -132,6 +134,7 @@ export interface AgentSubmitInputRequest {
   input: AgentSessionInputItem[];
   activeTurnId: string | null;
   overrides: AgentSessionOverrides;
+  clientMessageId?: string;
 }
 
 export interface AgentSubmitInputResult {
@@ -206,6 +209,8 @@ export interface AgentProviderCapabilities {
   };
   input: {
     text: boolean;
+    /** False means the host must keep follow-up input in its durable queue. */
+    steer?: boolean;
     imageUrl: boolean;
     localImage: boolean;
     skills: boolean;
@@ -388,6 +393,7 @@ export interface AgentSessionHistoryProvider {
 }
 
 export interface AgentSessionLifecycleProvider {
+  setSessionConfiguration(sessionId: string, optionId: string, value: string | boolean): Promise<SessionRuntimeSummary | null>;
   listLoadedSessionIds(): Promise<string[]>;
   resumeSessionThread(
     threadId: string,

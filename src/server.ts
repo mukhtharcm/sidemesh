@@ -190,9 +190,17 @@ export async function startServer(
   await mkdir(config.stateDir, { recursive: true, mode: 0o700 });
   await chmod(config.stateDir, 0o700);
   let runtimeConfig = config;
-  const providerRuntime = prebuiltRuntime ?? createAgentProviderRuntime(config);
+  const sessionStore = await SessionStore.open(config.stateDir);
+  let providerRuntime: AgentProviderRuntime;
+  try { providerRuntime = prebuiltRuntime ?? createAgentProviderRuntime(config, sessionStore); }
+  catch (error) { sessionStore.close(); throw error; }
   const provider = providerRuntime.provider;
-  await provider.start();
+  try { await provider.start(); }
+  catch (error) {
+    await provider.close?.().catch(() => {});
+    sessionStore.close();
+    throw error;
+  }
   let runningServerRef: RunningServer | null = null;
   const hostCapabilities: HostCapabilities = {
     ...HOST_CAPABILITIES,
@@ -221,7 +229,6 @@ export async function startServer(
   const searchIndex = new SessionSearchIndex(
     nodePath.join(config.stateDir, "search-index-v1.db"),
   );
-  const sessionStore = await SessionStore.open(config.stateDir);
   const pendingInputs = new Map<string, Promise<SessionInputReceipt>>();
   const pushNotifications = await PushNotificationDispatcher.open(
     config.stateDir,
@@ -935,7 +942,7 @@ export async function startServer(
             role: "assistant",
             text: event.message.text,
             content: event.message.content ?? [],
-            attachments: [],
+            attachments: event.message.attachments ?? [],
             createdAt: Date.now(),
             seq,
             phase: event.message.phase,
@@ -2528,6 +2535,7 @@ export async function startServer(
           input: inputForSubmit,
           activeTurnId: state.turnId,
           overrides: turnOverrides,
+          clientMessageId: submittedMessage.id,
         });
         const receipt: SessionInputReceipt = {
           mode: submitted.mode, turnId: submitted.turnId, messageId: submittedMessage.id,
@@ -2571,7 +2579,7 @@ export async function startServer(
         response.json({ ...receipt, replayed: false });
         scheduleRecentSessionUpsert(sessionId, 0);
       } catch (error) {
-        sessionStore.failInput(dedupeKey);
+        sessionStore.failInput(dedupeKey, error instanceof AgentProviderRequestError && error.inputNotDispatched);
         throw error;
       } finally {
         pendingInputs.delete(dedupeKey);

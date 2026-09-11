@@ -289,6 +289,12 @@ export class MultiAgentProvider
     ).call(resolved.provider, resolved.rawId, name);
   }
 
+  public async setSessionConfiguration(threadId: string, optionId: string, value: string | boolean): Promise<SessionRuntimeSummary | null> {
+    const resolved = this.resolveSessionId(threadId);
+    return requireProviderMethod(resolved.provider, "setSessionConfiguration", "session configuration")
+      .call(resolved.provider, resolved.rawId, optionId, value);
+  }
+
   public async archiveSession(threadId: string): Promise<unknown> {
     const resolved = this.resolveSessionId(threadId);
     return requireProviderMethod(

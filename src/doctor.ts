@@ -6,7 +6,7 @@ import nodePath from "node:path";
 import { promisify } from "node:util";
 
 import { VERSION as PI_VERSION } from "@earendil-works/pi-coding-agent";
-import { createAgentRegistry } from "acpx/runtime";
+import { resolveAcpCommand } from "./acp-provider.js";
 
 import { createCopilotSdkClient } from "./copilot-sdk-client.js";
 import {
@@ -539,10 +539,7 @@ async function inspectAcpxProvider(
   provider: AcpxProviderConfig,
   context: ResolvedDoctorRuntimeContext,
 ): Promise<DoctorProviderReport> {
-  const registry = createAgentRegistry({
-    overrides: provider.command ? { [provider.agent]: provider.command } : undefined,
-  });
-  const commandLine = registry.resolve(provider.agent);
+  const commandLine = resolveAcpCommand(provider.agent, provider.command);
   const commandHead = commandLine.split(/\s+/, 1)[0] ?? commandLine;
   const resolvedCommandPath = commandHead
     ? await resolveCommandPath(commandHead, context)
@@ -552,7 +549,7 @@ async function inspectAcpxProvider(
     {
       severity: "ok",
       label: "sdk",
-      detail: `Using embedded acpx runtime`,
+      detail: `Using the official ACP SDK`,
     },
     {
       severity: "ok",
@@ -570,10 +567,10 @@ async function inspectAcpxProvider(
     {
       severity: provider.stateDir ? "ok" : "warn",
       label: "state",
-      detail: `ACP session state dir: ${stateDir}`,
+      detail: `Legacy ACP history directory: ${stateDir}`,
       remedy: provider.stateDir
         ? undefined
-        : "Set SIDEMESH_ACPX_STATE_DIR or rerun setup if you want an explicit persisted acpx state path.",
+        : "Set SIDEMESH_ACPX_STATE_DIR or rerun setup if you want an explicit legacy ACP history path.",
     },
   ];
   if (provider.command) {
@@ -592,17 +589,17 @@ async function inspectAcpxProvider(
       severity: "warn",
       label: "command",
       detail:
-        "Agent command is managed by acpx's built-in registry and is not probed during doctor.",
+        "The default agent command is not executed during this check.",
       remedy:
-        "Run the agent's own login/install flow if the first acpx session fails to start.",
+        "Install the selected agent or set an explicit ACP command.",
     });
   }
   return {
     kind: "acpx",
-    displayName: "ACP via acpx",
+    displayName: "ACP",
     command: commandLine,
     resolvedCommandPath,
-    version: "acpx runtime",
+    version: "ACP protocol 1",
     auth: {
       status: "unknown",
       message: "ACP agent authentication is provider-specific and is not inspected yet.",

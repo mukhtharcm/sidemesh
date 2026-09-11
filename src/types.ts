@@ -1056,8 +1056,25 @@ export interface SessionRuntimeSummary {
   approvalsReviewer?: string;
   summaryMode?: string;
   personality?: string;
+  configurationOptions?: SessionConfigurationOption[];
+  commands?: SessionCommandSummary[];
   telemetry?: SessionTelemetrySummary;
   updatedAt?: number;
+}
+
+export interface SessionConfigurationOption {
+  id: string;
+  label: string;
+  description?: string;
+  category?: string;
+  value: string | boolean;
+  options?: Array<{ value: string; label: string; group?: string }>;
+}
+
+export interface SessionCommandSummary {
+  name: string;
+  description: string;
+  inputHint?: string;
 }
 
 export interface ProviderAccessModeConfirmation {
