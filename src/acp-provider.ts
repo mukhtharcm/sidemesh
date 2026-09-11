@@ -590,6 +590,7 @@ export class AcpAgentProvider extends EventEmitter<AgentProviderEvents> implemen
     const active = this.sessions.get(record.id)?.active;
     const phase = record.archived ? "closed" : active ? "running" : "idle";
     return { id: record.id, name: record.name, preview: record.preview, cwd: record.cwd, source: "acpx", path: null,
+      runtime: this.metadata(record).runtime ?? null,
       createdAt: Math.floor(record.createdAt / 1000), updatedAt: Math.floor(record.updatedAt / 1000),
       status: { type: phase, phase, ...(active ? { activeFlags: ["inProgress"] } : {}) },
       ...(includeTurns ? { turns: active ? [{ id: active.turnId, status: "inProgress", startedAt: null, completedAt: null }] : [] } : {}) };

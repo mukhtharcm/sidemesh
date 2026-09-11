@@ -44,7 +44,7 @@ src/
   types.ts                     # Shared daemon types and provider configs
   provider-registry.ts         # Provider metadata + factory definitions
   provider-factory.ts          # Provider construction
-  multi-provider.ts            # Multi-provider facade with namespaced IDs
+  session-identity.ts          # Stable instance ownership and legacy session aliases
   codex-provider.ts            # Codex adapter
   copilot-provider.ts          # Copilot CLI adapter
   fake-provider.ts             # Deterministic test harness
@@ -140,17 +140,25 @@ Every provider implements the interface in `src/agent-provider.ts`.
 - `setupAudience: "public" | "dev"` controls which providers appear in
   `sidemesh setup`. The fake provider is dev-only.
 
-### Multi-Provider Mode
+### Configured Provider Instances
 
-- When `config.providers.length > 1`, `provider-factory.ts` wraps them in
-  `MultiAgentProvider` automatically.
+- `AgentProviderRuntime` holds a direct map of configured instances. It is not
+  an `AgentProvider`. Resolve an instance and its native session ID before a call.
+  Construction and startup are lazy. Host health and controls remain available
+  when a provider fails. `/api/node` and `/api/providers` report each instance's
+  state, error, and version; restart recreates only that instance.
 - Configured providers have stable `id` values. Old entries default to their kind.
   Keep the old entry ID when adding another instance of that kind. Set
   `defaultProviderId` to select an instance. IDs are namespaced as
-  `instanceId:base64url(rawId)`; kind-only aliases resolve only when unambiguous.
-- `MultiAgentProvider.capabilities` reflects the default provider only; use
-  `supportedProviders[].capabilities` from `/api/node` for per-provider truth.
-- `stderr` gets a `[kind] ` prefix for non-default providers.
+  `instanceId:base64url(rawId)`, including single-provider hosts. SQLite pins
+  legacy raw IDs and kind aliases to their original owner. A default change or
+  provider removal must never transfer that ownership. Reusing an instance ID
+  for another kind or a saved alias fails closed.
+- Inputs, plans, recovery, and locks use canonical IDs. Old HTTP and WebSocket
+  callers receive their requested session alias. Input alias conflicts abort
+  the migration transaction and preserve both original delivery records.
+- Use `supportedProviders[].capabilities` from `/api/node` for instance truth.
+- `stderr` gets an `[instanceId] ` prefix.
 - If the resolved provider lacks a capability, the call throws even if another
   provider has it.
 

@@ -555,6 +555,7 @@ export class PiAgentProvider extends EventEmitter<AgentProviderEvents> implement
     const active = state?.active;
     const status = record.archived ? "closed" : active || state?.native?.isStreaming || state?.native?.isCompacting ? "running" : "idle";
     return { id: record.id, cwd: record.cwd, name: record.name, preview: record.preview, source: "pi",
+      runtime: this.metadata(record).runtime ?? null,
       path: this.metadata(record).nativePath ?? null, createdAt: record.createdAt / 1000, updatedAt: record.updatedAt / 1000,
       status: { type: status, ...(status === "running" ? { activeFlags: ["inProgress"] } : {}) },
       ...(includeTurns ? { turns: active ? [{ id: active.id, status: "inProgress", startedAt: null, completedAt: null }] : [] } : {}) };

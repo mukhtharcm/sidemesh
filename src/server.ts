@@ -30,6 +30,7 @@ import {
   type AgentProvider,
   type AgentProviderMethodName,
   type AgentProviderLiveEvent,
+  type AgentSessionListOptions,
   type AgentSessionInputItem,
   type AgentSessionOverrides,
 } from "./agent-provider.js";
@@ -69,9 +70,10 @@ import {
 import {
   createAgentProviderRuntime,
   type AgentProviderRuntime,
+  type AgentProviderRuntimeEntry,
 } from "./provider-factory.js";
 import { isAgentProviderKind } from "./provider-registry.js";
-import { MultiAgentProvider, wrapProviderScopedId } from "./multi-provider.js";
+import { wrapProviderScopedId } from "./session-identity.js";
 import { buildSessionResources } from "./resources.js";
 import {
   FsWatchRegistry,
@@ -122,7 +124,6 @@ const CLIENT_MESSAGE_ID_PATTERN = /^[A-Za-z0-9._:-]+$/;
 const RECENT_UNINDEXED_SESSION_SCAN_LIMIT = 50;
 const RECENT_LIVE_LIMIT = 40;
 const RECENT_SESSIONS_CACHE_TTL_MS = 1_500;
-const RECENT_SESSION_RUNTIME_CONCURRENCY = 4;
 const INSTALL_INFO_REFRESH_TTL_MS = 60_000;
 type SessionRuntimeListMode = "all" | "active" | "none";
 const HOST_CAPABILITIES: HostCapabilities = {
@@ -187,15 +188,11 @@ export async function startServer(
   let providerRuntime: AgentProviderRuntime;
   try { providerRuntime = prebuiltRuntime ?? createAgentProviderRuntime(config, sessionStore); }
   catch (error) { sessionStore.close(); throw error; }
-  const provider = providerRuntime.provider;
-  try { await provider.start(); }
-  catch (error) {
-    await provider.close?.().catch(() => {});
-    sessionStore.close();
-    throw error;
-  }
+  try { providerRuntime.attachStore(sessionStore); }
+  catch (error) { sessionStore.close(); throw error; }
   let runningServerRef: RunningServer | null = null;
   let closing = false;
+  let closingPromise: Promise<void> | null = null;
   const hostCapabilities: HostCapabilities = {
     ...HOST_CAPABILITIES,
     workspace: {
@@ -208,6 +205,7 @@ export async function startServer(
   const app = new Hono<HonoServerEnv>();
   const server = createServer(getRequestListener(app.fetch));
   const socketsBySession = new Map<string, Set<WebSocket>>();
+  const sessionSocketAliases = new WeakMap<WebSocket, string>();
   const approvalSockets = new Set<WebSocket>();
   const recentSessionsSockets = new Set<WebSocket>();
   const recentSessionBroadcastTimers = new Map<string, NodeJS.Timeout>();
@@ -220,23 +218,23 @@ export async function startServer(
   }>();
   const sessionState = new SessionCoordinator(sessionStore, {
     readSnapshot: async (id, options) => {
-      const resolved = provider instanceof MultiAgentProvider ? provider.resolveSessionProvider(id) : null;
-      const entry = providerEntryForSessionId(id);
-      if (!entry) throw new AgentProviderRequestError("Unknown provider", 404);
-      const snapshot = await requireProviderMethod(entry.provider, "readSessionSnapshot", "session snapshot")
-        .call(entry.provider, resolved?.rawId ?? id, options);
-      return { ...snapshot, latestPlanUpdate: snapshot.latestPlanUpdate ? { ...snapshot.latestPlanUpdate, sessionId: id } : null,
-        thread: { ...snapshot.thread, id, providerId: entry.id ?? entry.kind, providerKind: entry.kind,
-          subAgent: snapshot.thread.subAgent && resolved ? { ...snapshot.thread.subAgent,
-            parentSessionId: snapshot.thread.subAgent.parentSessionId ? wrapProviderScopedId(resolved.id, snapshot.thread.subAgent.parentSessionId) : null,
-          } : snapshot.thread.subAgent } };
+      const resolved = providerRuntime.resolveSession(id);
+      const provider = await providerRuntime.ensure(resolved.entry);
+      const snapshot = await requireProviderMethod(provider, "readSessionSnapshot", "session snapshot")
+        .call(provider, resolved.rawId, options);
+      return { ...snapshot, latestPlanUpdate: snapshot.latestPlanUpdate ? { ...snapshot.latestPlanUpdate, sessionId: resolved.sessionId } : null,
+        thread: providerRuntime.wrapThread(resolved.entry, snapshot.thread) };
     },
     publish: publishSessionEvent,
     input: {
-      canSteer: (id) => providerEntryForSessionId(id)?.provider.capabilities.input.steer !== false,
+      canSteer: (id) => providerEntryForSessionId(id)?.capabilities.input.steer !== false,
       prepare: async (id, payload) => ({ ...payload,
-        input: await resolveFileInputItemsForSession(provider, id, payload.input) }),
-      dispatch: (request) => provider.submitInput!(request),
+        input: await resolveFileInputItemsForSession(providerRuntime, id, payload.input) }),
+      dispatch: async (request) => {
+        const resolved = providerRuntime.resolveSession(request.sessionId);
+        const provider = await providerRuntime.ensure(resolved.entry);
+        return requireProviderMethod(provider, "submitInput", "session input").call(provider, { ...request, sessionId: resolved.rawId });
+      },
       submitted: async (request, receipt) => {
         broadcastLive(request.sessionId, { type: "user_message_submitted", sessionId: request.sessionId,
           turnId: receipt.turnId ?? undefined,
@@ -250,11 +248,10 @@ export async function startServer(
   const searchIndex = new SessionSearchIndex(
     nodePath.join(config.stateDir, "search-index-v1.db"),
   );
+  await searchIndex.open();
   const pushNotifications = await PushNotificationDispatcher.open(
     config.stateDir,
   );
-  let providerVersion = "unknown";
-  const providerVersions = new Map<string, string>();
   let installInfo = {
     packageVersion: "unknown",
     latestVersion: null as string | null,
@@ -345,7 +342,7 @@ export async function startServer(
     requirePty: config.terminal.requirePty,
     resolveCwd: (cwd, request) =>
       resolveTerminalCwd(
-        provider,
+        providerRuntime,
         sessionState,
         cwd,
         request.sessionId,
@@ -374,12 +371,19 @@ export async function startServer(
     sessionStore.clearInterruptedInputs(interruptedTurnIds);
   }
 
-  function providerEntryForKind(kind: string | null | undefined) {
-    return providerRuntime.providerForKind(kind);
-  }
 
   function providerEntryForSessionId(sessionId: string) {
     return providerRuntime.providerForSessionId(sessionId);
+  }
+
+  async function startedProviderForKind(id: string | null | undefined) {
+    const entry = providerRuntime.providerForKind(id);
+    return entry ? { ...entry, provider: await providerRuntime.ensure(entry) } : null;
+  }
+
+  async function startedSessionProvider(id: string) {
+    const resolved = providerRuntime.resolveSession(id);
+    return { ...resolved.entry, rawId: resolved.rawId, provider: await providerRuntime.ensure(resolved.entry) };
   }
 
   async function clearProviderScopedRuntimeState(kind: string): Promise<void> {
@@ -397,15 +401,15 @@ export async function startServer(
   }
 
   async function getSessionCwd(sessionId: string): Promise<string | null> {
-    const sessionProvider = providerEntryForSessionId(sessionId);
+    const sessionProvider = await startedSessionProvider(sessionId);
     if (
       !sessionProvider ||
-      !hasProviderMethod(sessionProvider.provider, "readSessionThread")
+      !sessionProvider.provider.capabilities.sessions.history
     ) {
       return null;
     }
     const session = await readSession(
-      providerRuntime.provider,
+      providerRuntime,
       sessionId,
       false,
     ).catch(() => null);
@@ -418,7 +422,7 @@ export async function startServer(
 
   function publishSessionEvent(event: LiveEvent): void {
     if (closing) return;
-    broadcast(socketsBySession, event.sessionId, event);
+    broadcast(socketsBySession, event.sessionId, event, sessionSocketAliases);
     if (event.type === "action_opened" && event.action) {
       broadcastApprovalLive({ type: "action_opened", action: event.action });
       void pushNotifications.enqueue({
@@ -456,6 +460,7 @@ export async function startServer(
       return;
     }
     for (const sessionId of socketsBySession.keys()) {
+      if (event.source && providerEntryForSessionId(sessionId)?.id !== event.source) continue;
       broadcastLive(sessionId, {
         type: "provider_warning",
         sessionId,
@@ -502,7 +507,7 @@ export async function startServer(
     }
 
     const promise = listSessions(
-      provider,
+      providerRuntime,
       sessionState,
       limit,
       runtimeMode,
@@ -556,13 +561,13 @@ export async function startServer(
       broadcastRecentSessionsLive({ type: "remove", sessionId });
     } catch {
       try {
-        const thread = await readSession(provider, sessionId, false);
+        const thread = await readSession(providerRuntime, sessionId, false);
         if (sessionSubAgentForThread(thread)) {
           broadcastRecentSessionsLive({ type: "remove", sessionId });
           return;
         }
         const session = await buildRecentSessionSummary(
-          provider,
+          providerRuntime,
           sessionState,
           thread,
           "active",
@@ -607,7 +612,7 @@ export async function startServer(
   }
 
   const onProviderStderr = (line: string): void => { process.stderr.write(line); };
-  provider.on("stderr", onProviderStderr);
+  providerRuntime.on("stderr", onProviderStderr);
 
   const fsWatchRegistry = new FsWatchRegistry();
 
@@ -616,17 +621,14 @@ export async function startServer(
     if (event.type === "provider_warning" && !event.sessionId) { broadcastProviderWarning(event); return; }
     sessionState.handle(event);
   };
-  provider.on("liveEvent", onProviderLiveEvent);
+  providerRuntime.on("liveEvent", onProviderLiveEvent);
 
-  for (const entry of providerRuntime.providers) {
-    providerVersions.set(
-      entry.id ?? entry.kind,
-      await entry.provider.getVersion().catch(() => "unknown"),
-    );
-  }
-  providerVersion =
-    providerVersions.get(providerRuntime.defaultProviderId ?? providerRuntime.defaultProviderKind) ??
-    (await provider.getVersion().catch(() => "unknown"));
+  const onProviderState = (entry: AgentProviderRuntimeEntry): void => {
+    if (entry.state === "unavailable" || entry.state === "starting") void clearProviderScopedRuntimeState(entry.id);
+    if (entry.state === "unavailable") broadcastProviderWarning({ level: "error",
+      code: "provider_unavailable", message: `${entry.displayName}: ${entry.error}`, source: entry.id });
+  };
+  providerRuntime.on("state", onProviderState);
 
   try {
     const detected = await dependencies.detectInstallInfo({ config: runtimeConfig });
@@ -676,17 +678,8 @@ export async function startServer(
     onError: (c) => c.json({ error: "payload too large" }, 413),
   }));
 
-  app.get("/healthz", jsonRoute(async (_request, response) => {
-    const providerHealthy = await probeProviderHealth(provider, 3_000);
-    if (providerHealthy) {
-      response.json({ ok: true, label: config.label });
-      return;
-    }
-    response.status(503).json({
-      ok: false,
-      label: config.label,
-      error: "provider unreachable",
-    });
+  app.get("/healthz", jsonRoute((_request, response) => {
+    response.json({ ok: true, label: config.label });
   }));
 
   const authMiddleware = createMiddleware<HonoServerEnv>(async (c, next) => {
@@ -702,17 +695,31 @@ export async function startServer(
     await next();
   });
   app.use("*", authMiddleware);
+  app.use("/api/sessions/:sessionId/*", async (c, next) => {
+    if (c.req.path.split("/").length < 5) { await next(); return; }
+    const alias = c.req.param("sessionId");
+    const canonical = providerRuntime.resolveSession(alias).sessionId;
+    await next();
+    if (alias === canonical || !c.res.headers.get("content-type")?.includes("application/json")) return;
+    const body = JSON.stringify(withSessionAlias(await c.res.clone().json(), canonical, alias));
+    const headers = new Headers(c.res.headers);
+    headers.set("content-length", String(Buffer.byteLength(body)));
+    c.header("content-length", String(Buffer.byteLength(body)));
+    c.res = new Response(body, { status: c.res.status, statusText: c.res.statusText, headers });
+  });
   registerHostResourceRoutes(app);
 
   app.get("/api/node", jsonRoute((_request, response) => {
     const defaultProvider = providerRuntime.defaultProvider;
-    const defaultProviderCapabilities = defaultProvider.provider.capabilities;
+    const defaultProviderCapabilities = defaultProvider.capabilities;
     const supportedProviders = providerRuntime.providers.map((entry) => ({
       ...entry.definitionSummary,
       id: entry.id ?? entry.kind,
       config: entry.configSummary,
-      capabilities: entry.provider.capabilities,
-      version: providerVersions.get(entry.id ?? entry.kind) ?? "unknown",
+      capabilities: entry.capabilities,
+      version: entry.version ?? "unknown",
+      state: entry.state,
+      error: entry.error,
       isDefault: entry === providerRuntime.defaultProvider,
     }));
     response.json({
@@ -724,14 +731,15 @@ export async function startServer(
       providerId: providerRuntime.defaultProviderId ?? providerRuntime.defaultProviderKind,
       providerName:
         supportedProviders.find((item) => item.isDefault)?.displayName ??
-        defaultProvider.provider.displayName,
-      providerVersion,
+        defaultProvider.displayName,
+      providerVersion: defaultProvider.version ?? "unknown",
       providerConfig: defaultProvider.configSummary,
       defaultProviderCapabilities,
       hostCapabilities,
       searchSessions: hostCapabilities.sessions.search,
       searchIndexStats: searchIndex.getStats(),
       supportedProviders,
+      sessionAliases: providerRuntime.sessionAliases,
       startedAt: process.uptime(),
       tokenSource: config.tokenSource,
       packageVersion: installInfo.packageVersion,
@@ -769,13 +777,16 @@ export async function startServer(
   app.get("/api/providers", jsonRoute((_request, response) => {
     response.json({
       currentProvider: providerRuntime.defaultProviderKind,
-      currentProviderId: providerRuntime.defaultProviderId ?? providerRuntime.defaultProviderKind,
+      currentProviderId: providerRuntime.defaultProviderId,
+      sessionAliases: providerRuntime.sessionAliases,
       providers: providerRuntime.providers.map((entry) => ({
         ...entry.definitionSummary,
         id: entry.id ?? entry.kind,
         config: entry.configSummary,
-        capabilities: entry.provider.capabilities,
-        version: providerVersions.get(entry.id ?? entry.kind) ?? "unknown",
+        capabilities: entry.capabilities,
+        version: entry.version ?? "unknown",
+      state: entry.state,
+      error: entry.error,
         isDefault: entry === providerRuntime.defaultProvider,
       })),
     });
@@ -900,14 +911,7 @@ export async function startServer(
         response.status(400).json({ error: "unknown provider kind" });
         return;
       }
-      if (
-        !selectedProvider.provider.capabilities.lifecycle.restart ||
-        !selectedProvider.provider.restart
-      ) {
-        response.status(501).json({ error: "provider does not support restart" });
-        return;
-      }
-      await selectedProvider.provider.restart();
+      await providerRuntime.restart(selectedProvider);
       await clearProviderScopedRuntimeState(selectedProvider.id ?? selectedProvider.kind);
       response.json({ ok: true, kind });
     }),
@@ -1008,15 +1012,8 @@ export async function startServer(
   app.get(
     "/api/sessions",
     asyncRoute(async (_request, response) => {
-      if (
-        !requireProviderCapability(
-          response,
-          provider,
-          provider.capabilities.sessions.history,
-          "session history",
-          "listSessionThreads",
-        )
-      ) {
+      if (!providerRuntime.providers.some((entry) => entry.capabilities.sessions.history)) {
+        response.status(501).json({ error: "No provider supports session history" });
         return;
       }
       const requestedLimit = asInteger(
@@ -1080,6 +1077,7 @@ export async function startServer(
       if (updatedBefore != null) {
         filter.updatedBefore = updatedBefore;
       }
+      await ensureSearchBackfill();
       const searchResults = await searchIndex.search(
         normalizedQuery,
         Math.min(limit * 3, 300),
@@ -1091,7 +1089,7 @@ export async function startServer(
           if (!providerEntryForSessionId(result.sessionId)) {
             return null;
           }
-          const thread = await readSession(provider, result.sessionId, false).catch(() => null);
+          const thread = await readSession(providerRuntime, result.sessionId, false).catch(() => null);
           if (!thread) {
             return null;
           }
@@ -1099,7 +1097,7 @@ export async function startServer(
             await searchIndex.remove(result.sessionId).catch(() => undefined);
             return null;
           }
-          const runtime = await loadCachedSessionRuntime(provider, thread, sessionState, "active");
+          const runtime = sessionState.runtimeSummary(thread.id);
           const session = mapSession(
             thread,
             runtime,
@@ -1127,8 +1125,8 @@ export async function startServer(
   app.get(
     "/api/sessions/:sessionId/agent-runs",
     asyncRoute(async (request, response) => {
-      const sessionId = pathParam(request.params.sessionId);
-      const sessionProvider = providerEntryForSessionId(sessionId);
+      const sessionId = providerRuntime.resolveSession(pathParam(request.params.sessionId)).sessionId;
+      const sessionProvider = await startedSessionProvider(sessionId);
       if (!sessionProvider) {
         response.status(400).json({ error: "unknown provider" });
         return;
@@ -1151,16 +1149,8 @@ export async function startServer(
           200,
         ),
       );
-      const listThreads = requireProviderMethod(
-        provider,
-        "listSessionThreads",
-        "agent runs",
-      );
-      const threads = await listThreads.call(provider, {
-        limit: requestedLimit,
-        archived: false,
-        includeSubAgents: true,
-        subAgentParentId: sessionId,
+      const threads = await listProviderThreads(providerRuntime, {
+        limit: requestedLimit, archived: false, includeSubAgents: true, subAgentParentId: sessionId,
       });
       const runs = threads
         .map(mapAgentRun)
@@ -1177,15 +1167,8 @@ export async function startServer(
   app.get(
     "/api/workspaces",
     asyncRoute(async (_request, response) => {
-      if (
-        !requireProviderCapability(
-          response,
-          provider,
-          provider.capabilities.sessions.history,
-          "workspace history",
-          "listSessionThreads",
-        )
-      ) {
+      if (!providerRuntime.providers.some((entry) => entry.capabilities.sessions.history)) {
+        response.status(501).json({ error: "No provider supports workspace history" });
         return;
       }
       const sessions = await loadRecentSessions(null, "none");
@@ -1196,7 +1179,7 @@ export async function startServer(
   registerFsRoutes(app, {
     listSessions: () =>
       listSessions(
-        provider,
+        providerRuntime,
         sessionState,
         null,
         "none",
@@ -1208,16 +1191,15 @@ export async function startServer(
   registerSessionArtifactRoutes(app, {
     stateDir: config.stateDir,
     isReferenced: async (sessionId, source) => {
-      const sessionProvider = providerEntryForSessionId(sessionId);
+      const sessionProvider = await startedSessionProvider(sessionId);
       if (
         !sessionProvider ||
-        !hasProviderMethod(sessionProvider.provider, "readSessionThread") ||
+        !sessionProvider.provider.capabilities.sessions.history ||
         !hasProviderMethod(sessionProvider.provider, "readSessionLog")
       ) {
         return false;
       }
       const resources = await readSessionResources(
-        provider,
         sessionId,
         sessionState,
       );
@@ -1377,7 +1359,7 @@ export async function startServer(
     asyncRoute(async (_request, response) => {
       response.json(
         await listPendingActions(
-          provider,
+          providerRuntime,
           pendingActions,
         ),
       );
@@ -1387,8 +1369,8 @@ export async function startServer(
   app.get(
     "/api/sessions/:sessionId/log",
     asyncRoute(async (request, response) => {
-      const sessionId = pathParam(request.params.sessionId);
-      const sessionProvider = providerEntryForSessionId(sessionId);
+      const sessionId = providerRuntime.resolveSession(pathParam(request.params.sessionId)).sessionId;
+      const sessionProvider = await startedSessionProvider(sessionId);
       if (!sessionProvider) {
         response.status(400).json({ error: "unknown provider" });
         return;
@@ -1433,8 +1415,8 @@ export async function startServer(
   app.get(
     "/api/sessions/:sessionId/resources",
     asyncRoute(async (request, response) => {
-      const sessionId = pathParam(request.params.sessionId);
-      const sessionProvider = providerEntryForSessionId(sessionId);
+      const sessionId = providerRuntime.resolveSession(pathParam(request.params.sessionId)).sessionId;
+      const sessionProvider = await startedSessionProvider(sessionId);
       if (!sessionProvider) {
         response.status(400).json({ error: "unknown provider" });
         return;
@@ -1459,7 +1441,6 @@ export async function startServer(
       }
       response.json(
         await readSessionResources(
-          provider,
           sessionId,
           sessionState,
         ),
@@ -1470,8 +1451,8 @@ export async function startServer(
   app.get(
     "/api/sessions/:sessionId/status",
     asyncRoute(async (request, response) => {
-      const sessionId = pathParam(request.params.sessionId);
-      const sessionProvider = providerEntryForSessionId(sessionId);
+      const sessionId = providerRuntime.resolveSession(pathParam(request.params.sessionId)).sessionId;
+      const sessionProvider = await startedSessionProvider(sessionId);
       if (!sessionProvider) {
         response.status(400).json({ error: "unknown provider" });
         return;
@@ -1497,8 +1478,8 @@ export async function startServer(
   app.get(
     "/api/sessions/:sessionId/git",
     asyncRoute(async (request, response) => {
-      const sessionId = pathParam(request.params.sessionId);
-      const sessionProvider = providerEntryForSessionId(sessionId);
+      const sessionId = providerRuntime.resolveSession(pathParam(request.params.sessionId)).sessionId;
+      const sessionProvider = await startedSessionProvider(sessionId);
       if (!sessionProvider) {
         response.status(400).json({ error: "unknown provider" });
         return;
@@ -1519,7 +1500,7 @@ export async function startServer(
       ) {
         return;
       }
-      const session = await readSession(provider, sessionId, false);
+      const session = await readSession(providerRuntime, sessionId, false);
       response.json(
         await readGitStatus(session.cwd, mapGitInfo(session.gitInfo)),
       );
@@ -1529,8 +1510,8 @@ export async function startServer(
   app.get(
     "/api/sessions/:sessionId/git/diff",
     asyncRoute(async (request, response) => {
-      const sessionId = pathParam(request.params.sessionId);
-      const sessionProvider = providerEntryForSessionId(sessionId);
+      const sessionId = providerRuntime.resolveSession(pathParam(request.params.sessionId)).sessionId;
+      const sessionProvider = await startedSessionProvider(sessionId);
       if (!sessionProvider) {
         response.status(400).json({ error: "unknown provider" });
         return;
@@ -1556,7 +1537,7 @@ export async function startServer(
       ) {
         return;
       }
-      const session = await readSession(provider, sessionId, false);
+      const session = await readSession(providerRuntime, sessionId, false);
       if (
         !requireHostCapability(
           response,
@@ -1575,7 +1556,7 @@ export async function startServer(
     asyncRoute(async (request, response) => {
       const query = request.query as Record<string, unknown>;
       const agentProvider = asString(query.agentProvider) || null;
-      const selectedProvider = providerEntryForKind(agentProvider);
+      const selectedProvider = await startedProviderForKind(agentProvider);
       if (!selectedProvider) {
         response.status(400).json({ error: "unknown provider" });
         return;
@@ -1608,7 +1589,7 @@ export async function startServer(
     "/api/skills/config/write",
     asyncRoute(async (request, response) => {
       const requestedProvider = asString(request.body?.agentProvider) || null;
-      const selectedProvider = providerEntryForKind(requestedProvider);
+      const selectedProvider = await startedProviderForKind(requestedProvider);
       if (!selectedProvider) {
         response.status(400).json({ error: "unknown provider" });
         return;
@@ -1652,7 +1633,7 @@ export async function startServer(
     asyncRoute(async (request, response) => {
       const query = request.query as Record<string, unknown>;
       const agentProvider = asString(query.agentProvider) || null;
-      const selectedProvider = providerEntryForKind(agentProvider);
+      const selectedProvider = await startedProviderForKind(agentProvider);
       if (!selectedProvider) {
         response.status(400).json({ error: "unknown provider" });
         return;
@@ -1682,7 +1663,7 @@ export async function startServer(
     asyncRoute(async (request, response) => {
       const query = request.query as Record<string, unknown>;
       const agentProvider = asString(query.agentProvider) || null;
-      const selectedProvider = providerEntryForKind(agentProvider);
+      const selectedProvider = await startedProviderForKind(agentProvider);
       if (!selectedProvider) {
         response.status(400).json({ error: "unknown provider" });
         return;
@@ -1716,7 +1697,7 @@ export async function startServer(
     asyncRoute(async (request, response) => {
       const query = request.query as Record<string, unknown>;
       const agentProvider = asString(query.agentProvider) || null;
-      const selectedProvider = providerEntryForKind(agentProvider);
+      const selectedProvider = await startedProviderForKind(agentProvider);
       if (!selectedProvider) {
         response.status(400).json({ error: "unknown provider" });
         return;
@@ -1742,7 +1723,7 @@ export async function startServer(
     asyncRoute(async (request, response) => {
       const query = request.query as Record<string, unknown>;
       const agentProvider = asString(query.agentProvider) || null;
-      const selectedProvider = providerEntryForKind(agentProvider);
+      const selectedProvider = await startedProviderForKind(agentProvider);
       if (!selectedProvider) {
         response.status(400).json({ error: "unknown provider" });
         return;
@@ -1767,7 +1748,7 @@ export async function startServer(
     "/api/sessions/create",
     asyncRoute(async (request, response) => {
       const requestedProvider = asString(request.body?.provider) || null;
-      const selectedProvider = providerEntryForKind(requestedProvider);
+      const selectedProvider = await startedProviderForKind(requestedProvider);
       if (!selectedProvider) {
         response.status(400).json({ error: "unknown provider" });
         return;
@@ -1816,8 +1797,8 @@ export async function startServer(
         response.status(400).json({ error: "clientMessageId must be 1-128 URL-safe characters" });
         return;
       }
-      const started = await provider.createSession!({ cwd, input: [], overrides,
-        provider: selectedProvider.id ?? selectedProvider.kind });
+      const native = await selectedProvider.provider.createSession!({ cwd, input: [], overrides });
+      const started = { ...native, thread: providerRuntime.wrapThread(selectedProvider, native.thread) };
       const inputOverrides = parseTurnOverrides(request.body);
       let receipt = null;
       try {
@@ -1848,8 +1829,8 @@ export async function startServer(
   app.post(
     "/api/sessions/:sessionId/input",
     asyncRoute(async (request, response) => {
-      const sessionId = pathParam(request.params.sessionId);
-      const sessionProvider = providerEntryForSessionId(sessionId);
+      const sessionId = providerRuntime.resolveSession(pathParam(request.params.sessionId)).sessionId;
+      const sessionProvider = await startedSessionProvider(sessionId);
       if (!sessionProvider) {
         response.status(400).json({ error: "unknown provider" });
         return;
@@ -1910,8 +1891,8 @@ export async function startServer(
   app.post(
     "/api/sessions/:sessionId/stop",
     asyncRoute(async (request, response) => {
-      const sessionId = pathParam(request.params.sessionId);
-      const sessionProvider = providerEntryForSessionId(sessionId);
+      const sessionId = providerRuntime.resolveSession(pathParam(request.params.sessionId)).sessionId;
+      const sessionProvider = await startedSessionProvider(sessionId);
       if (!sessionProvider) {
         response.status(400).json({ error: "unknown provider" });
         return;
@@ -1933,7 +1914,7 @@ export async function startServer(
         const state = await sessionState.snapshot(sessionId, { messageLimit: 1, activityLimit: 1 });
         turnId = state.activeTurnId;
         if (state.busy) {
-          const result = await provider.interruptTurn!(sessionId, turnId);
+          const result = await sessionProvider.provider.interruptTurn!(sessionProvider.rawId, turnId);
           stopped = !(result && typeof result === "object" && "interrupted" in result && result.interrupted === false);
         }
       });
@@ -1944,8 +1925,8 @@ export async function startServer(
   app.post(
     "/api/sessions/:sessionId/compact",
     asyncRoute(async (request, response) => {
-      const sessionId = pathParam(request.params.sessionId);
-      const sessionProvider = providerEntryForSessionId(sessionId);
+      const sessionId = providerRuntime.resolveSession(pathParam(request.params.sessionId)).sessionId;
+      const sessionProvider = await startedSessionProvider(sessionId);
       if (!sessionProvider) {
         response.status(400).json({ error: "unknown provider" });
         return;
@@ -1969,7 +1950,7 @@ export async function startServer(
         });
         return;
       }
-      const result = await provider.compactSession!(sessionId);
+      const result = await sessionProvider.provider.compactSession!(sessionProvider.rawId);
 
       response.json({ compacted: true, result: result ?? null });
       scheduleRecentSessionUpsert(sessionId, 0);
@@ -1979,8 +1960,8 @@ export async function startServer(
   app.post(
     "/api/sessions/:sessionId/name",
     asyncRoute(async (request, response) => {
-      const sessionId = pathParam(request.params.sessionId);
-      const sessionProvider = providerEntryForSessionId(sessionId);
+      const sessionId = providerRuntime.resolveSession(pathParam(request.params.sessionId)).sessionId;
+      const sessionProvider = await startedSessionProvider(sessionId);
       if (!sessionProvider) {
         response.status(400).json({ error: "unknown provider" });
         return;
@@ -2009,8 +1990,8 @@ export async function startServer(
         return;
       }
       if (
-        hasProviderMethod(provider, "listLoadedSessionIds") &&
-        !(await isThreadLoaded(provider, sessionId))
+        hasProviderMethod(sessionProvider.provider, "listLoadedSessionIds") &&
+        !(await isThreadLoaded(sessionProvider.provider, sessionProvider.rawId))
       ) {
         if (
           !requireProviderCapability(
@@ -2023,12 +2004,12 @@ export async function startServer(
         ) {
           return;
         }
-        await provider.resumeSessionThread!(sessionId, {
+        await sessionProvider.provider.resumeSessionThread!(sessionProvider.rawId, {
           persistExtendedHistory: true,
         });
       }
-      await provider.setSessionName!(sessionId, name);
-      const thread = await readSession(provider, sessionId, false);
+      await sessionProvider.provider.setSessionName!(sessionProvider.rawId, name);
+      const thread = await readSession(providerRuntime, sessionId, false);
       const session = mapSession(
         thread,
         null,
@@ -2043,8 +2024,8 @@ export async function startServer(
   app.post(
     "/api/sessions/:sessionId/archive",
     asyncRoute(async (request, response) => {
-      const sessionId = pathParam(request.params.sessionId);
-      const sessionProvider = providerEntryForSessionId(sessionId);
+      const sessionId = providerRuntime.resolveSession(pathParam(request.params.sessionId)).sessionId;
+      const sessionProvider = await startedSessionProvider(sessionId);
       if (!sessionProvider) {
         response.status(400).json({ error: "unknown provider" });
         return;
@@ -2060,7 +2041,7 @@ export async function startServer(
       ) {
         return;
       }
-      await inputs.stop(sessionId, async () => { await provider.archiveSession!(sessionId); });
+      await inputs.stop(sessionId, async () => { await sessionProvider.provider.archiveSession!(sessionProvider.rawId); });
       sessionState.invalidate(sessionId);
       broadcastRecentSessionRemove(sessionId);
       void indexSessionForSearch(searchIndex, providerRuntime, sessionId, true).catch(() => {});
@@ -2070,8 +2051,8 @@ export async function startServer(
   app.post(
     "/api/sessions/:sessionId/unarchive",
     asyncRoute(async (request, response) => {
-      const sessionId = pathParam(request.params.sessionId);
-      const sessionProvider = providerEntryForSessionId(sessionId);
+      const sessionId = providerRuntime.resolveSession(pathParam(request.params.sessionId)).sessionId;
+      const sessionProvider = await startedSessionProvider(sessionId);
       if (!sessionProvider) {
         response.status(400).json({ error: "unknown provider" });
         return;
@@ -2087,7 +2068,7 @@ export async function startServer(
       ) {
         return;
       }
-      await provider.unarchiveSession!(sessionId);
+      await sessionProvider.provider.unarchiveSession!(sessionProvider.rawId);
       response.json({ unarchived: true });
       scheduleRecentSessionUpsert(sessionId, 0);
       void indexSessionForSearch(searchIndex, providerRuntime, sessionId, false).catch(() => {});
@@ -2097,7 +2078,7 @@ export async function startServer(
   app.post(
     "/api/actions/:actionId/respond",
     asyncRoute(async (request, response) => {
-      const actionId = pathParam(request.params.actionId);
+      const actionId = providerRuntime.resolveSession(pathParam(request.params.actionId)).sessionId;
       const action = pendingActions.get(actionId);
       if (!action) {
         response.status(404).json({ error: "action not found" });
@@ -2109,18 +2090,12 @@ export async function startServer(
         return;
       }
 
-      if (
-        !requireProviderCapability(
-          response,
-          provider,
-          true,
-          "pending action responses",
-          "respondToPendingAction",
-        )
-      ) {
-        return;
-      }
-      const handled = provider.respondToPendingAction!(action, decision);
+      const resolved = providerRuntime.resolveSession(action.sessionId);
+      const actionReference = providerRuntime.resolveSession(action.id);
+      if (actionReference.providerId !== resolved.providerId) throw new AgentProviderRequestError("Action owner does not match session owner", 409);
+      const provider = await providerRuntime.ensure(resolved.entry);
+      const handled = requireProviderMethod(provider, "respondToPendingAction", "pending action responses").call(provider,
+        { ...action, id: actionReference.rawId, sessionId: resolved.rawId }, decision);
       if (!handled) {
         response.status(400).json({ error: "unsupported decision" });
         return;
@@ -2204,7 +2179,7 @@ export async function startServer(
         attachFsLiveSocket(ws, fsWatchRegistry, {
           listSessions: () =>
             listSessions(
-              provider,
+              providerRuntime,
               sessionState,
               null,
               "none",
@@ -2222,7 +2197,7 @@ export async function startServer(
       wsServer.handleUpgrade(request, socket, head, (ws) => {
         approvalSockets.add(ws);
         sendEvent(ws, { type: "hello" });
-        void listPendingActions(provider, pendingActions)
+        void listPendingActions(providerRuntime, pendingActions)
           .then((actions) => {
             sendEvent(ws, { type: "snapshot", actions });
           })
@@ -2243,7 +2218,7 @@ export async function startServer(
     }
 
     if (pathOnly === "/api/sessions/live") {
-      if (!provider.capabilities.sessions.history) {
+      if (!providerRuntime.providers.some((entry) => entry.capabilities.sessions.history)) {
         socket.destroy();
         return;
       }
@@ -2267,19 +2242,24 @@ export async function startServer(
     }
 
       const params = new URLSearchParams(queryString || "");
-      const sessionId = params.get("sessionId");
-      if (!sessionId || sessionId.length > 1024) {
+      const alias = params.get("sessionId");
+      if (!alias || alias.length > 1024) {
       socket.destroy();
       return;
     }
+      let sessionId: string;
+      try { sessionId = providerRuntime.resolveSession(alias).sessionId; }
+      catch { socket.destroy(); return; }
 
       wsServer.handleUpgrade(request, socket, head, (ws) => {
+        sessionSocketAliases.set(ws, alias);
         const set = socketsBySession.get(sessionId) || new Set<WebSocket>();
         set.add(ws);
         socketsBySession.set(sessionId, set);
+        void providerRuntime.ensure(providerRuntime.resolveSession(sessionId).entry).catch(() => undefined);
         sendEvent(ws, {
           type: "hello",
-          sessionId,
+          sessionId: alias,
         });
         ws.on("close", () => {
           const current = socketsBySession.get(sessionId);
@@ -2318,149 +2298,58 @@ export async function startServer(
   await listen(server, config.port);
   inputs.recover();
 
-  // Open search index and warm all provider indexes in the background
-  const searchIndexBackfill = searchIndex.open().then(async () => {
-    searchIndex.setBackfillRunning(true);
-    let totalIndexed = 0;
-    let totalRemoved = 0;
-
-    for (const entry of providerRuntime.providers) {
-      const provider = entry.provider;
-      const providerKind = entry.kind;
-      if (
-        !hasProviderMethod(provider, "listSessionThreads") ||
-        !hasProviderMethod(provider, "readSessionLog")
-      ) {
-        continue;
-      }
-      searchIndex.setProviderError(providerKind, null);
+  let searchIndexBackfill: Promise<void> | null = null;
+  function ensureSearchBackfill(): Promise<void> {
+    searchIndexBackfill ??= (async () => {
+      searchIndex.setBackfillRunning(true);
       try {
-        const batchSize = 50;
-        for (const archived of [false, true]) {
-          const threads = await provider.listSessionThreads!({
-            limit: 200,
-            archived,
-            includeSubAgents: false,
-          });
-          const batches = chunkArray(threads, batchSize);
-          for (const batch of batches) {
-            for (const thread of batch) {
-              try {
-                if (sessionSubAgentForThread(thread)) {
-                  const staleSessionKey = indexedSessionIdForProvider(
-                    providerRuntime,
-                    entry.id ?? entry.kind,
-                    thread.id,
-                  );
-                  await searchIndex.remove(staleSessionKey);
-                  totalRemoved++;
-                  continue;
-                }
-                const log = await provider.readSessionLog!(thread, {
-                  messageLimit: 200,
-                  activityLimit: 200,
-                });
-                const createdAt = threadTimestampMillis(thread.createdAt);
-                const updatedAt = threadTimestampMillis(thread.updatedAt);
-                const sessionKey = indexedSessionIdForProvider(
-                  providerRuntime,
-                  entry.id ?? entry.kind,
-                  thread.id,
-                );
-                await searchIndex.indexDocument({
-                  sessionKey,
-                  providerKind,
-                  title: thread.name || thread.preview,
-                  preview: thread.preview,
-                  cwd: thread.cwd,
-                  createdAt,
-                  updatedAt,
-                  archived,
-                  fingerprint: `${providerKind}|${thread.name || ""}|${thread.preview}|${thread.cwd}|${createdAt}|${updatedAt}|${archived}|${log.nextSeq}`,
-                  messages: log.messages,
-                  activities: log.activities,
-                });
-                if (sessionKey !== thread.id) {
-                  await searchIndex.remove(thread.id);
-                }
-                totalIndexed++;
-              } catch {
-                // Ignore per-session indexing errors during catch-up
+        for (const entry of providerRuntime.providers) {
+          if (closing) break;
+          if (!entry.capabilities.sessions.history) continue;
+          searchIndex.setProviderError(entry.id, null);
+          try {
+            const provider = await providerRuntime.ensure(entry);
+            if (!hasProviderMethod(provider, "listSessionThreads") || !hasProviderMethod(provider, "readSessionSnapshot")) continue;
+            for (const archived of [false, true]) {
+              const threads = await provider.listSessionThreads({ limit: 200, archived, includeSubAgents: false });
+              for (const thread of threads) {
+                if (closing) break;
+                const sessionId = wrapProviderScopedId(entry.id, thread.id);
+                if (sessionSubAgentForThread(thread)) { await searchIndex.remove(sessionId); continue; }
+                await indexSessionForSearch(searchIndex, providerRuntime, sessionId, archived);
               }
             }
-            // yield so startup remains responsive
-            await new Promise((resolve) => setImmediate(resolve));
+          } catch (error) {
+            searchIndex.setProviderError(entry.id, error instanceof Error ? error.message : String(error));
           }
         }
-      } catch (error: unknown) {
-        const message =
-          error instanceof Error ? error.message : String(error);
-        searchIndex.setProviderError(providerKind, message);
-      }
-    }
-
-    searchIndex.setBackfillRunning(false);
-    return { indexed: totalIndexed, removed: totalRemoved };
-  });
-  void searchIndexBackfill.then((result) => {
-    if (result.indexed > 0 || result.removed > 0) {
-      console.log(`Search index caught up: ${result.indexed} indexed, ${result.removed} removed`);
-    }
-  }).catch((error: unknown) => {
-    console.error(
-      "Failed to open search index:",
-      error instanceof Error ? error.message : error,
-    );
-  });
+      } finally { searchIndex.setBackfillRunning(false); }
+    })();
+    return searchIndexBackfill;
+  }
 
   for (const line of startupSummaryLines({
     config,
-    providerDisplayName: provider.displayName,
+    providerDisplayName: providerRuntime.defaultProvider.displayName,
     providerKinds: providerRuntime.providers.map((entry) => entry.kind),
   })) {
     console.log(line);
   }
 
-  // Health monitor: exit if provider is unhealthy so systemd can restart.
-  const HEALTH_MONITOR_INTERVAL_MS = 30_000;
-  const HEALTH_MONITOR_MAX_FAILURES = 3;
-  let healthFailures = 0;
   let healthMonitor: NodeJS.Timeout | null = null;
   let healthMonitorStopped = false;
   const runHealthMonitor = async (): Promise<void> => {
-    const healthy = await probeProviderHealth(provider, 5_000);
-    if (healthy) {
-      healthFailures = 0;
-    } else {
-      healthFailures++;
-      console.error(
-        `Health monitor: provider unhealthy (${healthFailures}/${HEALTH_MONITOR_MAX_FAILURES})`,
-      );
-      if (healthFailures >= HEALTH_MONITOR_MAX_FAILURES) {
-        console.error("Health monitor: exiting due to persistent provider failure");
-        await runningServerRef!.close();
-        dependencies.exitProcess(1);
-        return;
-      }
-    }
-    if (!healthMonitorStopped) {
-      healthMonitor = setTimeout(
-        () => void runHealthMonitor(),
-        HEALTH_MONITOR_INTERVAL_MS,
-      );
-    }
+    await providerRuntime.checkHealth();
+    if (!healthMonitorStopped) healthMonitor = setTimeout(() => void runHealthMonitor(), 30_000);
   };
-  healthMonitor = setTimeout(
-    () => void runHealthMonitor(),
-    HEALTH_MONITOR_INTERVAL_MS,
-  );
+  healthMonitor = setTimeout(() => void runHealthMonitor(), 30_000);
 
   const boundAddress = server.address();
   const boundPort = typeof boundAddress === "string" ? 0 : (boundAddress?.port ?? 0);
 
   runningServerRef = {
     port: boundPort,
-    close: async () => {
+    close: () => closingPromise ??= (async () => {
       closing = true;
       inputs.close();
       const httpClosing = closeHttpServer(server);
@@ -2468,28 +2357,18 @@ export async function startServer(
       healthMonitorStopped = true;
       if (healthMonitor) clearTimeout(healthMonitor);
       terminalRegistry.dispose();
-      await browserPreviewRegistry.dispose();
-      for (const socket of approvalSockets) socket.close();
-      for (const socket of recentSessionsSockets) socket.close();
-      for (const sockets of socketsBySession.values()) {
-        for (const socket of sockets) socket.close();
-      }
-      await closeWebSocketServer(wsServer);
+      for (const socket of wsServer.clients) socket.close();
       for (const timer of recentSessionBroadcastTimers.values()) clearTimeout(timer);
       recentSessionBroadcastTimers.clear();
-      try {
-        await provider.close?.();
-      } finally {
-        await httpClosing;
-        await searchIndexBackfill.catch(() => undefined);
-        await searchIndex.close();
-        provider.off("liveEvent", onProviderLiveEvent);
-        provider.off("stderr", onProviderStderr);
-        await inputs.drain();
-        sessionStore.close();
-        await pushNotifications.close();
-      }
-    },
+      const stopped = await Promise.allSettled([providerRuntime.close(), browserPreviewRegistry.dispose(),
+        closeWebSocketServer(wsServer), httpClosing, inputs.drain(), searchIndexBackfill]);
+      providerRuntime.off("liveEvent", onProviderLiveEvent);
+      providerRuntime.off("stderr", onProviderStderr);
+      providerRuntime.off("state", onProviderState);
+      const flushed = await Promise.allSettled([searchIndex.close(), pushNotifications.close(), Promise.resolve().then(() => sessionStore.close())]);
+      const errors = [...stopped, ...flushed].flatMap((result) => result.status === "rejected" ? [result.reason] : []);
+      if (errors.length) throw new AggregateError(errors, "Host shutdown did not finish cleanly");
+    })(),
   };
   return runningServerRef;
 }
@@ -2518,29 +2397,6 @@ async function listen(server: Server, port: number): Promise<void> {
   });
 }
 
-async function probeProviderHealth(
-  provider: AgentProvider,
-  timeoutMs: number,
-): Promise<boolean> {
-  let timer: NodeJS.Timeout | null = null;
-  try {
-    const probe = Promise.resolve()
-      .then(() =>
-        provider.health
-          ? provider.health()
-          : provider.getVersion().then(() => true),
-      )
-      .catch(() => false);
-    return await Promise.race([
-      probe,
-      new Promise<boolean>((resolve) => {
-        timer = setTimeout(() => resolve(false), timeoutMs);
-      }),
-    ]);
-  } finally {
-    if (timer) clearTimeout(timer);
-  }
-}
 
 function secretsEqual(candidate: string, expected: string): boolean {
   const candidateDigest = createHash("sha256").update(candidate).digest();
@@ -2760,15 +2616,15 @@ function unsupportedOverrideCapability(
 }
 
 async function resolveTerminalCwd(
-  provider: AgentProvider,
+  providerRuntime: AgentProviderRuntime,
   sessionState: SessionCoordinator,
   cwd: string,
   sessionId: string | null | undefined,
   configuredRoots: string[],
 ): Promise<string> {
-  if (sessionId?.trim() && hasProviderMethod(provider, "readSessionThread")) {
+  if (sessionId?.trim()) {
     try {
-      const thread = await provider.readSessionThread(sessionId.trim(), false);
+      const thread = await readSession(providerRuntime, sessionId.trim(), false);
       if (thread.cwd) {
         return resolveWorkspacePath(cwd, [thread.cwd]);
       }
@@ -2780,7 +2636,7 @@ async function resolveTerminalCwd(
   return resolveWorkspacePath(
     cwd,
     await collectWorkspaceRoots(
-      () => listSessions(provider, sessionState, null, "none"),
+      () => listSessions(providerRuntime, sessionState, null, "none"),
       configuredRoots,
     ),
   );
@@ -2822,7 +2678,7 @@ async function enrichSessionsWithGitCommonDir(
 // live socket so all delivery paths share the same runtime, status, and git
 // enrichment behavior.
 async function buildRecentSessionSummary(
-  provider: AgentProvider,
+  providerRuntime: AgentProviderRuntime,
   sessionState: SessionCoordinator,
   thread: ThreadRecord,
   runtimeMode: SessionRuntimeListMode = "active",
@@ -2831,7 +2687,7 @@ async function buildRecentSessionSummary(
   ) => LiveThreadStatus | null | Promise<LiveThreadStatus | null>,
 ): Promise<SessionSummary> {
   const [session] = await buildRecentSessionSummaries(
-    provider,
+    providerRuntime,
     sessionState,
     [thread],
     runtimeMode,
@@ -2841,7 +2697,7 @@ async function buildRecentSessionSummary(
 }
 
 async function buildRecentSessionSummaries(
-  provider: AgentProvider,
+  providerRuntime: AgentProviderRuntime,
   sessionState: SessionCoordinator,
   threads: ThreadRecord[],
   runtimeMode: SessionRuntimeListMode = "active",
@@ -2855,26 +2711,13 @@ async function buildRecentSessionSummaries(
   if (topLevelThreads.length === 0) {
     return [];
   }
-  const sessions = await mapWithConcurrency(
-    topLevelThreads,
-    RECENT_SESSION_RUNTIME_CONCURRENCY,
-    async (thread) =>
-      mapSession(
-        thread,
-        await loadCachedSessionRuntime(
-          provider,
-          thread,
-          sessionState,
-          runtimeMode,
-        ),
-        (await statusOverrideForSession?.(thread.id)) ?? null,
-      ),
-  );
+  const sessions = topLevelThreads.map((thread) => mapSession(thread,
+    runtimeMode === "none" ? null : thread.runtime ?? sessionState.runtimeSummary(thread.id)));
   return enrichSessionsWithGitCommonDir(sessions);
 }
 
 async function listSessions(
-  provider: AgentProvider,
+  providerRuntime: AgentProviderRuntime,
   sessionState: SessionCoordinator,
   limitOverride: number | null = null,
   runtimeMode: SessionRuntimeListMode = "active",
@@ -2883,54 +2726,31 @@ async function listSessions(
   ) => LiveThreadStatus | null | Promise<LiveThreadStatus | null>,
 ): Promise<SessionSummary[]> {
   const limit = normalizedSessionListLimit(limitOverride);
-  if (
-    canUseRecentSessionFallback(provider) &&
-    !hasProviderMethod(provider, "listSessionThreads")
-  ) {
-    const threads = await provider.listRecentUnindexedSessionThreads(
-      Math.max(limit, RECENT_UNINDEXED_SESSION_SCAN_LIMIT),
-    );
-    return buildRecentSessionSummaries(
-      provider,
-      sessionState,
-      threads,
-      runtimeMode,
-      statusOverrideForSession,
-    );
-  }
-  const listThreads = requireProviderMethod(
-    provider,
-    "listSessionThreads",
-    "session history",
-  );
-  const threads = await listThreads.call(provider, {
-    limit,
-    archived: false,
-    includeSubAgents: false,
-  });
-  const mergedThreads = await mergeRecentUnindexedThreads(
-    provider,
-    threads,
-    limit,
-  );
-  return buildRecentSessionSummaries(
-    provider,
-    sessionState,
-    mergedThreads,
-    runtimeMode,
-    statusOverrideForSession,
-  );
+  const threads = await listProviderThreads(providerRuntime, { limit, archived: false, includeSubAgents: false });
+  const projected = threads.map((thread) => sessionState.projectListedThread(thread));
+  return buildRecentSessionSummaries(providerRuntime, sessionState, projected, runtimeMode);
 }
 
-function canUseRecentSessionFallback(provider: AgentProvider): provider is AgentProvider & {
-  listRecentUnindexedSessionThreads: NonNullable<
-    AgentProvider["listRecentUnindexedSessionThreads"]
-  >;
-} {
-  return (
-    provider.capabilities.sessions.recentFallback &&
-    hasProviderMethod(provider, "listRecentUnindexedSessionThreads")
-  );
+async function listProviderThreads(
+  runtime: AgentProviderRuntime,
+  options: AgentSessionListOptions,
+): Promise<ThreadRecord[]> {
+  const parent = options.subAgentParentId ? runtime.resolveSession(options.subAgentParentId) : null;
+  const entries = parent ? [parent.entry] : runtime.providers.filter((entry) => entry.capabilities.sessions.history);
+  const groups = await Promise.allSettled(entries.map(async (entry) => {
+    const provider = await runtime.ensure(entry);
+    let threads: ThreadRecord[];
+    if (hasProviderMethod(provider, "listSessionThreads")) {
+      threads = await provider.listSessionThreads({ ...options, subAgentParentId: parent?.rawId });
+      if (!options.archived && !parent) threads = await mergeRecentUnindexedThreads(provider, threads, options.limit);
+    } else if (!options.archived && !parent && provider.capabilities.sessions.recentFallback && hasProviderMethod(provider, "listRecentUnindexedSessionThreads")) {
+      threads = await provider.listRecentUnindexedSessionThreads(options.limit);
+    } else throw new AgentProviderRequestError(`${entry.displayName} does not support session listing`, 501);
+    return threads.map((thread) => runtime.wrapThread(entry, thread));
+  }));
+  if (groups.length && groups.every((group) => group.status === "rejected")) throw (groups[0] as PromiseRejectedResult).reason;
+  return groups.flatMap((group) => group.status === "fulfilled" ? group.value : [])
+    .sort((a, b) => threadTimestampMillis(b.updatedAt) - threadTimestampMillis(a.updatedAt)).slice(0, options.limit);
 }
 
 function parseSessionRuntimeListMode(
@@ -3008,7 +2828,7 @@ function buildWorkspaces(sessions: SessionSummary[]): WorkspaceSummary[] {
 }
 
 async function listPendingActions(
-  provider: AgentProvider,
+  providerRuntime: AgentProviderRuntime,
   pendingActions: Map<string, AgentPendingAction>,
   reconcileStatus?: (
     sessionId: string,
@@ -3029,7 +2849,7 @@ async function listPendingActions(
 
       let sessionPromise = sessionsById.get(action.sessionId);
       if (!sessionPromise) {
-        sessionPromise = readSession(provider, action.sessionId, false).catch(
+        sessionPromise = readSession(providerRuntime, action.sessionId, false).catch(
           () => null,
         );
         sessionsById.set(action.sessionId, sessionPromise);
@@ -3061,35 +2881,27 @@ async function indexSessionForSearch(
   sessionId: string,
   archived?: boolean,
 ): Promise<void> {
-  const provider = providerRuntime.provider;
-  const providerEntry = providerRuntime.providerForSessionId(sessionId);
-  if (!providerEntry) return;
-  if (!provider.capabilities.sessions.history) return;
-  if (!hasProviderMethod(provider, "readSessionThread") || !hasProviderMethod(provider, "readSessionLog")) {
-    return;
-  }
+  const resolved = providerRuntime.resolveSession(sessionId);
+  if (!resolved.entry.capabilities.sessions.history) return;
   try {
-    const thread = await readSession(provider, sessionId, false);
-    if (sessionSubAgentForThread(thread)) {
-      await searchIndex.remove(sessionId);
-      return;
-    }
-    const log = await provider.readSessionLog!(thread, {
-      messageLimit: 200,
-      activityLimit: 200,
+    const provider = await providerRuntime.ensure(resolved.entry);
+    const log = await requireProviderMethod(provider, "readSessionSnapshot", "session snapshot").call(provider, resolved.rawId, {
+      messageLimit: 200, activityLimit: 200,
     });
+    const thread = providerRuntime.wrapThread(resolved.entry, log.thread);
+    if (sessionSubAgentForThread(thread)) { await searchIndex.remove(resolved.sessionId); return; }
     const createdAt = threadTimestampMillis(thread.createdAt);
     const updatedAt = threadTimestampMillis(thread.updatedAt);
     await searchIndex.indexDocument({
-      sessionKey: sessionId,
-      providerKind: providerEntry.kind,
+      sessionKey: resolved.sessionId,
+      providerKind: resolved.entry.kind,
       title: thread.name || thread.preview,
       preview: thread.preview,
       cwd: thread.cwd,
       createdAt,
       updatedAt,
       archived: archived ?? false,
-      fingerprint: `${providerEntry.kind}|${thread.name || ""}|${thread.preview}|${thread.cwd}|${createdAt}|${updatedAt}|${archived ?? false}|${log.nextSeq}`,
+      fingerprint: `${resolved.entry.kind}|${thread.name || ""}|${thread.preview}|${thread.cwd}|${createdAt}|${updatedAt}|${archived ?? false}|${log.nextSeq}`,
       messages: log.messages,
       activities: log.activities,
     });
@@ -3105,23 +2917,24 @@ async function collectUsageObservations(
 ): Promise<UsageObservation[]> {
   const groups = await Promise.all(
     providerRuntime.providers.map(async (entry) => {
-      if (!hasProviderMethod(entry.provider, "readUsageObservations")) {
+      if (!Object.values(entry.capabilities.usage).some(Boolean)) {
         return [
           buildUnsupportedUsageObservation(
             entry.kind,
-            entry.provider.displayName,
+            entry.displayName,
             hostLabel,
             generatedAt,
           ),
         ];
       }
       try {
-        const observations = await entry.provider.readUsageObservations();
+        const provider = await providerRuntime.ensure(entry);
+        const observations = hasProviderMethod(provider, "readUsageObservations") ? await provider.readUsageObservations() : [];
         if (observations.length === 0) {
           return [
             buildUnsupportedUsageObservation(
               entry.kind,
-              entry.provider.displayName,
+              entry.displayName,
               hostLabel,
               generatedAt,
             ),
@@ -3135,7 +2948,7 @@ async function collectUsageObservations(
             ...observation.provider,
             kind: observation.provider.kind || entry.kind,
             displayName:
-              observation.provider.displayName || entry.provider.displayName,
+              observation.provider.displayName || entry.displayName,
           },
         }));
       } catch (error) {
@@ -3143,7 +2956,7 @@ async function collectUsageObservations(
         return [
           buildUsageErrorObservation(
             entry.kind,
-            entry.provider.displayName,
+            entry.displayName,
             hostLabel,
             generatedAt,
             message,
@@ -3225,25 +3038,16 @@ function buildUsageErrorObservation(
 }
 
 async function readSession(
-  provider: AgentProvider,
+  providerRuntime: AgentProviderRuntime,
   sessionId: string,
   includeTurns: boolean,
 ): Promise<ThreadRecord> {
-  const readThread = requireProviderMethod(
-    provider,
-    "readSessionThread",
-    "session history",
-  );
-  return readThread.call(provider, sessionId, includeTurns);
+  const resolved = providerRuntime.resolveSession(sessionId);
+  const provider = await providerRuntime.ensure(resolved.entry);
+  const thread = await requireProviderMethod(provider, "readSessionThread", "session history").call(provider, resolved.rawId, includeTurns);
+  return providerRuntime.wrapThread(resolved.entry, thread);
 }
 
-function chunkArray<T>(array: T[], size: number): T[][] {
-  const chunks: T[][] = [];
-  for (let i = 0; i < array.length; i += size) {
-    chunks.push(array.slice(i, i + size));
-  }
-  return chunks;
-}
 
 async function isThreadLoaded(
   provider: AgentProvider,
@@ -3409,18 +3213,6 @@ function providerKindForThread(thread: ThreadRecord): string | null {
   return null;
 }
 
-function indexedSessionIdForProvider(
-  providerRuntime: AgentProviderRuntime,
-  providerKind: string,
-  sessionId: string,
-): string {
-  if (
-    providerRuntime.provider instanceof MultiAgentProvider
-  ) {
-    return wrapProviderScopedId(providerKind, sessionId);
-  }
-  return sessionId;
-}
 
 function compareSessionSearchSummary(
   left: SessionSummary,
@@ -3552,44 +3344,7 @@ function buildSubmittedUserMessage(
   };
 }
 
-async function loadCachedSessionRuntime(
-  provider: AgentProvider,
-  thread: ThreadRecord,
-  sessionState: SessionCoordinator,
-  runtimeMode: SessionRuntimeListMode,
-): Promise<SessionRuntimeSummary | null> {
-  if (runtimeMode === "none") {
-    return null;
-  }
-  const cached = sessionState.get(thread.id).runtime;
-  if (cached && cached.threadUpdatedAt === thread.updatedAt) {
-    if (cached.promise) {
-      return cached.promise;
-    }
-    return cached.runtime;
-  }
-  if (runtimeMode === "active" && !isActiveThread(thread)) {
-    return null;
-  }
 
-  const promise = hasProviderMethod(provider, "readSessionRuntime")
-    ? provider.readSessionRuntime(thread).catch(() => null)
-    : Promise.resolve(null);
-  sessionState.get(thread.id).runtime = {
-    threadUpdatedAt: thread.updatedAt,
-    runtime: null,
-    promise,
-  };
-  const runtime = await promise;
-  if (sessionState.get(thread.id).runtime?.promise === promise) {
-    sessionState.get(thread.id).runtime = { threadUpdatedAt: thread.updatedAt, runtime };
-  }
-  return runtime;
-}
-
-function isActiveThread(thread: ThreadRecord): boolean {
-  return isRunningThreadStatus(threadStatusPhase(thread));
-}
 
 function resolvedSessionStatus(
   thread: ThreadRecord,
@@ -3610,9 +3365,6 @@ function isRunningThreadStatus(status: LiveThreadStatus | null | undefined): boo
   );
 }
 
-function isTerminalThreadStatus(status: LiveThreadStatus | null | undefined): boolean {
-  return status === "closed" || status === "errored";
-}
 
 function normalizeThreadStatusPhase(status: string | null | undefined): LiveThreadStatus {
   switch (status) {
@@ -3636,27 +3388,6 @@ function normalizeThreadStatusPhase(status: string | null | undefined): LiveThre
   }
 }
 
-async function mapWithConcurrency<T, R>(
-  items: T[],
-  concurrency: number,
-  mapper: (item: T) => Promise<R>,
-): Promise<R[]> {
-  const results = new Array<R>(items.length);
-  let nextIndex = 0;
-  const workerCount = Math.min(Math.max(1, concurrency), items.length);
-
-  await Promise.all(
-    Array.from({ length: workerCount }, async () => {
-      while (nextIndex < items.length) {
-        const index = nextIndex;
-        nextIndex += 1;
-        results[index] = await mapper(items[index]!);
-      }
-    }),
-  );
-
-  return results;
-}
 
 function buildSessionHistorySummary(
   totalMessages: number,
@@ -3675,7 +3406,6 @@ function buildSessionHistorySummary(
 }
 
 async function readSessionResources(
-  _provider: AgentProvider,
   sessionId: string,
   sessionState: SessionCoordinator,
 ): Promise<SessionResourcesResponse> {
@@ -3700,14 +3430,37 @@ function broadcast(
   socketsBySession: Map<string, Set<WebSocket>>,
   sessionId: string,
   event: LiveEvent,
+  aliases: WeakMap<WebSocket, string>,
 ): void {
   const sockets = socketsBySession.get(sessionId);
   if (!sockets) {
     return;
   }
   for (const socket of sockets) {
-    sendEvent(socket, event);
+    const alias = aliases.get(socket) ?? sessionId;
+    sendEvent(socket, alias === sessionId ? event : withSessionAlias(event, sessionId, alias));
   }
+}
+
+/** Old clients keep their requested ID; all host state uses the canonical identity. */
+function withSessionAlias(value: unknown, canonical: string, alias: string): unknown {
+  const owner = (item: unknown): unknown => {
+    if (!item || typeof item !== "object" || Array.isArray(item)) return item;
+    const mapped = { ...item } as Record<string, unknown>;
+    for (const key of ["sessionId", "parentSessionId"]) if (mapped[key] === canonical) mapped[key] = alias;
+    return mapped;
+  };
+  if (Array.isArray(value)) return value.map(owner);
+  const result = owner(value);
+  if (!result || typeof result !== "object") return result;
+  const payload = result as Record<string, unknown>;
+  for (const key of ["action", "pendingAction", "latestPlanUpdate"]) if (payload[key]) payload[key] = owner(payload[key]);
+  if (payload.session && typeof payload.session === "object") {
+    const session = { ...payload.session } as Record<string, unknown>;
+    if (session.id === canonical) session.id = alias;
+    payload.session = session;
+  }
+  return { ...payload, canonicalSessionId: canonical };
 }
 
 function broadcastSkillsChanged(
@@ -3819,14 +3572,14 @@ function hasLocalPathInputItem(input: AgentSessionInputItem[]): boolean {
 }
 
 async function resolveFileInputItemsForSession(
-  provider: AgentProvider,
+  providerRuntime: AgentProviderRuntime,
   sessionId: string,
   input: AgentSessionInputItem[],
 ): Promise<AgentSessionInputItem[]> {
   if (!hasLocalPathInputItem(input)) {
     return input;
   }
-  const thread = await readSession(provider, sessionId, false);
+  const thread = await readSession(providerRuntime, sessionId, false);
   if (!thread.cwd) {
     throw new WorkspaceAccessError(
       "session cwd is required for file mentions",

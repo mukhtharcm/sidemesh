@@ -21,10 +21,20 @@ same host/session API.
 routes should ask it for the default provider, a requested catalog provider, or
 the provider that owns a namespaced session id.
 
-`MultiAgentProvider` is only the session aggregation/routing facade. It owns
-session id namespacing, event wrapping, and session operation dispatch. It does
-not advertise an OR-merged capability surface, and provider-owned catalog routes
-should use concrete runtime entries instead of default-provider forwarding.
+The runtime holds a direct instance map and starts each adapter when needed.
+It does not implement `AgentProvider`. Routes resolve the configured entry and
+native session ID, then call that adapter. Capabilities remain specific to each
+instance. A provider failure leaves host health and controls available. The
+provider endpoints expose `idle`, `starting`, `ready`, `unavailable`, and `closed`
+states. Host restart recreates one instance and closes its old connections.
+
+Public IDs use `instanceId:base64url(nativeId)`, including single-provider hosts.
+SQLite saves legacy raw ownership and kind aliases. Changing the default or
+removing an instance cannot transfer its sessions. Host input records, plans,
+and recovery are migrated together; a conflict preserves the source records
+and aborts the transaction. Old callers can use their saved aliases. HTTP and
+live responses retain the requested alias and expose `canonicalSessionId`.
+`sessionAliases` in the provider metadata supports client cache migration.
 
 ## Required Core
 
@@ -55,8 +65,8 @@ Session history:
 runs, not peer history rows. Normal history calls omit them. Callers that need
 the Agents surface set `includeSubAgents` and `subAgentParentId`; adapters must
 paginate until they satisfy the parent-scoped limit or exhaust history.
-`MultiAgentProvider` unwraps the parent id before dispatch and namespaces both
-the child and parent ids on return. The daemon exposes the normalized result at
+The host resolves the parent owner before dispatch and namespaces both the child
+and parent IDs on return. The daemon exposes the normalized result at
 `GET /api/sessions/:sessionId/agent-runs`.
 
 Session lifecycle:

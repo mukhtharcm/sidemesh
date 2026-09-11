@@ -347,6 +347,12 @@ export class CopilotAgentProvider
     return "unknown";
   }
 
+  public async health(): Promise<boolean> {
+    if (this.closed || !this.sdkClient) return false;
+    try { await this.sdkClient.getStatus?.(); return true; }
+    catch { return false; }
+  }
+
   public async listSessionThreads(
     options: AgentSessionListOptions,
   ): Promise<ThreadRecord[]> {
@@ -3208,6 +3214,7 @@ function sdkSessionToThread(
     session.context?.workingDirectory ?? local?.thread.cwd ?? process.cwd();
   return {
     id: session.sessionId,
+    runtime: local?.runtime ? structuredClone(local.runtime) : null,
     name: local?.thread.name ?? session.summary ?? null,
     preview: local?.thread.preview ?? session.summary ?? cwd,
     cwd,
@@ -4363,6 +4370,7 @@ function cloneThread(
 ): ThreadRecord {
   return {
     ...session.thread,
+    runtime: session.runtime ? structuredClone(session.runtime) : null,
     status: { ...session.thread.status },
     gitInfo: session.thread.gitInfo ? { ...session.thread.gitInfo } : null,
     turns: includeTurns ? session.turns.map(cloneTurn) : undefined,
