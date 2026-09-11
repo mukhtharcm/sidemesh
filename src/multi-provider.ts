@@ -28,12 +28,14 @@ import type {
 } from "./types.js";
 
 interface ProviderEntry {
+  id?: string;
   kind: AgentProviderKind;
   config: AgentProviderConfig;
   provider: AgentProvider;
 }
 
 interface ResolvedProviderEntry {
+  id: string;
   kind: AgentProviderKind;
   rawId: string;
   provider: AgentProvider;
@@ -47,20 +49,21 @@ export class MultiAgentProvider
   public readonly displayName: string;
   public readonly capabilities: AgentProviderCapabilities;
 
-  private readonly entriesByKind: Map<AgentProviderKind, ProviderEntry>;
-  private readonly orderedEntries: ProviderEntry[];
+  private readonly entriesById: Map<string, ProviderEntry & { id: string }>;
+  private readonly orderedEntries: Array<ProviderEntry & { id: string }>;
 
   public constructor(
     entries: ProviderEntry[],
-    private readonly defaultProviderKind: AgentProviderKind,
+    private readonly defaultProviderId: string,
   ) {
     super();
-    this.orderedEntries = [...entries];
-    this.entriesByKind = new Map(entries.map((entry) => [entry.kind, entry]));
-    const defaultEntry = this.entriesByKind.get(defaultProviderKind);
+    this.orderedEntries = entries.map((entry) => ({ ...entry, id: entry.id ?? entry.kind }));
+    this.entriesById = new Map(this.orderedEntries.map((entry) => [entry.id, entry]));
+    if (this.entriesById.size !== entries.length) throw new Error("Provider instance IDs must be unique.");
+    const defaultEntry = this.entriesById.get(defaultProviderId);
     if (!defaultEntry) {
       throw new Error(
-        `Default provider "${defaultProviderKind}" was not configured.`,
+        `Default provider "${defaultProviderId}" was not configured.`,
       );
     }
     this.kind = defaultEntry.provider.kind;
@@ -87,11 +90,11 @@ export class MultiAgentProvider
     };
     for (const entry of this.orderedEntries) {
       entry.provider.on("liveEvent", (event) => {
-        this.emit("liveEvent", this.wrapLiveEvent(entry.kind, event));
+        this.emit("liveEvent", this.wrapLiveEvent(entry.id, event));
       });
       entry.provider.on("stderr", (line) => {
         const prefix =
-          entry.kind === this.defaultProviderKind ? "" : `[${entry.kind}] `;
+          entry.id === this.defaultProviderId ? "" : `[${entry.id}] `;
         this.emit("stderr", `${prefix}${line}`);
       });
       entry.provider.on("exit", (code) => {
@@ -114,8 +117,8 @@ export class MultiAgentProvider
     }
   }
 
-  public async restartProvider(kind: AgentProviderKind): Promise<void> {
-    const entry = this.entriesByKind.get(kind);
+  public async restartProvider(kind: string): Promise<void> {
+    const entry = this.entriesById.get(kind);
     if (!entry) {
       throw new Error(`Unknown provider "${kind}".`);
     }
@@ -169,7 +172,7 @@ export class MultiAgentProvider
               ...options,
               subAgentParentId: parentOwner?.rawId,
             })
-          ).map((thread) => this.wrapThread(entry.kind, thread)),
+          ).map((thread) => this.wrapThread(entry.id, thread)),
         ),
     );
     return threads
@@ -191,7 +194,7 @@ export class MultiAgentProvider
       "readSessionThread",
       "session history",
     ).call(resolved.provider, resolved.rawId, includeTurns);
-    return this.wrapThread(resolved.kind, thread);
+    return this.wrapThread(resolved.id, thread);
   }
 
   public async listRecentUnindexedSessionThreads(
@@ -207,7 +210,7 @@ export class MultiAgentProvider
         .map(async (entry) =>
           (
             await entry.provider.listRecentUnindexedSessionThreads!(limit)
-          ).map((thread) => this.wrapThread(entry.kind, thread)),
+          ).map((thread) => this.wrapThread(entry.id, thread)),
         ),
     );
     return threads
@@ -258,7 +261,7 @@ export class MultiAgentProvider
         .filter((entry) => hasProviderMethod(entry.provider, "listLoadedSessionIds"))
         .map(async (entry) =>
           (await entry.provider.listLoadedSessionIds!()).map((id) =>
-            wrapProviderScopedId(entry.kind, id),
+            wrapProviderScopedId(entry.id, id),
           ),
         ),
     );
@@ -327,7 +330,7 @@ export class MultiAgentProvider
     });
     return {
       ...result,
-      thread: this.wrapThread(entry.kind, result.thread),
+      thread: this.wrapThread(entry.id, result.thread),
     };
   }
 
@@ -378,7 +381,7 @@ export class MultiAgentProvider
   }
 
   private wrapLiveEvent(
-    kind: AgentProviderKind,
+    kind: string,
     event: AgentProviderLiveEvent,
   ): AgentProviderLiveEvent {
     if ("sessionId" in event && typeof event.sessionId === "string") {
@@ -400,10 +403,12 @@ export class MultiAgentProvider
     return event;
   }
 
-  private wrapThread(kind: AgentProviderKind, thread: ThreadRecord): ThreadRecord {
+  private wrapThread(kind: string, thread: ThreadRecord): ThreadRecord {
     return {
       ...thread,
       id: wrapProviderScopedId(kind, thread.id),
+      providerId: kind,
+      providerKind: this.resolveProviderKind(kind).kind,
       subAgent: thread.subAgent
         ? {
             ...thread.subAgent,
@@ -416,7 +421,7 @@ export class MultiAgentProvider
   }
 
   private wrapAction(
-    kind: AgentProviderKind,
+    kind: string,
     action: AgentPendingAction,
   ): AgentPendingAction {
     return {
@@ -430,13 +435,15 @@ export class MultiAgentProvider
     const resolved = unwrapProviderScopedId(threadId);
     if (!resolved) {
       return {
-        kind: this.defaultProviderKind,
+        id: this.defaultProviderId,
+        kind: this.defaultEntry().kind,
         rawId: threadId,
         provider: this.defaultEntry().provider,
       };
     }
     const entry = this.resolveProviderKind(resolved.kind);
     return {
+      id: entry.id,
       kind: entry.kind,
       rawId: resolved.rawId,
       provider: entry.provider,
@@ -460,41 +467,39 @@ export class MultiAgentProvider
     return { provider: entry.provider, action: nextAction };
   }
 
-  private resolveProviderKind(kind: string | null | undefined): ProviderEntry {
-    const providerKind = (kind?.trim() || this.defaultProviderKind) as AgentProviderKind;
-    const entry = this.entriesByKind.get(providerKind);
-    if (!entry) {
-      throw new Error(`Unknown Sidemesh provider "${providerKind}".`);
-    }
+  private resolveProviderKind(kind: string | null | undefined): ProviderEntry & { id: string } {
+    const id = kind?.trim() || this.defaultProviderId;
+    const matches = this.orderedEntries.filter((entry) => entry.kind === id);
+    const entry = this.entriesById.get(id) ?? (matches.length === 1 ? matches[0] : undefined);
+    if (!entry) throw new Error(`Unknown or ambiguous Sidemesh provider instance "${id}".`);
     return entry;
   }
 
-  private defaultEntry(): ProviderEntry {
-    return this.resolveProviderKind(this.defaultProviderKind);
+  private defaultEntry(): ProviderEntry & { id: string } {
+    return this.resolveProviderKind(this.defaultProviderId);
   }
 }
 
-export function wrapProviderScopedId(kind: AgentProviderKind, rawId: string): string {
+export function wrapProviderScopedId(kind: string, rawId: string): string {
   return `${kind}:${Buffer.from(rawId, "utf8").toString("base64url")}`;
 }
 
 export function unwrapProviderScopedId(
   value: string,
-): { kind: AgentProviderKind; rawId: string } | null {
+): { kind: string; rawId: string } | null {
   const separator = value.indexOf(":");
   if (separator <= 0) {
     return null;
   }
-  const kind = value.slice(0, separator) as AgentProviderKind;
+  const kind = value.slice(0, separator);
   const encoded = value.slice(separator + 1);
-  if (!encoded) {
+  if (!/^[A-Za-z0-9_-]+$/.test(encoded)) {
     return null;
   }
   try {
-    return {
-      kind,
-      rawId: Buffer.from(encoded, "base64url").toString("utf8"),
-    };
+    const rawId = Buffer.from(encoded, "base64url").toString("utf8");
+    if (!rawId || Buffer.from(rawId, "utf8").toString("base64url") !== encoded) return null;
+    return { kind, rawId };
   } catch {
     return null;
   }

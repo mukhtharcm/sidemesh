@@ -7,7 +7,6 @@ import { z } from "zod";
 
 import type {
   AgentProviderConfig,
-  AgentProviderKind,
   AcpxPermissionMode,
   FakeCapabilityProfile,
   NodeConfig,
@@ -27,19 +26,24 @@ const fakeCapabilityProfileSchema = z.enum([
   "minimal",
 ] satisfies readonly FakeCapabilityProfile[]);
 
+const providerInstanceIdSchema = z.string().regex(/^[a-z][a-z0-9_-]{0,63}$/);
+
 const codexProviderConfigSchema = z.object({
   kind: z.literal("codex"),
+  id: providerInstanceIdSchema.optional(),
   bin: z.string().trim().min(1),
 });
 
 const piProviderConfigSchema = z.object({
   kind: z.literal("pi"),
+  id: providerInstanceIdSchema.optional(),
   agentDir: z.string().trim().min(1).nullable(),
   stateDir: z.string().trim().min(1).nullable(),
 });
 
 const copilotProviderConfigSchema = z.object({
   kind: z.literal("copilot"),
+  id: providerInstanceIdSchema.optional(),
   bin: z.string().trim().min(1),
   stateDir: z.string().trim().min(1).nullable(),
   allowAll: z.boolean(),
@@ -48,6 +52,7 @@ const copilotProviderConfigSchema = z.object({
 
 const opencodeProviderConfigSchema = z.object({
   kind: z.literal("opencode"),
+  id: providerInstanceIdSchema.optional(),
   bin: z.string().trim().min(1),
   stateDir: z.string().trim().min(1).nullable(),
 });
@@ -59,6 +64,7 @@ const acpxPermissionModeSchema = z.enum([
 
 const acpxProviderConfigSchema = z.object({
   kind: z.literal("acpx"),
+  id: providerInstanceIdSchema.optional(),
   agent: z.string().trim().min(1),
   command: z.string().trim().min(1).nullable(),
   stateDir: z.string().trim().min(1).nullable(),
@@ -67,6 +73,7 @@ const acpxProviderConfigSchema = z.object({
 
 const fakeProviderConfigSchema = z.object({
   kind: z.literal("fake"),
+  id: providerInstanceIdSchema.optional(),
   latencyMs: z.number().int().min(0),
   seedSessions: z.boolean(),
   workspaceRoot: z.string().trim().min(1).nullable(),
@@ -150,10 +157,18 @@ const persistedNodeConfigSchema = z.object({
     .optional(),
   terminal: terminalConfigSchema.optional(),
   browserPreview: browserPreviewConfigSchema.optional(),
+  defaultProviderId: providerInstanceIdSchema.optional(),
   defaultProviderKind: z
     .enum(["codex", "pi", "copilot", "opencode", "acpx", "fake"])
     .optional(),
-  providers: z.array(persistedProviderConfigSchema).default([]),
+  providers: z.array(persistedProviderConfigSchema).default([]).superRefine((providers, ctx) => {
+    const ids = new Set<string>();
+    for (const [index, provider] of providers.entries()) {
+      const id = provider.id ?? provider.kind;
+      if (ids.has(id)) ctx.addIssue({ code: "custom", path: [index, "id"], message: "provider instance IDs must be unique" });
+      ids.add(id);
+    }
+  }),
 });
 
 export type PersistedProviderConfig = z.infer<typeof persistedProviderConfigSchema>;
@@ -252,6 +267,7 @@ export function persistedConfigFromNodeConfig(
     terminal: config.terminal,
     browserPreview: config.browserPreview,
     defaultProviderKind: config.defaultProviderKind,
+    defaultProviderId: config.defaultProviderId,
     providers: config.providers.map((provider) =>
       normalizePersistedProviderConfig(provider),
     ),
@@ -293,55 +309,5 @@ export function tokenFingerprint(token: string): string {
 export function normalizePersistedProviderConfig(
   provider: AgentProviderConfig,
 ): PersistedProviderConfig {
-  switch (provider.kind) {
-    case "codex":
-      return { kind: "codex", bin: provider.bin };
-    case "copilot":
-      return {
-        kind: "copilot",
-        bin: provider.bin,
-        stateDir: provider.stateDir,
-        allowAll: provider.allowAll,
-        configuredModel: provider.configuredModel,
-      };
-    case "opencode":
-      return {
-        kind: "opencode",
-        bin: provider.bin,
-        stateDir: provider.stateDir,
-      };
-    case "acpx":
-      return {
-        kind: "acpx",
-        agent: provider.agent,
-        command: provider.command,
-        stateDir: provider.stateDir,
-        permissionMode: provider.permissionMode,
-      };
-    case "pi":
-      return {
-        kind: "pi",
-        agentDir: provider.agentDir,
-        stateDir: provider.stateDir,
-      };
-    case "fake":
-      return {
-        kind: "fake",
-        latencyMs: provider.latencyMs,
-        seedSessions: provider.seedSessions,
-        workspaceRoot: provider.workspaceRoot,
-        capabilityProfile: provider.capabilityProfile,
-      };
-  }
-}
-
-export function providerConfigByKind(
-  config: PersistedNodeConfig | null,
-  kind: AgentProviderKind,
-): PersistedProviderConfig | null {
-  return (
-    config?.providers.find(
-      (provider): provider is PersistedProviderConfig => provider.kind === kind,
-    ) ?? null
-  );
+  return persistedProviderConfigSchema.parse(provider);
 }

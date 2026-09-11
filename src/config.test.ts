@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import nodePath from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
 
-import { loadConfig, rotatePersistedToken } from "./config.js";
+import { loadConfig, rotatePersistedToken, saveConfig } from "./config.js";
 
 describe("loadConfig", () => {
   let tempDir = "";
@@ -90,6 +90,48 @@ describe("loadConfig", () => {
     });
     assert.equal(config.updateChannel, "stable");
     assert.deepEqual(config.allowedBrowserOrigins, []);
+  });
+
+  it("keeps the legacy default when it is not the first stored provider", async () => {
+    await writeFile(configPath, JSON.stringify({
+      version: 1, token: "file-token", defaultProviderKind: "pi",
+      providers: [
+        { kind: "codex", bin: "codex" },
+        { kind: "pi", agentDir: null, stateDir: null },
+      ],
+    }));
+    const config = await loadConfig({ configPath, env: {} });
+    assert.equal(config.provider.kind, "pi");
+    assert.equal(config.defaultProviderId, "pi");
+  });
+
+  it("preserves multiple instances and resolves Sidemesh paths from the host root", async () => {
+    const providers = [
+      { id: "copilot", kind: "copilot", bin: "copilot", stateDir: null, allowAll: false, configuredModel: null },
+      { id: "reviewer", kind: "copilot", bin: "copilot-review", stateDir: null, allowAll: false, configuredModel: null },
+      { id: "pi", kind: "pi", agentDir: "/native/pi", stateDir: null },
+      { id: "opencode", kind: "opencode", bin: "opencode", stateDir: "/native/opencode" },
+    ];
+    await writeFile(configPath, JSON.stringify({
+      version: 1, token: "file-token", defaultProviderId: "reviewer", providers,
+    }));
+    const config = await loadConfig({ configPath, env: { SIDEMESH_STATE_DIR: tempDir } });
+    assert.equal(config.defaultProviderId, "reviewer");
+    assert.equal(config.provider.id, "reviewer");
+    assert.deepEqual(config.providers.map((provider) => provider.id), ["copilot", "reviewer", "pi", "opencode"]);
+    assert.equal(config.providers[0]?.kind === "copilot" && config.providers[0].stateDir,
+      nodePath.join(tempDir, "copilot-provider"));
+    assert.equal(config.providers[1]?.kind === "copilot" && config.providers[1].stateDir,
+      nodePath.join(tempDir, "providers/reviewer"));
+    assert.equal(config.providers[2]?.kind === "pi" && config.providers[2].stateDir,
+      nodePath.join(tempDir, "pi-provider"));
+    assert.equal(config.providers[3]?.kind === "opencode" && config.providers[3].stateDir, "/native/opencode");
+    await saveConfig(config);
+    const loaded = await loadConfig({ configPath, env: {} });
+    assert.deepEqual(loaded.providers, config.providers);
+    assert.equal(loaded.defaultProviderId, "reviewer");
+    await writeFile(configPath, JSON.stringify({ version: 1, providers: [providers[0], providers[0]] }));
+    await assert.rejects(loadConfig({ configPath, env: {} }), /instance IDs must be unique/);
   });
 
   it("loads exact browser origins from config and environment", async () => {

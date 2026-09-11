@@ -37,7 +37,7 @@ import {
   listAgentProviderDefinitionSummaries,
   summarizeAgentProviderConfig,
 } from "./provider-registry.js";
-import type { AgentProviderRuntime, AgentProviderRuntimeEntry } from "./provider-factory.js";
+import { createAgentProviderRuntime, type AgentProviderRuntime, type AgentProviderRuntimeEntry } from "./provider-factory.js";
 import { AgentProviderRequestError } from "./agent-provider.js";
 import type {
   AgentCreateSessionRequest,
@@ -2568,6 +2568,34 @@ describe("GET /api/node", () => {
       assert.equal(body.supportedProviders[0].capabilities.sessions.create, true);
       assert.equal(body.updateChannel, "stable");
       assert.equal(body.latestCommitSha, null);
+    });
+  });
+
+  it("exposes and selects each configured instance of the same provider kind", async () => {
+    const stateDir = await mkdtemp(nodePath.join(tmpdir(), "sidemesh-server-test-"));
+    const config = makeConfig(stateDir);
+    config.providers = [{ ...config.provider, id: "fake" }, { ...config.provider, id: "reviewer" }];
+    config.defaultProviderId = "reviewer";
+    await withServerRuntime(config, createAgentProviderRuntime(config), async (server) => {
+      const headers = { Authorization: "Bearer " + config.token, "content-type": "application/json" };
+      const node = await request({ hostname: "127.0.0.1", port: server.port, path: "/api/node", headers });
+      const metadata = node.body as { providerId: string; supportedProviders: Array<{ id: string; kind: string; isDefault: boolean }> };
+      assert.equal(metadata.providerId, "reviewer");
+      assert.deepEqual(metadata.supportedProviders.map(({ id, kind, isDefault }) => ({ id, kind, isDefault })), [
+        { id: "fake", kind: "fake", isDefault: false },
+        { id: "reviewer", kind: "fake", isDefault: true },
+      ]);
+      for (const id of ["fake", "reviewer"]) {
+        const created = await request({ hostname: "127.0.0.1", port: server.port,
+          path: "/api/sessions/create", method: "POST", headers,
+          body: JSON.stringify({ provider: id, cwd: stateDir, input: [] }),
+        });
+        assert.equal(created.statusCode, 201);
+        const session = (created.body as { session: { id: string; provider: string; providerId: string } }).session;
+        assert.ok(session.id.startsWith(`${id}:`));
+        assert.equal(session.providerId, id);
+        assert.equal(session.provider, "fake");
+      }
     });
   });
 
