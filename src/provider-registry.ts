@@ -273,13 +273,15 @@ const COPILOT_PROVIDER_DEFINITION: AgentProviderDefinition = {
   ],
   supportedApprovalPolicies: ["on-request", "never"],
 
-  create(config) {
+  create(config, sessionStore) {
     const copilot = expectCopilotProviderConfig(config);
     return new CopilotAgentProvider({
       bin: copilot.bin,
       stateDir: copilot.stateDir,
       allowAll: copilot.allowAll,
       configuredModel: copilot.configuredModel,
+      providerId: copilot.id ?? copilot.kind,
+      sessionStore,
     });
   },
 

@@ -47,6 +47,8 @@ export type CopilotSdkSession = Pick<CopilotSession,
     skills: Pick<CopilotSession["rpc"]["skills"], "list" | "enable" | "disable" | "reload">;
     plan: Pick<CopilotSession["rpc"]["plan"], "read">;
     history: Pick<CopilotSession["rpc"]["history"], "compact">;
+    metadata: Pick<CopilotSession["rpc"]["metadata"], "activity">;
+    name: Pick<CopilotSession["rpc"]["name"], "get" | "set">;
   };
 };
 

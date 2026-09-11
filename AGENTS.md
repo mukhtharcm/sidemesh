@@ -333,6 +333,11 @@ specific agent provider.
   through `session.rpc.history.compact()`. The wire method `session.getMessages`
   is not a JavaScript method. Do not cast a client through `unknown` to a copied
   interface; this hides missing methods in production while mocks still pass.
+  Refresh `getEvents()` for full snapshots. Keep native IDs from `send()` and
+  recovery content in the shared session database; `sessions.json` is only an
+  import source. Use `metadata.activity()` and `session.idle` for execution
+  state. `assistant.turn_end` ends a loop iteration, and child errors must not
+  complete the parent turn.
 - **OpenCode SDK events**: use the official SDK and subscribe before reading
   session state. A completed assistant message can be followed by more tools;
   only native idle ends the turn. Reconnect invalidates loaded history and

@@ -6,6 +6,7 @@ import { describe, it } from "node:test";
 
 import type { AgentPendingAction, AgentProviderLiveEvent } from "./agent-provider.js";
 import {
+  createCopilotSdkClient,
   type CopilotSdkClient,
   type CopilotSdkClientFactory,
   type CopilotSdkMessageOptions,
@@ -19,8 +20,121 @@ import {
   type CopilotSdkSessionMetadata,
 } from "./copilot-sdk-client.js";
 import { CopilotAgentProvider } from "./copilot-provider.js";
+import { SessionStore } from "./session-store.js";
 
 describe("Copilot provider", () => {
+  it("keeps native tool cycles, reasoning, returned images, and compaction summaries", async () => {
+    const root = await mkdtemp(nodePath.join(tmpdir(), "sidemesh-copilot-native-events-"));
+    const sdk = new FakeCopilotSdkClient({ holdResponses: true });
+    const provider = new CopilotAgentProvider({ stateDir: root, sdkClientFactory: fakeSdkFactory(sdk) });
+    const events: AgentProviderLiveEvent[] = [];
+    provider.on("liveEvent", (event) => events.push(event));
+    try {
+      const created = await provider.createSession({ cwd: root, input: [{ type: "text", text: "work", text_elements: [] }], overrides: emptyOverrides() });
+      const session = sdk.created[0]!.session;
+      session.publish(event("assistant.reasoning_delta", { reasoningId: "thought", deltaContent: "Think once" }));
+      session.publish(event("assistant.reasoning", { reasoningId: "thought", content: "Think once" }));
+      session.publish(event("assistant.message", { messageId: "native-assistant", content: "step complete" }));
+      session.publish(event("tool.execution_start", { toolCallId: "image-tool", toolName: "browser", arguments: {} }));
+      session.publish(event("tool.execution_complete", { toolCallId: "image-tool", success: true,
+        result: { content: [{ type: "image", mimeType: "image/png", data: "aGVsbG8=" }] } }));
+      session.publish(event("assistant.turn_end", { turnId: "loop-1" }));
+      session.publish({ ...event("session.error", { message: "Child task failed" }), agentId: "child-1" });
+      assert.equal(events.some((event) => event.type === "turn_completed"), false);
+      assert.equal(events.flatMap((event) => event.type === "reasoning_delta" ? [event.delta] : []).join(""), "Think once");
+      session.publish(event("session.idle", {}));
+      assert.equal(events.filter((event) => event.type === "turn_completed").length, 1);
+      session.publish(event("session.compaction_start", {}));
+      session.publish(event("session.compaction_complete", { success: true, summaryContent: "Keep this summary" }));
+      session.publish(event("session.error", { message: "Native service error" }));
+      (await session.getEvents()).push(event("tool.execution_start", { toolCallId: "native-only-tool", toolName: "view", arguments: {} }));
+      Object.assign(session.rpc.metadata, { activity: async () => ({ hasActiveWork: true, abortable: true }) });
+      const log = await provider.readSessionLog(created.thread);
+      assert.equal(log.activities.find((activity) => activity.id === "native-only-tool")?.status, "in_progress");
+      const image = log.activities.find((activity) => activity.id === "image-tool");
+      assert.ok(image?.type === "tool");
+      assert.equal(image.attachments?.[0]?.url, "data:image/png;base64,aGVsbG8=");
+      assert.equal(image.output?.includes("aGVsbG8="), false);
+      assert.ok(log.messages.some((message) => message.content.some((part) => part.type === "thinking" && part.thinking === "Think once")));
+      assert.ok(log.activities.some((activity) => activity.type === "context_compaction" && activity.summary === "Keep this summary"));
+      assert.ok(log.messages.some((message) => message.role === "system" && message.text === "Native service error"));
+      assert.equal(log.messages.some((message) => message.text === "Child task failed"), false);
+    } finally { await provider.close(); await rm(root, { recursive: true, force: true }); }
+  });
+
+  it("refreshes native history, confirms client IDs, and retains repeated prompts", async () => {
+    const root = await mkdtemp(nodePath.join(tmpdir(), "sidemesh-copilot-replay-"));
+    const sdk = new FakeCopilotSdkClient();
+    const store = await SessionStore.open(root);
+    const provider = new CopilotAgentProvider({ sessionStore: store, stateDir: root, sdkClientFactory: fakeSdkFactory(sdk) });
+    try {
+      const created = await provider.createSession({ cwd: root, input: [], overrides: emptyOverrides() });
+      const completed = waitForTurnCompleted(provider);
+      await provider.submitInput({ sessionId: created.thread.id, clientMessageId: "client-input-1", activeTurnId: null,
+        input: [{ type: "text", text: "repeat me", text_elements: [] }], overrides: emptyOverrides() });
+      await completed;
+      assert.equal(store.getSessionItem("copilot", created.thread.id, "client-input-1")?.nativeId, "message-1");
+      const native = await sdk.created[0]!.session.getEvents();
+      native.push(event("user.message", { content: "repeat me" }, "message-1"),
+        event("assistant.message", { messageId: "assistant-1", content: "copilot says: repeat me" }));
+      const first = await provider.readSessionLog(created.thread);
+      assert.equal(first.messages.length, 2);
+      assert.equal(first.messages[0]?.id, "client-input-1");
+      assert.equal(store.getSessionItem("copilot", created.thread.id, "client-input-1")?.authority, "cache");
+      native.push(event("user.message", { content: "repeat me" }, "message-2"),
+        event("assistant.message", { messageId: "assistant-2", content: "second answer" }));
+      const next = await provider.readSessionLog(created.thread);
+      assert.equal(next.messages.length, 4);
+      assert.equal(next.messages.filter((item) => item.text === "repeat me").length, 2);
+      assert.equal(next.messages[2]?.id, "message-2");
+      Object.assign(sdk.created[0]!.session, { getEvents: async () => { throw new Error("history unavailable"); } });
+      await assert.rejects(provider.readSessionLog(created.thread), /history unavailable/);
+      assert.equal(store.readSessionItems("copilot", created.thread.id).filter((item) => item.kind === "message").length, 4);
+    } finally { await provider.close(); store.close(); await rm(root, { recursive: true, force: true }); }
+  });
+
+  it("does not acknowledge an SDK send error and keeps its recovery payload", async () => {
+    const root = await mkdtemp(nodePath.join(tmpdir(), "sidemesh-copilot-unknown-send-"));
+    const sdk = new FakeCopilotSdkClient();
+    const store = await SessionStore.open(root);
+    const provider = new CopilotAgentProvider({ sessionStore: store, stateDir: root, sdkClientFactory: fakeSdkFactory(sdk) });
+    try {
+      const created = await provider.createSession({ cwd: root, input: [], overrides: emptyOverrides() });
+      Object.assign(sdk.created[0]!.session, { send: async () => { throw new Error("connection lost after send"); } });
+      const events: AgentProviderLiveEvent[] = [];
+      provider.on("liveEvent", (event) => events.push(event));
+      await assert.rejects(provider.submitInput({ sessionId: created.thread.id, clientMessageId: "uncertain-input", activeTurnId: null,
+        input: [{ type: "text", text: "preserve this input", text_elements: [] }], overrides: emptyOverrides() }), /connection lost after send/);
+      const item = store.getSessionItem("copilot", created.thread.id, "uncertain-input");
+      assert.equal(item?.authority, "recovery");
+      assert.equal(item?.nativeId, null);
+      assert.ok(item?.kind === "message" && item.value.text === "preserve this input");
+      assert.ok(events.some((event) => event.type === "provider_warning" && event.code === "copilot_input_uncertain"));
+      assert.equal(events.some((event) => event.type === "turn_started"), false);
+    } finally { await provider.close(); store.close(); await rm(root, { recursive: true, force: true }); }
+  });
+
+  it("checks the installed SDK and CLI with isolated native storage and no prompt", { skip: process.env.SIDEMESH_TEST_COPILOT !== "1" }, async () => {
+    const root = await mkdtemp(nodePath.join(tmpdir(), "sidemesh-copilot-native-"));
+    const provider = new CopilotAgentProvider({ hostStateDir: nodePath.join(root, "host"), stateDir: nodePath.join(root, "legacy"),
+      sdkClientFactory: (options) => createCopilotSdkClient({ ...options, cwd: root,
+        env: { ...options.env, COPILOT_HOME: nodePath.join(root, "native"), GH_CONFIG_DIR: nodePath.join(root, "github") } }) });
+    try {
+      await provider.start();
+      assert.match(await provider.getVersion(), /1\.0\.73/);
+      const created = await provider.createSession({ cwd: root, input: [], overrides: emptyOverrides() });
+      assert.equal(created.activeTurnId, null);
+      assert.equal((await provider.readSessionLog(created.thread)).messages.length, 0);
+      assert.equal((await provider.readSessionThread(created.thread.id, true)).status.type, "idle");
+      await provider.setSessionName(created.thread.id, "SDK history check");
+      await provider.readSessionRuntime(created.thread);
+      assert.equal((await provider.readSessionThread(created.thread.id, false)).name, "SDK history check");
+      await provider.archiveSession(created.thread.id);
+      assert.ok((await provider.listSessionThreads({ archived: true, limit: 10 })).some((item) => item.id === created.thread.id));
+      await provider.unarchiveSession(created.thread.id);
+    } finally { await provider.close(); await rm(root, { recursive: true, force: true }); }
+  });
+
   it("closes once, interrupts running work, and flushes recoverable history", async () => {
     const dir = await mkdtemp(nodePath.join(tmpdir(), "sidemesh-copilot-close-"));
     const sdk = new FakeCopilotSdkClient({ holdResponses: true });
@@ -209,7 +323,8 @@ describe("Copilot provider", () => {
       assert.equal(log.messages.length, 2);
       assert.equal(log.messages[0]?.text, "hello sdk");
       assert.equal(log.messages[1]?.text, "hello back");
-      assert.equal(log.activities.length, 2);
+      assert.equal(log.activities.length, 3);
+      assert.ok(log.activities.some((activity) => activity.type === "context_compaction"));
       assert.equal(log.activities[0]?.type, "tool");
       assert.equal(log.activities[0]?.semantic?.action, "mode_change");
       assert.deepEqual(log.activities[0]?.semantic?.targets, [
@@ -924,17 +1039,12 @@ describe("Copilot provider", () => {
       });
       await provider.start();
 
-      const completed = waitForTurnCompleted(provider);
-      const created = await provider.createSession({
+      await assert.rejects(provider.createSession({
           cwd: dir,
           input: [{ type: "image", url: "http://127.0.0.1/private.png" }],
           overrides: emptyOverrides(),
-        });
-      await completed;
-      const thread = await provider.readSessionThread!(created.thread.id, true);
-      const log = await provider.readSessionLog!(thread);
-      assert.equal(thread.turns?.[0]?.status, "failed");
-      assert.match(log.messages.at(-1)?.text ?? "", /public network address/);
+        }), /public network address/);
+      assert.equal(sdk.created[0]?.session.sent.length, 0);
       assert.equal(fetchCalled, false);
     } finally {
       globalThis.fetch = originalFetch;
@@ -969,17 +1079,12 @@ describe("Copilot provider", () => {
       });
       await provider.start();
 
-      const completed = waitForTurnCompleted(provider);
-      const created = await provider.createSession({
+      await assert.rejects(provider.createSession({
           cwd: dir,
           input: [{ type: "image", url: "https://93.184.216.34/cat.png" }],
           overrides: emptyOverrides(),
-        });
-      await completed;
-      const thread = await provider.readSessionThread!(created.thread.id, true);
-      const log = await provider.readSessionLog!(thread);
-      assert.equal(thread.turns?.[0]?.status, "failed");
-      assert.match(log.messages.at(-1)?.text ?? "", /public network address/);
+        }), /public network address/);
+      assert.equal(sdk.created[0]?.session.sent.length, 0);
       assert.equal(fetchCalls, 1);
     } finally {
       globalThis.fetch = originalFetch;
@@ -1014,17 +1119,12 @@ describe("Copilot provider", () => {
       });
       await provider.start();
 
-      const completed = waitForTurnCompleted(provider);
-      const created = await provider.createSession({
+      await assert.rejects(provider.createSession({
           cwd: dir,
           input: [{ type: "image", url: "https://93.184.216.34/cat.png" }],
           overrides: emptyOverrides(),
-        });
-      await completed;
-      const thread = await provider.readSessionThread!(created.thread.id, true);
-      const log = await provider.readSessionLog!(thread);
-      assert.equal(thread.turns?.[0]?.status, "failed");
-      assert.match(log.messages.at(-1)?.text ?? "", /exceeds 10 MiB/);
+        }), /exceeds 10 MiB/);
+      assert.equal(sdk.created[0]?.session.sent.length, 0);
     } finally {
       globalThis.fetch = originalFetch;
       await settleProviderWrites();
@@ -1285,13 +1385,10 @@ describe("Copilot provider", () => {
       });
       await settleProviderWrites();
 
-      const statePath = nodePath.join(stateDir, "sessions.json");
-      const persisted = JSON.parse(await readFile(statePath, "utf8")) as {
-        sessions?: Array<Record<string, unknown>>;
-      };
-      const persistedSession = persisted.sessions?.[0];
-      assert.ok(persistedSession);
-      persistedSession.activities = [
+      const store = await SessionStore.open(stateDir);
+      const record = store.getProviderSession("copilot", created.thread.id)!;
+      const persistedSession = record.metadata as Record<string, unknown>;
+      const activities = [
         {
           id: "stale-tool",
           type: "tool",
@@ -1321,7 +1418,10 @@ describe("Copilot provider", () => {
           },
         },
       };
-      await writeFile(statePath, JSON.stringify(persisted, null, 2));
+      store.saveProviderSession("copilot", { ...record, metadata: persistedSession });
+      for (const value of activities) store.putSessionItem("copilot", created.thread.id,
+        { kind: "activity", nativeId: value.id, authority: "recovery", value: value as import("./types.js").SessionActivity });
+      store.close();
 
       const activeThread = await provider.readSessionThread(created.thread.id, true);
       assert.equal(activeThread.status.type, "running");
@@ -1388,20 +1488,11 @@ describe("Copilot provider", () => {
       const action = await opened;
       await settleProviderWrites();
 
-      const statePath = nodePath.join(stateDir, "sessions.json");
-      const persistedBeforeRestart = JSON.parse(
-        await readFile(statePath, "utf8"),
-      ) as {
-        sessions?: Array<{ pendingActions?: AgentPendingAction[] }>;
-      };
-      assert.equal(
-        persistedBeforeRestart.sessions?.[0]?.pendingActions?.length,
-        1,
-      );
-      assert.equal(
-        persistedBeforeRestart.sessions?.[0]?.pendingActions?.[0]?.id,
-        action.id,
-      );
+      const store = await SessionStore.open(stateDir);
+      const persistedBeforeRestart = store.getProviderSession("copilot", action.sessionId)!.metadata as { pendingActions?: AgentPendingAction[] };
+      assert.equal(persistedBeforeRestart.pendingActions?.length, 1);
+      assert.equal(persistedBeforeRestart.pendingActions?.[0]?.id, action.id);
+      store.close();
 
       const restoredProvider = new CopilotAgentProvider({
         stateDir,
@@ -1422,15 +1513,10 @@ describe("Copilot provider", () => {
       assert.match(restoredNotice?.text ?? "", /waiting for your answer/i);
       assert.match(restoredNotice?.text ?? "", /re-run your last request/i);
 
-      const persistedAfterRestart = JSON.parse(
-        await readFile(statePath, "utf8"),
-      ) as {
-        sessions?: Array<{ pendingActions?: AgentPendingAction[] }>;
-      };
-      assert.deepEqual(
-        persistedAfterRestart.sessions?.[0]?.pendingActions ?? [],
-        [],
-      );
+      const restoredStore = await SessionStore.open(stateDir);
+      const persistedAfterRestart = restoredStore.getProviderSession("copilot", action.sessionId)!.metadata as { pendingActions?: AgentPendingAction[] };
+      assert.deepEqual(persistedAfterRestart.pendingActions ?? [], []);
+      restoredStore.close();
     } finally {
       await settleProviderWrites();
       await rm(dir, {
@@ -1521,12 +1607,16 @@ describe("Copilot provider", () => {
         overrides: emptyOverrides(),
       });
 
+      await settleProviderWrites();
       const statePath = nodePath.join(stateDir, "sessions.json");
-      await waitForAsync(async () => {
-        const persisted = await readFile(statePath, "utf8");
-        return persisted.includes("copilot says: crash partial");
-      });
-      const validState = await readFile(statePath, "utf8");
+      const store = await SessionStore.open(stateDir);
+      const record = store.getProviderSession("copilot", created.thread.id)!;
+      const items = store.readSessionItems("copilot", created.thread.id);
+      const validState = JSON.stringify({ sessions: [{ ...record.metadata as object, copilotSessionId: record.nativeId,
+        messages: items.flatMap((item) => item.kind === "message" ? [item.value] : []),
+        activities: items.flatMap((item) => item.kind === "activity" ? [item.value] : []),
+        nextSeq: store.nextSessionSequence("copilot", created.thread.id) }] });
+      store.close();
       await writeFile(statePath, "{", "utf8");
       const restoreState = new Promise<void>((resolve, reject) => {
         setTimeout(() => {
@@ -1535,11 +1625,12 @@ describe("Copilot provider", () => {
       });
 
       const restoredProvider = new CopilotAgentProvider({
-        stateDir,
+        stateDir, hostStateDir: nodePath.join(dir, "imported"),
         sdkClientFactory: fakeSdkFactory(new FakeCopilotSdkClient()),
       });
       await restoredProvider.start();
       await restoreState;
+      assert.equal(await readFile(statePath, "utf8"), validState);
 
       const restoredThread = await restoredProvider.readSessionThread(
         created.thread.id,
@@ -2004,7 +2095,7 @@ describe("Copilot provider", () => {
     }
   });
 
-  it("finishes the turn when SDK session creation fails", async () => {
+  it("rejects creation before input dispatch when the SDK cannot create a session", async () => {
     const dir = await mkdtemp(
       nodePath.join(tmpdir(), "sidemesh-copilot-create-failure-"),
     );
@@ -2018,18 +2109,9 @@ describe("Copilot provider", () => {
       });
       await provider.start();
 
-      const completed = waitForTurnCompleted(provider);
-      const created = await provider.createSession({
-        cwd: dir,
-        input: [{ type: "text", text: "hello", text_elements: [] }],
-        overrides: emptyOverrides(),
-      });
-      await completed;
-
-      const thread = await provider.readSessionThread!(created.thread.id, true);
-      const log = await provider.readSessionLog!(thread);
-      assert.equal(thread.turns?.[0]?.status, "failed");
-      assert.match(log.messages.at(-1)?.text ?? "", /SDK unavailable/);
+      await assert.rejects(provider.createSession({ cwd: dir,
+        input: [{ type: "text", text: "hello", text_elements: [] }], overrides: emptyOverrides() }), /SDK unavailable/);
+      assert.equal(sdk.created.length, 0);
     } finally {
       await settleProviderWrites();
       await rm(dir, {
@@ -2236,6 +2318,8 @@ class FakeCopilotSdkClient implements CopilotSdkClient {
 class FakeCopilotSdkSession implements CopilotSdkSession {
   public readonly sent: CopilotSdkMessageOptions[] = [];
   public readonly rpc = {
+    metadata: { activity: async () => ({ hasActiveWork: this.processing, abortable: this.processing }) },
+    name: { get: async () => ({ name: this.name }), set: async ({ name }: { name: string }) => { this.name = name; } },
     mode: {
       get: async (): Promise<CopilotSdkSessionMode> => this.currentMode,
       set: async ({ mode }: { mode: CopilotSdkSessionMode }): Promise<void> => {
@@ -2331,6 +2415,8 @@ class FakeCopilotSdkSession implements CopilotSdkSession {
   public aborted = false;
   public skillReloadCount = 0;
   public compactCallCount = 0;
+  private processing = false;
+  private name: string | null = null;
   private currentMode: CopilotSdkSessionMode = "interactive";
   private planContent: string | null = null;
   private readonly holdResponses: boolean;
@@ -2357,6 +2443,13 @@ class FakeCopilotSdkSession implements CopilotSdkSession {
     const options = typeof input === "string" ? { prompt: input } : input;
     this.sent.push(options);
     const sendIndex = this.sent.length;
+    this.processing = true;
+    this.emit(event("user.message", { content: options.displayPrompt ?? options.prompt, attachments: options.attachments }, `message-${sendIndex}`));
+    void this.processInput(options, sendIndex).catch((error) => this.emit(event("session.error", { message: String(error) })));
+    return `message-${sendIndex}`;
+  }
+
+  private async processInput(options: CopilotSdkMessageOptions, sendIndex: number): Promise<string> {
     let userInputResult:
       | {
           answer: string;
@@ -2712,6 +2805,7 @@ class FakeCopilotSdkSession implements CopilotSdkSession {
 
   public async abort(): Promise<void> {
     this.aborted = true;
+    this.processing = false;
   }
 
   public async setModel(
@@ -2725,7 +2819,13 @@ class FakeCopilotSdkSession implements CopilotSdkSession {
   }
 
   private emit(event: CopilotSdkSessionEvent): void {
+    if (event.type === "session.idle" || event.type === "session.error") this.processing = false;
     this.config.onEvent?.(event);
+  }
+
+  public publish(event: CopilotSdkSessionEvent): void {
+    this.historyEvents.push(event);
+    this.emit(event);
   }
 
   public flushHeldResponses(): void {
