@@ -121,6 +121,8 @@ export class AcpHost {
     } finally { cancelled.abort(); }
   }
 
+  get hasPendingRequests(): boolean { return this.pending.size > 0; }
+
   cancelPending(): void {
     for (const pending of [...this.pending.values()]) pending.cancel();
   }

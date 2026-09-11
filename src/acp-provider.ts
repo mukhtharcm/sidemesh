@@ -75,6 +75,8 @@ interface ConnectedSession {
   host: AcpHost;
   transport: AcpTransport;
   initialized: InitializeResponse;
+  requestsInFlight: number;
+  idleTimer?: NodeJS.Timeout;
   transcript: AcpTranscript;
   active?: { turnId: string; clientInputId?: string; done: Promise<void>; interrupted: boolean };
   loading?: Promise<void>;
@@ -117,7 +119,6 @@ export class AcpAgentProvider extends EventEmitter<AgentProviderEvents> implemen
   private starting?: Promise<void>;
   private closed = false;
   private signingOut = false;
-  private requestsInFlight = 0;
   private readonly sessions = new Map<string, ConnectedSession>();
   private readonly connecting = new Map<string, Promise<ConnectedSession>>();
   private readonly deleting = new Set<string>();
@@ -173,8 +174,8 @@ export class AcpAgentProvider extends EventEmitter<AgentProviderEvents> implemen
   }
 
   async logout(): Promise<void> {
-    if (this.closed || this.signingOut || this.requestsInFlight || this.connecting.size || this.deleting.size ||
-        [...this.sessions.values()].some((state) => state.active || state.loading || state.disconnecting)) {
+    if (this.closed || this.signingOut || this.connecting.size || this.deleting.size ||
+        [...this.sessions.values()].some((state) => state.active || state.loading || state.disconnecting || state.requestsInFlight || state.host.hasPendingRequests)) {
       throw new AgentProviderRequestError("Wait for agent operations to finish before sign-out", 409);
     }
     const state = [...this.sessions.values()].find((state) =>
@@ -418,7 +419,7 @@ export class AcpAgentProvider extends EventEmitter<AgentProviderEvents> implemen
     host.nativeSessionId = record.nativeId;
     const transport = this.dependencies.connect ? await this.dependencies.connect(host.app, record.cwd)
       : await this.spawnConnection(host.app, record.cwd);
-    state = { host, transport, initialized: { protocolVersion: PROTOCOL_VERSION }, transcript: this.transcript(id), earlyUpdates: [] };
+    state = { host, transport, requestsInFlight: 0, initialized: { protocolVersion: PROTOCOL_VERSION }, transcript: this.transcript(id), earlyUpdates: [] };
     this.sessions.set(id, state);
     const connectedState = state;
     void transport.connection.closed.then(() => this.disconnect(connectedState))
@@ -633,16 +634,29 @@ export class AcpAgentProvider extends EventEmitter<AgentProviderEvents> implemen
   }
 
   private async requestWithTimeout<T>(state: ConnectedSession, request: Promise<T>, timeoutMs = 30_000): Promise<T> {
-    this.requestsInFlight++;
+    state.requestsInFlight++;
     const timer = setTimeout(() => {
       state.transport.connection.close(new Error("ACP request timed out"));
       void this.disconnect(state);
     }, timeoutMs);
     timer.unref();
-    try { return await request; } finally { clearTimeout(timer); this.requestsInFlight--; }
+    try { return await request; }
+    finally { clearTimeout(timer); state.requestsInFlight--; this.scheduleIdleClose(state); }
+  }
+
+  private scheduleIdleClose(state: ConnectedSession): void {
+    clearTimeout(state.idleTimer);
+    if (this.closed || state.disconnecting || state.transport.connection.signal.aborted) return;
+    state.idleTimer = setTimeout(() => {
+      if (state.active || state.loading || state.requestsInFlight || state.host.hasPendingRequests || this.connecting.has(state.host.sessionId)) {
+        this.scheduleIdleClose(state);
+      } else void this.disconnect(state).catch((error) => this.emit("stderr", `ACP idle cleanup failed: ${errorMessage(error)}`));
+    }, 10 * 60_000);
+    state.idleTimer.unref();
   }
 
   private async disconnect(state: ConnectedSession): Promise<void> {
+    clearTimeout(state.idleTimer);
     state.disconnecting ??= (async () => {
       const id = state.host.sessionId;
       const done = state.active?.done;
@@ -665,7 +679,22 @@ export class AcpAgentProvider extends EventEmitter<AgentProviderEvents> implemen
       { cwd, env, shell: !this.executable, stdio: "pipe", detached: process.platform !== "win32" });
     let exited = false;
     const done = new Promise<void>((resolve) => child.once("close", () => { exited = true; resolve(); }));
-    const connection = app.connect(ndJsonStream(Writable.toWeb(child.stdin), Readable.toWeb(child.stdout)));
+    let lineBytes = 0;
+    const input = Readable.toWeb(child.stdout).pipeThrough(new TransformStream<Uint8Array, Uint8Array>({
+      transform(chunk, controller) {
+        let start = 0;
+        for (;;) {
+          const newline = chunk.indexOf(10, start);
+          lineBytes += (newline < 0 ? chunk.length : newline) - start;
+          if (lineBytes > 16 * 1024 * 1024) throw new Error("ACP protocol line exceeds 16 MiB");
+          if (newline < 0) break;
+          lineBytes = 0;
+          start = newline + 1;
+        }
+        controller.enqueue(chunk);
+      },
+    }));
+    const connection = app.connect(ndJsonStream(Writable.toWeb(child.stdin), input));
     child.stderr.on("data", (chunk: Buffer) => this.emit("stderr", chunk.toString()));
     child.on("error", (error) => connection.close(error));
     child.once("close", () => connection.close());

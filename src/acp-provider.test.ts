@@ -153,6 +153,25 @@ describe("AcpAgentProvider", () => {
   });
   afterEach(async () => { await provider.close(); store.close(); await rm(directory, { recursive: true, force: true }); });
 
+  it("stops an owned process whose protocol line exceeds the limit", async () => {
+    const oversized = new AcpAgentProvider({ agent: "fixture", executable: process.execPath,
+      args: ["-e", "process.stdout.write(Buffer.alloc(17 * 1024 * 1024, 120)); setInterval(() => {}, 1000)"],
+      stateDir: directory, cwd: directory }, { sessionStore: store });
+    try { await assert.rejects(oversized.createSession({ cwd: directory, input: [], overrides }), /16 MiB|closed|exceeds/i); }
+    finally { await oversized.close(); }
+  });
+
+  it("closes idle connections after ten minutes without archiving the session", async (context) => {
+    context.mock.timers.enable({ apis: ["setTimeout"] });
+    const created = await provider.createSession({ cwd: directory, input: [], overrides });
+    context.mock.timers.tick(10 * 60_000);
+    while ((await provider.listLoadedSessionIds()).length) await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(wire.closed, 1);
+    assert.equal((await provider.listSessionThreads({ limit: 10, archived: false }))[0]!.id, created.thread.id);
+    await provider.resumeSessionThread(created.thread.id);
+    assert.equal(wire.connects, 2);
+  });
+
   it("sends negotiated audio, embedded content, and references and preserves their bytes", async () => {
     wire.audio = true;
     wire.resources = true;
