@@ -56,6 +56,10 @@ export interface StoredProviderSession {
 
 export type StoredSessionItem = {
   nativeId: string | null;
+  /** Client identity bound to this submitted native input, never inferred from display IDs. */
+  clientInputId?: string;
+  /** Timestamp received in a native input event (Pi does not echo client IDs). */
+  nativeInputTimestamp?: number;
   /** Native branch entry before this recovery item, when the provider has trees. */
   anchorId?: string;
   authority: "primary" | "recovery" | "cache";
@@ -124,6 +128,13 @@ export class SessionStore {
           `);
         });
       }
+      if (!store.hasMigration("input-bindings-v1")) {
+        store.transaction(() => {
+          db.exec(`ALTER TABLE session_items ADD COLUMN client_input_id TEXT;
+            ALTER TABLE session_items ADD COLUMN native_input_timestamp INTEGER;
+            INSERT INTO migrations VALUES ('input-bindings-v1')`);
+        });
+      }
       await store.importLegacy(stateDir);
       // The provider can have accepted a request before the daemon stopped.
       // Never dispatch these rows again without an explicit recovery decision.
@@ -175,11 +186,12 @@ export class SessionStore {
   }
 
   putSessionItem(providerId: string, sessionId: string, item: StoredSessionItem): void {
-    this.db.prepare(`INSERT INTO session_items VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    this.db.prepare(`INSERT INTO session_items VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(provider_id, session_id, id) DO UPDATE SET kind = excluded.kind, native_id = excluded.native_id,
-      authority = excluded.authority, position = excluded.position, value = excluded.value, anchor_id = excluded.anchor_id`)
+      authority = excluded.authority, position = excluded.position, value = excluded.value, anchor_id = excluded.anchor_id,
+      client_input_id = excluded.client_input_id, native_input_timestamp = excluded.native_input_timestamp`)
       .run(providerId, sessionId, item.value.id, item.kind, item.nativeId, item.authority,
-        item.value.seq, JSON.stringify(item.value), item.anchorId ?? null);
+        item.value.seq, JSON.stringify(item.value), item.anchorId ?? null, item.clientInputId ?? null, item.nativeInputTimestamp ?? null);
   }
 
   replaceProviderHistory(providerId: string, session: StoredProviderSession, items: StoredSessionItem[]): void {
@@ -243,10 +255,19 @@ export class SessionStore {
   }
 
   acceptInput(key: string, receipt: SessionInputReceipt): void {
-    const result = this.db.prepare(`UPDATE inputs SET state = 'accepted', receipt = ?, updated_at = ?
-      WHERE key = ? AND state = 'dispatching'`).run(JSON.stringify(receipt), Date.now(), key);
+    const result = this.db.prepare(`UPDATE inputs SET state = CASE WHEN state = 'confirmed' THEN state ELSE 'accepted' END, receipt = ?, updated_at = ?
+      WHERE key = ? AND state IN ('dispatching', 'confirmed')`).run(JSON.stringify(receipt), Date.now(), key);
     if (result.changes !== 1) throw new Error("Input acceptance has no dispatch record");
     this.prune();
+  }
+
+  confirmInputs(sessionId: string, clientInputIds: string[]): void {
+    const update = this.db.prepare(`UPDATE inputs SET state = 'confirmed', payload = NULL,
+      receipt = CASE WHEN receipt IS NULL OR json_extract(receipt, '$.mode') = 'queued' THEN ? ELSE receipt END, updated_at = ?
+      WHERE key = ? AND session_id = ? AND state IN ('dispatching', 'uncertain', 'accepted')`);
+    this.transaction(() => {
+      for (const id of clientInputIds) update.run(JSON.stringify({ mode: "turn", turnId: null, messageId: id }), Date.now(), `${sessionId}:${id}`, sessionId);
+    });
   }
 
   failInput(key: string, notDispatched = false): void {
@@ -331,7 +352,8 @@ export class SessionStore {
         (key, session_id, signature_hash, state, receipt, created_at, updated_at)
         VALUES (?, ?, ?, 'accepted', ?, ?, ?)`);
       for (const entry of entries) {
-        insert.run(entry.key, entry.key.slice(0, entry.key.lastIndexOf(":")), entry.signatureHash,
+        insert.run(entry.key, entry.key.endsWith(`:${entry.receipt.messageId}`)
+          ? entry.key.slice(0, -entry.receipt.messageId.length - 1) : entry.key.slice(0, entry.key.lastIndexOf(":")), entry.signatureHash,
           JSON.stringify(entry.receipt), entry.createdAt, entry.updatedAt);
       }
       const insertPlan = this.db.prepare("INSERT OR IGNORE INTO plans VALUES (?, ?, ?)");
@@ -365,9 +387,11 @@ function providerSessionFromRow(row: ProviderSessionRow): StoredProviderSession 
     createdAt: row.created_at, updatedAt: row.updated_at, archived: row.archived === 1, metadata: JSON.parse(row.metadata) };
 }
 interface SessionItemRow {
-  kind: StoredSessionItem["kind"]; native_id: string | null; authority: StoredSessionItem["authority"]; value: string; anchor_id: string | null;
+  kind: StoredSessionItem["kind"]; native_id: string | null; authority: StoredSessionItem["authority"]; value: string; anchor_id: string | null; client_input_id: string | null; native_input_timestamp: number | null;
 }
 function sessionItemFromRow(row: SessionItemRow): StoredSessionItem {
   return { kind: row.kind, nativeId: row.native_id, authority: row.authority, value: JSON.parse(row.value),
+    ...(row.client_input_id ? { clientInputId: row.client_input_id } : {}),
+    ...(row.native_input_timestamp != null ? { nativeInputTimestamp: row.native_input_timestamp } : {}),
     ...(row.anchor_id ? { anchorId: row.anchor_id } : {}) };
 }

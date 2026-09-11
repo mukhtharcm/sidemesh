@@ -9,7 +9,7 @@ import nodePath from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 
 import { SessionStore, type StoredProviderSession, type StoredSessionItem } from "./session-store.js";
-import { reconcileSessionHistory } from "./session-history.js";
+import { reconcileSessionHistory, confirmedSessionInputIds } from "./session-history.js";
 import { stripSessionAttachments } from "./session-attachments.js";
 
 import {
@@ -27,7 +27,7 @@ import {
   type AgentSessionActivityDraft,
   type AgentSessionInputItem,
   type AgentSessionListOptions,
-  type AgentSessionLogOptions,
+  type AgentSessionLogOptions, type AgentSessionSnapshot,
   type AgentSessionResumeOptions,
   type AgentSubmitInputRequest,
   type AgentSubmitInputResult,
@@ -415,27 +415,38 @@ export class CopilotAgentProvider
     thread: ThreadRecord,
     options: AgentSessionLogOptions = {},
   ): Promise<SessionLogSnapshot> {
+    return this.readSessionSnapshot(thread.id, options);
+  }
+
+  public async readSessionSnapshot(id: string, options: AgentSessionLogOptions = {}): Promise<AgentSessionSnapshot> {
     await this.ensureStore();
-    const session = await this.getWritableSession(thread.id);
+    const session = await this.getWritableSession(id);
     const sdkSession = await this.ensureSdkSession(session);
     const beforeRuntime = session.runtime;
-    const events = await sdkSession.getEvents();
+    const [events, name, mode] = await Promise.all([sdkSession.getEvents(), sdkSession.rpc.name.get(), sdkSession.rpc.mode.get()]);
     const nativeActivity = await sdkSession.rpc.metadata.activity();
     const parsed = parseSdkSessionEvents(events, session.thread.cwd);
     const replay: StoredSessionItem[] = [
       ...parsed.messages.map((value): StoredSessionItem => ({ kind: "message", value, nativeId: value.id, authority: "cache" })),
       ...parsed.activities.map((value): StoredSessionItem => ({ kind: "activity", value: nativeActivity.hasActiveWork ? value : normalizeInactiveCopilotActivity(value), nativeId: value.id, authority: "cache" })),
     ].sort((a, b) => a.value.seq - b.value.seq);
-    const items = reconcileSessionHistory(this.db.readSessionItems(this.providerId, thread.id), replay);
-    if (parsed.runtime && session.runtime === beforeRuntime) session.runtime = { ...session.runtime, ...parsed.runtime };
+    const items = reconcileSessionHistory(this.db.readSessionItems(this.providerId, id), replay);
+    if (session.runtime === beforeRuntime) {
+      session.runtime = withRuntimeMetadata({ ...session.runtime, ...parsed.runtime }, { mode, updatedAt: Date.now() });
+    }
+    session.thread.name = name.name ?? session.thread.name;
     if (!nativeActivity.hasActiveWork) session.runtime = normalizeInactiveCopilotRuntime(session.runtime, session.thread.updatedAt);
     session.thread.status = { type: nativeActivity.hasActiveWork ? "running" : "idle" };
     this.db.replaceProviderHistory(this.providerId, this.storedSession(session), items);
     const messages = items.flatMap((item) => item.kind === "message" ? [item.value] : []);
     const activities = items.flatMap((item) => item.kind === "activity" ? [item.value] : []);
-    return { messages: limitTail(messages, options.messageLimit ?? null), activities: limitTail(activities, options.activityLimit ?? null),
+    const thread = cloneThread(session, true);
+    if (!nativeActivity.hasActiveWork) thread.turns = thread.turns?.filter((turn) => turn.status !== "inProgress");
+    return { thread, busy: nativeActivity.hasActiveWork,
+      activeTurnId: nativeActivity.hasActiveWork ? this.activeTurns.get(id)?.turnId ?? null : null,
+      confirmedInputIds: confirmedSessionInputIds(items), messages: limitTail(messages, options.messageLimit ?? null), activities: limitTail(activities, options.activityLimit ?? null),
       runtime: session.runtime, totalMessages: messages.length, totalActivities: activities.length,
-      nextSeq: this.db.nextSessionSequence(this.providerId, thread.id) };
+      nextSeq: this.db.nextSessionSequence(this.providerId, id) };
   }
 
   public async readSessionRuntime(
@@ -1666,6 +1677,7 @@ export class CopilotAgentProvider
   ): SessionMessage {
     return this.appendMessage(session, {
       id,
+      clientInputId: id,
       role: "user",
       text: inputDisplayText(input),
       attachments: inputAttachments(input),
@@ -1719,6 +1731,7 @@ export class CopilotAgentProvider
     message: {
       id?: string;
       nativeId?: string;
+      clientInputId?: string;
       role: SessionMessage["role"];
       text: string;
       content?: SessionMessageContentBlock[];
@@ -1742,7 +1755,7 @@ export class CopilotAgentProvider
     const previous = this.db.getSessionItem(this.providerId, session.thread.id, next.id);
     if (previous) { next.seq = previous.value.seq; next.createdAt = previous.value.createdAt; }
     this.db.putSessionItem(this.providerId, session.thread.id, { kind: "message", value: next,
-      nativeId: message.nativeId ?? (message.role === "assistant" ? next.id : null), authority: "recovery" });
+      nativeId: message.nativeId ?? (message.role === "assistant" ? next.id : null), clientInputId: message.clientInputId ?? previous?.clientInputId, authority: "recovery" });
     session.thread.preview = next.text || session.thread.preview;
     this.touch(session);
     return next;

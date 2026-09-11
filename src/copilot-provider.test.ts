@@ -49,7 +49,9 @@ describe("Copilot provider", () => {
       session.publish(event("session.error", { message: "Native service error" }));
       (await session.getEvents()).push(event("tool.execution_start", { toolCallId: "native-only-tool", toolName: "view", arguments: {} }));
       Object.assign(session.rpc.metadata, { activity: async () => ({ hasActiveWork: true, abortable: true }) });
-      const log = await provider.readSessionLog(created.thread);
+      const log = await provider.readSessionSnapshot(created.thread.id);
+      assert.equal(log.busy, true);
+      assert.equal(log.activeTurnId, null);
       assert.equal(log.activities.find((activity) => activity.id === "native-only-tool")?.status, "in_progress");
       const image = log.activities.find((activity) => activity.id === "image-tool");
       assert.ok(image?.type === "tool");
@@ -77,7 +79,10 @@ describe("Copilot provider", () => {
       const native = await sdk.created[0]!.session.getEvents();
       native.push(event("user.message", { content: "repeat me" }, "message-1"),
         event("assistant.message", { messageId: "assistant-1", content: "copilot says: repeat me" }));
-      const first = await provider.readSessionLog(created.thread);
+      const first = await provider.readSessionSnapshot(created.thread.id);
+      assert.deepEqual(first.confirmedInputIds, ["client-input-1"]);
+      assert.equal(first.busy, false);
+      assert.equal(first.activeTurnId, null);
       assert.equal(first.messages.length, 2);
       assert.equal(first.messages[0]?.id, "client-input-1");
       assert.equal(store.getSessionItem("copilot", created.thread.id, "client-input-1")?.authority, "cache");
@@ -337,7 +342,8 @@ describe("Copilot provider", () => {
         { type: "file", path: "README.md", access: "read", role: "target" },
       ]);
       assert.equal(log.runtime?.model, "gpt-5.2");
-      assert.equal(log.runtime?.mode, "autopilot");
+      // Current native mode can differ from the last persisted mode-change event.
+      assert.equal(log.runtime?.mode, "interactive");
       assert.equal(log.runtime?.telemetry?.contextWindow?.currentTokens, 3200);
       assert.equal(log.runtime?.telemetry?.lastUsage?.inputTokens, 333);
       assert.equal(log.runtime?.telemetry?.compaction?.tokensRemoved, 1400);

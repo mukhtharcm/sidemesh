@@ -20,13 +20,13 @@ import { createOpencodeClient, type OpencodeClient, type OpencodeClientConfig,
 import { AgentProviderRequestError, materializeAgentActivityDraft, type AgentCreateSessionRequest,
   type AgentCreateSessionResult, type AgentModelListOptions, type AgentModeListOptions, type AgentPendingAction,
   type AgentProvider, type AgentProviderCapabilities, type AgentProviderEvents, type AgentSessionActivityDraft,
-  type AgentSessionInputItem, type AgentSessionListOptions, type AgentSessionLogOptions,
+  type AgentSessionInputItem, type AgentSessionListOptions, type AgentSessionLogOptions, type AgentSessionSnapshot,
   type AgentSessionResumeOptions, type AgentSubmitInputRequest, type AgentSubmitInputResult,
   type AgentSkillListOptions } from "./agent-provider.js";
 import { parsePendingActionDecision, parsePendingActionProviderOptionResponse, parsePendingActionElicitationResponse,
   parsePendingActionUserInputResponse, type PendingActionResponseInput } from "./approvals.js";
 import { SessionStore, type StoredProviderSession, type StoredSessionItem } from "./session-store.js";
-import { reconcileSessionHistory } from "./session-history.js";
+import { reconcileSessionHistory, confirmedSessionInputIds } from "./session-history.js";
 import { extractSessionAttachments } from "./session-attachments.js";
 import { terminatePipeProcess } from "./terminal.js";
 import type { LiveThreadStatus, LivePlanStep, ModelSummary, PendingActionApproval, PendingActionApprovalTarget,
@@ -248,16 +248,25 @@ export class OpenCodeAgentProvider extends EventEmitter<AgentProviderEvents> imp
     return thread;
   }
   async readSessionLog(thread: ThreadRecord, options: AgentSessionLogOptions = {}): Promise<SessionLogSnapshot> {
-    const info = await this.info(thread.id, thread.cwd);
-    const messages = (await this.sdk.session.messages({ sessionID: thread.id, directory: info.directory }, this.requestOptions())).data;
+    return this.readSessionSnapshot(thread.id, options);
+  }
+  async readSessionSnapshot(id: string, options: AgentSessionLogOptions = {}): Promise<AgentSessionSnapshot> {
+    const info = await this.info(id);
+    const messages = (await this.sdk.session.messages({ sessionID: id, directory: info.directory }, this.requestOptions())).data;
     const [permissions, questions] = await Promise.all([
       this.sdk.permission.list({ directory: info.directory }, this.requestOptions()),
       this.sdk.question.list({ directory: info.directory }, this.requestOptions()),
     ]);
+    const status = (await this.sdk.session.status({ directory: info.directory }, this.requestOptions())).data[id] ?? { type: "idle" };
+    const busy = status.type === "busy" || status.type === "retry";
     this.syncActions(info, permissions.data, questions.data);
     const snapshot = this.saveHistory(info, messages);
-    this.loaded.add(thread.id);
-    return { ...snapshot, messages: limitTail(snapshot.messages, options.messageLimit ?? null),
+    this.loaded.add(id);
+    const thread = this.thread(info, status, true);
+    thread.turns = buildTurns(messages, status);
+    return { ...snapshot, thread, busy, activeTurnId: busy ? this.active.get(id)?.id
+      ?? [...thread.turns].reverse().find((turn) => turn.status === "inProgress")?.id ?? null : null,
+      confirmedInputIds: confirmedSessionInputIds(this.db.readSessionItems(this.providerId, id)), messages: limitTail(snapshot.messages, options.messageLimit ?? null),
       activities: limitTail(snapshot.activities, options.activityLimit ?? null) };
   }
   async readSessionRuntime(thread: ThreadRecord): Promise<SessionRuntimeSummary | null> {
@@ -323,7 +332,7 @@ export class OpenCodeAgentProvider extends EventEmitter<AgentProviderEvents> imp
       attachments: request.input.flatMap((item): SessionMessageAttachment[] => item.type === "image" ? [{ type: "image", url: item.url }]
         : item.type === "localImage" ? [{ type: "localImage", path: item.path }] : item.type === "file" ? [{ type: "file", path: item.path }] : []),
       createdAt: Date.now(), seq: this.db.nextSessionSequence(this.providerId, info.id) };
-    this.db.putSessionItem(this.providerId, info.id, { kind: "message", value, nativeId: messageID, authority: "recovery" });
+    this.db.putSessionItem(this.providerId, info.id, { kind: "message", value, nativeId: messageID, clientInputId: request.clientMessageId, authority: "recovery" });
     const turn: ActiveOpenCodeTurn = { id: messageID, status: "completed", started: false, submitting: true };
     this.active.set(info.id, turn);
     this.loaded.add(info.id);

@@ -929,6 +929,9 @@ export async function startServer(
 
   const onProviderLiveEvent = (event: AgentProviderLiveEvent): void => {
     switch (event.type) {
+      case "input_confirmed":
+        sessionStore.confirmInputs(event.sessionId, [event.clientInputId]);
+        return;
       case "skills_changed":
         broadcastSkillsChanged(socketsBySession);
         return;

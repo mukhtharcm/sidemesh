@@ -170,6 +170,10 @@ describe("AcpAgentProvider", () => {
     done = completion(provider);
     await provider.submitInput({ sessionId: created.thread.id, input: textInput("repeat"), activeTurnId: null, overrides, clientMessageId: "client-repeat-2" });
     await done;
+    assert.ok(events.some((event) => event.type === "input_confirmed" && event.clientInputId === "client-repeat-2"));
+    const snapshot = await provider.readSessionSnapshot(created.thread.id);
+    assert.equal(snapshot.busy, false);
+    assert.equal(snapshot.activeTurnId, null);
     const saved = store.readSessionItems("acpx", created.thread.id);
     wire.loadFails = true;
     await assert.rejects(provider.readSessionLog(created.thread), /Replay interrupted/);

@@ -13,7 +13,7 @@ import {
 
 import { AgentProviderRequestError, type AgentProvider, type AgentProviderEvents,
   type AgentProviderCapabilities, type AgentCreateSessionRequest, type AgentCreateSessionResult,
-  type AgentSessionListOptions, type AgentSessionLogOptions, type AgentSubmitInputRequest,
+  type AgentSessionListOptions, type AgentSessionLogOptions, type AgentSessionSnapshot, type AgentSubmitInputRequest,
   type AgentSubmitInputResult, type AgentPendingAction, type AgentSessionResumeOptions,
   type AgentSessionInputItem, type AgentModelListOptions } from "./agent-provider.js";
 import type { PendingActionResponseInput } from "./approvals.js";
@@ -69,7 +69,7 @@ interface ConnectedSession {
   transport: AcpTransport;
   initialized: InitializeResponse;
   transcript: AcpTranscript;
-  active?: { turnId: string; done: Promise<void>; interrupted: boolean };
+  active?: { turnId: string; clientInputId?: string; done: Promise<void>; interrupted: boolean };
   loading?: Promise<void>;
   disconnecting?: Promise<void>;
   replay?: { writer: AcpTranscript; items: Map<string, StoredSessionItem>; updates: SessionUpdate[] };
@@ -163,16 +163,19 @@ export class AcpAgentProvider extends EventEmitter<AgentProviderEvents> implemen
     return this.thread(this.record(id), includeTurns);
   }
   async readSessionLog(thread: ThreadRecord, options: AgentSessionLogOptions = {}): Promise<SessionLogSnapshot> {
+    return this.readSessionSnapshot(thread.id, options);
+  }
+  async readSessionSnapshot(id: string, options: AgentSessionLogOptions = {}): Promise<AgentSessionSnapshot> {
     await this.start();
-    const state = this.sessions.get(thread.id) ?? (this.record(thread.id).nativeId && this.db.nextSessionSequence(this.providerId, thread.id) === 0
-      ? await this.ensureConnection(thread.id) : undefined);
-    if (state && !state.active) await this.refreshHistory(thread.id, state);
-    const record = this.record(thread.id);
-    const items = this.db.readSessionItems(this.providerId, thread.id);
+    const state = this.sessions.get(id) ?? (this.record(id).nativeId && this.db.nextSessionSequence(this.providerId, id) === 0
+      ? await this.ensureConnection(id) : undefined);
+    if (state && !state.active) await this.refreshHistory(id, state);
+    const record = this.record(id);
+    const items = this.db.readSessionItems(this.providerId, id);
     const messages = items.flatMap((item) => item.kind === "message" ? [item.value] : []);
     const activities = items.flatMap((item) => item.kind === "activity" ? [item.value] : []);
-    return { messages: tail(messages, options.messageLimit), activities: tail(activities, options.activityLimit),
-      totalMessages: messages.length, totalActivities: activities.length, nextSeq: this.db.nextSessionSequence(this.providerId, thread.id),
+    return { thread: this.thread(record, true), busy: Boolean(state?.active), activeTurnId: state?.active?.turnId ?? null, messages: tail(messages, options.messageLimit), activities: tail(activities, options.activityLimit),
+      totalMessages: messages.length, totalActivities: activities.length, nextSeq: this.db.nextSessionSequence(this.providerId, id),
       runtime: this.metadata(record).runtime ?? null, latestPlanUpdate: this.metadata(record).latestPlanUpdate };
   }
   async readSessionRuntime(thread: ThreadRecord): Promise<SessionRuntimeSummary | null> {
@@ -232,7 +235,7 @@ export class AcpAgentProvider extends EventEmitter<AgentProviderEvents> implemen
       throw new AgentProviderRequestError(errorMessage(error), 409, true);
     }
     const turnId = `acp-turn-${randomUUID()}`;
-    const active = { turnId, interrupted: false, done: Promise.resolve() };
+    const active = { turnId, clientInputId: request.clientMessageId, interrupted: false, done: Promise.resolve() };
     state.active = active;
     state.transcript.beginTurn(turnId, { id: request.clientMessageId || `acp-user-${randomUUID()}`,
       role: "user", text, content: [{ type: "text", text }], attachments: [], createdAt: Date.now() });
@@ -456,7 +459,10 @@ export class AcpAgentProvider extends EventEmitter<AgentProviderEvents> implemen
 
   private async finishPrompt(id: string, state: ConnectedSession, active: NonNullable<ConnectedSession["active"]>, prompt: Promise<{ stopReason: string }>): Promise<void> {
     let status = "completed";
-    try { if ((await prompt).stopReason === "cancelled") status = "interrupted"; }
+    try {
+      if ((await prompt).stopReason === "cancelled") status = "interrupted";
+      if (active.clientInputId) this.emit("liveEvent", { type: "input_confirmed", sessionId: id, clientInputId: active.clientInputId });
+    }
     catch (error) {
       status = active.interrupted || this.closed ? "interrupted" : "failed";
       if (status === "failed") this.emit("liveEvent", { type: "provider_warning", sessionId: id, level: "error",
