@@ -81,6 +81,30 @@ describe("parseActivity", () => {
 });
 
 describe("loadSessionRuntime", () => {
+  it("retains native thread settings across later token usage records", async () => {
+    const directory = await mkdtemp(nodePath.join(tmpdir(), "sidemesh-codex-settings-"));
+    const file = nodePath.join(directory, "rollout.jsonl");
+    try {
+      const timestamp = "2026-09-11T00:00:00.000Z";
+      await writeFile(file, [
+        { type: "session_meta", payload: { model_provider: "fixture" } },
+        { type: "event_msg", payload: { type: "thread_settings_applied", thread_settings: {
+          model: "native-model", model_provider_id: "fixture", reasoning_effort: "high",
+          active_permission_profile: { id: ":workspace" }, approvals_reviewer: "user",
+          approval_policy: "on-request", reasoning_summary: "detailed", personality: "pragmatic",
+        } } },
+        { type: "event_msg", payload: { type: "token_count", info: {
+          total_token_usage: { total_tokens: 12 }, last_token_usage: { total_tokens: 12 }, model_context_window: 100,
+        } } },
+      ].map((record) => JSON.stringify({ timestamp, ...record })).join("\n") + "\n");
+      const runtime = await loadSessionRuntime("thread-1", file, null);
+      assert.equal(runtime?.model, "native-model");
+      assert.equal(runtime?.permissionProfile, ":workspace");
+      assert.equal(runtime?.approvalsReviewer, "user");
+      assert.equal(runtime?.telemetry?.contextWindow?.currentTokens, 12);
+    } finally { await rm(directory, { recursive: true, force: true }); }
+  });
+
   let tempDir = "";
   let rolloutPath = "";
 

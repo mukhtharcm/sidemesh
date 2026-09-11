@@ -837,6 +837,63 @@ describe("codex provider resume runtime restore", () => {
 });
 
 describe("codex rich live event mappings", () => {
+  it("reads the official snapshot and never replaces a failed native read with local history", async () => {
+    const provider = new CodexAgentProvider("codex") as any;
+    const calls: unknown[] = [];
+    provider.bridge = {
+      request: async (method: string, params: unknown) => {
+        calls.push({ method, params });
+        return { thread: { ...createThread(), modelProvider: "fixture", status: { type: "active" }, turns: [
+          { id: "turn-native", status: "inProgress", itemsView: "full", startedAt: 0, completedAt: null,
+            items: [{ type: "userMessage", id: "native-user", clientId: "client-user", content: [{ type: "text", text: "Saved", text_elements: [] }] }] },
+        ] } };
+      },
+    };
+    provider.readSessionRuntime = async () => ({ model: "native-model" });
+    const snapshot = await provider.readSessionSnapshot("thread-1");
+    assert.deepEqual(calls, [{ method: "thread/read", params: { threadId: "thread-1", includeTurns: true } }]);
+    assert.equal(snapshot.activeTurnId, "turn-native");
+    assert.equal(snapshot.messages[0]?.id, "client-user");
+    assert.equal(snapshot.runtime.model, "native-model");
+    provider.bridge.request = async () => { throw new Error("native read failed"); };
+    await assert.rejects(provider.readSessionLog(createThread()), /native read failed/);
+  });
+
+  it("preserves the client input ID for both start and steer requests", async () => {
+    const provider = new CodexAgentProvider("codex") as any;
+    const calls: Array<{ method: string; params: any }> = [];
+    provider.bridge = { request: async (method: string, params: unknown) => {
+      calls.push({ method, params });
+      if (method === "thread/loaded/list") return { data: ["thread-1"] };
+      return { turn: { id: "turn-1" }, turnId: "turn-1" };
+    } };
+    await provider.submitInput({ ...createSubmitRequest(), clientMessageId: "client-turn" });
+    await provider.submitInput({ ...createSubmitRequest(), activeTurnId: "turn-1", clientMessageId: "client-steer" });
+    assert.equal(calls.find((call) => call.method === "turn/start")?.params.clientUserMessageId, "client-turn");
+    assert.equal(calls.find((call) => call.method === "turn/steer")?.params.clientUserMessageId, "client-steer");
+  });
+
+  it("uses completed native reasoning without repeating streamed content in later messages", () => {
+    const provider = new CodexAgentProvider("codex") as any;
+    const events: any[] = [];
+    provider.on("liveEvent", (event: unknown) => events.push(event));
+    const context = { threadId: "thread-1", turnId: "turn-1", itemId: "reason-1" };
+    provider.emitCodexNotification("item/reasoning/summaryTextDelta", { ...context, delta: "Sum" });
+    provider.emitCodexNotification("item/reasoning/textDelta", { ...context, delta: "Body" });
+    provider.emitCodexNotification("item/completed", { ...context,
+      item: { id: "reason-1", type: "reasoning", summary: ["Summary"], content: ["Body"] } });
+    for (const id of ["answer-1", "answer-2"]) provider.emitCodexNotification("item/completed", {
+      ...context, item: { id, type: "agentMessage", text: "Answer" },
+    });
+    const messages = events.filter((event) => event.type === "assistant_message_completed");
+    assert.deepEqual(messages[0]?.message.content, [
+      { type: "thinking", thinking: "Summary", reasoningId: "reason-1", summary: true },
+      { type: "thinking", thinking: "Body", reasoningId: "reason-1", summary: false },
+      { type: "text", text: "Answer" },
+    ]);
+    assert.deepEqual(messages[1]?.message.content, [{ type: "text", text: "Answer" }]);
+  });
+
   it("normalizes raw Codex thread phases for list and read APIs", async () => {
     const provider = new CodexAgentProvider("codex") as any;
     provider.bridge = {

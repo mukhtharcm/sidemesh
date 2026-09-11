@@ -78,6 +78,13 @@ export interface AgentSessionLogOptions {
   activityLimit?: number | null;
 }
 
+export interface AgentSessionSnapshot extends SessionLogSnapshot {
+  thread: ThreadRecord;
+  activeTurnId: string | null;
+  /** Native history explicitly binds these client input IDs. */
+  confirmedInputIds?: string[];
+}
+
 export type AgentSessionInputItem =
   | {
       type: "text";
@@ -386,6 +393,7 @@ export interface AgentProviderCore extends EventEmitter<AgentProviderEvents> {
 }
 
 export interface AgentSessionHistoryProvider {
+  readSessionSnapshot(sessionId: string, options?: AgentSessionLogOptions): Promise<AgentSessionSnapshot>;
   listSessionThreads(options: AgentSessionListOptions): Promise<ThreadRecord[]>;
   readSessionThread(threadId: string, includeTurns: boolean): Promise<ThreadRecord>;
   listRecentUnindexedSessionThreads(limit: number): Promise<ThreadRecord[]>;

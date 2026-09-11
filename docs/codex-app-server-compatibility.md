@@ -1,6 +1,7 @@
 # Codex app-server compatibility
 
-Last audited: 2026-07-21 against Codex CLI `0.144.6`.
+Last audited: 2026-09-11 against Codex CLI `0.144.6`, with a native
+paginated-history check against `0.154.0`.
 
 Sidemesh treats the Codex app-server protocol as versioned provider input. The
 audit source of truth is the CLI-generated stable JSON Schema together with the
@@ -10,7 +11,8 @@ official [app-server documentation](https://learn.chatgpt.com/docs/app-server).
 
 - All Codex RPC methods sent by Sidemesh are present in the `0.144.6` stable
   schema.
-- Sidemesh does not opt into `experimentalApi`. It does advertise the stable
+- Sidemesh opts into `experimentalApi` for permission profiles and client input
+  identity. It also advertises the stable
   `mcpServerOpenaiFormElicitation` capability because the adapter supports the
   extended form response shape.
 - Codex `0.144.6` accepts `untrusted`, `on-request`, and `never` approval
@@ -29,6 +31,32 @@ official [app-server documentation](https://learn.chatgpt.com/docs/app-server).
   not carry their own status.
 - Keep generalized activity mappings aligned with the stable `ThreadItem`
   union, including MCP, dynamic, and collaboration tool-call variants.
+- `thread/read` with `includeTurns: true` owns transcript messages, native IDs,
+  and execution state. Complete native `clientId` values confirm host inputs;
+  both `turn/start` and `turn/steer` send `clientUserMessageId`.
+- The generated snapshot and input types in `src/codex-protocol.ts` come from
+  CLI `0.144.6`. Regenerate them with
+  `node scripts/generate-codex-protocol.mjs <codex-binary>`.
+- Two file compatibility gaps remain explicit: `thread/read` does not include
+  all saved runtime settings or token usage in `0.144.6`, and its legacy
+  projection drops persisted function-call output. Legacy file data supplies
+  missing tool output and system errors. It never replaces native user or
+  assistant messages. File ordering is used only after both complete visible
+  sequences agree, retaining each native message ID and each repeated prompt.
+- `0.144.6` rejects paginated history despite exposing related protocol types.
+  `0.154.0` supports it through `thread/read`. Seeded paginated JSONL fixtures
+  need ordinals and native resume to build the native SQLite projection.
+  Sidemesh does not write that projection. Native read failures propagate;
+  they do not mark a cached transcript as current.
+
+## Native history check
+
+Set `SIDEMESH_TEST_CODEX_BIN` to the selected CLI and run
+`node --import tsx --test src/codex-thread-history.test.ts`. The check uses an
+isolated native home, canonical fixture history, resume, and process restart.
+It sends no model prompt. It checks legacy history on `0.144.6` and paginated
+history on `0.154.0`, including client input identity. Shared fixtures cover
+reasoning, plans, errors, command output, and image-bearing tools.
 
 ## Upgrade audit
 
