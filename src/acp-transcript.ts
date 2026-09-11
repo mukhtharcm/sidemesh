@@ -35,7 +35,8 @@ export class AcpTranscript {
           // The first user notification in this prompt is the agent's echo.
           // Bind its native ID to the submitted input; do not add the text twice.
           const submitted = this.read("message", this.submittedUserId);
-          if (submitted && update.messageId) this.write({ ...submitted, nativeId: update.messageId });
+          if (submitted?.kind === "message") this.write({ ...submitted, nativeId: update.messageId ?? submitted.nativeId,
+            value: { ...submitted.value, ...metadataField(update, submitted.value.providerMetadata) } });
           return;
         }
         this.submittedUserId = null;
@@ -52,7 +53,7 @@ export class AcpTranscript {
         const thinking = update.sessionUpdate === "agent_thought_chunk";
         const content = appendBlock(message.content, thinking ? { type: "thinking", thinking: text }
           : { type: "text", text });
-        const value = { ...message, text: thinking ? message.text : message.text + text,
+        const value = { ...message, ...metadataField(update, message.providerMetadata), text: thinking ? message.text : message.text + text,
           content, attachments: mergeSessionAttachments(message.attachments, extractSessionAttachments(update.content),
             update.content.type === "audio" ? [contentInputAttachment(update.content)] :
             update.content.type === "resource" ? [contentInputAttachment({ type: "resource", ...update.content.resource, mimeType: update.content.resource.mimeType ?? undefined })] :
@@ -76,7 +77,7 @@ export class AcpTranscript {
         const status = update.status === "completed" ? "completed" : update.status === "failed" ? "failed"
           : update.status ? "in_progress" : previous?.status ?? "in_progress";
         const value = materializeAgentActivityDraft({
-          id, type: "tool", turnId: previous?.turnId ?? this.turnId ?? null, status,
+          id, type: "tool", ...metadataField(update, previous?.providerMetadata), turnId: previous?.turnId ?? this.turnId ?? null, status,
           toolName: update.name ?? previous?.toolName ?? title, title, args,
           output: typeof result === "string" ? result : update.content?.flatMap((entry) =>
             entry.type === "content" && entry.content.type === "text" ? [entry.content.text] : []).join("\n") || previous?.output || null,
@@ -91,7 +92,7 @@ export class AcpTranscript {
         this.finish("commentary");
         const id = `acp-compaction-${update.compactionId}`;
         const previous = this.read("activity", id);
-        const value = { id, type: "context_compaction" as const, turnId: this.turnId ?? null,
+        const value = { id, type: "context_compaction" as const, ...metadataField(update, previous?.value.providerMetadata), turnId: this.turnId ?? null,
           status: update.status === "completed" ? "completed" as const : update.status === "failed" ? "failed" as const : "in_progress" as const,
           seq: previous?.value.seq ?? this.nextSeq++, createdAt: previous?.value.createdAt ?? Date.now() };
         this.write({ kind: "activity", value, nativeId: update.compactionId, authority: "recovery" });
@@ -99,7 +100,7 @@ export class AcpTranscript {
         return;
       }
       case "compaction_summary_chunk":
-        this.update({ sessionUpdate: "agent_thought_chunk", messageId: `compaction-${update.compactionId}`, content: update.content });
+        this.update({ sessionUpdate: "agent_thought_chunk", messageId: `compaction-${update.compactionId}`, content: update.content, _meta: update._meta });
         return;
     }
   }
@@ -130,4 +131,26 @@ function contentText(content: ContentBlock): string {
     case "audio": return `[Audio: ${content.mimeType}]`;
     case "image": return "";
   }
+}
+
+/** Keep opaque extension data at its source path without copying message bodies. */
+export function acpMetadata(value: unknown, previous?: Record<string, unknown>): Record<string, unknown> | undefined {
+  const result = { ...previous };
+  const pending: Array<{ entry: unknown; path: string }> = [{ entry: value, path: "" }];
+  while (pending.length) {
+    const { entry, path } = pending.pop()!;
+    if (!entry || typeof entry !== "object") continue;
+    for (const [key, child] of Object.entries(entry)) {
+      const childPath = `${path}/${key.replaceAll("~", "~0").replaceAll("/", "~1")}`;
+      if (key === "_meta" && child && typeof child === "object" && !Array.isArray(child)) {
+        result[childPath] = { ...(result[childPath] as Record<string, unknown> | undefined), ...child };
+      } else if (key !== "_meta" && child && typeof child === "object") pending.push({ entry: child, path: childPath });
+    }
+  }
+  return Object.keys(result).length ? result : undefined;
+}
+
+function metadataField(value: unknown, previous?: Record<string, unknown>): Pick<SessionMessage, "providerMetadata"> {
+  const providerMetadata = acpMetadata(value, previous);
+  return providerMetadata ? { providerMetadata } : {};
 }

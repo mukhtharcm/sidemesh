@@ -478,6 +478,8 @@ export function normalizeSessionMessageContent(
 }
 
 export interface SessionMessage {
+  /** Opaque provider metadata; never used to authorize host actions. */
+  providerMetadata?: Record<string, unknown>;
   id: string;
   role: "user" | "assistant" | "system";
   text: string;
@@ -529,6 +531,8 @@ export interface SessionActivityChange {
 }
 
 export interface SessionActivityBase {
+  /** Opaque provider metadata; never used to authorize host actions. */
+  providerMetadata?: Record<string, unknown>;
   id: string;
   type:
     | "command"

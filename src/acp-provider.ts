@@ -21,7 +21,7 @@ import type { PendingActionResponseInput } from "./approvals.js";
 import { AcpHost } from "./acp-host.js";
 import { acpInputPreview, prepareAcpInput } from "./acp-input.js";
 import { importAcpxHistory } from "./acp-history.js";
-import { AcpTranscript } from "./acp-transcript.js";
+import { AcpTranscript, acpMetadata } from "./acp-transcript.js";
 import { reconcileSessionHistory } from "./session-history.js";
 import { SessionStore, type StoredProviderSession, type StoredSessionItem } from "./session-store.js";
 import { terminatePipeProcess } from "./terminal.js";
@@ -64,6 +64,7 @@ interface AcpProviderDependencies {
   connect?: (app: ClientApp, cwd: string) => Promise<AcpTransport>;
 }
 interface AcpSessionMetadata {
+  extensions?: Record<string, unknown>;
   sessionDeletion?: { commandHash: string; supported: boolean };
   agentInfo?: { commandHash: string; name: string; version: string; protocolVersion: number };
   promptCapabilities?: { commandHash: string; value: PromptCapabilities };
@@ -437,7 +438,7 @@ export class AcpAgentProvider extends EventEmitter<AgentProviderEvents> implemen
       this.capabilities.lifecycle.logout = Boolean(state.initialized.agentCapabilities?.auth?.logout);
       this.capabilities.sessions.delete = Boolean(state.initialized.agentCapabilities?.sessionCapabilities?.delete);
       this.db.saveProviderSession(this.providerId, { ...this.record(id), metadata: {
-        ...this.metadata(this.record(id)), sessionDeletion: { commandHash: this.commandHash, supported: this.capabilities.sessions.delete },
+        ...this.metadata(this.record(id)), extensions: acpMetadata({ initialize: state.initialized }, this.metadata(this.record(id)).extensions), sessionDeletion: { commandHash: this.commandHash, supported: this.capabilities.sessions.delete },
         promptCapabilities: { commandHash: this.commandHash, value: promptCapabilities },
         ...(state.initialized.agentInfo ? { agentInfo: { commandHash: this.commandHash,
           name: state.initialized.agentInfo.name, version: state.initialized.agentInfo.version,
@@ -495,7 +496,7 @@ export class AcpAgentProvider extends EventEmitter<AgentProviderEvents> implemen
   private handleUpdate(id: string, state: ConnectedSession, update: SessionUpdate): void {
     if (state.replay) {
       state.replay.writer.update(update);
-      if (["config_option_update", "current_mode_update", "available_commands_update", "usage_update", "session_info_update", "plan"].includes(update.sessionUpdate)) {
+      if (acpMetadata(update) || ["config_option_update", "current_mode_update", "available_commands_update", "usage_update", "session_info_update", "plan"].includes(update.sessionUpdate)) {
         state.replay.updates.push(update);
       }
       return;
@@ -505,6 +506,9 @@ export class AcpAgentProvider extends EventEmitter<AgentProviderEvents> implemen
   }
 
   private handleMetadata(id: string, update: SessionUpdate): void {
+    if (acpMetadata(update) && !["user_message_chunk", "agent_message_chunk", "agent_thought_chunk", "tool_call", "tool_call_update", "compaction_update", "compaction_summary_chunk"].includes(update.sessionUpdate)) {
+      this.saveExtensions(id, { [update.sessionUpdate]: update });
+    }
     if (update.sessionUpdate === "config_option_update") this.applySessionOptions(id, { configOptions: update.configOptions });
     else if (update.sessionUpdate === "current_mode_update") this.updateRuntime(id, { mode: update.currentModeId,
       configurationOptions: this.metadata(this.record(id)).runtime?.configurationOptions?.map((option) =>
@@ -527,7 +531,15 @@ export class AcpAgentProvider extends EventEmitter<AgentProviderEvents> implemen
     }
   }
 
+  private saveExtensions(id: string, value: unknown): void {
+    const record = this.record(id);
+    const metadata = this.metadata(record);
+    const extensions = acpMetadata(value, metadata.extensions);
+    if (extensions) this.db.saveProviderSession(this.providerId, { ...record, metadata: { ...metadata, extensions } });
+  }
+
   private applySessionOptions(id: string, response: LoadSessionResponse): void {
+    this.saveExtensions(id, { session: response });
     const runtime = this.metadata(this.record(id)).runtime ?? {};
     let configurationOptions = response.configOptions ? response.configOptions.map(configurationOption) : runtime.configurationOptions ?? [];
     if (response.configOptions && !configurationOptions.some((option) => option.category === "mode")) {

@@ -12,7 +12,7 @@ daemon processes all need separate compatibility checks.
 | Surface | Audited version or policy | Status |
 |---|---|---|
 | Node.js | `>=22.19.0`; CI uses Node 24 | Current |
-| Codex CLI/app-server | `0.144.6` | Compatible; see `docs/codex-app-server-compatibility.md` |
+| Codex CLI/app-server | `0.144.6` schema; native history also checked on `0.154.0` | Compatible; see `docs/codex-app-server-compatibility.md` |
 | OpenCode SDK/server | `1.18.4` / `1.18.4` | Official SDK requests and SSE; isolated native checks cover health, session history, model/mode/skill catalogs, archive, and shutdown |
 | GitHub Copilot CLI | `1.0.73` | Current; also enforced through the root npm override |
 | ACP SDK | `1.4.0`, protocol 1 | Direct optional ACP adapter; see [support matrix](acp-support-matrix.md) |

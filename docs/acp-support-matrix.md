@@ -35,6 +35,7 @@ stable or enable it in Sidemesh.
 | Terminals | Create, output, wait, kill, release; session ownership and bounded output | Declared client terminal capability |
 | Elicitation | Validated form and URL requests; cancellation and completion | Declared client elicitation capabilities |
 | Compaction updates | Status and summary display | Declared client compaction update support |
+| Extension metadata | Retain opaque `_meta` maps at source paths on messages, tools, and stored session metadata | Preserved through replay; never interpreted as host permissions |
 | Recovery | Keep unconfirmed local output; commit complete native replay atomically | SQLite display and recovery records |
 
 Inline input content is limited to 5 MiB per item. Resource URI values do not

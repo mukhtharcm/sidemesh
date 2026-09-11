@@ -36,7 +36,7 @@ function harness() {
         .onRequest(methods.agent.initialize, ({ params }) => {
           result.terminalAuthAdvertised = params.clientCapabilities?.auth?.terminal === true;
           return { protocolVersion: PROTOCOL_VERSION,
-          agentInfo: { name: "wire-fixture", version: "1" },
+          agentInfo: { name: "wire-fixture", version: "1" }, _meta: { "fixture/setup": true },
           agentCapabilities: { auth: result.logoutSupported ? { logout: {} } : {}, loadSession: result.loadSupported, promptCapabilities: { image: result.images, audio: result.audio, embeddedContext: result.resources }, sessionCapabilities: {
             list: {}, resume: {}, close: {}, ...(result.deleteSupported ? { delete: {} } : {}),
           } },
@@ -49,7 +49,7 @@ function harness() {
           const sessionId = `native-${++counter}`;
           history.set(sessionId, []);
           sessions.push({ sessionId, cwd, title: "Fixture session" });
-          return { sessionId, configOptions: controls, modes: {
+          return { sessionId, _meta: { "fixture/session": 1 }, configOptions: controls, modes: {
             currentModeId: "code", availableModes: [{ id: "code", name: "Code" }, { id: "plan", name: "Plan" }],
           } };
         })
@@ -152,6 +152,32 @@ describe("AcpAgentProvider", () => {
     await provider.start();
   });
   afterEach(async () => { await provider.close(); store.close(); await rm(directory, { recursive: true, force: true }); });
+
+  it("preserves extension metadata through partial updates and committed history replay", async () => {
+    const created = await provider.createSession({ cwd: directory, input: [], overrides });
+    const id = created.thread.id;
+    const nativeId = store.getProviderSession("acpx", id)!.nativeId!;
+    wire.history.set(nativeId, [
+      { sessionUpdate: "agent_message_chunk", messageId: "meta", _meta: { "fixture/first": 1 },
+        content: { type: "text", text: "Hello", _meta: { "fixture/content": true } } },
+      { sessionUpdate: "agent_message_chunk", messageId: "meta", _meta: { "fixture/second": 2 }, content: { type: "text", text: "!" } },
+      { sessionUpdate: "tool_call", toolCallId: "meta-tool", title: "Tool", _meta: { "fixture/tool": "start" } },
+      { sessionUpdate: "tool_call_update", toolCallId: "meta-tool", status: "completed", _meta: { "fixture/end": true } },
+      { sessionUpdate: "plan", entries: [], _meta: { "fixture/plan": true } },
+    ]);
+    await provider.readSessionLog(created.thread);
+    const items = store.readSessionItems("acpx", id);
+    assert.deepEqual(items.find((item) => item.nativeId === "meta")?.value.providerMetadata, {
+      "/_meta": { "fixture/first": 1, "fixture/second": 2 }, "/content/_meta": { "fixture/content": true },
+    });
+    assert.deepEqual(items.find((item) => item.nativeId === "meta-tool")?.value.providerMetadata, {
+      "/_meta": { "fixture/tool": "start", "fixture/end": true },
+    });
+    const metadata = store.getProviderSession("acpx", id)!.metadata as { extensions: Record<string, unknown> };
+    assert.deepEqual(metadata.extensions["/initialize/_meta"], { "fixture/setup": true });
+    assert.deepEqual(metadata.extensions["/session/_meta"], { "fixture/session": 1 });
+    assert.deepEqual(metadata.extensions["/plan/_meta"], { "fixture/plan": true });
+  });
 
   it("stops an owned process whose protocol line exceeds the limit", async () => {
     const oversized = new AcpAgentProvider({ agent: "fixture", executable: process.execPath,
