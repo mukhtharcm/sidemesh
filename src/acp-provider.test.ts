@@ -158,9 +158,11 @@ describe("AcpAgentProvider", () => {
     provider = createProvider();
     await provider.start();
     assert.equal(provider.capabilities.input.imageUrl, true);
+    assert.equal(await provider.getVersion(), "wire-fixture 1 (ACP 1)");
     const changed = new AcpAgentProvider({ agent: "fixture", command: "different-agent-command", cwd: directory }, { sessionStore: store, connect: wire.connect });
     await changed.start();
     assert.equal(changed.capabilities.input.imageUrl, false);
+    assert.equal(await changed.getVersion(), "ACP 1");
     await changed.close();
   });
 
@@ -380,14 +382,18 @@ it("leaves a failed ACP import unmarked and rolls back a failed history replacem
   } finally { await provider.close(); store.close(); await rm(directory, { recursive: true, force: true }); }
 });
 
-it("uses real stdio framing and stops the owned agent process", { skip: process.platform === "win32" }, async () => {
+it("passes explicit arguments without shell expansion, uses stdio framing, and stops the owned process", async () => {
   const directory = await mkdtemp(join(tmpdir(), "sidemesh-acp-stdio-"));
-  const script = join(directory, "agent.mjs");
+  const script = join(directory, "agent with spaces.mjs");
   const closedFile = join(directory, "closed");
+  const literalArg = "literal $SIDEMESH_TOKEN; `echo never` $(echo never)";
   await writeFile(script, `
 import { agent, methods, ndJsonStream, PROTOCOL_VERSION } from ${JSON.stringify(import.meta.resolve("@agentclientprotocol/sdk"))};
 import { Readable, Writable } from "node:stream";
 import { writeFile } from "node:fs/promises";
+import assert from "node:assert/strict";
+assert.equal(process.argv[2], ${JSON.stringify(literalArg)});
+assert.equal(process.env.SIDEMESH_TOKEN, undefined);
 const app = agent()
   .onRequest(methods.agent.initialize, () => ({ protocolVersion: PROTOCOL_VERSION, agentCapabilities: { sessionCapabilities: { close: {} } } }))
   .onRequest(methods.agent.session.new, () => ({ sessionId: "stdio-native" }))
@@ -407,8 +413,7 @@ const app = agent()
 const connection = app.connect(ndJsonStream(Writable.toWeb(process.stdout), Readable.toWeb(process.stdin)));
 await connection.closed;
 `);
-  const quote = (value: string) => `'${value.replaceAll("'", "'\\''")}'`;
-  const provider = new AcpAgentProvider({ agent: "stdio-fixture", command: [process.execPath, script].map(quote).join(" "),
+  const provider = new AcpAgentProvider({ agent: "stdio-fixture", executable: process.execPath, args: [script, literalArg],
     stateDir: directory, cwd: directory });
   try {
     await provider.start();
@@ -420,5 +425,14 @@ await connection.closed;
     const pid = Number(await readFile(closedFile, "utf8"));
     assert.ok(pid > 0);
     assert.throws(() => process.kill(pid, 0), { code: "ESRCH" });
+  } finally { await provider.close(); await rm(directory, { recursive: true, force: true }); }
+});
+
+it("reports a missing explicit executable and closes the failed connection", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "sidemesh-acp-missing-"));
+  const provider = new AcpAgentProvider({ agent: "missing", executable: join(directory, "missing-agent"), stateDir: directory });
+  try {
+    await assert.rejects(provider.createSession({ cwd: directory, input: [], overrides }), /ENOENT|closed/i);
+    assert.deepEqual(await provider.listLoadedSessionIds(), []);
   } finally { await provider.close(); await rm(directory, { recursive: true, force: true }); }
 });

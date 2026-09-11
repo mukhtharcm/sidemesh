@@ -11,6 +11,28 @@ Run `sidemesh setup`, select **ACP**, then select an agent or enter a custom com
 Install and sign in to the selected agent. Sidemesh can also show agent-managed
 sign-in choices and ACP form or URL requests in the app.
 
+Select **Executable and arguments** to launch an installed agent without a shell.
+Enter the arguments as a JSON array. For example, this provider entry runs Gemini:
+
+```json
+{
+  "kind": "acpx",
+  "agent": "gemini",
+  "executable": "gemini",
+  "args": ["--acp"],
+  "command": null,
+  "stateDir": null,
+  "permissionMode": "approve-reads"
+}
+```
+
+An executable can be a path with spaces. Each argument passes unchanged; shell
+variables and command substitutions are not expanded. Use either `executable`
+and `args`, or the legacy `command` field. A command environment override replaces
+the saved executable and arguments. The handshake records the agent name and
+version. Sidemesh can show this saved version after a restart without launching
+the agent. A change to the launch settings requires a new handshake.
+
 ```bash
 SIDEMESH_PROVIDER=acpx
 SIDEMESH_ACPX_AGENT=gemini

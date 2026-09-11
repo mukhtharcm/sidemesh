@@ -349,6 +349,25 @@ describe("loadConfig", () => {
     assert.equal(config.provider.permissionMode, "deny-all");
   });
 
+  it("preserves explicit ACP launch settings and lets a command override replace them", async () => {
+    const provider = { kind: "acpx", agent: "custom", executable: "/opt/agent with spaces",
+      args: ["--acp", "literal $HOME", ""], command: null, stateDir: null, permissionMode: "approve-reads" };
+    await writeFile(configPath, JSON.stringify({ version: 1, token: "file-token", providers: [provider] }));
+    const config = await loadConfig({ configPath, env: {} });
+    assert.equal(config.provider.kind, "acpx");
+    if (config.provider.kind !== "acpx") throw new Error("Expected ACP");
+    assert.equal(config.provider.executable, provider.executable);
+    assert.deepEqual(config.provider.args, provider.args);
+    await saveConfig(config, { configPath });
+    assert.deepEqual((await loadConfig({ configPath, env: {} })).providers, config.providers);
+    const overridden = await loadConfig({ configPath, env: { SIDEMESH_ACPX_COMMAND: "other-agent --acp" } });
+    assert.equal(overridden.provider.kind, "acpx");
+    if (overridden.provider.kind !== "acpx") throw new Error("Expected ACP");
+    assert.equal(overridden.provider.command, "other-agent --acp");
+    assert.equal(overridden.provider.executable, undefined);
+    assert.equal(overridden.provider.args, undefined);
+  });
+
   it("loads terminal settings from persisted config and env overrides", async () => {
     await writeFile(
       configPath,

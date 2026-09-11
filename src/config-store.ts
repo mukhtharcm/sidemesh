@@ -67,9 +67,12 @@ const acpxProviderConfigSchema = z.object({
   id: providerInstanceIdSchema.optional(),
   agent: z.string().trim().min(1),
   command: z.string().trim().min(1).nullable(),
+  executable: z.string().trim().min(1).refine((value) => !value.includes("\0")).optional(),
+  args: z.array(z.string().refine((value) => !value.includes("\0"))).optional(),
   stateDir: z.string().trim().min(1).nullable(),
   permissionMode: acpxPermissionModeSchema.default("approve-reads"),
-});
+}).refine((value) => !value.args || Boolean(value.executable), "ACP args require an executable")
+  .refine((value) => !value.executable || !value.command, "Use either an ACP executable or a legacy command");
 
 const fakeProviderConfigSchema = z.object({
   kind: z.literal("fake"),

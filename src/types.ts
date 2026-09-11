@@ -65,6 +65,8 @@ export interface AcpxProviderConfig {
   kind: "acpx";
   agent: string;
   command: string | null;
+  executable?: string;
+  args?: string[];
   stateDir: string | null;
   permissionMode: AcpxPermissionMode;
 }
