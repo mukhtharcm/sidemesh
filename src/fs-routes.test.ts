@@ -18,7 +18,7 @@ import { getRequestListener } from "@hono/node-server";
 import { Hono } from "hono";
 
 import { registerFsRoutes } from "./fs-routes.js";
-import type { HonoServerEnv } from "./hono-route-adapter.js";
+import type { HonoServerEnv } from "./server-http.js";
 import type { SessionSummary } from "./types.js";
 
 describe("filesystem routes", () => {

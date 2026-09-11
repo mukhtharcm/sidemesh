@@ -16,7 +16,7 @@ import {
   artifactReferencesMatch,
   registerSessionArtifactRoutes,
 } from "./session-artifacts.js";
-import type { HonoServerEnv } from "./hono-route-adapter.js";
+import type { HonoServerEnv } from "./server-http.js";
 
 const temporaryRoots: string[] = [];
 
