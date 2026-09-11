@@ -573,8 +573,8 @@ async function promptAcpxProvider(
   const current =
     existing?.providers.find((provider) => provider.kind === "acpx") ?? null;
   note(
-    "acpx bridges Sidemesh to ACP-compatible agents. Reads/searches may be auto-approved; writes and commands still go through Sidemesh approvals.",
-    "ACP via acpx",
+    "ACP connects agents that need this protocol. Use a native provider when one is available. File writes and commands require app approval.",
+    "ACP",
   );
   const agentOptions = [
     { value: "gemini", label: "Gemini CLI", hint: "gemini --acp" },
@@ -607,21 +607,21 @@ async function promptAcpxProvider(
     });
   }
   const command = await promptText({
-    message: "ACP command override (leave blank for acpx built-in registry)",
+    message: "ACP command override (leave blank for the default agent command)",
     defaultValue: current?.kind === "acpx" ? (current.command ?? "") : "",
     fallbackToDefaultOnEmpty: false,
   });
   const acpxStateDir = await promptText({
-    message: "acpx state directory",
+    message: "Legacy ACP history directory",
     defaultValue:
       current?.kind === "acpx"
         ? (current.stateDir ?? nodePath.join(stateDir, "acpx-provider", resolvedAgent))
         : nodePath.join(stateDir, "acpx-provider", resolvedAgent),
     validate: (value) =>
-      value.trim() ? undefined : "acpx state directory cannot be empty.",
+      value.trim() ? undefined : "Legacy ACP history directory cannot be empty.",
   });
   const permissionMode = await select<"approve-reads" | "deny-all">({
-    message: "acpx permission mode",
+    message: "ACP permission mode",
     initialValue:
       current?.kind === "acpx" ? current.permissionMode : "approve-reads",
     options: [

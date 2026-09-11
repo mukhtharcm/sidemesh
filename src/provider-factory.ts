@@ -1,4 +1,5 @@
 import type { AgentProvider } from "./agent-provider.js";
+import type { SessionStore } from "./session-store.js";
 import { MultiAgentProvider } from "./multi-provider.js";
 import type { NodeConfig } from "./types.js";
 import type { AgentProviderKind } from "./types.js";
@@ -30,6 +31,7 @@ export interface AgentProviderRuntime {
 
 export function createAgentProviderRuntime(
   config: NodeConfig,
+  sessionStore?: SessionStore,
 ): AgentProviderRuntime {
   const definitionSummaries = new Map(
     listAgentProviderDefinitionSummaries().map((summary) => [summary.kind, summary]),
@@ -42,7 +44,7 @@ export function createAgentProviderRuntime(
     return {
       id: providerConfig.id ?? providerConfig.kind,
       kind: providerConfig.kind,
-      provider: createAgentProviderFromConfig(providerConfig),
+      provider: createAgentProviderFromConfig(providerConfig, sessionStore),
       configSummary: { ...summarizeAgentProviderConfig(providerConfig), id: providerConfig.id ?? providerConfig.kind },
       definitionSummary,
     };

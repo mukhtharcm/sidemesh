@@ -2,9 +2,9 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 
 import {
-  ACPX_PROVIDER_CAPABILITIES,
-  AcpxAgentProvider,
-} from "./acpx-provider.js";
+  ACP_PROVIDER_CAPABILITIES,
+  AcpAgentProvider,
+} from "./acp-provider.js";
 import {
   CODEX_PROVIDER_CAPABILITIES,
   CodexAgentProvider,
@@ -138,7 +138,7 @@ describe("provider registry", () => {
       },
       {
         kind: "acpx",
-        displayName: "ACP via acpx",
+        displayName: "ACP",
         defaultCommand: "gemini",
         commandEnvironmentVariables: [
           "SIDEMESH_ACPX_AGENT",
@@ -148,7 +148,7 @@ describe("provider registry", () => {
           "SIDEMESH_ACPX_PERMISSION_MODE",
         ],
         supportedApprovalPolicies: ["on-request", "never"],
-        capabilities: ACPX_PROVIDER_CAPABILITIES,
+        capabilities: ACP_PROVIDER_CAPABILITIES,
         setupAudience: "public",
       },
     ]);
@@ -391,9 +391,9 @@ describe("provider registry", () => {
     });
 
     const provider = createAgentProviderFromConfig(config);
-    assert.ok(provider instanceof AcpxAgentProvider);
+    assert.ok(provider instanceof AcpAgentProvider);
     assert.equal(provider.kind, "acpx");
-    assert.equal(provider.displayName, "ACP via acpx (claude)");
+    assert.equal(provider.displayName, "ACP (claude)");
     assert.equal(provider.capabilities.sessions.create, true);
     assert.equal(provider.capabilities.approvals.command, true);
     assert.equal(provider.capabilities.runtimeControls.model, true);

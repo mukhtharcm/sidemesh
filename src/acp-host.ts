@@ -8,10 +8,11 @@ import {
   type ReadTextFileRequest, type WriteTextFileRequest,
   type RequestPermissionRequest, type RequestPermissionResponse,
   type CreateElicitationResponse, type TerminalExitStatus,
+  type AuthMethod,
 } from "@agentclientprotocol/sdk";
 
 import { parsePendingActionDecision, parsePendingActionElicitationResponse,
-  parsePendingActionProviderOptionResponse, type PendingActionResponseInput } from "./approvals.js";
+  parsePendingActionProviderOptionResponse, parsePendingActionUserInputResponse, type PendingActionResponseInput } from "./approvals.js";
 import type { AgentPendingAction, AgentProviderLiveEvent } from "./agent-provider.js";
 import type { AcpxPermissionMode, PendingActionApprovalTarget } from "./types.js";
 import { elicitationFields } from "./elicitation.js";
@@ -74,6 +75,23 @@ export class AcpHost {
 
   respond(actionId: string, input: PendingActionResponseInput): boolean {
     return this.pending.get(actionId)?.respond(input) ?? false;
+  }
+
+  async selectAuthentication(authMethods: AuthMethod[], signal: AbortSignal): Promise<string | null> {
+    const offered = authMethods.filter((method) => !("type" in method && method.type === "terminal"));
+    if (!offered.length) return null;
+    const choices = offered.map((method) => `${method.name} (${method.id})`);
+    const action: AgentPendingAction = {
+      ...this.action("tool", "Agent sign-in", "Select the agent sign-in method.", []),
+      kind: "user_input", approval: undefined, canApprove: false, canDecline: false,
+      userInput: { question: "Select the agent sign-in method.", choices, allowFreeform: false },
+    };
+    const result = await this.ask<{ methodId: string | null }>(action, signal, (input) => {
+      const response = parsePendingActionUserInputResponse(input);
+      const index = response ? choices.indexOf(response.answer) : -1;
+      return index >= 0 ? { methodId: offered[index]!.id } : null;
+    }, { methodId: null });
+    return result.methodId;
   }
 
   cancelPending(): void {

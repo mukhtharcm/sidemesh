@@ -4,7 +4,7 @@ import { DatabaseSync } from "node:sqlite";
 import { z } from "zod";
 
 import type { AgentSessionInputItem, AgentSessionOverrides } from "./agent-provider.js";
-import type { LatestPlanUpdate } from "./types.js";
+import type { LatestPlanUpdate, SessionActivity, SessionMessage } from "./types.js";
 
 const receiptSchema = z.object({
   mode: z.enum(["steer", "turn"]),
@@ -42,6 +42,23 @@ export interface SessionInputRecord {
   receipt: SessionInputReceipt | null;
 }
 
+export interface StoredProviderSession {
+  id: string;
+  nativeId: string | null;
+  cwd: string;
+  name: string | null;
+  preview: string;
+  createdAt: number;
+  updatedAt: number;
+  archived: boolean;
+  metadata: unknown;
+}
+
+export type StoredSessionItem = {
+  nativeId: string | null;
+  authority: "primary" | "recovery" | "cache";
+} & ({ kind: "message"; value: SessionMessage } | { kind: "activity"; value: SessionActivity });
+
 /** Durable host data. Native history and the disposable search index stay separate. */
 export class SessionStore {
   private constructor(private readonly db: DatabaseSync) {}
@@ -57,6 +74,7 @@ export class SessionStore {
         PRAGMA journal_mode = WAL;
         PRAGMA synchronous = FULL;
         PRAGMA busy_timeout = 5000;
+        PRAGMA foreign_keys = ON;
         CREATE TABLE IF NOT EXISTS migrations (name TEXT PRIMARY KEY);
         CREATE TABLE IF NOT EXISTS inputs (
           key TEXT PRIMARY KEY, session_id TEXT NOT NULL, signature_hash TEXT NOT NULL,
@@ -67,6 +85,20 @@ export class SessionStore {
         CREATE TABLE IF NOT EXISTS plans (
           session_id TEXT PRIMARY KEY, value TEXT NOT NULL, updated_at INTEGER NOT NULL
         );
+        CREATE TABLE IF NOT EXISTS provider_sessions (
+          provider_id TEXT NOT NULL, id TEXT NOT NULL, native_id TEXT, cwd TEXT NOT NULL,
+          name TEXT, preview TEXT NOT NULL, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL,
+          archived INTEGER NOT NULL, metadata TEXT NOT NULL, PRIMARY KEY(provider_id, id)
+        );
+        CREATE TABLE IF NOT EXISTS session_items (
+          provider_id TEXT NOT NULL, session_id TEXT NOT NULL, id TEXT NOT NULL,
+          kind TEXT NOT NULL CHECK(kind IN ('message', 'activity')), native_id TEXT,
+          authority TEXT NOT NULL CHECK(authority IN ('primary', 'recovery', 'cache')),
+          position INTEGER NOT NULL, value TEXT NOT NULL,
+          PRIMARY KEY(provider_id, session_id, id),
+          FOREIGN KEY(provider_id, session_id) REFERENCES provider_sessions(provider_id, id)
+        );
+        CREATE INDEX IF NOT EXISTS session_items_order ON session_items(provider_id, session_id, position);
       `);
       const store = new SessionStore(db);
       await store.importLegacy(stateDir);
@@ -82,6 +114,81 @@ export class SessionStore {
   }
 
   close(): void { this.db.close(); }
+
+  getProviderSession(providerId: string, id: string): StoredProviderSession | null {
+    const row = this.db.prepare("SELECT * FROM provider_sessions WHERE provider_id = ? AND id = ?")
+      .get(providerId, id) as ProviderSessionRow | undefined;
+    return row ? providerSessionFromRow(row) : null;
+  }
+
+  listProviderSessions(providerId: string): StoredProviderSession[] {
+    return (this.db.prepare("SELECT * FROM provider_sessions WHERE provider_id = ? ORDER BY updated_at DESC")
+      .all(providerId) as unknown as ProviderSessionRow[]).map(providerSessionFromRow);
+  }
+
+  saveProviderSession(providerId: string, session: StoredProviderSession): void {
+    this.db.prepare(`INSERT INTO provider_sessions VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(provider_id, id) DO UPDATE SET native_id = excluded.native_id, cwd = excluded.cwd,
+      name = excluded.name, preview = excluded.preview, updated_at = excluded.updated_at,
+      archived = excluded.archived, metadata = excluded.metadata`)
+      .run(providerId, session.id, session.nativeId, session.cwd, session.name, session.preview,
+        session.createdAt, session.updatedAt, Number(session.archived), JSON.stringify(session.metadata));
+  }
+
+  getSessionItem(providerId: string, sessionId: string, id: string): StoredSessionItem | null {
+    const row = this.db.prepare("SELECT * FROM session_items WHERE provider_id = ? AND session_id = ? AND id = ?")
+      .get(providerId, sessionId, id) as SessionItemRow | undefined;
+    return row ? sessionItemFromRow(row) : null;
+  }
+
+  readSessionItems(providerId: string, sessionId: string): StoredSessionItem[] {
+    return (this.db.prepare("SELECT * FROM session_items WHERE provider_id = ? AND session_id = ? ORDER BY position, rowid")
+      .all(providerId, sessionId) as unknown as SessionItemRow[]).map(sessionItemFromRow);
+  }
+
+  nextSessionSequence(providerId: string, sessionId: string): number {
+    return (this.db.prepare("SELECT coalesce(max(position) + 1, 0) AS next FROM session_items WHERE provider_id = ? AND session_id = ?")
+      .get(providerId, sessionId) as { next: number }).next;
+  }
+
+  putSessionItem(providerId: string, sessionId: string, item: StoredSessionItem): void {
+    this.db.prepare(`INSERT INTO session_items VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(provider_id, session_id, id) DO UPDATE SET kind = excluded.kind, native_id = excluded.native_id,
+      authority = excluded.authority, position = excluded.position, value = excluded.value`)
+      .run(providerId, sessionId, item.value.id, item.kind, item.nativeId, item.authority,
+        item.value.seq, JSON.stringify(item.value));
+  }
+
+  replaceProviderHistory(providerId: string, session: StoredProviderSession, items: StoredSessionItem[]): void {
+    this.transaction(() => {
+      this.saveProviderSession(providerId, session);
+      this.db.prepare("DELETE FROM session_items WHERE provider_id = ? AND session_id = ?").run(providerId, session.id);
+      for (const item of items) this.putSessionItem(providerId, session.id, item);
+    });
+  }
+
+  hasMigration(name: string): boolean {
+    return Boolean(this.db.prepare("SELECT name FROM migrations WHERE name = ?").get(name));
+  }
+
+  importProviderSessions(name: string, providerId: string,
+    sessions: Array<{ session: StoredProviderSession; items: StoredSessionItem[] }>): void {
+    if (this.hasMigration(name)) return;
+    this.transaction(() => {
+      for (const { session, items } of sessions) {
+        if (this.getProviderSession(providerId, session.id)) throw new Error(`Session import conflict: ${session.id}`);
+        this.saveProviderSession(providerId, session);
+        for (const item of items) this.putSessionItem(providerId, session.id, item);
+      }
+      this.db.prepare("INSERT INTO migrations VALUES (?)").run(name);
+    });
+  }
+
+  private transaction(operation: () => void): void {
+    this.db.exec("BEGIN IMMEDIATE");
+    try { operation(); this.db.exec("COMMIT"); }
+    catch (error) { this.db.exec("ROLLBACK"); throw error; }
+  }
 
   getInput(key: string): SessionInputRecord | null {
     const row = this.db.prepare(
@@ -119,10 +226,10 @@ export class SessionStore {
     this.prune();
   }
 
-  failInput(key: string): void {
+  failInput(key: string, notDispatched = false): void {
     this.db.prepare(
-      "UPDATE inputs SET state = 'uncertain', updated_at = ? WHERE key = ? AND state = 'dispatching'",
-    ).run(Date.now(), key);
+      "UPDATE inputs SET state = ?, updated_at = ? WHERE key = ? AND state = 'dispatching'",
+    ).run(notDispatched ? "prepared" : "uncertain", Date.now(), key);
     // A failure before dispatch is safe to retry; the durable payload remains prepared.
   }
 
@@ -202,4 +309,19 @@ async function readLegacy(path: string): Promise<unknown> {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
     throw error;
   }
+}
+
+interface ProviderSessionRow {
+  id: string; native_id: string | null; cwd: string; name: string | null; preview: string;
+  created_at: number; updated_at: number; archived: number; metadata: string;
+}
+function providerSessionFromRow(row: ProviderSessionRow): StoredProviderSession {
+  return { id: row.id, nativeId: row.native_id, cwd: row.cwd, name: row.name, preview: row.preview,
+    createdAt: row.created_at, updatedAt: row.updated_at, archived: row.archived === 1, metadata: JSON.parse(row.metadata) };
+}
+interface SessionItemRow {
+  kind: StoredSessionItem["kind"]; native_id: string | null; authority: StoredSessionItem["authority"]; value: string;
+}
+function sessionItemFromRow(row: SessionItemRow): StoredSessionItem {
+  return { kind: row.kind, nativeId: row.native_id, authority: row.authority, value: JSON.parse(row.value) };
 }
