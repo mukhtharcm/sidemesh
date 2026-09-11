@@ -549,7 +549,7 @@ async function assertNotWorkspaceRoot(
   }
 }
 
-async function writeFileAtomically(target: string, buffer: Buffer): Promise<void> {
+export async function writeFileAtomically(target: string, buffer: Buffer): Promise<void> {
   let existingMode: number | undefined;
   try {
     existingMode = (await stat(target)).mode & 0o777;

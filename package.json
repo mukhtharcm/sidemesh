@@ -86,6 +86,7 @@
     "secret:scan": "bash scripts/secret-scan.sh"
   },
   "dependencies": {
+    "@agentclientprotocol/sdk": "1.4.0",
     "@clack/prompts": "^1.7.0",
     "@earendil-works/pi-coding-agent": "0.80.3",
     "@github/copilot-sdk": "1.0.4",
@@ -97,9 +98,9 @@
     "ignore": "^7.0.6",
     "protobufjs": "7.6.5",
     "qrcode": "^1.5.4",
+    "undici": "8.9.0",
     "ws": "^8.21.1",
-    "zod": "^4.4.3",
-    "undici": "8.9.0"
+    "zod": "^4.4.3"
   },
   "optionalDependencies": {
     "node-pty": "^1.1.0"

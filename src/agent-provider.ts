@@ -355,6 +355,11 @@ export type AgentProviderLiveEvent =
       status: string;
     }
   | {
+      type: "action_resolved";
+      sessionId: string;
+      actionId: string;
+    }
+  | {
       type: "action_opened";
       action: AgentPendingAction;
     };

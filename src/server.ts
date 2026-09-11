@@ -1120,6 +1120,14 @@ export async function startServer(
         void indexSessionForSearch(searchIndex, providerRuntime, event.sessionId).catch(() => {});
         // Transcript order remains stable across turns.
         return;
+      case "action_resolved":
+        if (!pendingActions.delete(event.actionId)) return;
+        setLatestThreadStatusForSession(event.sessionId,
+          sessionState.get(event.sessionId).activeTurn ? "running" : null);
+        broadcastLive(event.sessionId, event);
+        broadcastApprovalLive({ type: "action_resolved", actionId: event.actionId });
+        scheduleRecentSessionUpsert(event.sessionId, 0);
+        return;
       case "action_opened":
         pendingActions.set(event.action.id, event.action);
         setLatestThreadStatusForSession(
