@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { EventEmitter } from "node:events";
 import { homedir } from "node:os";
 import { resolve, join } from "node:path";
@@ -9,15 +9,17 @@ import {
   type ClientApp, type ClientConnection, type InitializeResponse, type SessionNotification,
   type SessionUpdate, type LoadSessionResponse, type SessionConfigOption,
   type SetSessionConfigOptionRequest,
+  type PromptCapabilities,
 } from "@agentclientprotocol/sdk";
 
 import { AgentProviderRequestError, type AgentProvider, type AgentProviderEvents,
   type AgentProviderCapabilities, type AgentCreateSessionRequest, type AgentCreateSessionResult,
   type AgentSessionListOptions, type AgentSessionLogOptions, type AgentSessionSnapshot, type AgentSubmitInputRequest,
   type AgentSubmitInputResult, type AgentPendingAction, type AgentSessionResumeOptions,
-  type AgentSessionInputItem, type AgentModelListOptions } from "./agent-provider.js";
+  type AgentModelListOptions } from "./agent-provider.js";
 import type { PendingActionResponseInput } from "./approvals.js";
 import { AcpHost } from "./acp-host.js";
+import { acpInputPreview, prepareAcpInput } from "./acp-input.js";
 import { importAcpxHistory } from "./acp-history.js";
 import { AcpTranscript } from "./acp-transcript.js";
 import { reconcileSessionHistory } from "./session-history.js";
@@ -60,6 +62,7 @@ interface AcpProviderDependencies {
   connect?: (app: ClientApp, cwd: string) => Promise<AcpTransport>;
 }
 interface AcpSessionMetadata {
+  promptCapabilities?: { commandHash: string; value: PromptCapabilities };
   runtime?: SessionRuntimeSummary | null;
   latestPlanUpdate?: LatestPlanUpdate | null;
   localName?: boolean;
@@ -96,6 +99,7 @@ export class AcpAgentProvider extends EventEmitter<AgentProviderEvents> implemen
   readonly capabilities = structuredClone(ACP_PROVIDER_CAPABILITIES);
   private readonly providerId: string;
   private readonly command: string;
+  private readonly commandHash: string;
   private readonly stateDir: string;
   private readonly cwd: string;
   private readonly permissionMode: AcpxPermissionMode;
@@ -111,6 +115,7 @@ export class AcpAgentProvider extends EventEmitter<AgentProviderEvents> implemen
     const agent = options.agent.trim().toLowerCase() || ACP_DEFAULT_AGENT;
     this.providerId = options.providerId ?? "acpx";
     this.command = resolveAcpCommand(agent, options.command);
+    this.commandHash = createHash("sha256").update(this.command).digest("hex");
     this.cwd = resolve(options.cwd || process.cwd());
     this.stateDir = resolve(options.stateDir || join(homedir(), ".sidemesh", "acpx-provider", agent.replace(/[^A-Za-z0-9._-]/g, "-")));
     this.permissionMode = options.permissionMode ?? "approve-reads";
@@ -122,7 +127,12 @@ export class AcpAgentProvider extends EventEmitter<AgentProviderEvents> implemen
     if (this.closed) throw new Error("ACP provider is closed");
     this.starting ??= (async () => {
       this.store = this.dependencies.sessionStore ?? await SessionStore.open(this.stateDir);
-      try { await importAcpxHistory(this.store, this.providerId, this.stateDir); }
+      try {
+        await importAcpxHistory(this.store, this.providerId, this.stateDir);
+        const saved = this.store.listProviderSessions(this.providerId)
+          .map((record) => this.metadata(record).promptCapabilities).find((saved) => saved?.commandHash === this.commandHash);
+        if (saved) this.applyPromptCapabilities(saved.value);
+      }
       catch (error) {
         if (!this.dependencies.sessionStore) this.store.close();
         this.store = null;
@@ -211,7 +221,7 @@ export class AcpAgentProvider extends EventEmitter<AgentProviderEvents> implemen
     await this.start();
     const id = `acp-${randomUUID()}`;
     this.db.saveProviderSession(this.providerId, { id, nativeId: null, cwd: resolve(request.cwd || this.cwd),
-      name: null, preview: inputText(request.input).slice(0, 160), createdAt: Date.now(), updatedAt: Date.now(), archived: false, metadata: {} });
+      name: null, preview: acpInputPreview(request.input).slice(0, 160), createdAt: Date.now(), updatedAt: Date.now(), archived: false, metadata: {} });
     const state = await this.ensureConnection(id);
     await this.applyControls(id, state, request.overrides);
     const started = request.input.length ? await this.submitInput({ sessionId: id, input: request.input, activeTurnId: null, overrides: request.overrides }) : null;
@@ -221,14 +231,13 @@ export class AcpAgentProvider extends EventEmitter<AgentProviderEvents> implemen
 
   async submitInput(request: AgentSubmitInputRequest): Promise<AgentSubmitInputResult> {
     let state: ConnectedSession;
-    let text: string;
+    let prepared: Awaited<ReturnType<typeof prepareAcpInput>>;
     try {
       await this.start();
       state = await this.ensureConnection(request.sessionId);
       await state.loading;
       if (state.active) throw new Error("Session is busy; the host must queue this input");
-      text = inputText(request.input);
-      if (!text.trim()) throw new Error("Input text is required");
+      prepared = await prepareAcpInput(request.input, state.initialized.agentCapabilities?.promptCapabilities);
       await this.applyControls(request.sessionId, state, request.overrides);
       if (this.closed || state.active) throw new Error("Session is busy or closed");
     } catch (error) {
@@ -238,10 +247,10 @@ export class AcpAgentProvider extends EventEmitter<AgentProviderEvents> implemen
     const active = { turnId, clientInputId: request.clientMessageId, interrupted: false, done: Promise.resolve() };
     state.active = active;
     state.transcript.beginTurn(turnId, { id: request.clientMessageId || `acp-user-${randomUUID()}`,
-      role: "user", text, content: [{ type: "text", text }], attachments: [], createdAt: Date.now() });
+      role: "user", text: prepared.text, content: [{ type: "text", text: prepared.text }], attachments: prepared.attachments, createdAt: Date.now() });
     active.done = this.finishPrompt(request.sessionId, state, active,
       this.requestWithTimeout(state, state.transport.connection.agent.request(methods.agent.session.prompt, {
-        sessionId: state.host.nativeSessionId!, prompt: [{ type: "text", text }],
+        sessionId: state.host.nativeSessionId!, prompt: prepared.prompt,
       }), this.timeoutMs));
     this.updateRuntime(request.sessionId, { turnId });
     this.emit("liveEvent", { type: "turn_started", sessionId: request.sessionId, turnId });
@@ -347,6 +356,11 @@ export class AcpAgentProvider extends EventEmitter<AgentProviderEvents> implemen
           elicitation: { form: {}, url: {} }, session: { configOptions: { boolean: {} }, compaction: {} } },
       }));
       if (state.initialized.protocolVersion !== PROTOCOL_VERSION) throw new Error("Unsupported ACP protocol version");
+      const promptCapabilities = state.initialized.agentCapabilities?.promptCapabilities ?? {};
+      this.applyPromptCapabilities(promptCapabilities);
+      this.db.saveProviderSession(this.providerId, { ...this.record(id), metadata: {
+        ...this.metadata(this.record(id)), promptCapabilities: { commandHash: this.commandHash, value: promptCapabilities },
+      } });
       if (record.nativeId) {
         if (state.initialized.agentCapabilities?.loadSession) await this.refreshHistory(id, state);
         else if (state.initialized.agentCapabilities?.sessionCapabilities?.resume) {
@@ -586,6 +600,10 @@ export class AcpAgentProvider extends EventEmitter<AgentProviderEvents> implemen
   private metadata(record: StoredProviderSession): AcpSessionMetadata {
     return (record.metadata ?? {}) as AcpSessionMetadata;
   }
+  private applyPromptCapabilities(value: PromptCapabilities): void {
+    this.capabilities.input.imageUrl = value.image === true;
+    this.capabilities.input.localImage = value.image === true;
+  }
   private thread(record: StoredProviderSession, includeTurns: boolean): ThreadRecord {
     const active = this.sessions.get(record.id)?.active;
     const phase = record.archived ? "closed" : active ? "running" : "idle";
@@ -602,13 +620,6 @@ function configurationOption(option: SessionConfigOption): SessionConfigurationO
     value: option.currentValue, ...(option.type === "select" ? { options: option.options.flatMap((entry) => "options" in entry
       ? entry.options.map((value) => ({ value: value.value, label: value.name, group: entry.name }))
       : [{ value: entry.value, label: entry.name }]) } : {}) };
-}
-function inputText(input: AgentSessionInputItem[]): string {
-  return input.map((item) => {
-    if (item.type === "text") return item.text;
-    if (item.type === "file") return `${item.isDirectory ? "Directory" : "File"}: ${item.path}`;
-    throw new Error(`ACP ${item.type} input is not supported`);
-  }).join("\n\n");
 }
 function tail<T>(items: T[], limit?: number | null): T[] {
   return limit == null || limit < 0 ? items : items.slice(Math.max(0, items.length - limit));

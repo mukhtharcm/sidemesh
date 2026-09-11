@@ -2,6 +2,7 @@ import { open, readFile, readdir, stat } from "node:fs/promises";
 import nodePath from "node:path";
 import type { AgentSessionEvent, SessionEntry, Skill as PiSkill } from "@earendil-works/pi-coding-agent";
 import { materializeAgentActivityDraft, type AgentSessionActivityDraft, type AgentSessionInputItem } from "./agent-provider.js";
+import { imageFromDataUrl, readLocalImage } from "./input-image.js";
 import { extractSessionAttachments } from "./session-attachments.js";
 import type { SessionMessage, SessionActivity, SessionRuntimeSummary, SessionMessageAttachment, SessionMessageContentBlock, SessionMessageContentBlockText, SessionActivityChange, ToolActivitySemantic, SkillSummary } from "./types.js";
 import { textToBlocks } from "./types.js";
@@ -576,19 +577,10 @@ export async function preparePiInput(
         break;
       }
       case "image": {
-        // Mobile clients send images as base64 data URLs.  Pi's own wire
-        // format (PiImageInput) already stores images as { data, mimeType }
-        // so we can parse the data URL inline — no temp-file round-trip.
-        const url = item.url ?? "";
-        const match = url.match(/^data:(image\/[a-zA-Z0-9.+-]+);base64,([A-Za-z0-9+/]+={0,2})$/);
-        if (match && Buffer.from(match[2], "base64").toString("base64") === match[2]) {
-          const mimeType = match[1].trim();
-          const base64Data = match[2].trim();
-          images.push({ type: "image", data: base64Data, mimeType });
-          attachments.push({ type: "image", url });
-        } else {
-          throw new Error("Pi accepts local images or image data URLs");
-        }
+        const image = imageFromDataUrl(item.url);
+        if (!image) throw new Error("Pi accepts local images or image data URLs");
+        images.push(image);
+        attachments.push({ type: "image", url: item.url });
         break;
       }
       case "file": {
@@ -685,38 +677,6 @@ async function checkBinaryFile(filePath: string): Promise<boolean> {
     return false;
   } finally {
     await handle.close();
-  }
-}
-
-async function readLocalImage(path: string): Promise<PiImageInput> {
-  const absolutePath = nodePath.resolve(path);
-  const mimeType = imageMimeTypeFromPath(absolutePath);
-  if (!mimeType) {
-    throw new Error(`Unsupported image type for "${path}".`);
-  }
-  const buffer = await readFile(absolutePath);
-  return {
-    type: "image",
-    data: buffer.toString("base64"),
-    mimeType,
-  };
-}
-
-function imageMimeTypeFromPath(path: string): string | null {
-  switch (nodePath.extname(path).toLowerCase()) {
-    case ".png":
-      return "image/png";
-    case ".jpg":
-    case ".jpeg":
-      return "image/jpeg";
-    case ".gif":
-      return "image/gif";
-    case ".webp":
-      return "image/webp";
-    case ".svg":
-      return "image/svg+xml";
-    default:
-      return null;
   }
 }
 
