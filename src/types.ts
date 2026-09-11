@@ -990,6 +990,8 @@ export interface ThreadStatus {
 }
 
 export interface ThreadRecord {
+  /** Native runtime metadata already available without a separate per-session read. */
+  runtime?: SessionRuntimeSummary | null;
   providerId?: string;
   providerKind?: AgentProviderKind;
   id: string;

@@ -197,10 +197,7 @@ describe("fake provider capability profile API smoke", () => {
       try {
         const node = await getJson(daemon.baseUrl, "/api/node");
         assert.equal(node.provider, "fake");
-        assert.match(
-          asString(node.providerVersion),
-          new RegExp(`\\(${expectation.profile}\\)$`),
-        );
+        assert.equal(node.providerVersion, "unknown");
 
         for (const [path, supported] of Object.entries(
           expectation.capabilities,
@@ -219,6 +216,9 @@ describe("fake provider capability profile API smoke", () => {
           }),
           201,
         );
+
+        const startedNode = await getJson(daemon.baseUrl, "/api/node");
+        assert.match(asString(startedNode.providerVersion), new RegExp(`\\(${expectation.profile}\\)$`));
 
         assert.equal(
           await status(daemon.baseUrl, "/api/models"),

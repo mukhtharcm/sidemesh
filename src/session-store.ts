@@ -5,6 +5,7 @@ import { z } from "zod";
 
 import type { AgentSessionInputItem, AgentSessionOverrides } from "./agent-provider.js";
 import type { LatestPlanUpdate, SessionActivity, SessionMessage } from "./types.js";
+import { extendProviderOwnership, resolveSessionReference, type ProviderOwnership } from "./session-identity.js";
 
 const receiptSchema = z.object({
   mode: z.enum(["steer", "turn", "queued"]),
@@ -84,6 +85,7 @@ export class SessionStore {
         PRAGMA busy_timeout = 5000;
         PRAGMA foreign_keys = ON;
         CREATE TABLE IF NOT EXISTS migrations (name TEXT PRIMARY KEY);
+        CREATE TABLE IF NOT EXISTS host_metadata (key TEXT PRIMARY KEY, value TEXT NOT NULL);
         CREATE TABLE IF NOT EXISTS inputs (
           key TEXT PRIMARY KEY, session_id TEXT NOT NULL, signature_hash TEXT NOT NULL,
           state TEXT NOT NULL CHECK(state IN ('prepared', 'dispatching', 'uncertain', 'accepted')),
@@ -182,6 +184,42 @@ export class SessionStore {
   }
 
   close(): void { this.db.close(); }
+
+  configureProviderOwnership(providers: Array<{ id: string; kind: string }>, defaultProviderId: string): ProviderOwnership {
+    const row = this.db.prepare("SELECT value FROM host_metadata WHERE key = 'provider-ownership'").get() as { value: string } | undefined;
+    const ownership = extendProviderOwnership(row ? JSON.parse(row.value) as ProviderOwnership : null, providers, defaultProviderId);
+    this.transaction(() => {
+      const sessionIds = this.db.prepare(`SELECT session_id FROM inputs UNION SELECT session_id FROM plans
+        UNION SELECT session_id FROM session_recovery`).all() as { session_id: string }[];
+      for (const { session_id: previousId } of sessionIds) {
+        const id = resolveSessionReference(previousId, ownership)?.sessionId;
+        // Keep records for unknown owners. Requests for those IDs fail closed.
+        if (!id || id === previousId) continue;
+        const records = this.db.prepare("SELECT key FROM inputs WHERE session_id = ?").all(previousId) as { key: string }[];
+        for (const { key } of records) {
+          if (!key.startsWith(`${previousId}:`)) throw new Error(`Invalid input identity for ${previousId}`);
+          const nextKey = `${id}:${key.slice(previousId.length + 1)}`;
+          if (this.getInput(nextKey)) throw new Error(`Input alias conflict for ${previousId}; both delivery records were preserved`);
+          this.db.prepare("UPDATE inputs SET key = ?, session_id = ? WHERE key = ?").run(nextKey, id, key);
+        }
+        const plan = this.getPlan(previousId);
+        if (plan) {
+          if (this.getPlan(id)) throw new Error(`Plan alias conflict for ${previousId}; both records were preserved`);
+          this.db.prepare("UPDATE plans SET session_id = ?, value = ? WHERE session_id = ?")
+            .run(id, JSON.stringify({ ...plan, sessionId: id }), previousId);
+        }
+        for (const item of this.readRecovery(previousId)) {
+          if (this.db.prepare("SELECT 1 FROM session_recovery WHERE session_id = ? AND kind = ? AND id = ?").get(id, item.kind, item.value.id)) {
+            throw new Error(`Recovery alias conflict for ${previousId}; both records were preserved`);
+          }
+        }
+        this.db.prepare("UPDATE session_recovery SET session_id = ? WHERE session_id = ?").run(id, previousId);
+      }
+      this.db.prepare(`INSERT INTO host_metadata VALUES ('provider-ownership', ?)
+        ON CONFLICT(key) DO UPDATE SET value = excluded.value`).run(JSON.stringify(ownership));
+    });
+    return ownership;
+  }
 
   readRecovery(sessionId: string): SessionRecoveryItem[] {
     return (this.db.prepare("SELECT value FROM session_recovery WHERE session_id = ? ORDER BY rowid")

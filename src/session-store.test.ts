@@ -7,6 +7,7 @@ import { it } from "node:test";
 
 import { SessionStore, type StoredSessionItem } from "./session-store.js";
 import { reconcileSessionHistory } from "./session-history.js";
+import { resolveSessionReference, wrapProviderScopedId } from "./session-identity.js";
 
 const payload = {
   input: [{ type: "text" as const, text: "Keep this request", text_elements: [] }],
@@ -17,6 +18,59 @@ const payload = {
   },
 };
 const receipt = { mode: "turn" as const, turnId: "turn-1", messageId: "input-1" };
+
+it("pins legacy owners and migrates input, plan, and recovery identities together", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "sidemesh-provider-ownership-"));
+  let store = await SessionStore.open(dir);
+  try {
+    const canonical = wrapProviderScopedId("writer", "native");
+    const legacy = wrapProviderScopedId("fake", "native");
+    store.prepareInput({ key: "native:raw:input", sessionId: "native", signatureHash: "raw", payload });
+    store.queueInput("native:raw:input", "raw:input", payload);
+    store.prepareInput({ key: `${legacy}:scoped:input`, sessionId: legacy, signatureHash: "scoped", payload });
+    store.dispatchInput(`${legacy}:scoped:input`);
+    store.acceptInput(`${legacy}:scoped:input`, { ...receipt, messageId: "scoped:input" });
+    store.setPlan("native", { type: "plan_updated", sessionId: "native", plan: [{ step: "Keep this plan", status: "pending" }] });
+    const recovery: StoredSessionItem = { kind: "message", nativeId: null, authority: "recovery",
+      value: { id: "draft", role: "assistant", text: "Keep this output", content: [], attachments: [], seq: 1, createdAt: 1 } };
+    store.putRecovery(legacy, recovery);
+    const first = store.configureProviderOwnership([{ id: "writer", kind: "fake" }], "writer");
+    for (const reference of ["native", legacy, canonical]) assert.equal(resolveSessionReference(reference, first)?.sessionId, canonical);
+    assert.equal(store.getInput("native:raw:input"), null);
+    assert.equal(store.getInput(`${canonical}:raw:input`)?.state, "queued");
+    assert.deepEqual(store.getInput(`${canonical}:scoped:input`)?.receipt, { ...receipt, messageId: "scoped:input" });
+    assert.equal(store.getPlan(canonical)?.sessionId, canonical);
+    assert.deepEqual(store.readRecovery(canonical), [recovery]);
+    store.close();
+    store = await SessionStore.open(dir);
+    const changed = store.configureProviderOwnership([{ id: "writer", kind: "fake" }, { id: "reviewer", kind: "fake" }], "reviewer");
+    assert.equal(resolveSessionReference("native", changed)?.providerId, "writer");
+    assert.equal(resolveSessionReference(legacy, changed)?.providerId, "writer");
+    assert.equal(resolveSessionReference(wrapProviderScopedId("reviewer", "native"), changed)?.providerId, "reviewer");
+    assert.equal(resolveSessionReference(wrapProviderScopedId("missing", "native"), changed), null);
+    assert.equal(store.getInput(`${canonical}:scoped:input`)?.state, "uncertain");
+    const removed = store.configureProviderOwnership([{ id: "reviewer", kind: "fake" }], "reviewer");
+    assert.equal(resolveSessionReference("native", removed)?.providerId, "writer", "removing an owner must not transfer its sessions");
+    assert.throws(() => store.configureProviderOwnership([{ id: "writer", kind: "codex" }], "writer"), /belongs to fake/);
+    assert.throws(() => store.configureProviderOwnership([{ id: "fake", kind: "fake" }], "fake"), /saved alias/);
+  } finally { store.close(); await rm(dir, { recursive: true, force: true }); }
+});
+
+it("rolls back alias migration when two input records could represent separate deliveries", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "sidemesh-alias-conflict-"));
+  const store = await SessionStore.open(dir);
+  try {
+    const canonical = wrapProviderScopedId("writer", "native");
+    for (const sessionId of ["native", canonical]) store.prepareInput({ key: `${sessionId}:input`, sessionId, signatureHash: "same", payload });
+    assert.throws(() => store.configureProviderOwnership([{ id: "writer", kind: "fake" }], "writer"), /Input alias conflict/);
+    assert.deepEqual(store.getInput("native:input")?.payload, payload);
+    assert.deepEqual(store.getInput(`${canonical}:input`)?.payload, payload);
+    assert.equal(store.inputCount(), 2);
+    const db = new DatabaseSync(join(dir, "sessions-v1.db"));
+    assert.equal(db.prepare("SELECT value FROM host_metadata WHERE key = 'provider-ownership'").get(), undefined);
+    db.close();
+  } finally { store.close(); await rm(dir, { recursive: true, force: true }); }
+});
 
 it("migrates item keys and retains a message and tool with the same ID", async () => {
   const dir = await mkdtemp(join(tmpdir(), "sidemesh-item-identity-"));

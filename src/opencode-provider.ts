@@ -671,7 +671,9 @@ export class OpenCodeAgentProvider extends EventEmitter<AgentProviderEvents> imp
       nextSeq: this.db.nextSessionSequence(this.providerId, info.id) };
   }
   private thread(info: OpenCodeSessionInfo, status: OpenCodeSessionStatus, includeTurns: boolean): ThreadRecord {
-    return { id: info.id, cwd: info.directory, name: info.title, preview: this.db.getProviderSession(this.providerId, info.id)?.preview ?? info.title,
+    const record = this.db.getProviderSession(this.providerId, info.id);
+    return { id: info.id, cwd: info.directory, name: info.title, preview: record?.preview ?? info.title,
+      runtime: this.metadata(record).runtime ?? null,
       createdAt: info.time.created / 1000, updatedAt: info.time.updated / 1000, source: "opencode", path: info.path ?? null,
       subAgent: subAgentInfoForOpenCodeSession(info), status: { type: status.type, phase: statusToLiveThreadStatus(status) },
       ...(includeTurns ? { turns: this.active.has(info.id) ? [{ id: this.active.get(info.id)!.id, status: "inProgress", startedAt: null, completedAt: null }] : [] } : {}) };

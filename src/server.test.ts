@@ -1,5 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
+import { wrapProviderScopedId, unwrapProviderScopedId } from "./session-identity.js";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { EventEmitter } from "node:events";
@@ -33,12 +34,11 @@ import {
   FakeAgentProvider,
   type FakeAgentProviderOptions,
 } from "./fake-provider.js";
-import { MultiAgentProvider } from "./multi-provider.js";
 import {
   listAgentProviderDefinitionSummaries,
   summarizeAgentProviderConfig,
 } from "./provider-registry.js";
-import { createAgentProviderRuntime, type AgentProviderRuntime, type AgentProviderRuntimeEntry } from "./provider-factory.js";
+import { createAgentProviderRuntime, AgentProviderRuntime } from "./provider-factory.js";
 import { AgentProviderRequestError } from "./agent-provider.js";
 import type {
   AgentCreateSessionRequest,
@@ -206,86 +206,19 @@ function makeMultiProviderRuntime(fakeOptions: FakeAgentProviderOptions, seconda
   // underlying provider is FakeAgentProvider so no external binary is needed.
   const codexConfig = { kind: "codex" as const, bin: "codex" };
 
-  const fakeEntry: AgentProviderRuntimeEntry = {
-    kind: "fake",
-    provider: defaultProvider,
-    configSummary: summarizeAgentProviderConfig(fakeConfig),
-    definitionSummary: fakeDef,
-  };
-  const secondaryEntry: AgentProviderRuntimeEntry = {
-    kind: "codex",
-    provider: secondaryProvider,
-    configSummary: summarizeAgentProviderConfig(codexConfig),
-    definitionSummary: codexDef,
-  };
-
-  const multiProvider = new MultiAgentProvider(
-    [
-      { kind: "fake", config: fakeConfig, provider: defaultProvider },
-      { kind: "codex", config: codexConfig, provider: secondaryProvider },
-    ],
-    "fake",
-  );
-
-  const providersByKind = new Map<string, AgentProviderRuntimeEntry>([
-    ["fake", fakeEntry],
-    ["codex", secondaryEntry],
-  ]);
-
-  return {
-    provider: multiProvider,
-    providers: [fakeEntry, secondaryEntry],
-    defaultProviderKind: "fake",
-    defaultProvider: fakeEntry,
-    providerForKind(kind) {
-      if (kind === null || kind === undefined) return fakeEntry;
-      const trimmed = kind.trim();
-      if (!trimmed) return null;
-      return providersByKind.get(trimmed) ?? null;
-    },
-    providerForSessionId(sessionId) {
-      try {
-        const resolved = multiProvider.resolveSessionProvider(sessionId);
-        return providersByKind.get(resolved.kind) ?? null;
-      } catch {
-        return fakeEntry;
-      }
-    },
-  };
+  return new AgentProviderRuntime([
+    { id: "fake", kind: "fake", create: () => defaultProvider,
+      configSummary: summarizeAgentProviderConfig(fakeConfig), definitionSummary: { ...fakeDef, capabilities: defaultProvider.capabilities } },
+    { id: "codex", kind: "codex", create: () => secondaryProvider,
+      configSummary: summarizeAgentProviderConfig(codexConfig), definitionSummary: { ...codexDef, capabilities: secondaryProvider.capabilities } },
+  ], "fake");
 }
 
 function makeCustomSingleProviderRuntime(provider: AgentProvider): AgentProviderRuntime {
-  const definitionSummary = listAgentProviderDefinitionSummaries().find(
-    (summary) => summary.kind === "fake",
-  );
-  if (!definitionSummary) {
-    throw new Error("Missing fake provider definition");
-  }
-  const configSummary = summarizeAgentProviderConfig({
-    kind: "fake",
-    latencyMs: 0,
-    seedSessions: false,
-    workspaceRoot: null,
-    capabilityProfile: "full",
-  });
-  const entry: AgentProviderRuntimeEntry = {
-    kind: "fake",
-    provider,
-    configSummary,
-    definitionSummary,
-  };
-  return {
-    provider,
-    providers: [entry],
-    defaultProviderKind: "fake",
-    defaultProvider: entry,
-    providerForKind(kind) {
-      return kind == null || kind.trim() === "fake" ? entry : null;
-    },
-    providerForSessionId() {
-      return entry;
-    },
-  };
+  const definitionSummary = listAgentProviderDefinitionSummaries().find((summary) => summary.kind === "fake")!;
+  const configSummary = summarizeAgentProviderConfig({ kind: "fake", latencyMs: 0, seedSessions: false, workspaceRoot: null, capabilityProfile: "full" });
+  return new AgentProviderRuntime([{ id: "fake", kind: "fake", create: () => provider,
+    configSummary, definitionSummary: { ...definitionSummary, capabilities: provider.capabilities } }], "fake");
 }
 
 class ModeCatalogOnlyProvider
@@ -424,7 +357,7 @@ class RestartableFakeProvider
 
   public async start(): Promise<void> {}
 
-  public async close(): Promise<void> {}
+  public async close(): Promise<void> { await this.restart(); }
 
   public async restart(): Promise<void> {
     this.restarted = true;
@@ -724,7 +657,7 @@ class ImmediateCompletionProvider extends SnapshotFixtureProvider implements Age
     this.lastTurnId = turnId;
     this.emit("liveEvent", {
       type: "turn_completed",
-      sessionId: this.sessionId,
+      sessionId: nativeSessionId(this.sessionId),
       turnId,
       status: "completed",
     });
@@ -1080,34 +1013,8 @@ function makeSingleProviderRuntime(
     workspaceRoot: fakeOptions.workspaceRoot ?? null,
     capabilityProfile: fakeOptions.capabilityProfile ?? "full",
   };
-  const entry: AgentProviderRuntimeEntry = {
-    kind: "fake",
-    provider,
-    configSummary: summarizeAgentProviderConfig(fakeConfig),
-    definitionSummary: fakeDef,
-  };
-  return {
-    provider,
-    runtime: {
-      provider,
-      providers: [entry],
-      defaultProviderKind: "fake",
-      defaultProvider: entry,
-      providerForKind(kind) {
-        if (kind === null || kind === undefined) {
-          return entry;
-        }
-        const trimmed = kind.trim();
-        if (!trimmed || trimmed === "fake") {
-          return entry;
-        }
-        return null;
-      },
-      providerForSessionId() {
-        return entry;
-      },
-    },
-  };
+  return { provider, runtime: new AgentProviderRuntime([{ id: "fake", kind: "fake", create: () => provider,
+    configSummary: summarizeAgentProviderConfig(fakeConfig), definitionSummary: { ...fakeDef, capabilities: provider.capabilities } }], "fake") };
 }
 
 async function openSessionLiveSocket(
@@ -1194,51 +1101,51 @@ describe("/healthz", () => {
     });
   });
 
-  it("returns 503 when provider getVersion throws", async () => {
-    const original = FakeAgentProvider.prototype.getVersion;
-    FakeAgentProvider.prototype.getVersion = async function () {
-      throw new Error("simulated provider failure");
-    };
-    const stateDir = await mkdtemp(nodePath.join(tmpdir(), "sidemesh-server-test-"));
-    try {
-      await withServer(makeConfig(stateDir), async (server) => {
-        const res = await request({ hostname: "127.0.0.1", port: server.port, path: "/healthz", method: "GET" });
-        assert.equal(res.statusCode, 503);
-        assert.equal((res.body as any).ok, false);
-        assert.equal((res.body as any).error, "provider unreachable");
-      });
-    } finally {
-      FakeAgentProvider.prototype.getVersion = original;
-    }
+  it("keeps host controls available when one provider cannot start", async () => {
+    const stateDir = await mkdtemp(nodePath.join(tmpdir(), "sidemesh-provider-failure-"));
+    const config = makeConfig(stateDir);
+    config.terminal.enabled = true;
+    const bad = new FakeAgentProvider({ seedSessions: false });
+    bad.start = async () => { throw new Error("Missing executable"); };
+    const good = new FakeAgentProvider({ seedSessions: false });
+    const base = makeCustomSingleProviderRuntime(bad).defaultProvider;
+    const runtime = new AgentProviderRuntime([
+      { ...base, id: "broken", create: () => bad },
+      { ...base, id: "working", create: () => good },
+    ], "broken");
+    await withServerRuntime(config, runtime, async (server) => {
+      const headers = { Authorization: `Bearer ${config.token}`, "content-type": "application/json" };
+      assert.ok(runtime.providers.every((entry) => entry.state === "idle"));
+      const failed = await request({ hostname: "127.0.0.1", port: server.port, path: "/api/sessions/create", method: "POST", headers,
+        body: JSON.stringify({ provider: "broken", cwd: stateDir, input: [] }) });
+      assert.equal(failed.statusCode, 503);
+      const created = await request({ hostname: "127.0.0.1", port: server.port, path: "/api/sessions/create", method: "POST", headers,
+        body: JSON.stringify({ provider: "working", cwd: stateDir, input: [] }) });
+      assert.equal(created.statusCode, 201);
+      const health = await request({ hostname: "127.0.0.1", port: server.port, path: "/healthz" });
+      assert.equal(health.statusCode, 200);
+      const terminals = await request({ hostname: "127.0.0.1", port: server.port, path: "/api/terminals", headers });
+      assert.equal(terminals.statusCode, 200);
+      const node = await request({ hostname: "127.0.0.1", port: server.port, path: "/api/node", headers });
+      assert.deepEqual((node.body as any).supportedProviders.map((entry: any) => entry.state), ["unavailable", "ready"]);
+      await server.close();
+      await server.close();
+    });
   });
 
-  it("returns 503 when an explicit provider health probe rejects", async () => {
-    const prototype = FakeAgentProvider.prototype as unknown as {
-      health?: () => Promise<boolean>;
-    };
-    const original = prototype.health;
-    prototype.health = async () => {
-      throw new Error("simulated health rejection");
-    };
-    const stateDir = await mkdtemp(nodePath.join(tmpdir(), "sidemesh-server-test-"));
-    try {
-      await withServer(makeConfig(stateDir), async (server) => {
-        const res = await request({
-          hostname: "127.0.0.1",
-          port: server.port,
-          path: "/healthz",
-          method: "GET",
-        });
-        assert.equal(res.statusCode, 503);
-        assert.equal((res.body as any).ok, false);
-      });
-    } finally {
-      if (original) {
-        prototype.health = original;
-      } else {
-        delete prototype.health;
-      }
-    }
+  it("keeps host health independent of a rejected provider health probe", async () => {
+    const stateDir = await mkdtemp(nodePath.join(tmpdir(), "sidemesh-provider-health-"));
+    const provider = new FakeAgentProvider({ seedSessions: false });
+    const runtime = makeCustomSingleProviderRuntime(provider);
+    Object.assign(provider, { health: async () => { throw new Error("Connection failed"); } });
+    await withServerRuntime(makeConfig(stateDir), runtime, async (server) => {
+      await runtime.ensure(runtime.defaultProvider);
+      await runtime.checkHealth();
+      assert.equal(runtime.defaultProvider.state, "unavailable");
+      const res = await request({ hostname: "127.0.0.1", port: server.port, path: "/healthz" });
+      assert.equal(res.statusCode, 200);
+      assert.equal((res.body as any).ok, true);
+    });
   });
 
 });
@@ -1387,7 +1294,7 @@ describe("session input item parsing", () => {
         method: "POST", headers, body: JSON.stringify({ ...body, cwd: stateDir }) });
       assert.equal(created.statusCode, 502);
       const result = created.body as { session: { id: string }; code: string; clientMessageId: string };
-      assert.equal(result.session.id, "fake-restart-session");
+      assert.equal(result.session.id, wrapProviderScopedId("fake", "fake-restart-session"));
       assert.equal(result.code, "initial_input_failed");
       assert.equal(result.clientMessageId, body.clientMessageId);
       const retry = await request({ hostname: "127.0.0.1", port: server.port,
@@ -1593,7 +1500,7 @@ describe("session input item parsing", () => {
         input: { ...RESTARTABLE_FAKE_CAPABILITIES.input, steer: false } };
       async interruptTurn(sessionId: string, turnId: string): Promise<void> {
         await this.restart();
-        this.emit("liveEvent", { type: "turn_completed", sessionId, turnId, status: "interrupted" });
+        this.emit("liveEvent", { type: "turn_completed", sessionId: nativeSessionId(sessionId), turnId, status: "interrupted" });
       }
     }
     const stateDir = await mkdtemp(nodePath.join(tmpdir(), "sidemesh-server-queue-"));
@@ -1657,7 +1564,7 @@ describe("session input item parsing", () => {
       assert.equal((await result).statusCode, 500);
       const db = new DatabaseSync(nodePath.join(stateDir, "sessions-v1.db"), { readOnly: true });
       try {
-        const row = db.prepare("SELECT state, payload FROM inputs WHERE key = ?").get(`${created.thread.id}:close-input`) as { state: string; payload: string };
+        const row = db.prepare("SELECT state, payload FROM inputs WHERE key = ?").get(`${wrapProviderScopedId("fake", created.thread.id)}:close-input`) as { state: string; payload: string };
         assert.equal(row.state, "uncertain");
         assert.equal(JSON.parse(row.payload).input[0].text, "saved input");
       } finally { db.close(); }
@@ -1913,7 +1820,7 @@ describe("POST /api/admin/provider/:kind/restart", () => {
     });
   });
 
-  it("returns 501 when provider does not support restart", async () => {
+  it("can recreate a configured provider without a native restart method", async () => {
     const stateDir = await mkdtemp(nodePath.join(tmpdir(), "sidemesh-server-test-"));
     await withServer(makeConfig(stateDir), async (server, config) => {
       const res = await request({
@@ -1923,8 +1830,7 @@ describe("POST /api/admin/provider/:kind/restart", () => {
         method: "POST",
         headers: { Authorization: "Bearer " + config.token },
       });
-      assert.equal(res.statusCode, 501);
-      assert.equal((res.body as any).error, "provider does not support restart");
+      assert.equal(res.statusCode, 200);
     });
   });
 
@@ -1960,7 +1866,7 @@ describe("POST /api/admin/provider/:kind/restart", () => {
       });
       assert.equal(beforeStatus.statusCode, 200);
       assert.equal((beforeStatus.body as any).isRunning, true);
-      assert.equal((beforeStatus.body as any).pendingAction.id, "fake-restart-action");
+      assert.equal((beforeStatus.body as any).pendingAction.id, wrapProviderScopedId("fake", "fake-restart-action"));
 
       const beforeActions = await request({
         hostname: "127.0.0.1",
@@ -1980,7 +1886,7 @@ describe("POST /api/admin/provider/:kind/restart", () => {
         );
         provider.emit("liveEvent", {
           type: "provider_warning",
-          sessionId,
+          sessionId: nativeSessionId(sessionId),
           level: "warning",
           code: "restart-seed",
           message: "seed session seq",
@@ -2010,7 +1916,7 @@ describe("POST /api/admin/provider/:kind/restart", () => {
             sessionLive.events.find(
               (event) =>
                 event.type === "action_resolved" &&
-                event.actionId === "fake-restart-action",
+                event.actionId === wrapProviderScopedId("fake", "fake-restart-action"),
             ),
           "restart action resolved live event",
         );
@@ -2782,7 +2688,7 @@ describe("session live rich events", () => {
 
         provider.emit("liveEvent", {
           type: "provider_warning",
-          sessionId: primary.thread.id,
+          sessionId: nativeSessionId(primary.thread.id),
           level: "warning",
           code: "warn-1",
           message: "Heads up",
@@ -2790,13 +2696,13 @@ describe("session live rich events", () => {
         });
         provider.emit("liveEvent", {
           type: "thread_status_changed",
-          sessionId: primary.thread.id,
+          sessionId: nativeSessionId(primary.thread.id),
           status: "running",
           message: "Working",
         });
         provider.emit("liveEvent", {
           type: "plan_updated",
-          sessionId: primary.thread.id,
+          sessionId: nativeSessionId(primary.thread.id),
           turnId: "turn-1",
           explanation: "Follow the envelope plan.",
           plan: [
@@ -2806,7 +2712,7 @@ describe("session live rich events", () => {
         });
         provider.emit("liveEvent", {
           type: "reasoning_delta",
-          sessionId: primary.thread.id,
+          sessionId: nativeSessionId(primary.thread.id),
           turnId: "turn-1",
           itemId: "item-1",
           reasoningId: "reason-1",
@@ -2815,7 +2721,7 @@ describe("session live rich events", () => {
         });
         provider.emit("liveEvent", {
           type: "queue_updated",
-          sessionId: primary.thread.id,
+          sessionId: nativeSessionId(primary.thread.id),
           steeringCount: 1,
           followUpCount: 2,
           steeringPreview: ["Keep it provider-neutral"],
@@ -2823,7 +2729,7 @@ describe("session live rich events", () => {
         });
         provider.emit("liveEvent", {
           type: "auto_retry_updated",
-          sessionId: primary.thread.id,
+          sessionId: nativeSessionId(primary.thread.id),
           phase: "started",
           attempt: 2,
           maxAttempts: 3,
@@ -2904,7 +2810,7 @@ describe("session live rich events", () => {
 
       provider.emit("liveEvent", {
         type: "plan_updated",
-        sessionId,
+        sessionId: nativeSessionId(sessionId),
         turnId: "turn-1",
         explanation: "First plan.",
         plan: [{ step: "Inspect the daemon path", status: "completed" }],
@@ -2929,7 +2835,7 @@ describe("session live rich events", () => {
 
       provider.emit("liveEvent", {
         type: "plan_updated",
-        sessionId,
+        sessionId: nativeSessionId(sessionId),
         turnId: "turn-2",
         explanation: "Second plan.",
         plan: [{ step: "Return the freshest plan", status: "in_progress" }],
@@ -2962,6 +2868,7 @@ describe("session live rich events", () => {
       workspaceRoot: stateDir,
     });
     await withServerRuntime(makeConfig(stateDir), runtime, async (server, config) => {
+      await runtime.ensure(runtime.defaultProvider);
       const created = await provider.createSession({
         cwd: stateDir,
         input: [],
@@ -2971,7 +2878,7 @@ describe("session live rich events", () => {
 
       provider.emit("liveEvent", {
         type: "plan_updated",
-        sessionId,
+        sessionId: nativeSessionId(sessionId),
         turnId: "turn-1",
         explanation: "Catch up on reconnect.",
         plan: [{ step: "Replay the latest plan", status: "in_progress" }],
@@ -3012,6 +2919,7 @@ describe("session live rich events", () => {
       workspaceRoot: stateDir,
     });
     await withServerRuntime(makeConfig(stateDir), runtime, async (server, config) => {
+      await runtime.ensure(runtime.defaultProvider);
       const created = await provider.createSession({
         cwd: stateDir,
         input: [],
@@ -3021,7 +2929,7 @@ describe("session live rich events", () => {
 
       provider.emit("liveEvent", {
         type: "plan_updated",
-        sessionId,
+        sessionId: nativeSessionId(sessionId),
         turnId: "turn-1",
         explanation: "Create the plan card.",
         plan: [{ step: "Show the plan", status: "in_progress" }],
@@ -3042,7 +2950,7 @@ describe("session live rich events", () => {
 
       provider.emit("liveEvent", {
         type: "plan_updated",
-        sessionId,
+        sessionId: nativeSessionId(sessionId),
         turnId: "turn-1",
         plan: [],
       });
@@ -3089,7 +2997,7 @@ describe("session live rich events", () => {
 
       provider.emit("liveEvent", {
         type: "activity_updated",
-        sessionId: provider.sessionId,
+        sessionId: nativeSessionId(provider.sessionId),
         turnId: "turn-1",
         activity: {
           id: "cmd-1",
@@ -3137,9 +3045,10 @@ describe("session live rich events", () => {
   it("releases provider listeners and timers when the server closes", async () => {
     const stateDir = await mkdtemp(nodePath.join(tmpdir(), "sidemesh-server-close-"));
     const provider = new ActivityReplayFixtureProvider();
-    await withServerRuntime(makeConfig(stateDir), makeCustomSingleProviderRuntime(provider), async () => {
+    await withServerRuntime(makeConfig(stateDir), makeCustomSingleProviderRuntime(provider), async (server, config) => {
+      await request({ hostname: "127.0.0.1", port: server.port, path: `/api/sessions/${provider.sessionId}/log`, headers: { Authorization: `Bearer ${config.token}` } });
       assert.equal(provider.listenerCount("liveEvent"), 1);
-      provider.emit("liveEvent", { type: "runtime_updated", sessionId: provider.sessionId, runtime: { model: "last model" } });
+      provider.emit("liveEvent", { type: "runtime_updated", sessionId: nativeSessionId(provider.sessionId), runtime: { model: "last model" } });
     });
     assert.equal(provider.listenerCount("liveEvent"), 0);
     assert.equal(provider.listenerCount("stderr"), 0);
@@ -3167,15 +3076,15 @@ describe("session live rich events", () => {
         headers: { Authorization: `Bearer ${config.token}` },
       });
       await entered;
-      provider.emit("liveEvent", { type: "turn_started", sessionId: provider.sessionId, turnId: "turn-live" });
-      provider.emit("liveEvent", { type: "assistant_delta", sessionId: provider.sessionId, delta: "Still writing" });
-      provider.emit("liveEvent", { type: "reasoning_delta", sessionId: provider.sessionId, delta: "Checking", summary: false });
-      provider.emit("liveEvent", { type: "runtime_updated", sessionId: provider.sessionId, runtime: { model: "live-model" } });
+      provider.emit("liveEvent", { type: "turn_started", sessionId: nativeSessionId(provider.sessionId), turnId: "turn-live" });
+      provider.emit("liveEvent", { type: "assistant_delta", sessionId: nativeSessionId(provider.sessionId), delta: "Still writing" });
+      provider.emit("liveEvent", { type: "reasoning_delta", sessionId: nativeSessionId(provider.sessionId), delta: "Checking", summary: false });
+      provider.emit("liveEvent", { type: "runtime_updated", sessionId: nativeSessionId(provider.sessionId), runtime: { model: "live-model" } });
       provider.emit("liveEvent", {
-        type: "activity_updated", sessionId: provider.sessionId,
+        type: "activity_updated", sessionId: nativeSessionId(provider.sessionId),
         activity: { ...((await readLog({ id: provider.sessionId } as ThreadRecord)).activities[0]), output: "fresh output" },
       });
-      provider.emit("liveEvent", { type: "plan_updated", sessionId: provider.sessionId, plan: [{ step: "Fresh plan", status: "in_progress" }] });
+      provider.emit("liveEvent", { type: "plan_updated", sessionId: nativeSessionId(provider.sessionId), plan: [{ step: "Fresh plan", status: "in_progress" }] });
       release();
       const result = await snapshot;
       assert.equal(result.statusCode, 200);
@@ -3211,16 +3120,16 @@ describe("session live rich events", () => {
         headers: { Authorization: `Bearer ${config.token}` },
       });
       await entered;
-      provider.emit("liveEvent", { type: "turn_started", sessionId: provider.sessionId, turnId: "turn-live" });
-      provider.emit("liveEvent", { type: "assistant_delta", sessionId: provider.sessionId, delta: "Still writing" });
-      provider.emit("liveEvent", { type: "reasoning_delta", sessionId: provider.sessionId, delta: "Checking", summary: false });
-      provider.emit("liveEvent", { type: "runtime_updated", sessionId: provider.sessionId, runtime: { model: "live-model" } });
+      provider.emit("liveEvent", { type: "turn_started", sessionId: nativeSessionId(provider.sessionId), turnId: "turn-live" });
+      provider.emit("liveEvent", { type: "assistant_delta", sessionId: nativeSessionId(provider.sessionId), delta: "Still writing" });
+      provider.emit("liveEvent", { type: "reasoning_delta", sessionId: nativeSessionId(provider.sessionId), delta: "Checking", summary: false });
+      provider.emit("liveEvent", { type: "runtime_updated", sessionId: nativeSessionId(provider.sessionId), runtime: { model: "live-model" } });
       provider.emit("liveEvent", {
-        type: "activity_updated", sessionId: provider.sessionId,
+        type: "activity_updated", sessionId: nativeSessionId(provider.sessionId),
         activity: { ...((await readLog({ id: provider.sessionId } as ThreadRecord)).activities[0]), output: "fresh output" },
       });
-      provider.emit("liveEvent", { type: "plan_updated", sessionId: provider.sessionId, plan: [{ step: "Fresh plan", status: "in_progress" }] });
-      provider.emit("liveEvent", { type: "turn_completed", sessionId: provider.sessionId, turnId: "turn-live", status: "completed" });
+      provider.emit("liveEvent", { type: "plan_updated", sessionId: nativeSessionId(provider.sessionId), plan: [{ step: "Fresh plan", status: "in_progress" }] });
+      provider.emit("liveEvent", { type: "turn_completed", sessionId: nativeSessionId(provider.sessionId), turnId: "turn-live", status: "completed" });
       release();
       const result = await snapshot;
       assert.equal(result.statusCode, 200);
@@ -3372,6 +3281,7 @@ describe("session live rich events", () => {
     let secondServer: RunningServer | null = null;
     try {
       firstServer = await startServer(config, runtime);
+      await runtime.ensure(runtime.defaultProvider);
       const created = await provider.createSession({
         cwd: stateDir,
         input: [],
@@ -3381,7 +3291,7 @@ describe("session live rich events", () => {
 
       provider.emit("liveEvent", {
         type: "plan_updated",
-        sessionId,
+        sessionId: nativeSessionId(sessionId),
         turnId: "turn-1",
         explanation: "Persist this plan.",
         plan: [{ step: "Reload after restart", status: "completed" }],
@@ -3390,7 +3300,7 @@ describe("session live rich events", () => {
       await firstServer.close();
       firstServer = null;
 
-      secondServer = await startServer(config, runtime);
+      secondServer = await startServer(config, makeCustomSingleProviderRuntime(provider));
       const restored = await request({
         hostname: "127.0.0.1",
         port: secondServer.port,
@@ -3549,7 +3459,7 @@ describe("session live rich events", () => {
         );
         provider.emit("liveEvent", {
           type: "queue_updated",
-          sessionId: primary.thread.id,
+          sessionId: nativeSessionId(primary.thread.id),
           steeringCount: 1,
           followUpCount: 0,
           steeringPreview: ["Still alive"],
@@ -3904,7 +3814,7 @@ describe("GET /api/sessions/:sessionId/status", () => {
       };
       provider.emit("liveEvent", {
         type: "thread_status_changed",
-        sessionId: session.thread.id,
+        sessionId: nativeSessionId(session.thread.id),
         status: "waiting_for_approval",
         pendingActionKind: "permissions",
       });
@@ -3929,7 +3839,7 @@ describe("GET /api/sessions/:sessionId/status", () => {
       });
       assert.equal(sessionsRes.statusCode, 200);
       const listed = (sessionsRes.body as any[]).find(
-        (item) => item.id === session.thread.id,
+        (item) => item.id === wrapProviderScopedId("fake", session.thread.id),
       );
       assert.ok(listed);
       assert.equal(listed.status, "waiting_for_approval");
@@ -3982,7 +3892,7 @@ describe("GET /api/sessions/:sessionId/status", () => {
       });
       assert.equal(sessionsRes.statusCode, 200);
       const listed = (sessionsRes.body as any[]).find(
-        (item) => item.id === "thread-child",
+        (item) => item.id === wrapProviderScopedId("fake", "thread-child"),
       );
       assert.equal(listed, undefined);
 
@@ -3995,14 +3905,15 @@ describe("GET /api/sessions/:sessionId/status", () => {
       });
       assert.equal(runsRes.statusCode, 200);
       assert.deepEqual(runsRes.body, [{
-        id: "thread-child",
+        id: wrapProviderScopedId("fake", "thread-child"),
         parentSessionId: "thread-parent",
         title: "Delegated explorer",
         preview: "Delegated explorer",
         cwd: "/repo",
         createdAt: 1000,
         updatedAt: 2000,
-        provider: null,
+        provider: "fake",
+        providerId: "fake",
         status: "idle",
         agentName: null,
         agentDisplayName: null,
@@ -4030,7 +3941,7 @@ describe("GET /api/sessions/:sessionId/status", () => {
       };
       provider.emit("liveEvent", {
         type: "thread_status_changed",
-        sessionId,
+        sessionId: nativeSessionId(sessionId),
         status: "waiting_for_input",
       });
 
@@ -4057,7 +3968,7 @@ describe("GET /api/sessions/:sessionId/status", () => {
       };
       provider.emit("liveEvent", {
         type: "thread_status_changed",
-        sessionId,
+        sessionId: nativeSessionId(sessionId),
         status: "errored",
       });
 
@@ -4219,7 +4130,7 @@ describe("GET /api/sessions/:sessionId/status", () => {
 
       provider.emit("liveEvent", {
         type: "thread_status_changed",
-        sessionId,
+        sessionId: nativeSessionId(sessionId),
         status: "waiting_for_approval",
         pendingActionKind: "user_input",
       });
@@ -4360,13 +4271,13 @@ describe("GET /api/sessions/:sessionId/status", () => {
           "recent session live snapshot",
         );
         const snapshotSession = (snapshot.sessions as Array<any>).find(
-          (session) => session.id === provider.sessionId,
+          (session) => session.id === wrapProviderScopedId("fake", provider.sessionId),
         );
         assert.equal(snapshotSession?.updatedAt, provider.freshUpdatedAt);
 
         provider.emit("liveEvent", {
           type: "thread_status_changed",
-          sessionId: provider.sessionId,
+          sessionId: nativeSessionId(provider.sessionId),
           status: "running",
         });
 
@@ -4375,7 +4286,7 @@ describe("GET /api/sessions/:sessionId/status", () => {
             recentLive.events.find(
               (event) =>
                 event.type === "upsert" &&
-                event.session?.id === provider.sessionId,
+                event.session?.id === wrapProviderScopedId("fake", provider.sessionId),
             ),
           "recent upsert after status change",
         );
@@ -4408,7 +4319,7 @@ describe("GET /api/sessions/:sessionId/status", () => {
       try {
         await reading;
         await provider.setSessionName(session.thread.id, "Fresh title");
-        provider.emit("liveEvent", { type: "thread_status_changed", sessionId: session.thread.id, status: "idle" });
+        provider.emit("liveEvent", { type: "thread_status_changed", sessionId: nativeSessionId(session.thread.id), status: "idle" });
         release();
         const response = await result;
         assert.equal(response.statusCode, 200);
@@ -4705,7 +4616,7 @@ describe("GET /api/sessions/search", () => {
     });
   });
 
-  it("returns archived provider sessions from startup backfill when requested", async () => {
+  it("returns archived provider sessions from search backfill when requested", async () => {
     const stateDir = await mkdtemp(nodePath.join(tmpdir(), "sidemesh-server-search-startup-archive-test-"));
     const provider = new SearchFixtureProvider([
       {
@@ -4745,11 +4656,11 @@ describe("GET /api/sessions/search", () => {
         assert.equal(searchRes.statusCode, 200);
         const results = searchRes.body as any[];
         assert.ok(
-          results.some((session) => session.id === "fixture-archived"),
-          "expected archived startup-backfilled session in archived search",
+          results.some((session) => session.id === wrapProviderScopedId("fake", "fixture-archived")),
+          "expected archived session from search backfill in archived search",
         );
         assert.ok(
-          !results.some((session) => session.id === "fixture-active"),
+          !results.some((session) => session.id === wrapProviderScopedId("fake", "fixture-active")),
           "expected active session excluded from archived-only search",
         );
       },
@@ -4788,7 +4699,7 @@ describe("GET /api/sessions/search", () => {
         assert.equal(includeRes.statusCode, 200);
         const included = includeRes.body as any[];
         assert.ok(
-          included.some((session) => session.id === "fixture-filter"),
+          included.some((session) => session.id === wrapProviderScopedId("fake", "fixture-filter")),
           "expected session newer than updatedAfter filter",
         );
 
@@ -4804,10 +4715,82 @@ describe("GET /api/sessions/search", () => {
         assert.equal(excludeRes.statusCode, 200);
         const excluded = excludeRes.body as any[];
         assert.ok(
-          !excluded.some((session) => session.id === "fixture-filter"),
+          !excluded.some((session) => session.id === wrapProviderScopedId("fake", "fixture-filter")),
           "expected session older than updatedAfter filter to be excluded",
         );
       },
     );
+  });
+});
+
+function nativeSessionId(id: string): string { return unwrapProviderScopedId(id)?.rawId ?? id; }
+
+describe("provider session identity", () => {
+  it("shares raw aliases with canonical input delivery and keeps owners after default changes", async () => {
+    const stateDir = await mkdtemp(nodePath.join(tmpdir(), "sidemesh-session-aliases-"));
+    const config = makeConfig(stateDir);
+    const writer = new RestartableFakeProvider();
+    const reviewer = new RestartableFakeProvider();
+    const definition = makeCustomSingleProviderRuntime(writer).defaultProvider;
+    const runtimeForDefault = (defaultId: string, includeWriter = true) => new AgentProviderRuntime([
+      ...(includeWriter ? [{ ...definition, id: "writer", create: () => writer }] : []),
+      { ...definition, id: "reviewer", create: () => reviewer },
+    ], defaultId);
+    let server = await startServer(config, runtimeForDefault("writer"));
+    const headers = { Authorization: `Bearer ${config.token}`, "content-type": "application/json" };
+    const call = (path: string, body?: unknown) => request({ hostname: "127.0.0.1", port: server.port, path,
+      method: body === undefined ? "GET" : "POST", headers, body: body === undefined ? undefined : JSON.stringify(body) });
+    const native = "fake-restart-session";
+    const writerId = wrapProviderScopedId("writer", native);
+    const reviewerId = wrapProviderScopedId("reviewer", native);
+    const input = { clientMessageId: "shared:input", input: [{ type: "text", text: "Keep each input once", text_elements: [] }] };
+    try {
+      for (const provider of ["writer", "reviewer"]) {
+        const created = await call("/api/sessions/create", { provider, cwd: `${stateDir}/${provider}`, input: [] });
+        assert.equal(created.statusCode, 201);
+        assert.equal((created.body as any).session.id, wrapProviderScopedId(provider, native));
+      }
+      const first = await call(`/api/sessions/${native}/input`, input);
+      const duplicate = await call(`/api/sessions/${encodeURIComponent(writerId)}/input`, input);
+      assert.equal(first.statusCode, 200);
+      assert.equal(duplicate.statusCode, 200);
+      assert.equal((first.body as any).messageId, (duplicate.body as any).messageId);
+      assert.equal(writer.submittedInputs, 1);
+      assert.equal(reviewer.submittedInputs, 0);
+      assert.equal((await call(`/api/sessions/${encodeURIComponent(reviewerId)}/input`, input)).statusCode, 200);
+      assert.equal(reviewer.submittedInputs, 1);
+      const rawLog = await call(`/api/sessions/${native}/log`);
+      assert.equal(rawLog.statusCode, 200);
+      assert.equal((rawLog.body as any).session.id, native);
+      assert.equal((rawLog.body as any).canonicalSessionId, writerId);
+      assert.equal((rawLog.body as any).session.cwd, `${stateDir}/writer`);
+      const otherLog = await call(`/api/sessions/${encodeURIComponent(reviewerId)}/log`);
+      assert.equal((otherLog.body as any).session.cwd, `${stateDir}/reviewer`);
+      const rawSocket = await openSessionLiveSocket(server.port, config.token, native);
+      const canonicalSocket = await openSessionLiveSocket(server.port, config.token, writerId);
+      try {
+        writer.emit("liveEvent", { type: "provider_warning", sessionId: native, level: "warning", code: "alias-check", message: "Same published event" });
+        const rawEvent = await waitFor(() => rawSocket.events.find((event) => event.code === "alias-check"), "raw alias event");
+        const canonicalEvent = await waitFor(() => canonicalSocket.events.find((event) => event.code === "alias-check"), "canonical event");
+        assert.equal(rawEvent.sessionId, native);
+        assert.equal(canonicalEvent.sessionId, writerId);
+        assert.equal(rawEvent.revision, canonicalEvent.revision);
+        assert.equal(rawEvent.seq, canonicalEvent.seq);
+      } finally { await closeSessionLiveSocket(rawSocket.socket); await closeSessionLiveSocket(canonicalSocket.socket); }
+      await server.close();
+      server = await startServer(config, runtimeForDefault("reviewer"));
+      const uncertain = await call(`/api/sessions/${native}/input`, input);
+      assert.equal(uncertain.statusCode, 409);
+      assert.equal(writer.submittedInputs, 1);
+      assert.equal(reviewer.submittedInputs, 1);
+      const next = await call(`/api/sessions/${native}/input`, { ...input, clientMessageId: "next:input" });
+      assert.equal(next.statusCode, 200);
+      assert.equal(writer.submittedInputs, 2);
+      assert.equal(reviewer.submittedInputs, 1);
+      await server.close();
+      server = await startServer(config, runtimeForDefault("reviewer", false));
+      assert.equal((await call(`/api/sessions/${native}/input`, { ...input, clientMessageId: "removed:owner" })).statusCode, 404);
+      assert.equal(reviewer.submittedInputs, 1);
+    } finally { await server.close(); await rm(stateDir, { recursive: true, force: true }); }
   });
 });

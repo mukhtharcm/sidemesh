@@ -139,7 +139,7 @@ export const FAKE_PROVIDER_CAPABILITIES: AgentProviderCapabilities = {
   },
 };
 
-function capabilitiesForFakeProfile(
+export function capabilitiesForFakeProfile(
   profile: FakeCapabilityProfile,
 ): AgentProviderCapabilities {
   const capabilities = cloneCapabilities(FAKE_PROVIDER_CAPABILITIES);
@@ -1377,6 +1377,7 @@ export class FakeAgentProvider
   private cloneThread(session: FakeSessionState, includeTurns: boolean): ThreadRecord {
     return {
       ...session.thread,
+      runtime: session.runtime ? structuredClone(session.runtime) : null,
       status: { ...session.thread.status },
       gitInfo: session.thread.gitInfo ? { ...session.thread.gitInfo } : null,
       turns: includeTurns

@@ -7,13 +7,8 @@ import { appendCommandActivityOutput, applyCommandTerminalInteraction, mergeActi
 import { toPublicPendingAction } from "./approvals.js";
 import { SessionInputCoordinator } from "./session-input-coordinator.js";
 import { SessionStore, type SessionRecoveryItem } from "./session-store.js";
-import type { ActiveTurnState, LatestPlanUpdate, LiveEvent, LiveThreadStatus, SessionActivity, SessionMessage, SessionRuntimeSummary } from "./types.js";
+import type { ActiveTurnState, LatestPlanUpdate, LiveEvent, LiveThreadStatus, SessionActivity, SessionMessage, SessionRuntimeSummary, ThreadRecord } from "./types.js";
 
-export interface SessionRuntimeCacheEntry {
-  threadUpdatedAt: number;
-  runtime: SessionRuntimeSummary | null;
-  promise?: Promise<SessionRuntimeSummary | null>;
-}
 
 interface SessionState {
   activeTurn: ActiveTurnState | null;
@@ -22,7 +17,7 @@ interface SessionState {
   executionRevision: number;
   activities: Map<string, SessionActivity>;
   messages: Map<string, SessionRecoveryItem & { kind: "message" }>;
-  runtime: SessionRuntimeCacheEntry | null;
+  runtime: SessionRuntimeSummary | null;
   nextSeq: number;
   revision: number;
   draftId: string | null;
@@ -78,6 +73,14 @@ export class SessionCoordinator {
   keys(): IterableIterator<string> { return this.sessions.keys(); }
   values(): IterableIterator<SessionState> { return this.sessions.values(); }
   get size(): number { return this.sessions.size; }
+  runtimeSummary(id: string): SessionRuntimeSummary | null { return this.sessions.get(id)?.runtime ?? null; }
+  projectListedThread(thread: ThreadRecord): ThreadRecord {
+    const state = this.sessions.get(thread.id);
+    // A list is metadata, not a complete native snapshot. It cannot clear a
+    // published approval, error, or completion observed through the coordinator.
+    return state?.status
+      ? { ...thread, status: { ...thread.status, phase: state.status } } : thread;
+  }
   allocSeq(id: string): number { return this.get(id).nextSeq++; }
 
   /** Stamp after the state mutation and durable write, before any socket receives it. */
@@ -194,9 +197,9 @@ export class SessionCoordinator {
         return;
       }
       case "runtime_updated": {
-        const previous = state.runtime?.runtime;
+        const previous = state.runtime;
         const runtime = event.runtime ? { ...previous, ...event.runtime, telemetry: { ...previous?.telemetry, ...event.runtime.telemetry } } : previous ?? null;
-        state.runtime = { threadUpdatedAt: Date.now() / 1000, runtime };
+        state.runtime = runtime;
         this.publish({ ...event, runtime: runtime ?? undefined });
         return;
       }
@@ -267,7 +270,7 @@ export class SessionCoordinator {
       state.status = native.busy ? (this.actionFor(id) ? "waiting_for_approval" : runningStatus(status) ? status : "running") : runningStatus(status) ? "idle" : status;
     }
     if (state.status !== previousStatus) this.publish({ type: "thread_status_changed", sessionId: id, status: state.status ?? "unknown" });
-    if (state.runtime === runtimeBeforeRead) state.runtime = { threadUpdatedAt: native.thread.updatedAt, runtime: native.runtime };
+    if (state.runtime === runtimeBeforeRead) state.runtime = native.runtime;
     this.store.confirmInputs(id, native.confirmedInputIds ?? []);
     // Reconcile the complete native view before applying client limits. Rebase
     // events received before the first snapshot after the native transcript.
@@ -321,7 +324,7 @@ export class SessionCoordinator {
     return { ...native, messages: messages.slice(-messageLimit), activities: activities.slice(-activityLimit),
       totalMessages: native.totalMessages + Math.max(0, messages.length - native.messages.length),
       totalActivities: Math.max(native.totalActivities, activities.length),
-      runtime: state.runtime?.runtime ?? native.runtime, latestPlanUpdate: plan,
+      runtime: state.runtime ?? native.runtime, latestPlanUpdate: plan,
       busy: state.busy, activeTurnId: state.activeTurn?.turnId ?? null, status: state.status ?? "unknown",
       revision: state.revision, nextSeq: state.nextSeq,
       liveAssistantText: draft?.text ?? "", liveAssistantReasoning: draft ? reasoningText(draft) : "" };

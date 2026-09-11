@@ -387,6 +387,11 @@ describe("Copilot provider", () => {
       await provider.start();
 
       assert.equal(await provider.getVersion(), "GitHub Copilot SDK 9.9.9");
+      assert.equal(await provider.health(), true);
+      const getStatus = sdk.getStatus.bind(sdk);
+      sdk.getStatus = async () => { throw new Error("SDK connection lost"); };
+      assert.equal(await provider.health(), false);
+      sdk.getStatus = getStatus;
 
       const completed = waitForTurnCompleted(provider);
       const created = await provider.createSession({
