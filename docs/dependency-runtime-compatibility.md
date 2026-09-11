@@ -1,6 +1,6 @@
 # Dependency and runtime compatibility
 
-Last audited: 2026-07-21.
+Last architecture compatibility check: 2026-09-11.
 
 Sidemesh combines ordinary library dependencies with external agent runtimes.
 An `outdated` result is therefore an audit queue, not an instruction to update
@@ -15,7 +15,7 @@ daemon processes all need separate compatibility checks.
 | Codex CLI/app-server | `0.144.6` | Compatible; see `docs/codex-app-server-compatibility.md` |
 | OpenCode SDK/server | `1.18.4` / `1.18.4` | Official SDK requests and SSE; isolated native checks cover health, session history, model/mode/skill catalogs, archive, and shutdown |
 | GitHub Copilot CLI | `1.0.73` | Current; also enforced through the root npm override |
-| ACPx | `0.12.0` | Current |
+| ACP SDK | `1.4.0`, protocol 1 | Direct optional ACP adapter; see [support matrix](acp-support-matrix.md) |
 | Flutter | CI and release workflows use `3.44.7`; the app requires Flutter `>=3.44.0` and Dart `^3.12.0` | Current |
 
 Codex and OpenCode are host-installed executables rather than npm dependencies

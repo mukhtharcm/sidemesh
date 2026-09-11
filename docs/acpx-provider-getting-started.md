@@ -82,3 +82,6 @@ Configure different instance `id` values to use several ACP agents, or several
 instances of the same agent, in one daemon. Keep existing IDs when changing a
 command. The legacy launch entries are retained for compatibility; use an explicit
 command to select a different bridge version.
+
+See the [versioned support matrix](acp-support-matrix.md) for authentication,
+content input, resource limits, and draft features that are not enabled.
