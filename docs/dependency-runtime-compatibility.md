@@ -48,6 +48,15 @@ or the adapter isolates the native feature.
 The Copilot CLI itself is independently held at the compatible `1.0.73` line by
 the root npm override.
 
+Copilot history reads use `getEvents()` on every full refresh. SQLite retains
+recovery items until native replay confirms them, including the native ID from
+`send()`. The old `sessions.json` is an import source only. The adapter uses
+`metadata.activity()` for native execution status and waits for `session.idle`,
+because `assistant.turn_end` can precede another tool cycle. Run
+`SIDEMESH_TEST_COPILOT=1 node --import tsx --test src/copilot-provider.test.ts`
+for the isolated SDK/CLI check. It creates an empty session with a temporary
+`COPILOT_HOME` and sends no model prompt.
+
 ### OpenCode SDK `1.18.4`
 
 Use the official SDK and global event stream. OpenCode owns its native history;
