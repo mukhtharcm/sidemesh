@@ -346,10 +346,14 @@ import { writeFile } from "node:fs/promises";
 const app = agent()
   .onRequest(methods.agent.initialize, () => ({ protocolVersion: PROTOCOL_VERSION, agentCapabilities: { sessionCapabilities: { close: {} } } }))
   .onRequest(methods.agent.session.new, () => ({ sessionId: "stdio-native" }))
-  .onRequest(methods.agent.session.prompt, async ({ params, client }) => {
-    await client.notify(methods.client.session.update, { sessionId: params.sessionId,
-      update: { sessionUpdate: "agent_message_chunk", content: { type: "text", text: "stdio result" } } });
-    return { stopReason: "end_turn" };
+  .onRequest(methods.agent.session.prompt, ({ params, requestId }) => {
+    // Put notification and response in one read to test the SDK dispatch order.
+    process.stdout.write([
+      { jsonrpc: "2.0", method: methods.client.session.update, params: { sessionId: params.sessionId,
+        update: { sessionUpdate: "agent_message_chunk", content: { type: "text", text: "stdio result" } } } },
+      { jsonrpc: "2.0", id: requestId, result: { stopReason: "end_turn" } },
+    ].map((item) => JSON.stringify(item)).join("\\n") + "\\n");
+    return new Promise(() => {});
   })
   .onRequest(methods.agent.session.close, async () => {
     await writeFile(${JSON.stringify(closedFile)}, String(process.pid));
