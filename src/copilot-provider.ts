@@ -484,9 +484,6 @@ export class CopilotAgentProvider
   public async compactSession(threadId: string): Promise<unknown> {
     const session = await this.getWritableSession(threadId);
     const sdkSession = await this.ensureSdkSession(session);
-    if (!sdkSession.rpc?.compaction?.compact) {
-      throw new Error("Copilot SDK does not expose manual compaction.");
-    }
     const startedAt = Date.now();
     this.replaceRuntime(
       session,
@@ -504,7 +501,7 @@ export class CopilotAgentProvider
       }),
     );
     try {
-      const result = await sdkSession.rpc.compaction.compact();
+      const result = await sdkSession.rpc.history.compact();
       const completedAt = Date.now();
       this.replaceRuntime(
         session,
@@ -2058,7 +2055,7 @@ export class CopilotAgentProvider
       suppressResumeEvent: true,
     });
     state.sdkSession = sdkSession;
-    const events = await sdkSession.getMessages?.();
+    const events = await sdkSession.getEvents();
     if (events) {
       const parsed = parseSdkSessionEvents(events, thread.cwd);
       state.messages = parsed.messages;

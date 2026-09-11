@@ -302,6 +302,11 @@ specific agent provider.
   `agent_message` events. Read both formats for transcripts and previews.
   Do not also promote `response_item.message`: it includes model context and
   copies of visible messages.
+- **Copilot SDK types**: derive adapter method types from the installed SDK.
+  SDK 1.0.4 exposes history through `session.getEvents()` and manual compaction
+  through `session.rpc.history.compact()`. The wire method `session.getMessages`
+  is not a JavaScript method. Do not cast a client through `unknown` to a copied
+  interface; this hides missing methods in production while mocks still pass.
 - **WebSocket `hello`**: The server sends `{"type":"hello"}` on every WS
   connection.
 - **Session freshness**: recover through `GET /api/sessions/:id/log` on open,
