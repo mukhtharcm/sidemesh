@@ -2059,7 +2059,7 @@ class _RecentPaneState extends State<RecentPane> {
     final secondaryLabel = showBranchLabel
         ? [
             if (branch != null && branch.isNotEmpty) branch,
-            if (agentProviderDisplayLabel(entry.session.provider)
+            if (agentProviderDisplayLabel(entry.session.provider, providerId: entry.session.providerId)
                 case final String provider)
               provider,
           ].join(' · ')

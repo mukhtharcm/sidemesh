@@ -277,10 +277,10 @@ class ApiClient {
 
   // -------------------------- Admin diagnostics --------------------------
 
-  Future<void> restartProvider(HostProfile host, String kind) async {
+  Future<void> restartProvider(HostProfile host, String providerId) async {
     await _post(
       host,
-      '/api/admin/provider/$kind/restart',
+      '/api/admin/provider/$providerId/restart',
       body: const {},
       timeout: const Duration(seconds: 15),
       operation: 'restart provider',

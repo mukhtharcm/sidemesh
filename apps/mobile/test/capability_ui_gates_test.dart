@@ -1537,6 +1537,35 @@ void main() {
     expect(api.lastCreateRequest?.accessMode, 'guarded');
   });
 
+  testWidgets('create session distinguishes two instances of the same provider', (tester) async {
+    final api = _CapabilityFakeApi(NodeInfo.fromJson({
+      'provider': 'fake', 'providerId': 'primary', 'providerName': 'Fake',
+      'defaultProviderCapabilities': _fullCapabilities,
+      'supportedProviders': [
+        for (final id in ['primary', 'secondary']) {
+          'id': id, 'kind': 'fake', 'displayName': 'Fake', 'defaultCommand': 'builtin',
+          'capabilities': {'sessions': {'create': true}, 'input': {'text': true}}, 'isDefault': id == 'primary',
+        },
+      ],
+    }));
+    await _pumpApp(tester, CreateSessionSheet(
+      host: _host('same-kind'), api: api, initialCwd: '/repo',
+      presentation: CreateSessionPresentation.dialog,
+    ), size: const Size(1600, 1100));
+    await _pumpFrames(tester);
+    expect(find.text('Fake · primary'), findsWidgets);
+    await tester.tap(find.byKey(const ValueKey('create-session-provider-selector')));
+    await _pumpFrames(tester);
+    expect(find.byKey(const ValueKey('provider-picker-primary')), findsOneWidget);
+    await tester.tap(find.byKey(const ValueKey('provider-picker-secondary')));
+    await _pumpFrames(tester);
+    expect(find.text('Fake · secondary'), findsWidgets);
+    await tester.enterText(find.byKey(const ValueKey('create-session-prompt-field')), 'Use the second instance');
+    await tester.tap(find.widgetWithText(FilledButton, 'Start session'));
+    await _pumpFrames(tester);
+    expect(api.lastCreateRequest!.provider, 'secondary');
+  });
+
   testWidgets('create session sheet sends selected provider for mixed hosts', (
     tester,
   ) async {
