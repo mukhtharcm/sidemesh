@@ -328,6 +328,11 @@ specific agent provider.
   `agent_message` events. Read both formats for transcripts and previews.
   Do not also promote `response_item.message`: it includes model context and
   copies of visible messages.
+  Transcript reads use app-server `thread/read`; retain the documented legacy
+  tool-output and runtime-settings supplements until upstream closes those
+  gaps. Codex `0.144.6` cannot read paginated histories. Native paginated test
+  fixtures on `0.154.0` need JSONL ordinals and native resume to build their
+  native projection. Never write that database directly.
 - **Copilot SDK types**: derive adapter method types from the installed SDK.
   SDK 1.0.4 exposes history through `session.getEvents()` and manual compaction
   through `session.rpc.history.compact()`. The wire method `session.getMessages`

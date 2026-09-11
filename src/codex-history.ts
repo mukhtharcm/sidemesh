@@ -200,6 +200,7 @@ async function scanRolloutFile(
   let totalMessages = 0;
   let totalActivities = 0;
   let seq = 0;
+  let turnId: string | null = null;
   const commandFunctionCalls = new Map<string, PendingCommandFunctionCall>();
   const commandSessionCalls = new Map<string, PendingCommandFunctionCall>();
   const stdinFunctionCalls = new Map<string, string>();
@@ -213,6 +214,8 @@ async function scanRolloutFile(
     if (!parsed) {
       continue;
     }
+
+    turnId = asOptionalString(parsed.payload?.turn_id) ?? turnId;
 
     const nextRuntime = parseRuntime(parsed);
     if (nextRuntime) {
@@ -246,11 +249,13 @@ async function scanRolloutFile(
     if (options.includeMessages) {
       const entry = parseMessage(parsed, seq);
       if (entry) {
+        if (entry.role === "system" && parsed.payload?.type === "error" && turnId) entry.id = `${turnId}:error`;
         totalMessages += 1;
         seq += 1;
         appendBounded(messages, entry, options.messageLimit ?? null);
       }
     }
+    if (committedTurnId || discardedTurnId) turnId = null;
 
     if (options.includeActivities) {
       const commandFunctionCall = parseCommandFunctionCall(parsed, seq);
@@ -1182,8 +1187,10 @@ export function parseRuntime(parsed: any): SessionRuntimeSummary | null {
     return null;
   }
 
-  if (parsed.type === "session_configured") {
-    const payload = parsed.payload;
+  if (parsed.type === "session_configured" ||
+      (parsed.type === "event_msg" && parsed.payload?.type === "thread_settings_applied")) {
+    const payload = parsed.type === "session_configured"
+      ? parsed.payload : parsed.payload.thread_settings;
     if (!payload || typeof payload !== "object") {
       return null;
     }
@@ -1191,9 +1198,11 @@ export function parseRuntime(parsed: any): SessionRuntimeSummary | null {
     const typed = payload as Record<string, any>;
     const runtime = {
       model: asOptionalString(typed.model),
-      modelProvider: asOptionalString(typed.model_provider),
+      modelProvider: asOptionalString(typed.model_provider ?? typed.model_provider_id),
       serviceTier: asOptionalString(typed.service_tier),
       reasoningEffort: asOptionalString(typed.reasoning_effort),
+      summaryMode: asOptionalString(typed.reasoning_summary),
+      personality: asOptionalString(typed.personality),
       approvalPolicy: asOptionalString(typed.approval_policy),
       sandboxMode: asOptionalString(typed.sandbox_policy?.type),
       networkAccess: asOptionalBoolean(typed.sandbox_policy?.network_access),
@@ -1340,6 +1349,10 @@ export function mergeRuntime(
     serviceTier: next.serviceTier ?? previous.serviceTier,
     reasoningEffort: next.reasoningEffort ?? previous.reasoningEffort,
     approvalPolicy: next.approvalPolicy ?? previous.approvalPolicy,
+    ...((next.permissionProfile ?? previous.permissionProfile) !== undefined
+      ? { permissionProfile: next.permissionProfile ?? previous.permissionProfile } : {}),
+    ...((next.approvalsReviewer ?? previous.approvalsReviewer) !== undefined
+      ? { approvalsReviewer: next.approvalsReviewer ?? previous.approvalsReviewer } : {}),
     sandboxMode: next.sandboxMode ?? previous.sandboxMode,
     networkAccess: next.networkAccess ?? previous.networkAccess,
     summaryMode: next.summaryMode ?? previous.summaryMode,
