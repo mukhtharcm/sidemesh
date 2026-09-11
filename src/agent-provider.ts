@@ -236,6 +236,7 @@ export interface AgentProviderCapabilities {
     approveForSession: boolean;
   };
   configuration: {
+    sessionOptions?: boolean;
     models: boolean;
     profiles: boolean;
     accessModes: boolean;

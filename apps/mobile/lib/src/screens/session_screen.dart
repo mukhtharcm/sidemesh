@@ -61,6 +61,7 @@ import '../widgets/app_dialogs.dart';
 import '../widgets/app_composer.dart';
 import '../widgets/mobile_model_picker.dart';
 import '../widgets/app_menu.dart';
+import '../widgets/session_configuration_controls.dart';
 import '../widgets/app_primitives.dart';
 import '../widgets/app_sheets.dart';
 import '../widgets/markdown_content.dart';

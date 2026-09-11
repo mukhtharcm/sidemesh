@@ -1020,6 +1020,8 @@ class SessionRuntimeSummary {
     this.summaryMode,
     this.personality,
     this.telemetry,
+    this.configurationOptions = const [],
+    this.commands = const [],
     this.updatedAt,
   });
 
@@ -1035,6 +1037,8 @@ class SessionRuntimeSummary {
   final String? summaryMode;
   final String? personality;
   final SessionTelemetrySummary? telemetry;
+  final List<SessionConfigurationOption> configurationOptions;
+  final List<SessionCommandSummary> commands;
   final DateTime? updatedAt;
 
   SessionRuntimeSummary copyWith({
@@ -1051,6 +1055,8 @@ class SessionRuntimeSummary {
     String? personality,
     SessionTelemetrySummary? telemetry,
     bool clearTelemetry = false,
+    List<SessionConfigurationOption>? configurationOptions,
+    List<SessionCommandSummary>? commands,
     DateTime? updatedAt,
   }) => SessionRuntimeSummary(
     model: model ?? this.model,
@@ -1066,10 +1072,14 @@ class SessionRuntimeSummary {
     personality: personality ?? this.personality,
     telemetry: clearTelemetry ? null : (telemetry ?? this.telemetry),
     updatedAt: updatedAt ?? this.updatedAt,
+    configurationOptions: configurationOptions ?? this.configurationOptions,
+    commands: commands ?? this.commands,
   );
 
   factory SessionRuntimeSummary.fromJson(Map<String, dynamic> json) =>
       SessionRuntimeSummary(
+        configurationOptions: SessionConfigurationOption.listFromJson(json['configurationOptions']),
+        commands: SessionCommandSummary.listFromJson(json['commands']),
         model: json['model'] as String?,
         modelProvider: json['modelProvider'] as String?,
         mode: json['mode'] as String?,
@@ -1104,8 +1114,71 @@ class SessionRuntimeSummary {
     'summaryMode': summaryMode,
     'personality': personality,
     'telemetry': telemetry?.toJson(),
+    'configurationOptions': configurationOptions.map((option) => option.toJson()).toList(),
+    'commands': commands.map((command) => command.toJson()).toList(),
     'updatedAt': updatedAt?.millisecondsSinceEpoch,
   };
+}
+
+class SessionConfigurationOption {
+  const SessionConfigurationOption({required this.id, required this.label, required this.value,
+    this.description, this.category, this.options = const []});
+  final String id;
+  final String label;
+  final Object value;
+  final String? description;
+  final String? category;
+  final List<SessionConfigurationChoice> options;
+
+  static List<SessionConfigurationOption> listFromJson(Object? value) {
+    if (value is! List) return const [];
+    final ids = <String>{};
+    return value.whereType<Map<String, dynamic>>().where((entry) =>
+      entry['id'] is String && (entry['id'] as String).isNotEmpty && ids.add(entry['id'] as String) &&
+      entry['label'] is String && (entry['value'] is String || entry['value'] is bool))
+      .map((entry) => SessionConfigurationOption(id: entry['id'] as String, label: entry['label'] as String,
+        value: entry['value'] as Object, description: _stringOrNull(entry['description']),
+        category: _stringOrNull(entry['category']), options: SessionConfigurationChoice.listFromJson(entry['options'])))
+      .toList();
+  }
+
+  Map<String, dynamic> toJson() => {'id': id, 'label': label, 'value': value,
+    'description': description, 'category': category, 'options': options.map((option) => option.toJson()).toList()};
+}
+
+class SessionConfigurationChoice {
+  const SessionConfigurationChoice({required this.value, required this.label, this.group});
+  final String value;
+  final String label;
+  final String? group;
+
+  static List<SessionConfigurationChoice> listFromJson(Object? value) {
+    if (value is! List) return const [];
+    final ids = <String>{};
+    return value.whereType<Map<String, dynamic>>().where((entry) =>
+      entry['value'] is String && ids.add(entry['value'] as String) && entry['label'] is String)
+      .map((entry) => SessionConfigurationChoice(value: entry['value'] as String,
+        label: entry['label'] as String, group: _stringOrNull(entry['group']))).toList();
+  }
+
+  Map<String, dynamic> toJson() => {'value': value, 'label': label, 'group': group};
+}
+
+class SessionCommandSummary {
+  const SessionCommandSummary({required this.name, required this.description, this.inputHint});
+  final String name;
+  final String description;
+  final String? inputHint;
+
+  static List<SessionCommandSummary> listFromJson(Object? value) {
+    if (value is! List) return const [];
+    return value.whereType<Map<String, dynamic>>().where((entry) =>
+      entry['name'] is String && (entry['name'] as String).isNotEmpty)
+      .map((entry) => SessionCommandSummary(name: entry['name'] as String,
+        description: _stringValue(entry['description']), inputHint: _stringOrNull(entry['inputHint']))).toList();
+  }
+
+  Map<String, dynamic> toJson() => {'name': name, 'description': description, 'inputHint': inputHint};
 }
 
 class SessionTelemetrySummary {
