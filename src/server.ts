@@ -932,6 +932,10 @@ export async function startServer(
       case "skills_changed":
         broadcastSkillsChanged(socketsBySession);
         return;
+      case "history_invalidated":
+        broadcastLive(event.sessionId, event);
+        scheduleRecentSessionUpsert(event.sessionId, 0);
+        return;
       case "turn_started":
         sessionState.get(event.sessionId).activities.clear();
         sessionState.clearDraft(event.sessionId);

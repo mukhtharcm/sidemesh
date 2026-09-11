@@ -13,7 +13,7 @@ daemon processes all need separate compatibility checks.
 |---|---|---|
 | Node.js | `>=22.19.0`; CI uses Node 24 | Current |
 | Codex CLI/app-server | `0.144.6` | Compatible; see `docs/codex-app-server-compatibility.md` |
-| OpenCode | `1.18.4` | Compatible; the real adapter passed health, session, model, mode, and skill smoke checks |
+| OpenCode SDK/server | `1.18.4` / `1.18.4` | Official SDK requests and SSE; isolated native checks cover health, session history, model/mode/skill catalogs, archive, and shutdown |
 | GitHub Copilot CLI | `1.0.73` | Current; also enforced through the root npm override |
 | ACPx | `0.12.0` | Current |
 | Flutter | CI and release workflows use `3.44.7`; the app requires Flutter `>=3.44.0` and Dart `^3.12.0` | Current |
@@ -47,6 +47,17 @@ or the adapter isolates the native feature.
 
 The Copilot CLI itself is independently held at the compatible `1.0.73` line by
 the root npm override.
+
+### OpenCode SDK `1.18.4`
+
+Use the official SDK and global event stream. OpenCode owns its native history;
+Sidemesh keeps recovery records in the host session database. `stateDir` still
+sets the native XDG roots. The owned server uses a temporary local password.
+Assistant completion does not end a tool cycle; wait for native idle status.
+On reconnect, refresh loaded sessions and pending requests. There is no idle
+history poller. Run the optional isolated native check with
+`SIDEMESH_TEST_OPENCODE_BIN=/path/to/opencode node --import tsx --test src/opencode-provider.test.ts`.
+It creates empty sessions and sends no model prompt.
 
 ### TypeScript 6
 

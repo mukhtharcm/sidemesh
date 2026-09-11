@@ -1,16 +1,30 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
-import { chmod, mkdtemp, writeFile } from "node:fs/promises";
+import { chmod, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtempSync } from "node:fs";
+import { createOpencodeClient } from "@opencode-ai/sdk/v2/client";
 import { createServer as createHttpServer } from "node:http";
 import { tmpdir } from "node:os";
 import nodePath from "node:path";
-import { describe, it } from "node:test";
+import { afterEach, describe, it } from "node:test";
 
 import type { AgentProviderLiveEvent } from "./agent-provider.js";
 import {
   createOpenCodeServer,
   OpenCodeAgentProvider,
 } from "./opencode-provider.js";
+
+const providers: OpenCodeAgentProvider[] = [];
+const storeDirectories: string[] = [];
+function testStoreDirectory(): string {
+  const directory = mkdtempSync(nodePath.join(tmpdir(), "sidemesh-opencode-store-"));
+  storeDirectories.push(directory);
+  return directory;
+}
+afterEach(async () => {
+  await Promise.all(providers.splice(0).map((provider) => provider.close()));
+  await Promise.all(storeDirectories.splice(0).map((directory) => rm(directory, { recursive: true, force: true })));
+});
 
 describe("OpenCode provider", () => {
   it("launches OpenCode serve with the supported upstream arguments", async () => {
@@ -75,6 +89,11 @@ sleep 10
 
   it("detects /api-prefixed OpenCode HTTP routes on startup", async () => {
     const server = createHttpServer((request, response) => {
+      if (request.url === "/api/global/event") {
+        response.writeHead(200, { "content-type": "text/event-stream" });
+        response.write('data: {"payload":{"type":"server.connected","properties":{}}}\n\n');
+        return;
+      }
       if (request.url === "/api/global/health") {
         response.writeHead(200, { "content-type": "application/json" });
         response.end(JSON.stringify({ healthy: true, version: "9.9.9" }));
@@ -98,6 +117,7 @@ sleep 10
     }
 
     const provider = new OpenCodeAgentProvider({
+    hostStateDir: testStoreDirectory(),
       defaultDirectory: "/repo/app",
       serverFactory: async () => ({
         baseUrl: new URL(`http://127.0.0.1:${address.port}`),
@@ -143,6 +163,7 @@ sleep 10
     let closeCalls = 0;
 
     const provider = new OpenCodeAgentProvider({
+    hostStateDir: testStoreDirectory(),
       defaultDirectory: "/repo/app",
       serverFactory: async () => ({
         baseUrl: new URL(`http://127.0.0.1:${address.port}`),
@@ -218,7 +239,7 @@ sleep 10
         : null,
       "done",
     );
-    assert.equal(client.createSessionInputs[0]?.model, undefined);
+    assert.deepEqual(client.createSessionInputs[0]?.model, { providerID: "opencode", id: "big-pickle" });
     assert.deepEqual(client.promptInputs[0]?.input.model, {
       providerID: "opencode",
       modelID: "big-pickle",
@@ -739,9 +760,10 @@ sleep 10
     );
     assert.equal(events.some((event) => event.type === "turn_started"), false);
     assert.equal(
-      events.some((event) => event.type === "thread_status_changed"),
+      events.some((event) => event.type === "thread_status_changed" && event.status === "running"),
       false,
     );
+    assert.ok(events.some((event) => event.type === "provider_warning" && event.code === "opencode_input_uncertain"));
   });
 
   it("finds uncached sessions beyond the first 200 global results", async () => {
@@ -963,16 +985,140 @@ sleep 10
   });
 });
 
+describe("OpenCode SDK event boundary", () => {
+  const overrides = { model: null, mode: null, reasoningEffort: null, fastMode: null, approvalPolicy: null,
+    sandboxMode: null, networkAccess: null, webSearch: null, profile: null };
+
+  it("checks the selected native server with isolated storage and no model prompt", { skip: !process.env.SIDEMESH_TEST_OPENCODE_BIN }, async () => {
+    const root = testStoreDirectory();
+    const provider = new OpenCodeAgentProvider({ bin: process.env.SIDEMESH_TEST_OPENCODE_BIN,
+      stateDir: nodePath.join(root, "native"), hostStateDir: nodePath.join(root, "host"), defaultDirectory: root });
+    providers.push(provider);
+    await provider.start();
+    assert.equal(await provider.getVersion(), "OpenCode 1.18.4");
+    assert.equal(await provider.health(), true);
+    const created = await provider.createSession({ cwd: root, input: [], overrides });
+    assert.equal(created.activeTurnId, null);
+    assert.equal((await provider.readSessionLog(created.thread)).messages.length, 0);
+    await provider.setSessionName(created.thread.id, "SDK compatibility check");
+    assert.equal((await provider.readSessionThread(created.thread.id, true)).name, "SDK compatibility check");
+    assert.ok((await provider.listSessionThreads({ limit: 10, archived: false })).some((item) => item.id === created.thread.id));
+    assert.ok((await provider.listModes({ cwd: root })).modes.length > 0);
+    await provider.listModels({ cwd: root, profile: null, provider: null });
+    await provider.listSkills({ cwd: root, forceReload: false });
+    await provider.archiveSession(created.thread.id);
+    assert.ok((await provider.listSessionThreads({ limit: 10, archived: true })).some((item) => item.id === created.thread.id));
+    await provider.unarchiveSession(created.thread.id);
+    await provider.close();
+    assert.equal(await provider.health(), false);
+  });
+
+  it("subscribes before reads, retains tool cycles, and does not poll idle sessions", async () => {
+    const client = new FakeOpenCodeClient();
+    client.onPrompt = () => {};
+    const provider = createProvider(client);
+    const events: AgentProviderLiveEvent[] = [];
+    provider.on("liveEvent", (event) => events.push(event));
+    const created = await provider.createSession({ cwd: "/repo/日本語 app", input: [], overrides });
+    assert.ok(client.requests.findIndex((value) => value.includes("/global/event")) < client.requests.findIndex((value) => value.startsWith("POST /session?")));
+    const id = created.thread.id;
+    await provider.submitInput({ sessionId: id, activeTurnId: null, clientMessageId: "client-1",
+      input: [{ type: "text", text: "check", text_elements: [] }], overrides });
+    const userId = client.promptInputs[0]!.input.messageID!;
+    const tool = { id: "tool-1", sessionID: id, messageID: "assistant-1", type: "tool", callID: "call-1", tool: "browser",
+      state: { status: "completed", input: {}, title: "Screenshot", output: "captured", metadata: {}, time: { start: 10, end: 20 },
+        attachments: [{ type: "file", id: "image-1", sessionID: id, messageID: "assistant-1", mime: "image/png", url: "data:image/png;base64,YQ==" }] } };
+    client.messages.get(id)!.push({ info: { id: "assistant-1", sessionID: id, role: "assistant", parentID: userId,
+      providerID: "opencode", modelID: "big-pickle", agent: "build", mode: "build", cost: 0,
+      tokens: { input: 1, output: 1, reasoning: 0, cache: { read: 0, write: 0 } }, time: { created: Date.now(), completed: Date.now() + 1 } },
+      parts: [{ id: "text-1", type: "text", text: "first step" }, tool] });
+    client.publish();
+    await waitForEvent(events, (event) => event.type === "assistant_message_completed");
+    assert.equal(events.some((event) => event.type === "turn_completed"), false);
+    const activity = await waitForEvent(events, (event) => event.type === "activity_updated" && event.activity.id === "tool-1");
+    assert.ok(activity.type === "activity_updated" && activity.activity.type === "tool");
+    assert.equal(activity.activity.attachments?.[0]?.url, "data:image/png;base64,YQ==");
+    await assert.rejects(provider.submitInput({ sessionId: id, activeTurnId: userId, input: [], overrides }), /busy/);
+    assert.equal(client.promptInputs.length, 1);
+    client.statusesByDirectory.set(created.thread.cwd, { [id]: { type: "idle" } }); client.publish();
+    await waitForEvent(events, (event) => event.type === "turn_completed");
+    const log = await provider.readSessionLog(created.thread);
+    assert.equal(log.messages[0]?.id, "client-1");
+    assert.equal(log.messages[1]?.text, "first step");
+    const requests = client.requests.length;
+    await delay(650);
+    assert.equal(client.requests.length, requests);
+    await provider.close();
+    assert.equal(client.streams.size, 0);
+  });
+
+  it("recovers missed completion and external permission replies after reconnect", async () => {
+    const client = new FakeOpenCodeClient();
+    client.onPrompt = ({ directory, sessionID }) => client.permissionsByDirectory.set(directory,
+      [{ id: "offline-permission", sessionID, permission: "read", patterns: ["file"], metadata: {} }]);
+    const provider = createProvider(client);
+    const events: AgentProviderLiveEvent[] = [];
+    provider.on("liveEvent", (event) => events.push(event));
+    const created = await provider.createSession({ cwd: "/repo/app", input: [{ type: "text", text: "work", text_elements: [] }], overrides });
+    await waitForEvent(events, (event) => event.type === "action_opened");
+    client.disconnect();
+    client.permissionsByDirectory.set("/repo/app", []);
+    client.finishPrompt({ directory: "/repo/app", sessionID: created.thread.id, userMessageID: created.activeTurnId!, text: "completed while disconnected" });
+    await waitForEvent(events, (event) => event.type === "turn_completed");
+    await waitForEvent(events, (event) => event.type === "action_resolved");
+    assert.ok(client.requests.filter((value) => value.includes("/global/event")).length >= 2);
+    assert.equal((await provider.readSessionLog(created.thread)).messages.at(-1)?.text, "completed while disconnected");
+  });
+
+  it("rejects unsupported controls before dispatch and closes active input without new work", async () => {
+    const client = new FakeOpenCodeClient(); client.onPrompt = () => {};
+    const provider = createProvider(client);
+    const created = await provider.createSession({ cwd: "/repo/app", input: [], overrides });
+    for (const invalid of [{ model: "unknown/model" }, { model: "opencode/big-pickle/missing" }, { mode: "missing" }]) {
+      await assert.rejects(provider.submitInput({ sessionId: created.thread.id, activeTurnId: null, input: [], overrides: { ...overrides, ...invalid } }), /not available/);
+    }
+    assert.equal(client.promptInputs.length, 0);
+    await provider.submitInput({ sessionId: created.thread.id, activeTurnId: null, input: [{ type: "text", text: "work", text_elements: [] }], overrides });
+    await provider.close();
+    assert.equal(client.promptInputs.length, 1);
+    assert.equal(client.streams.size, 0);
+    await assert.rejects(provider.submitInput({ sessionId: created.thread.id, activeTurnId: null, input: [], overrides }), /closed/);
+  });
+
+  it("uses native archive and compaction methods", async () => {
+    const client = new FakeOpenCodeClient(); const provider = createProvider(client);
+    const created = await provider.createSession({ cwd: "/repo/app", input: [], overrides });
+    await provider.compactSession(created.thread.id);
+    assert.ok(client.requests.some((value) => value.includes("/summarize")));
+    await provider.archiveSession(created.thread.id);
+    assert.equal((await provider.listSessionThreads({ archived: true, limit: 10 }))[0]?.id, created.thread.id);
+    await provider.unarchiveSession(created.thread.id);
+    assert.equal((await provider.listSessionThreads({ archived: false, limit: 10 }))[0]?.id, created.thread.id);
+  });
+
+  it("keeps slashes in catalog model IDs and preserves their variants", async () => {
+    const client = new FakeOpenCodeClient(); client.onPrompt = () => {};
+    client.providerList.all[0]!.models["big-pickle"].id = "vendor/big-pickle";
+    const provider = createProvider(client);
+    await provider.createSession({ cwd: "/repo/app", input: [{ type: "text", text: "work", text_elements: [] }],
+      overrides: { ...overrides, model: "opencode/vendor/big-pickle/high" } });
+    assert.deepEqual(client.promptInputs[0]!.input.model, { providerID: "opencode", modelID: "vendor/big-pickle" });
+    assert.equal(client.promptInputs[0]!.input.variant, "high");
+  });
+});
+
 function createProvider(client: FakeOpenCodeClient) {
-  return new OpenCodeAgentProvider({
+  const provider = new OpenCodeAgentProvider({
+    hostStateDir: testStoreDirectory(),
     defaultDirectory: "/repo/app",
-    pollIntervalMs: 5,
     serverFactory: async ({ onExit: _onExit, onOutput: _onOutput }) => ({
       baseUrl: new URL("http://127.0.0.1:1"),
       close: async () => {},
     }),
-    clientFactory: () => client as any,
+    clientFactory: (options) => createOpencodeClient({ ...options, fetch: client.fetch }),
   });
+  providers.push(provider);
+  return provider;
 }
 
 async function waitForEvent(
@@ -1030,6 +1176,125 @@ function delay(ms: number): Promise<void> {
 }
 
 class FakeOpenCodeClient {
+  readonly requests: string[] = [];
+  readonly streams = new Set<ReadableStreamDefaultController<Uint8Array>>();
+  private readonly published = new Map<string, string>();
+  private readonly publishedActions = new Map<string, { directory: string; sessionID: string; kind: "permission" | "question" }>();
+  readonly fetch: typeof fetch = async (input, init) => {
+    const request = input instanceof Request ? input : new Request(input, init);
+    const url = new URL(request.url);
+    const path = url.pathname.replace(/^\/api(?=\/)/, "");
+    const directory = url.searchParams.get("directory") ?? decodeURIComponent(request.headers.get("x-opencode-directory") ?? "/repo/app");
+    const segments = path.split("/").filter(Boolean).map(decodeURIComponent);
+    const body = request.method === "GET" || request.method === "HEAD" ? {} : JSON.parse(await request.text() || "{}");
+    this.requests.push(`${request.method} ${url.pathname}${url.search}`);
+    const json = (data: unknown, status = 200, headers: Record<string, string> = {}) => new Response(JSON.stringify(data), { status, headers: { "content-type": "application/json", ...headers } });
+    try {
+      if (path === "/global/event") {
+        let controller: ReadableStreamDefaultController<Uint8Array>;
+        return new Response(new ReadableStream({
+          start: (stream) => {
+            controller = stream;
+            this.streams.add(stream);
+            stream.enqueue(new TextEncoder().encode('data: {"payload":{"type":"server.connected","properties":{}}}\n\n'));
+            request.signal.addEventListener("abort", () => { if (this.streams.delete(stream)) stream.close(); }, { once: true });
+          }, cancel: () => { this.streams.delete(controller); },
+        }), { headers: { "content-type": "text/event-stream" } });
+      }
+      if (path === "/global/health") return json(await this.getHealth(directory));
+      if (path === "/experimental/session") {
+        const page = await this.listGlobalSessions({ archived: url.searchParams.get("archived") === "true", limit: Number(url.searchParams.get("limit") ?? 100), cursor: Number(url.searchParams.get("cursor") ?? 0) });
+        return json(page.sessions, 200, page.nextCursor == null ? {} : { "x-next-cursor": String(page.nextCursor) });
+      }
+      if (path === "/provider") return json(this.providerList);
+      if (path === "/agent") return json(this.agents);
+      if (path === "/skill") return json(this.skills);
+      if (path === "/session/status") return json(await this.getSessionStatuses(directory));
+      if (path === "/session" && request.method === "POST") {
+        const session = await this.createSession({ directory, ...body }); this.publish(); return json(session);
+      }
+      if (segments[0] === "session") {
+        const sessionID = segments[1]!;
+        if (segments.length === 2 && request.method === "GET") return json(await this.getSession({ sessionID }));
+        if (segments.length === 2 && request.method === "PATCH") {
+          const session = await this.getSession({ sessionID }); Object.assign(session, { ...body, time: { ...session.time, ...body.time } }); this.publish(); return json(session);
+        }
+        if (segments[2] === "message") {
+          const messages = await this.listMessages({ sessionID });
+          const normalized = messages.map((message) => ({ ...message, parts: message.parts.map((part: any, index: number) => ({ ...part, id: part.id ?? `${message.info.id}:part:${index}`, sessionID, messageID: message.info.id })) }));
+          return json(segments[3] ? normalized.find((message) => message.info.id === segments[3]) : normalized);
+        }
+        if (segments[2] === "prompt_async") {
+          await this.promptAsync({ directory, sessionID, input: body }); this.publish(); return new Response(null, { status: 204 });
+        }
+        if (segments[2] === "abort") { await this.abortSession({ directory, sessionID }); this.publish(); return json(true); }
+        if (segments[2] === "summarize") return json(true);
+      }
+      if (path === "/permission") return json(await this.listPermissions(directory));
+      if (path === "/question") return json(await this.listQuestions(directory));
+      if (segments[0] === "permission" && segments[2] === "reply") {
+        const result = await this.replyPermission({ directory, requestID: segments[1]!, reply: body.reply });
+        this.permissionsByDirectory.set(directory, (this.permissionsByDirectory.get(directory) ?? []).filter((item) => item.id !== segments[1]));
+        this.publish(); return json(result);
+      }
+      if (segments[0] === "question") {
+        const result = segments[2] === "reject" ? await this.rejectQuestion({ directory, requestID: segments[1]! })
+          : await this.replyQuestion({ directory, requestID: segments[1]!, answers: body.answers });
+        this.questionsByDirectory.set(directory, (this.questionsByDirectory.get(directory) ?? []).filter((item) => item.id !== segments[1]));
+        this.publish(); return json(result);
+      }
+      return json({ message: `Unknown fixture route ${request.method} ${path}` }, 404);
+    } catch (error) { return json({ message: error instanceof Error ? error.message : String(error) }, 500); }
+  };
+
+  emitEvent(directory: string, type: string, properties: unknown): void {
+    const bytes = new TextEncoder().encode(`data: ${JSON.stringify({ directory, payload: { id: randomUUID(), type, properties } })}\n\n`);
+    for (const stream of this.streams) stream.enqueue(bytes);
+  }
+  disconnect(): void {
+    for (const stream of this.streams) stream.close();
+    this.streams.clear();
+  }
+  publish(): void {
+    const changed = (key: string, value: unknown) => {
+      const text = JSON.stringify(value);
+      if (this.published.get(key) === text) return false;
+      this.published.set(key, text);
+      return true;
+    };
+    for (const session of this.sessions.values()) {
+      const directory = session.directory;
+      if (changed(`session:${session.id}`, session)) this.emitEvent(directory, "session.updated", { info: session });
+      for (const message of this.messages.get(session.id) ?? []) {
+        const updated = changed(`message:${message.info.id}`, message.info);
+        if (updated) this.emitEvent(directory, "message.updated", { info: { ...message.info, time: { created: message.info.time.created } } });
+        for (const [index, value] of message.parts.entries()) {
+          const part = { ...value, id: value.id ?? `${message.info.id}:part:${index}`, sessionID: session.id, messageID: message.info.id };
+          if (!changed(`part:${part.id}`, part)) continue;
+          if (updated && message.info.role === "assistant" && (part.type === "text" || part.type === "reasoning")) {
+            this.emitEvent(directory, "message.part.updated", { part: { ...part, text: "" }, sessionID: session.id, time: Date.now() });
+            this.emitEvent(directory, "message.part.delta", { sessionID: session.id, messageID: message.info.id, partID: part.id, field: "text", delta: part.text });
+          }
+          this.emitEvent(directory, "message.part.updated", { part, sessionID: session.id, time: Date.now() });
+        }
+        if (updated && message.info.time.completed) this.emitEvent(directory, "message.updated", { info: message.info });
+      }
+      const actions = new Set<string>();
+      for (const [kind, values] of [["permission", this.permissionsByDirectory.get(directory) ?? []], ["question", this.questionsByDirectory.get(directory) ?? []]] as const) {
+        for (const action of values.filter((item) => item.sessionID === session.id)) {
+          const key = `${kind}:${action.id}`;
+          actions.add(key);
+          if (!this.publishedActions.has(key)) { this.publishedActions.set(key, { directory, sessionID: session.id, kind }); this.emitEvent(directory, `${kind}.asked`, action); }
+        }
+      }
+      for (const [key, action] of this.publishedActions) {
+        if (action.sessionID !== session.id || actions.has(key)) continue;
+        this.publishedActions.delete(key); this.emitEvent(directory, `${action.kind}.replied`, { sessionID: session.id, requestID: key.slice(key.indexOf(":") + 1), reply: "once", answers: [] });
+      }
+      const status = this.statusesByDirectory.get(directory)?.[session.id] ?? { type: "idle" };
+      if (changed(`status:${session.id}`, status)) this.emitEvent(directory, "session.status", { sessionID: session.id, status });
+    }
+  }
   public providerList = {
     all: [
       {
@@ -1040,6 +1305,7 @@ class FakeOpenCodeClient {
             id: "big-pickle",
             name: "Big Pickle",
             providerID: "opencode",
+            variants: { high: {} },
             capabilities: { reasoning: true, input: { text: true } },
           },
         },
@@ -1078,6 +1344,7 @@ class FakeOpenCodeClient {
     directory: string;
     sessionID: string;
     input: {
+      messageID?: string;
       agent?: string;
       model?: { providerID: string; modelID: string };
       variant?: string;
@@ -1178,7 +1445,7 @@ class FakeOpenCodeClient {
       directory: options.directory,
       title: options.title ?? "Untitled",
       agent: options.agent ?? "build",
-      model: options.model ?? { providerID: "opencode", modelID: "big-pickle" },
+      model: options.model ?? { providerID: "opencode", id: "big-pickle" },
       time: {
         created: Date.now(),
         updated: Date.now(),
@@ -1203,6 +1470,7 @@ class FakeOpenCodeClient {
     directory: string;
     sessionID: string;
     input: {
+      messageID?: string;
       agent?: string;
       model?: { providerID: string; modelID: string };
       variant?: string;
@@ -1219,7 +1487,7 @@ class FakeOpenCodeClient {
     }
     const session = await this.getSession({ sessionID: options.sessionID });
     session.time.updated = Date.now();
-    const userMessageID = `msg_${randomUUID()}`;
+    const userMessageID = options.input.messageID ?? `msg_${randomUUID()}`;
     const userMessage = {
       info: {
         id: userMessageID,
@@ -1228,7 +1496,7 @@ class FakeOpenCodeClient {
         time: { created: Date.now() },
         agent: options.input.agent ?? session.agent ?? "build",
         model: {
-          ...(options.input.model ?? session.model),
+          ...(options.input.model ?? { providerID: session.model.providerID, modelID: session.model.id ?? session.model.modelID }),
           ...(options.input.variant ? { variant: options.input.variant } : {}),
         },
       },
@@ -1317,6 +1585,7 @@ class FakeOpenCodeClient {
         ...(this.statusesByDirectory.get(input.directory) ?? {}),
         [input.sessionID]: { type: "idle" },
       });
+      this.publish();
     }, 10);
   }
 

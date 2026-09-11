@@ -1,436 +1,55 @@
-import {
-  spawn,
-  type ChildProcessByStdio,
-} from "node:child_process";
-import { randomUUID } from "node:crypto";
+import { spawn } from "node:child_process";
+import { createHash, randomUUID } from "node:crypto";
 import { EventEmitter } from "node:events";
 import { mkdir } from "node:fs/promises";
-import { basename, extname } from "node:path";
+import { homedir } from "node:os";
+import { basename, extname, join } from "node:path";
 import { createInterface } from "node:readline";
-import type { Readable } from "node:stream";
 import { pathToFileURL } from "node:url";
+import { setTimeout as sleep } from "node:timers/promises";
+import { createOpencodeClient, type OpencodeClient, type OpencodeClientConfig,
+  type Session as OpenCodeSessionInfo, type SessionStatus as OpenCodeSessionStatus,
+  type SessionMessageResponse as OpenCodeMessage, type TextPart as OpenCodeMessageTextPart,
+  type ReasoningPart as OpenCodeMessageReasoningPart, type FilePart as OpenCodeMessageFilePart,
+  type ToolPart as OpenCodeMessageToolPart, type CompactionPart as OpenCodeMessageCompactionPart,
+  type Part as OpenCodeMessagePart, type ToolState as OpenCodeMessageToolState,
+  type UserMessage as OpenCodeUserMessageInfo, type AssistantMessage as OpenCodeAssistantMessageInfo,
+  type TextPartInput, type FilePartInput, type PermissionRequest as OpenCodePermissionRequest,
+  type QuestionRequest as OpenCodeQuestionRequest, type QuestionInfo as OpenCodeQuestionInfo,
+  type Model as OpenCodeProviderModel, type GlobalEvent } from "@opencode-ai/sdk/v2/client";
+import { AgentProviderRequestError, materializeAgentActivityDraft, type AgentCreateSessionRequest,
+  type AgentCreateSessionResult, type AgentModelListOptions, type AgentModeListOptions, type AgentPendingAction,
+  type AgentProvider, type AgentProviderCapabilities, type AgentProviderEvents, type AgentSessionActivityDraft,
+  type AgentSessionInputItem, type AgentSessionListOptions, type AgentSessionLogOptions,
+  type AgentSessionResumeOptions, type AgentSubmitInputRequest, type AgentSubmitInputResult,
+  type AgentSkillListOptions } from "./agent-provider.js";
+import { parsePendingActionDecision, parsePendingActionProviderOptionResponse, parsePendingActionElicitationResponse,
+  parsePendingActionUserInputResponse, type PendingActionResponseInput } from "./approvals.js";
+import { SessionStore, type StoredProviderSession, type StoredSessionItem } from "./session-store.js";
+import { reconcileSessionHistory } from "./session-history.js";
+import { extractSessionAttachments } from "./session-attachments.js";
+import { terminatePipeProcess } from "./terminal.js";
+import type { LiveThreadStatus, LivePlanStep, ModelSummary, PendingActionApproval, PendingActionApprovalTarget,
+  PendingActionElicitationField, ProviderModeCatalog, SessionActivity, SessionLogSnapshot, SessionMessage,
+  SessionMessageAttachment, SessionMessageContentBlock, SessionSubAgentInfo, SessionRuntimeSummary,
+  SkillCatalogEntry, SkillSummary, ThreadRecord, TurnRecord } from "./types.js";
 
-import type {
-  AgentCreateSessionRequest,
-  AgentCreateSessionResult,
-  AgentModelListOptions,
-  AgentModeListOptions,
-  AgentPendingAction,
-  AgentProvider,
-  AgentProviderCapabilities,
-  AgentProviderEvents,
-  AgentSessionActivityDraft,
-  AgentSessionInputItem,
-  AgentSessionListOptions,
-  AgentSessionLogOptions,
-  AgentSessionResumeOptions,
-  AgentSubmitInputRequest,
-  AgentSubmitInputResult,
-  AgentSkillListOptions,
-} from "./agent-provider.js";
-import {
-  normalizePendingActionDecision,
-  parsePendingActionProviderOptionResponse,
-  parsePendingActionElicitationResponse,
-  parsePendingActionUserInputResponse,
-  type PendingActionResponseInput,
-} from "./approvals.js";
-import type {
-  LiveThreadStatus,
-  ModelSummary,
-  PendingActionApproval,
-  PendingActionApprovalTarget,
-  PendingActionElicitationField,
-  ProviderModeCatalog,
-  SessionActivity,
-  SessionLogSnapshot,
-  SessionMessage,
-  SessionMessageAttachment,
-  SessionMessageContentBlock,
-  SessionSubAgentInfo,
-  SessionRuntimeSummary,
-  SkillCatalogEntry,
-  SkillSummary,
-  ThreadRecord,
-  TurnRecord,
-  ToolActivity,
-} from "./types.js";
-
-const DEFAULT_REQUEST_TIMEOUT_MS = 30_000;
-const DEFAULT_POLL_INTERVAL_MS = 500;
-const DEFAULT_SERVER_READY_TIMEOUT_MS = 30_000;
-const READY_LINE_PREFIX = "opencode server listening on ";
-
-interface OpenCodeModelRef {
-  providerID: string;
-  modelID: string;
-  variant?: string;
-}
-
-interface OpenCodeSessionInfo {
-  id: string;
-  directory: string;
-  path?: string;
-  parentID?: string;
-  title: string;
-  agent?: string;
-  model?: OpenCodeModelRef;
-  time: {
-    created: number;
-    updated: number;
-    archived?: number;
-  };
-}
-
-type OpenCodeSessionStatus =
-  | { type: "idle" }
-  | { type: "busy" }
-  | { type: "retry"; attempt: number; message: string; next: number };
-
-interface OpenCodeMessageTextPart {
-  id: string;
-  type: "text";
-  text: string;
-  time?: { start?: number; end?: number };
-}
-
-interface OpenCodeMessageReasoningPart {
-  id: string;
-  type: "reasoning";
-  text: string;
-  time?: { start?: number; end?: number };
-}
-
-interface OpenCodeMessageFilePart {
-  id: string;
-  type: "file";
-  mime: string;
-  filename?: string;
-  url: string;
-  source?: {
-    type?: string;
-    path?: string;
-  };
-}
-
-interface OpenCodeMessageToolStatePending {
-  status: "pending";
-  input: Record<string, unknown>;
-  raw?: string;
-}
-
-interface OpenCodeMessageToolStateRunning {
-  status: "running";
-  input: Record<string, unknown>;
-  title?: string;
-  metadata?: Record<string, unknown>;
-  time: { start: number };
-}
-
-interface OpenCodeMessageToolStateCompleted {
-  status: "completed";
-  input: Record<string, unknown>;
-  output: string;
-  title: string;
-  metadata: Record<string, unknown>;
-  time: { start: number; end: number };
-}
-
-interface OpenCodeMessageToolStateError {
-  status: "error";
-  input: Record<string, unknown>;
-  error: string;
-  metadata?: Record<string, unknown>;
-  time: { start: number; end: number };
-}
-
-type OpenCodeMessageToolState =
-  | OpenCodeMessageToolStatePending
-  | OpenCodeMessageToolStateRunning
-  | OpenCodeMessageToolStateCompleted
-  | OpenCodeMessageToolStateError;
-
-interface OpenCodeMessageToolPart {
-  id: string;
-  type: "tool";
-  tool: string;
-  callID: string;
-  state: OpenCodeMessageToolState;
-  metadata?: Record<string, unknown>;
-}
-
-interface OpenCodeMessageCompactionPart {
-  id: string;
-  type: "compaction";
-}
-
-type OpenCodeMessagePart =
-  | OpenCodeMessageTextPart
-  | OpenCodeMessageReasoningPart
-  | OpenCodeMessageFilePart
-  | OpenCodeMessageToolPart
-  | OpenCodeMessageCompactionPart
-  | { id: string; type: string; [key: string]: unknown };
-
-type OpenCodeChildProcess = ChildProcessByStdio<null, Readable, Readable>;
-
-interface OpenCodeUserMessageInfo {
-  id: string;
-  sessionID: string;
-  role: "user";
-  time: { created: number };
-  agent: string;
-  model: OpenCodeModelRef & { variant?: string };
-}
-
-interface OpenCodeAssistantMessageInfo {
-  id: string;
-  sessionID: string;
-  role: "assistant";
-  parentID: string;
-  providerID: string;
-  modelID: string;
-  agent: string;
-  mode: string;
-  time: { created: number; completed?: number };
-  cost: number;
-  finish?: string;
-  error?: { name?: string; data?: { message?: string } };
-  tokens?: {
-    total?: number;
-    input: number;
-    output: number;
-    reasoning: number;
-    cache: { read: number; write: number };
-  };
-}
-
-type OpenCodeMessageInfo =
-  | OpenCodeUserMessageInfo
-  | OpenCodeAssistantMessageInfo;
-
-interface OpenCodeMessage {
-  info: OpenCodeMessageInfo;
-  parts: OpenCodeMessagePart[];
-}
-
-interface OpenCodePromptPartText {
-  type: "text";
-  text: string;
-}
-
-interface OpenCodePromptPartFile {
-  type: "file";
-  mime: string;
-  filename?: string;
-  url: string;
-  source?: {
-    type?: "file";
-    path?: string;
-    text?: { start: number; end: number; value: string };
-  };
-}
-
-type OpenCodePromptPart = OpenCodePromptPartText | OpenCodePromptPartFile;
-
-type OpenCodeHeaders = Record<string, string>;
-
-interface OpenCodePromptInput {
-  agent?: string;
-  model?: OpenCodeModelRef;
-  variant?: string;
-  parts: OpenCodePromptPart[];
-}
-
-interface OpenCodePermissionRequest {
-  id: string;
-  sessionID: string;
-  permission: string;
-  patterns: string[];
-  metadata: Record<string, unknown>;
-  always?: string[];
-}
-
-interface OpenCodeQuestionOption {
-  label: string;
-  description: string;
-}
-
-interface OpenCodeQuestionInfo {
-  question: string;
-  header: string;
-  options: OpenCodeQuestionOption[];
-  multiple?: boolean;
-  custom?: boolean;
-}
-
-interface OpenCodeQuestionRequest {
-  id: string;
-  sessionID: string;
-  questions: OpenCodeQuestionInfo[];
-}
-
-interface OpenCodeProviderModel {
-  id: string;
-  name: string;
-  providerID: string;
-  variants?: Record<string, Record<string, unknown>>;
-  capabilities?: {
-    reasoning?: boolean;
-    input?: {
-      text?: boolean;
-      image?: boolean;
-      pdf?: boolean;
-      audio?: boolean;
-      video?: boolean;
-    };
-  };
-}
-
-interface OpenCodeProviderInfo {
-  id: string;
-  name: string;
-  models: Record<string, OpenCodeProviderModel>;
-}
-
-interface OpenCodeProviderListResult {
-  all: OpenCodeProviderInfo[];
-  default: Record<string, string>;
-  connected: string[];
-}
-
-interface OpenCodeAgentInfo {
-  name: string;
-  mode: "primary" | "subagent" | "all";
-  hidden?: boolean;
-}
-
-interface OpenCodeSkillInfo {
-  name: string;
-  description: string;
-  location: string;
-}
-
-interface OpenCodeGlobalSessionPage {
-  sessions: OpenCodeSessionInfo[];
-  nextCursor: number | null;
-}
-
-interface OpenCodeClient {
-  getHealth(directory: string): Promise<{ healthy: true; version: string }>;
-  listGlobalSessions(options: {
-    directory: string;
-    archived: boolean;
-    limit: number;
-    cursor?: number | null;
-  }): Promise<OpenCodeGlobalSessionPage>;
-  getSession(options: {
-    directory: string;
-    sessionID: string;
-  }): Promise<OpenCodeSessionInfo>;
-  getSessionStatuses(
-    directory: string,
-  ): Promise<Record<string, OpenCodeSessionStatus>>;
-  listMessages(options: {
-    directory: string;
-    sessionID: string;
-  }): Promise<OpenCodeMessage[]>;
-  createSession(options: {
-    directory: string;
-    title?: string | null;
-    agent?: string | null;
-    model?: OpenCodeModelRef | null;
-  }): Promise<OpenCodeSessionInfo>;
-  setSessionName(options: {
-    directory: string;
-    sessionID: string;
-    title: string;
-  }): Promise<OpenCodeSessionInfo>;
-  promptAsync(options: {
-    directory: string;
-    sessionID: string;
-    input: OpenCodePromptInput;
-  }): Promise<void>;
-  abortSession(options: {
-    directory: string;
-    sessionID: string;
-  }): Promise<boolean>;
-  listPermissions(directory: string): Promise<OpenCodePermissionRequest[]>;
-  replyPermission(options: {
-    directory: string;
-    requestID: string;
-    reply: "once" | "always" | "reject";
-  }): Promise<boolean>;
-  listQuestions(directory: string): Promise<OpenCodeQuestionRequest[]>;
-  replyQuestion(options: {
-    directory: string;
-    requestID: string;
-    answers: string[][];
-  }): Promise<boolean>;
-  rejectQuestion(options: {
-    directory: string;
-    requestID: string;
-  }): Promise<boolean>;
-  listProviders(directory: string): Promise<OpenCodeProviderListResult>;
-  listAgents(directory: string): Promise<OpenCodeAgentInfo[]>;
-  listSkills(directory: string): Promise<OpenCodeSkillInfo[]>;
-}
-
-interface OpenCodeServerHandle {
-  baseUrl: URL;
-  close(): Promise<void>;
-}
-
+type OpenCodeModelRef = OpenCodeUserMessageInfo["model"] & { variant?: string };
+type OpenCodePromptPart = TextPartInput | FilePartInput;
+interface OpenCodeMetadata { info: OpenCodeSessionInfo; runtime: SessionRuntimeSummary | null; }
+interface ActiveOpenCodeTurn { id: string; status: string; started: boolean; submitting: boolean; }
+export interface OpenCodeServerHandle { baseUrl: URL; headers?: Record<string, string>; close(): Promise<void>; }
 export interface OpenCodeServerFactoryOptions {
-  bin: string;
-  stateDir: string | null;
-  readyTimeoutMs?: number;
-  onOutput(line: string): void;
-  onExit(code: number | null): void;
+  bin: string; stateDir: string | null; signal?: AbortSignal; readyTimeoutMs?: number;
+  onOutput(line: string): void; onExit(code: number | null): void;
 }
-
-export type OpenCodeServerFactory = (
-  options: OpenCodeServerFactoryOptions,
-) => Promise<OpenCodeServerHandle>;
-
-export interface OpenCodeClientFactoryOptions {
-  baseUrl: URL;
-  defaultDirectory: string;
-}
-
-export type OpenCodeClientFactory = (
-  options: OpenCodeClientFactoryOptions,
-) => OpenCodeClient;
-
-interface ActiveOpenCodeTurn {
-  sessionId: string;
-  cwd: string;
-  turnId: string;
-  baselineMessageIds: Set<string>;
-  assistantMessageId: string | null;
-  emittedAssistantText: string;
-  emittedReasoningText: string;
-  emittedActivityFingerprints: Map<string, string>;
-  lastStatus: LiveThreadStatus | null;
-  aborted: boolean;
-}
-
-interface OpenCodeSessionCache {
-  info: OpenCodeSessionInfo;
-  preview: string;
-  runtime: SessionRuntimeSummary | null;
-  pendingActions: Map<string, AgentPendingAction>;
-}
-
+export type OpenCodeServerFactory = (options: OpenCodeServerFactoryOptions) => Promise<OpenCodeServerHandle>;
 export interface OpenCodeAgentProviderOptions {
-  bin?: string;
-  stateDir?: string | null;
-  defaultDirectory?: string | null;
-  pollIntervalMs?: number;
+  bin?: string; stateDir?: string | null; defaultDirectory?: string | null;
+  providerId?: string; sessionStore?: SessionStore; hostStateDir?: string;
   serverFactory?: OpenCodeServerFactory;
-  clientFactory?: OpenCodeClientFactory;
+  clientFactory?: (options: OpencodeClientConfig) => OpencodeClient;
 }
-
 const REASONING_EFFORTS = [
   {
     reasoningEffort: "low",
@@ -457,8 +76,8 @@ export const OPENCODE_PROVIDER_CAPABILITIES: AgentProviderCapabilities = {
     create: true,
     resume: true,
     rename: true,
-    archive: false,
-    compact: false,
+    archive: true,
+    compact: true,
     interrupt: true,
     history: true,
     recentFallback: true,
@@ -466,6 +85,7 @@ export const OPENCODE_PROVIDER_CAPABILITIES: AgentProviderCapabilities = {
   },
   input: {
     text: true,
+    steer: false,
     imageUrl: true,
     localImage: true,
     skills: true,
@@ -511,1450 +131,603 @@ export const OPENCODE_PROVIDER_CAPABILITIES: AgentProviderCapabilities = {
   },
 };
 
-export class OpenCodeAgentProvider
-  extends EventEmitter<AgentProviderEvents>
-  implements AgentProvider
-{
-  public readonly kind = "opencode";
-  public readonly displayName = "OpenCode";
-  public readonly capabilities = OPENCODE_PROVIDER_CAPABILITIES;
+export class OpenCodeAgentProvider extends EventEmitter<AgentProviderEvents> implements AgentProvider {
+  readonly kind = "opencode";
+  readonly displayName = "OpenCode";
+  readonly capabilities = OPENCODE_PROVIDER_CAPABILITIES;
+  private readonly providerId: string;
+  private readonly directory: string;
+  private store?: SessionStore;
+  private client?: OpencodeClient;
+  private server?: OpenCodeServerHandle;
+  private starting?: Promise<void>;
+  private closing?: Promise<void>;
+  private closed = false;
+  private abort = new AbortController();
+  private eventTask?: Promise<void>;
+  private readonly active = new Map<string, ActiveOpenCodeTurn>();
+  private readonly loaded = new Set<string>();
+  private readonly parts = new Map<string, { sessionId: string; messageId: string; type: "text" | "reasoning" }>();
+  private readonly pending = new Map<string, { action: AgentPendingAction; responding: boolean }>();
 
-  private readonly bin: string;
-  private readonly stateDir: string | null;
-  private readonly defaultDirectory: string;
-  private readonly pollIntervalMs: number;
-  private readonly serverFactory: OpenCodeServerFactory;
-  private readonly clientFactory: OpenCodeClientFactory;
-  private readonly usesDefaultClientFactory: boolean;
-  private readonly sessionCache = new Map<string, OpenCodeSessionCache>();
-  private readonly loadedSessionIds = new Set<string>();
-  private readonly activeTurns = new Map<string, ActiveOpenCodeTurn>();
-
-  private server: OpenCodeServerHandle | null = null;
-  private client: OpenCodeClient | null = null;
-  private startPromise: Promise<void> | null = null;
-
-  public constructor(options: OpenCodeAgentProviderOptions = {}) {
+  constructor(private readonly options: OpenCodeAgentProviderOptions = {}) {
     super();
-    this.bin = options.bin?.trim() || "opencode";
-    this.stateDir = options.stateDir?.trim() || null;
-    this.defaultDirectory = options.defaultDirectory?.trim() || process.cwd();
-    this.pollIntervalMs = Math.max(50, options.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS);
-    this.serverFactory = options.serverFactory ?? createOpenCodeServer;
-    this.clientFactory = options.clientFactory ?? createOpenCodeClient;
-    this.usesDefaultClientFactory = options.clientFactory == null;
+    this.providerId = options.providerId ?? "opencode";
+    this.directory = options.defaultDirectory?.trim() || process.cwd();
+    this.store = options.sessionStore;
   }
 
-  public async start(): Promise<void> {
-    if (this.client) {
-      return;
-    }
-    if (this.startPromise) {
-      return this.startPromise;
-    }
-    this.startPromise = this.startInternal();
+  async start(): Promise<void> {
+    if (this.closed) throw new Error("OpenCode provider is closed");
+    this.starting ??= this.startInternal();
+    await this.starting;
+  }
+  private async startInternal(): Promise<void> {
+    this.store ??= await SessionStore.open(this.options.hostStateDir ?? process.env.SIDEMESH_STATE_DIR ?? join(homedir(), ".sidemesh"));
     try {
-      await this.startPromise;
+      this.server = await (this.options.serverFactory ?? createOpenCodeServer)({
+        bin: this.options.bin?.trim() || "opencode", stateDir: this.options.stateDir ?? null, signal: this.abort.signal,
+        onOutput: (line) => this.emit("stderr", line), onExit: (code) => { if (!this.closed) this.emit("exit", code); },
+      });
+      if (this.closed) throw new Error("OpenCode provider is closing");
+      const factory = this.options.clientFactory ?? createOpencodeClient;
+      let lastError: unknown;
+      for (const baseUrl of [this.server.baseUrl.href, new URL("api/", this.server.baseUrl).href]) {
+        const client = factory({ baseUrl: baseUrl.replace(/\/$/, ""), headers: this.server.headers });
+        try { await client.global.health(this.requestOptions()); this.client = client; break; }
+        catch (error) { lastError = error; }
+      }
+      if (!this.client) throw new Error("OpenCode did not expose a supported headless HTTP API", { cause: lastError });
+      let connected!: () => void;
+      let failed!: (error: unknown) => void;
+      const ready = new Promise<void>((resolve, reject) => { connected = resolve; failed = reject; });
+      const timeout = setTimeout(() => failed(new Error("OpenCode event stream did not become ready")), 30_000);
+      this.eventTask = this.readEvents(connected, failed);
+      try { await ready; } finally { clearTimeout(timeout); }
     } catch (error) {
-      await this.close().catch(() => undefined);
+      this.abort.abort();
+      await this.eventTask;
+      await this.server?.close();
+      this.server = undefined;
+      this.client = undefined;
       throw error;
-    } finally {
-      this.startPromise = null;
     }
   }
 
-  public async close(): Promise<void> {
-    this.activeTurns.clear();
-    this.client = null;
-    const server = this.server;
-    this.server = null;
-    if (server) {
-      await server.close();
-    }
+  close(): Promise<void> {
+    if (this.closing) return this.closing;
+    this.closed = true;
+    this.abort.abort();
+    this.closing = (async () => {
+      await this.starting?.catch(() => {});
+      await this.eventTask;
+      await this.server?.close();
+      for (const [id, turn] of this.active) if (turn.started) this.emit("liveEvent", { type: "turn_completed", sessionId: id, turnId: turn.id, status: "interrupted" });
+      this.active.clear();
+      for (const id of [...this.pending.keys()]) this.resolveAction(id);
+      this.parts.clear();
+      this.server = undefined;
+      this.client = undefined;
+      if (!this.options.sessionStore) this.store?.close();
+      this.store = undefined;
+    })();
+    return this.closing;
   }
-
-  public async restart(): Promise<void> {
+  async restart(): Promise<void> {
     await this.close();
+    this.closed = false;
+    this.closing = undefined;
+    this.starting = undefined;
+    this.abort = new AbortController();
+    this.store = this.options.sessionStore;
     await this.start();
   }
-
-  public async health(): Promise<boolean> {
-    try {
-      await this.start();
-      const health = await this.requireClient().getHealth(this.defaultDirectory);
-      return health.healthy === true;
-    } catch {
-      return false;
-    }
+  async health(): Promise<boolean> {
+    if (this.closed || !this.client) return false;
+    try { return (await this.client.global.health(this.requestOptions())).data.healthy; } catch { return false; }
   }
+  async getVersion(): Promise<string> { await this.start(); return `OpenCode ${(await this.sdk.global.health(this.requestOptions())).data.version}`; }
 
-  public async getVersion(): Promise<string> {
+  async listSessionThreads(options: AgentSessionListOptions): Promise<ThreadRecord[]> {
     await this.start();
-    const health = await this.requireClient().getHealth(this.defaultDirectory);
-    return `OpenCode ${health.version}`;
+    const sessions = await this.listNativeSessions(options);
+    const statuses = new Map<string, Record<string, OpenCodeSessionStatus>>();
+    await Promise.all([...new Set(sessions.map((session) => session.directory))].map(async (directory) => {
+      statuses.set(directory, (await this.sdk.session.status({ directory }, this.requestOptions())).data);
+    }));
+    return sessions.map((info) => this.thread(info, statuses.get(info.directory)?.[info.id] ?? { type: "idle" }, false));
   }
-
-  public async listSessionThreads(
-    options: AgentSessionListOptions,
-  ): Promise<ThreadRecord[]> {
-    await this.start();
-    const sessions = await this.listAllSessions(
-      options.limit,
-      options.archived,
-      options.includeSubAgents === true,
-      options.subAgentParentId,
-    );
-    const statusesByDirectory = await this.loadStatusesForDirectories(
-      sessions.map((session) => session.directory),
-    );
-    return sessions
-      .map((session) =>
-        this.threadFromSession(
-          session,
-          statusesByDirectory.get(session.directory)?.[session.id] ?? { type: "idle" },
-          false,
-        ),
-      )
-      .sort((left, right) => right.updatedAt - left.updatedAt)
-      .slice(0, options.limit)
-      .map(cloneThreadRecord);
+  async listRecentUnindexedSessionThreads(limit: number): Promise<ThreadRecord[]> { return this.listSessionThreads({ limit, archived: false }); }
+  async listLoadedSessionIds(): Promise<string[]> { return [...this.loaded]; }
+  async readSessionThread(id: string, includeTurns: boolean): Promise<ThreadRecord> {
+    const info = await this.info(id);
+    const messages = includeTurns ? (await this.sdk.session.messages({ sessionID: id, directory: info.directory }, this.requestOptions())).data : [];
+    const status = (await this.sdk.session.status({ directory: info.directory }, this.requestOptions())).data[id] ?? { type: "idle" };
+    const thread = this.thread(info, status, includeTurns);
+    if (includeTurns) thread.turns = buildTurns(messages, status);
+    return thread;
   }
-
-  public async listRecentUnindexedSessionThreads(
-    limit: number,
-  ): Promise<ThreadRecord[]> {
-    return this.listSessionThreads({ limit, archived: false });
+  async readSessionLog(thread: ThreadRecord, options: AgentSessionLogOptions = {}): Promise<SessionLogSnapshot> {
+    const info = await this.info(thread.id, thread.cwd);
+    const messages = (await this.sdk.session.messages({ sessionID: thread.id, directory: info.directory }, this.requestOptions())).data;
+    const [permissions, questions] = await Promise.all([
+      this.sdk.permission.list({ directory: info.directory }, this.requestOptions()),
+      this.sdk.question.list({ directory: info.directory }, this.requestOptions()),
+    ]);
+    this.syncActions(info, permissions.data, questions.data);
+    const snapshot = this.saveHistory(info, messages);
+    this.loaded.add(thread.id);
+    return { ...snapshot, messages: limitTail(snapshot.messages, options.messageLimit ?? null),
+      activities: limitTail(snapshot.activities, options.activityLimit ?? null) };
   }
-
-  public async readSessionThread(
-    threadId: string,
-    includeTurns: boolean,
-  ): Promise<ThreadRecord> {
-    await this.start();
-    const info = await this.ensureSessionInfo(threadId);
-    const status =
-      (await this.requireClient().getSessionStatuses(info.directory))[threadId] ??
-      { type: "idle" as const };
-    if (!includeTurns) {
-      return cloneThreadRecord(this.threadFromSession(info, status, false));
-    }
-    const messages = await this.requireClient().listMessages({
-      directory: info.directory,
-      sessionID: threadId,
-    });
-    const turns = buildTurns(messages, status);
-    const thread = this.threadFromSession(info, status, true);
-    thread.turns = turns;
-    this.cacheSession(threadId, info, messages);
-    return cloneThreadRecord(thread);
+  async readSessionRuntime(thread: ThreadRecord): Promise<SessionRuntimeSummary | null> {
+    await this.info(thread.id, thread.cwd);
+    return this.metadata(this.record(thread.id)).runtime;
   }
-
-  public async readSessionLog(
-    thread: ThreadRecord,
-    options: AgentSessionLogOptions = {},
-  ): Promise<SessionLogSnapshot> {
-    await this.start();
-    const info = await this.ensureSessionInfo(thread.id, thread.cwd);
-    const messages = await this.requireClient().listMessages({
-      directory: info.directory,
-      sessionID: info.id,
-    });
-    const snapshot = buildSessionLogSnapshot(messages, info);
-    this.cacheSession(thread.id, info, messages, snapshot.runtime);
-    const limitedMessages = limitTail(snapshot.messages, options.messageLimit ?? null);
-    const limitedActivities = limitTail(
-      snapshot.activities,
-      options.activityLimit ?? null,
-    );
-    return {
-      messages: limitedMessages.map(cloneMessage),
-      activities: limitedActivities.map(cloneActivity),
-      runtime: snapshot.runtime ? { ...snapshot.runtime } : null,
-      totalMessages: snapshot.messages.length,
-      totalActivities: snapshot.activities.length,
-      nextSeq: snapshot.nextSeq,
-    };
-  }
-
-  public async readSessionRuntime(
-    thread: ThreadRecord,
-  ): Promise<SessionRuntimeSummary | null> {
-    await this.start();
-    const info = await this.ensureSessionInfo(thread.id, thread.cwd);
-    const messages = await this.requireClient().listMessages({
-      directory: info.directory,
-      sessionID: info.id,
-    });
-    const runtime = buildSessionRuntime(info, messages);
-    this.cacheSession(thread.id, info, messages, runtime);
-    return runtime ? { ...runtime } : null;
-  }
-
-  public async listLoadedSessionIds(): Promise<string[]> {
-    return [...this.loadedSessionIds];
-  }
-
-  public async resumeSessionThread(
-    threadId: string,
-    _options?: AgentSessionResumeOptions,
-  ): Promise<unknown> {
-    await this.start();
-    const info = await this.ensureSessionInfo(threadId);
-    this.loadedSessionIds.add(threadId);
-    this.touchCache(info);
+  async resumeSessionThread(id: string, _options?: AgentSessionResumeOptions): Promise<unknown> {
+    const info = await this.info(id);
+    this.loaded.add(id);
+    await this.readSessionLog(this.thread(info, { type: "idle" }, false));
     return { resumed: true };
   }
-
-  public async setSessionName(threadId: string, name: string): Promise<unknown> {
-    await this.start();
-    const info = await this.ensureSessionInfo(threadId);
-    const updated = await this.requireClient().setSessionName({
-      directory: info.directory,
-      sessionID: threadId,
-      title: name,
-    });
-    this.touchCache(updated);
+  async setSessionName(id: string, name: string): Promise<unknown> {
+    const info = await this.info(id);
+    this.saveInfo((await this.sdk.session.update({ sessionID: id, directory: info.directory, title: name }, this.requestOptions())).data);
     return { renamed: true };
   }
-
-  public async createSession(
-    request: AgentCreateSessionRequest,
-  ): Promise<AgentCreateSessionResult> {
-    await this.start();
-    const model = parseModelRef(request.overrides.model);
-    const agent = normalizeAgentName(request.overrides.mode);
-    const created = await this.requireClient().createSession({
-      directory: request.cwd,
-      title: deriveSessionTitle(request.input),
-      agent,
-    });
-    const sessionInfo =
-      model == null
-        ? created
-        : {
-            ...created,
-            model,
-          };
-    this.loadedSessionIds.add(created.id);
-    this.touchCache(sessionInfo);
-    let activeTurnId: string | null = null;
-    let runtime = buildSessionRuntime(sessionInfo, []);
-    if (request.input.length > 0) {
-      const started = await this.startPromptTurn({
-        sessionId: created.id,
-        cwd: request.cwd,
-        input: request.input,
-        overrides: request.overrides,
-        mode: "turn",
-      });
-      activeTurnId = started.turnId;
-      runtime = {
-        ...(runtime ?? {}),
-        turnId: started.turnId,
-        updatedAt: Date.now(),
-      };
-      this.updateRuntimeCache(created.id, runtime);
-    }
-    return {
-      thread: this.threadFromSession(sessionInfo, { type: "idle" }, false),
-      activeTurnId,
-      runtime,
-    };
+  async archiveSession(id: string): Promise<unknown> {
+    const info = await this.info(id);
+    await this.interruptTurn(id, this.active.get(id)?.id ?? id);
+    this.saveInfo((await this.sdk.session.update({ sessionID: id, directory: info.directory, time: { archived: Date.now() } }, this.requestOptions())).data);
+    return { archived: true };
   }
-
-  public async submitInput(
-    request: AgentSubmitInputRequest,
-  ): Promise<AgentSubmitInputResult> {
-    await this.start();
-    const info = await this.ensureSessionInfo(request.sessionId);
-    const mode = request.activeTurnId ? "steer" : "turn";
-    if (request.activeTurnId) {
-      await this.interruptTurn(request.sessionId, request.activeTurnId).catch(
-        () => undefined,
-      );
-    }
-    return this.startPromptTurn({
-      sessionId: request.sessionId,
-      cwd: info.directory,
-      input: request.input,
-      overrides: request.overrides,
-      mode,
-    });
+  async unarchiveSession(id: string): Promise<unknown> {
+    const info = await this.info(id);
+    this.saveInfo((await this.sdk.session.update({ sessionID: id, directory: info.directory, time: { archived: 0 } }, this.requestOptions())).data);
+    return { unarchived: true };
   }
-
-  public async interruptTurn(
-    threadId: string,
-    turnId: string,
-  ): Promise<unknown> {
+  async compactSession(id: string): Promise<unknown> {
+    const info = await this.info(id);
+    await this.sdk.session.summarize({ sessionID: id, directory: info.directory }, this.requestOptions(120_000));
+    this.invalidate(id);
+    return { compacted: true };
+  }
+  async createSession(request: AgentCreateSessionRequest): Promise<AgentCreateSessionResult> {
     await this.start();
-    const info = await this.ensureSessionInfo(threadId);
-    const active = this.activeTurns.get(threadId);
-    if (active && active.turnId === turnId) {
-      active.aborted = true;
+    const controls = await this.controls(request.cwd, request.overrides);
+    const info = (await this.sdk.session.create({ directory: request.cwd, title: deriveSessionTitle(request.input) ?? undefined,
+      agent: controls.agent, ...(controls.model ? { model: { id: controls.model.modelID, providerID: controls.model.providerID, variant: controls.variant } } : {}) }, this.requestOptions())).data;
+    this.saveInfo(info);
+    this.loaded.add(info.id);
+    const input = request.input.length ? await this.submitInput({ ...request, sessionId: info.id, activeTurnId: null }) : null;
+    return { thread: this.thread(info, input ? { type: "busy" } : { type: "idle" }, false), activeTurnId: input?.turnId ?? null,
+      runtime: this.metadata(this.record(info.id)).runtime };
+  }
+  async submitInput(request: AgentSubmitInputRequest): Promise<AgentSubmitInputResult> {
+    let info: OpenCodeSessionInfo;
+    let controls: Awaited<ReturnType<OpenCodeAgentProvider["controls"]>>;
+    let prepared: ReturnType<typeof preparePromptInput>;
+    try {
+      info = await this.info(request.sessionId);
+      if (info.time.archived) throw new Error("OpenCode session is archived");
+      const status = (await this.sdk.session.status({ directory: info.directory }, this.requestOptions())).data[info.id];
+      if (this.active.has(info.id) || status?.type === "busy" || status?.type === "retry") throw new Error("OpenCode is busy; the host must queue this input");
+      controls = await this.controls(info.directory, request.overrides);
+      prepared = preparePromptInput(request.input);
+      if (this.closed) throw new Error("OpenCode is closing");
+    } catch (error) { throw new AgentProviderRequestError(formatError(error), 409, true); }
+    const messageID = `msg_${createHash("sha256").update(`${this.providerId}:${info.id}:${request.clientMessageId ?? randomUUID()}`).digest("hex").slice(0, 32)}`;
+    const value: SessionMessage = { id: request.clientMessageId ?? messageID, role: "user",
+      text: prepared.parts.flatMap((part) => part.type === "text" ? [part.text] : []).join("\n"),
+      content: prepared.parts.flatMap((part) => part.type === "text" ? [{ type: "text" as const, text: part.text }] : []),
+      attachments: request.input.flatMap((item): SessionMessageAttachment[] => item.type === "image" ? [{ type: "image", url: item.url }]
+        : item.type === "localImage" ? [{ type: "localImage", path: item.path }] : item.type === "file" ? [{ type: "file", path: item.path }] : []),
+      createdAt: Date.now(), seq: this.db.nextSessionSequence(this.providerId, info.id) };
+    this.db.putSessionItem(this.providerId, info.id, { kind: "message", value, nativeId: messageID, authority: "recovery" });
+    const turn: ActiveOpenCodeTurn = { id: messageID, status: "completed", started: false, submitting: true };
+    this.active.set(info.id, turn);
+    this.loaded.add(info.id);
+    try {
+      await this.sdk.session.promptAsync({ sessionID: info.id, directory: info.directory, messageID, ...controls, parts: prepared.parts }, this.requestOptions());
+      turn.submitting = false;
+      await this.finishTurn(info.id).catch((error) => this.warning(info.id, "opencode_refresh_failed", formatError(error)));
+      return { mode: "turn", turnId: messageID };
+    } catch (error) {
+      turn.submitting = false;
+      this.warning(info.id, "opencode_input_uncertain", formatError(error));
+      await this.finishTurn(info.id).catch(() => {});
+      this.invalidate(info.id);
+      throw error;
     }
-    await this.requireClient().abortSession({
-      directory: info.directory,
-      sessionID: threadId,
-    });
+  }
+  async interruptTurn(id: string, _turnId: string): Promise<unknown> {
+    const info = await this.info(id);
+    const active = this.active.get(id);
+    if (active) active.status = "interrupted";
+    await this.sdk.session.abort({ sessionID: id, directory: info.directory }, this.requestOptions());
+    await this.finishTurn(id);
     return { interrupted: true };
   }
 
-  public respondToPendingAction(
-    action: AgentPendingAction,
-    decision: PendingActionResponseInput,
-  ): boolean {
-    const cache = this.sessionCache.get(action.sessionId);
-    const existing = cache?.pendingActions.get(action.id);
-    if (!existing) {
-      return false;
-    }
-    if (action.providerRequestKind === "opencode/permission") {
-      const providerOption = parsePendingActionProviderOptionResponse(decision);
-      let reply: "once" | "always" | "reject";
-      if (providerOption) {
-        const offered = existing.approval?.providerOptions?.find(
-          (option) => option.id === providerOption.providerOptionId,
-        );
-        if (!offered) {
-          return false;
-        }
-        reply = offered.id as "once" | "always" | "reject";
+  async listModels(options: AgentModelListOptions): Promise<ModelSummary[]> {
+    await this.start();
+    const result = (await this.sdk.provider.list({ directory: options.cwd ?? this.directory }, this.requestOptions())).data;
+    const models = result.all.flatMap((provider) => Object.values(provider.models).flatMap((model) => {
+      if (options.provider && provider.id !== options.provider) return [];
+      return [undefined, ...Object.keys(model.variants ?? {})].map((variant) => buildModelSummary(provider.name, model,
+        { providerID: provider.id, modelID: model.id, variant }, { isDefault: !variant && result.default[provider.id] === model.id }));
+    }));
+    return models.sort((a, b) => Number(b.isDefault) - Number(a.isDefault) || a.displayName.localeCompare(b.displayName));
+  }
+  async listModes(options: AgentModeListOptions): Promise<ProviderModeCatalog> {
+    await this.start();
+    const agents = (await this.sdk.app.agents({ directory: options.cwd ?? this.directory }, this.requestOptions())).data;
+    return { defaultMode: null, modes: agents.filter((agent) => !agent.hidden && agent.mode !== "subagent")
+      .map((agent) => ({ id: agent.name, label: prettifyModeName(agent.name) })).sort((a, b) => a.label.localeCompare(b.label)) };
+  }
+  async listSkills(options: AgentSkillListOptions): Promise<SkillCatalogEntry> {
+    await this.start();
+    const skills = (await this.sdk.app.skills({ directory: options.cwd }, this.requestOptions())).data;
+    return { cwd: options.cwd, skills: skills.map((skill): SkillSummary => ({ name: skill.name, description: skill.description ?? "",
+      path: skill.location, scope: inferSkillScope(options.cwd, skill.location), enabled: true })), errors: [] };
+  }
+
+  respondToPendingAction(action: AgentPendingAction, input: PendingActionResponseInput): boolean {
+    const pending = this.pending.get(action.id);
+    if (!pending || pending.responding || this.closed) return false;
+    const offered = pending.action;
+    let respond: () => Promise<unknown>;
+    const parameters = { requestID: String(offered.providerRequestId), directory: offered.cwd ?? undefined };
+    if (offered.providerRequestKind === "opencode/permission") {
+      const option = parsePendingActionProviderOptionResponse(input)?.providerOptionId;
+      const decision = parsePendingActionDecision(input);
+      const reply = option ?? (decision ? decision.decision === "approve" ? decision.scope === "once" ? "once" : "always" : "reject" : null);
+      if ((reply !== "once" && reply !== "always" && reply !== "reject") || !offered.approval?.providerOptions?.some((item) => item.id === reply)) return false;
+      respond = () => this.sdk.permission.reply({ ...parameters, reply }, this.requestOptions());
+    } else {
+      const decision = parsePendingActionDecision(input)?.decision;
+      const elicitation = parsePendingActionElicitationResponse(input);
+      if (decision === "cancel" || decision === "decline" || elicitation?.action === "cancel" || elicitation?.action === "decline") {
+        respond = () => this.sdk.question.reject(parameters, this.requestOptions());
       } else {
-        const normalized = normalizePendingActionDecision(decision as any);
-        if (!normalized) {
-          return false;
-        }
-        reply =
-          normalized.decision === "approve"
-            ? normalized.scope === "once"
-              ? "once"
-              : "always"
-            : "reject";
-      }
-      cache?.pendingActions.delete(action.id);
-      void this.respondToPermission(existing, reply);
-      return true;
-    }
-
-    if (action.providerRequestKind === "opencode/question:user-input") {
-      const parsed = parsePendingActionUserInputResponse(decision);
-      if (!parsed) {
-        return false;
-      }
-      cache?.pendingActions.delete(action.id);
-      void this.respondToQuestion(existing, [[parsed.answer]]);
-      return true;
-    }
-
-    if (action.providerRequestKind === "opencode/question:elicitation") {
-      const parsed = parsePendingActionElicitationResponse(decision);
-      if (!parsed) {
-        return false;
-      }
-      if (parsed.action === "decline" || parsed.action === "cancel") {
-        cache?.pendingActions.delete(action.id);
-        void this.rejectQuestion(existing);
-        return true;
-      }
-      const payload = existing.providerPayload;
-      if (!payload || typeof payload !== "object") {
-        return false;
-      }
-      const question = payload as { questions?: OpenCodeQuestionInfo[] };
-      const answers = buildQuestionAnswersFromElicitation(
-        question.questions ?? [],
-        parsed.content ?? {},
-      );
-      if (!answers) {
-        return false;
-      }
-      cache?.pendingActions.delete(action.id);
-      void this.respondToQuestion(existing, answers);
-      return true;
-    }
-
-    return false;
-  }
-
-  public async listModels(options: AgentModelListOptions): Promise<ModelSummary[]> {
-    await this.start();
-    const result = await this.requireClient().listProviders(
-      options.cwd ?? this.defaultDirectory,
-    );
-    const providerFilter = options.provider?.trim() || null;
-    const models: ModelSummary[] = [];
-    for (const provider of result.all) {
-      for (const model of Object.values(provider.models)) {
-        const providerId = model.providerID || provider.id;
-        if (providerFilter && providerId !== providerFilter) {
-          continue;
-        }
-        models.push(
-          buildModelSummary(provider.name, model, {
-            providerID: providerId,
-            modelID: model.id,
-          }, {
-            isDefault: result.default[provider.id] === model.id,
-          }),
-        );
-        for (const variant of Object.keys(model.variants ?? {})) {
-          models.push(
-            buildModelSummary(provider.name, model, {
-              providerID: providerId,
-              modelID: model.id,
-              variant,
-            }),
-          );
-        }
+        const user = parsePendingActionUserInputResponse(input);
+        const questions = (offered.providerPayload as OpenCodeQuestionRequest).questions;
+        const answers = user ? [[user.answer]] : elicitation?.action === "accept" ? buildQuestionAnswersFromElicitation(questions, elicitation.content ?? {}) : null;
+        if (!answers || !validQuestionAnswers(questions, answers)) return false;
+        respond = () => this.sdk.question.reply({ ...parameters, answers }, this.requestOptions());
       }
     }
-    models.sort((left, right) => {
-      if (left.isDefault !== right.isDefault) {
-        return left.isDefault ? -1 : 1;
-      }
-      return left.displayName.localeCompare(right.displayName);
+    pending.responding = true;
+    void respond().then(() => this.resolveAction(offered.id)).catch((error) => {
+      if (this.pending.get(offered.id) !== pending || this.closed) return;
+      pending.responding = false;
+      this.emit("liveEvent", { type: "action_opened", action: offered });
+      this.warning(offered.sessionId, "opencode_action_failed", formatError(error));
     });
-    return models;
+    return true;
   }
 
-  public async listModes(options: AgentModeListOptions): Promise<ProviderModeCatalog> {
-    await this.start();
-    const agents = await this.requireClient().listAgents(
-      options.cwd ?? this.defaultDirectory,
-    );
-    return {
-      defaultMode: null,
-      modes: agents
-        .filter((agent) => agent.hidden !== true && agent.mode !== "subagent")
-        .map((agent) => ({
-          id: agent.name,
-          label: prettifyModeName(agent.name),
-        }))
-        .sort((left, right) => left.label.localeCompare(right.label)),
-    };
-  }
-
-  public async listSkills(options: AgentSkillListOptions): Promise<SkillCatalogEntry> {
-    await this.start();
-    const skills = await this.requireClient().listSkills(options.cwd);
-    return {
-      cwd: options.cwd,
-      skills: skills.map((skill): SkillSummary => ({
-        name: skill.name,
-        description: skill.description,
-        path: skill.location,
-        scope: inferSkillScope(options.cwd, skill.location),
-        enabled: true,
-      })),
-      errors: [],
-    };
-  }
-
-  private async startInternal(): Promise<void> {
-    if (this.stateDir) {
-      await mkdir(this.stateDir, { recursive: true });
+  private async controls(directory: string, overrides: AgentSubmitInputRequest["overrides"]) {
+    let model: OpenCodeModelRef | undefined;
+    const agent = normalizeAgentName(overrides.mode) ?? undefined;
+    if (overrides.model) {
+      const providers = (await this.sdk.provider.list({ directory }, this.requestOptions())).data;
+      // Model IDs can contain slashes. Match the catalog before considering variants.
+      const offered = providers.all.flatMap((provider) => Object.values(provider.models).flatMap((item) =>
+        [undefined, ...Object.keys(item.variants ?? {})].map((variant) => ({ providerID: provider.id, modelID: item.id, variant }))));
+      model = offered.sort((a, b) => Number(Boolean(a.variant)) - Number(Boolean(b.variant)))
+        .find((item) => encodeModelRef(item) === overrides.model?.trim());
+      if (!model) throw new Error("OpenCode model or variant is not available");
     }
-    const server = await this.serverFactory({
-      bin: this.bin,
-      stateDir: this.stateDir,
-      onOutput: (line) => this.emit("stderr", `${line}\n`),
-      onExit: (code) => this.emit("exit", code),
-    });
-    this.server = server;
-    const resolvedBaseUrl = this.usesDefaultClientFactory
-      ? await resolveOpenCodeApiBaseUrl(server.baseUrl)
-      : server.baseUrl;
-    this.client = this.clientFactory({
-      baseUrl: resolvedBaseUrl,
-      defaultDirectory: this.defaultDirectory,
-    });
-  }
-
-  private requireClient(): OpenCodeClient {
-    if (!this.client) {
-      throw new Error("OpenCode provider has not been started.");
-    }
-    return this.client;
-  }
-
-  private async startPromptTurn(input: {
-    sessionId: string;
-    cwd: string;
-    input: AgentSessionInputItem[];
-    overrides: AgentSubmitInputRequest["overrides"];
-    mode: "turn" | "steer";
-  }): Promise<{ mode: "turn" | "steer"; turnId: string }> {
-    const prepared = preparePromptInput(input.input);
-    const promptInput: OpenCodePromptInput = {
-      parts: prepared.parts,
-    };
-    const agent = normalizeAgentName(input.overrides.mode);
     if (agent) {
-      promptInput.agent = agent;
+      const agents = (await this.sdk.app.agents({ directory }, this.requestOptions())).data;
+      if (!agents.some((item) => item.name === agent && !item.hidden && item.mode !== "subagent")) throw new Error("OpenCode mode is not available");
     }
-    const model = parseModelRef(input.overrides.model);
-    if (model) {
-      promptInput.model = {
-        providerID: model.providerID,
-        modelID: model.modelID,
-      };
-      if (model.variant) {
-        promptInput.variant = model.variant;
-      }
-    }
-
-    const baseline = await this.requireClient().listMessages({
-      directory: input.cwd,
-      sessionID: input.sessionId,
-    });
-    const turnId = randomUUID();
-    const turn: ActiveOpenCodeTurn = {
-      sessionId: input.sessionId,
-      cwd: input.cwd,
-      turnId,
-      baselineMessageIds: new Set(baseline.map((message) => message.info.id)),
-      assistantMessageId: null,
-      emittedAssistantText: "",
-      emittedReasoningText: "",
-      emittedActivityFingerprints: new Map(),
-      lastStatus: null,
-      aborted: false,
-    };
-
-    if (prepared.warnings.length > 0) {
-      for (const warning of prepared.warnings) {
-        this.emit("liveEvent", {
-          type: "provider_warning",
-          sessionId: input.sessionId,
-          level: "warning",
-          message: warning,
-          source: "opencode/input",
-        });
-      }
-    }
-
-    await this.requireClient().promptAsync({
-      directory: input.cwd,
-      sessionID: input.sessionId,
-      input: promptInput,
-    });
-    this.activeTurns.set(input.sessionId, turn);
-    this.loadedSessionIds.add(input.sessionId);
-    this.emit("liveEvent", {
-      type: "turn_started",
-      sessionId: input.sessionId,
-      turnId,
-    });
-    this.emitThreadStatusIfChanged(turn, "running");
-    void this.monitorTurn(turn);
-    return { mode: input.mode, turnId };
+    return { agent, model: model ? { providerID: model.providerID, modelID: model.modelID } : undefined, variant: model?.variant };
   }
 
-  private async monitorTurn(turn: ActiveOpenCodeTurn): Promise<void> {
-    try {
-      while (this.activeTurns.get(turn.sessionId) === turn) {
-        const [messages, statuses, permissions, questions] = await Promise.all([
-          this.requireClient().listMessages({
-            directory: turn.cwd,
-            sessionID: turn.sessionId,
-          }),
-          this.requireClient().getSessionStatuses(turn.cwd),
-          this.requireClient().listPermissions(turn.cwd),
-          this.requireClient().listQuestions(turn.cwd),
-        ]);
-
-        const sessionInfo = await this.ensureSessionInfo(turn.sessionId, turn.cwd);
-        this.cacheSession(turn.sessionId, sessionInfo, messages);
-
-        const status = statuses[turn.sessionId] ?? { type: "idle" as const };
-        const pendingKind = this.emitPendingActions(turn, permissions, questions);
-        if (pendingKind === "permissions") {
-          this.emitThreadStatusIfChanged(turn, "waiting_for_approval");
-        } else if (pendingKind) {
-          this.emitThreadStatusIfChanged(turn, "waiting_for_input");
-        } else {
-          this.emitThreadStatusIfChanged(turn, statusToLiveThreadStatus(status));
-        }
-
-        const userMessage = findLastItem(
-          messages,
-          (
-            message,
-          ): message is OpenCodeMessage & { info: OpenCodeUserMessageInfo } =>
-            message.info.role === "user" &&
-            !turn.baselineMessageIds.has(message.info.id),
-        );
-        const assistantMessage =
-          userMessage == null
-            ? undefined
-            : findLastItem(
-                messages,
-                (
-                  message,
-                ): message is OpenCodeMessage & {
-                  info: OpenCodeAssistantMessageInfo;
-                } =>
-                  message.info.role === "assistant" &&
-                  message.info.parentID === userMessage.info.id,
-              );
-        if (assistantMessage && assistantMessage.info.role === "assistant") {
-          turn.assistantMessageId = assistantMessage.info.id;
-          this.emitAssistantDeltas(turn, assistantMessage);
-          this.emitActivityDeltas(turn, assistantMessage);
-          if (assistantMessage.info.time.completed) {
-            const runtime = buildSessionRuntime(sessionInfo, messages);
-            const completedMessage = toSessionMessage(assistantMessage);
-            this.emit("liveEvent", {
-              type: "assistant_message_completed",
-              sessionId: turn.sessionId,
-              turnId: turn.turnId,
-              message: {
-                id: completedMessage.id,
-                text: completedMessage.text,
-                content: completedMessage.content,
-                phase: completedMessage.phase,
-              },
-            });
-            this.emit("liveEvent", {
-              type: "runtime_updated",
-              sessionId: turn.sessionId,
-              runtime,
-            });
-            this.updateRuntimeCache(turn.sessionId, runtime);
-            this.emitThreadStatusIfChanged(
-              turn,
-              assistantMessage.info.error ? "errored" : "idle",
-            );
-            this.emit("liveEvent", {
-              type: "turn_completed",
-              sessionId: turn.sessionId,
-              turnId: turn.turnId,
-              status: assistantMessage.info.error ? "failed" : "completed",
-            });
-            this.activeTurns.delete(turn.sessionId);
-            return;
+  private async readEvents(connected: () => void, failed: (error: unknown) => void): Promise<void> {
+    let everConnected = false;
+    let backoff = 250;
+    while (!this.abort.signal.aborted) {
+      try {
+        const events = await this.sdk.global.event({ signal: this.abort.signal, sseMaxRetryAttempts: 1,
+          onSseError: (error) => { if (!everConnected) failed(error); } });
+        for await (const event of events.stream) {
+          if (this.abort.signal.aborted) break;
+          if (event.payload.type === "server.connected") {
+            const reconnect = everConnected;
+            everConnected = true;
+            backoff = 250;
+            connected();
+            if (reconnect) {
+              for (const id of this.loaded) this.invalidate(id);
+              for (const id of [...this.active.keys()]) await this.finishTurn(id);
+              for (const id of new Set([...this.loaded, ...[...this.pending.values()].map((item) => item.action.sessionId)])) {
+                const info = await this.info(id);
+                const [permissions, questions] = await Promise.all([
+                  this.sdk.permission.list({ directory: info.directory }, this.requestOptions()),
+                  this.sdk.question.list({ directory: info.directory }, this.requestOptions()),
+                ]);
+                this.syncActions(info, permissions.data, questions.data);
+              }
+            }
+            continue;
           }
+          await this.onEvent(event);
         }
-
-        if (turn.aborted && status.type === "idle") {
-          this.emitThreadStatusIfChanged(turn, "idle");
-          this.emit("liveEvent", {
-            type: "turn_completed",
-            sessionId: turn.sessionId,
-            turnId: turn.turnId,
-            status: "cancelled",
-          });
-          this.activeTurns.delete(turn.sessionId);
-          return;
+      } catch (error) {
+        if (!everConnected) failed(error);
+        else if (!this.closed) this.warning(undefined, "opencode_event_error", formatError(error));
+      }
+      if (!this.abort.signal.aborted) {
+        try { await sleep(backoff, undefined, { signal: this.abort.signal }); } catch { break; }
+        backoff = Math.min(backoff * 2, 10_000);
+      }
+    }
+  }
+  private async onEvent(event: GlobalEvent): Promise<void> {
+    const payload = event.payload;
+    switch (payload.type) {
+      case "session.created": case "session.updated": this.saveInfo(payload.properties.info); return;
+      case "session.deleted": {
+        const id = payload.properties.info.id;
+        const turn = this.active.get(id);
+        this.active.delete(id);
+        this.loaded.delete(id);
+        for (const [key, part] of this.parts) if (part.sessionId === id) this.parts.delete(key);
+        for (const [key, pending] of this.pending) if (pending.action.sessionId === id) this.resolveAction(key);
+        if (turn?.started) this.emit("liveEvent", { type: "turn_completed", sessionId: id, turnId: turn.id, status: "interrupted" });
+        this.invalidate(id); return;
+      }
+      case "message.updated": {
+        const message = payload.properties.info;
+        if (message.role === "user") this.beginTurn(message.sessionID, message.id);
+        if (message.role === "assistant" && message.time.completed != null) {
+          const info = await this.info(message.sessionID, event.directory);
+          const native = (await this.sdk.session.message({ sessionID: message.sessionID, messageID: message.id, directory: info.directory }, this.requestOptions())).data;
+          const value = toSessionMessage(native);
+          if (value.text || value.content.length || value.attachments.length) {
+            this.saveItem(info.id, { kind: "message", value, nativeId: message.id, authority: "recovery" });
+            this.emit("liveEvent", { type: "assistant_message_completed", sessionId: info.id, turnId: this.active.get(info.id)?.id, message: value });
+          }
+          for (const part of native.parts) this.emitActivity(info.id, part, message.parentID, message.time.created);
+          for (const [key, part] of this.parts) if (part.messageId === message.id) this.parts.delete(key);
         }
-
-        await delay(this.pollIntervalMs);
+        return;
       }
-    } catch (error) {
-      this.emit("liveEvent", {
-        type: "provider_warning",
-        sessionId: turn.sessionId,
-        level: "error",
-        message: formatError(error),
-        source: "opencode/monitor",
-      });
-      this.emitThreadStatusIfChanged(turn, "errored");
-      this.emit("liveEvent", {
-        type: "turn_completed",
-        sessionId: turn.sessionId,
-        turnId: turn.turnId,
-        status: "failed",
-      });
-      this.activeTurns.delete(turn.sessionId);
-    }
-  }
-
-  private emitAssistantDeltas(
-    turn: ActiveOpenCodeTurn,
-    message: OpenCodeMessage,
-  ): void {
-    const reasoningText = message.parts
-      .filter(isReasoningPart)
-      .map((part) => part.text)
-      .join("");
-    if (reasoningText.length > turn.emittedReasoningText.length) {
-      const delta = reasoningText.slice(turn.emittedReasoningText.length);
-      turn.emittedReasoningText = reasoningText;
-      if (delta) {
-        this.emit("liveEvent", {
-          type: "reasoning_delta",
-          sessionId: turn.sessionId,
-          turnId: turn.turnId,
-          itemId: message.info.id,
-          reasoningId: `${message.info.id}:reasoning`,
-          delta,
-          summary: false,
-        });
+      case "message.part.updated": {
+        const part = payload.properties.part;
+        if (part.type === "text" || part.type === "reasoning") this.parts.set(part.id, { sessionId: part.sessionID, messageId: part.messageID, type: part.type });
+        this.emitActivity(part.sessionID, part, this.active.get(part.sessionID)?.id ?? null, Date.now());
+        return;
       }
-    }
-
-    const text = message.parts
-      .filter(isTextPart)
-      .map((part) => part.text)
-      .join("");
-    if (text.length > turn.emittedAssistantText.length) {
-      const delta = text.slice(turn.emittedAssistantText.length);
-      turn.emittedAssistantText = text;
-      if (delta) {
-        this.emit("liveEvent", {
-          type: "assistant_delta",
-          sessionId: turn.sessionId,
-          turnId: turn.turnId,
-          itemId: message.info.id,
-          delta,
-        });
-      }
-    }
-  }
-
-  private emitActivityDeltas(
-    turn: ActiveOpenCodeTurn,
-    message: OpenCodeMessage,
-  ): void {
-    for (const part of message.parts) {
-      const activity = activityFromOpenCodePart(part, turn.turnId);
-      if (!activity) {
-        continue;
-      }
-      const fingerprint = JSON.stringify(activity);
-      if (turn.emittedActivityFingerprints.get(activity.id) === fingerprint) {
-        continue;
-      }
-      turn.emittedActivityFingerprints.set(activity.id, fingerprint);
-      this.emit("liveEvent", {
-        type: "activity_updated",
-        sessionId: turn.sessionId,
-        turnId: turn.turnId,
-        activity,
-      });
-    }
-  }
-
-  private emitPendingActions(
-    turn: ActiveOpenCodeTurn,
-    permissions: OpenCodePermissionRequest[],
-    questions: OpenCodeQuestionRequest[],
-  ): "permissions" | "user_input" | "elicitation" | null {
-    const cache = this.sessionCache.get(turn.sessionId);
-    let pendingKind: "permissions" | "user_input" | "elicitation" | null = null;
-
-    for (const permission of permissions) {
-      if (permission.sessionID !== turn.sessionId) {
-        continue;
-      }
-      const action = permissionToPendingAction(
-        permission,
-        cache?.info.title ?? "OpenCode session",
-        cache?.info.directory ?? turn.cwd,
-      );
-      if (!cache?.pendingActions.has(action.id)) {
-        cache?.pendingActions.set(action.id, action);
-        this.emit("liveEvent", { type: "action_opened", action });
-      }
-      pendingKind = "permissions";
-    }
-
-    for (const question of questions) {
-      if (question.sessionID !== turn.sessionId) {
-        continue;
-      }
-      const action = questionToPendingAction(
-        question,
-        cache?.info.title ?? "OpenCode session",
-        cache?.info.directory ?? turn.cwd,
-      );
-      if (!cache?.pendingActions.has(action.id)) {
-        cache?.pendingActions.set(action.id, action);
-        this.emit("liveEvent", { type: "action_opened", action });
-      }
-      if (action.kind === "user_input" || action.kind === "elicitation") {
-        pendingKind = action.kind;
-      }
-    }
-
-    return pendingKind;
-  }
-
-  private emitThreadStatusIfChanged(
-    turn: ActiveOpenCodeTurn,
-    status: LiveThreadStatus,
-  ): void {
-    if (turn.lastStatus === status) {
-      return;
-    }
-    turn.lastStatus = status;
-    this.emit("liveEvent", {
-      type: "thread_status_changed",
-      sessionId: turn.sessionId,
-      status,
-    });
-  }
-
-  private async listAllSessions(
-    limit: number,
-    archived: boolean,
-    includeSubAgents: boolean,
-    subAgentParentId?: string,
-  ): Promise<OpenCodeSessionInfo[]> {
-    const sessions: OpenCodeSessionInfo[] = [];
-    let cursor: number | null = null;
-    let matchingCount = 0;
-    while (matchingCount < limit) {
-      const page = await this.requireClient().listGlobalSessions({
-        directory: this.defaultDirectory,
-        archived,
-        limit: Math.max(limit, 50),
-        cursor,
-      });
-      sessions.push(...page.sessions);
-      matchingCount = sessions.filter(
-        (session) =>
-          archived === Boolean(session.time.archived) &&
-          (subAgentParentId
-            ? session.parentID === subAgentParentId
-            : includeSubAgents || !session.parentID),
-      ).length;
-      if (page.nextCursor == null || page.sessions.length === 0) {
-        break;
-      }
-      cursor = page.nextCursor;
-    }
-    for (const session of sessions) {
-      this.touchCache(session);
-    }
-    return sessions
-      .filter(
-        (session) =>
-          archived === Boolean(session.time.archived) &&
-          (subAgentParentId
-            ? session.parentID === subAgentParentId
-            : includeSubAgents || !session.parentID),
-      )
-      .slice(0, limit);
-  }
-
-  private async loadStatusesForDirectories(
-    directories: string[],
-  ): Promise<Map<string, Record<string, OpenCodeSessionStatus>>> {
-    const result = new Map<string, Record<string, OpenCodeSessionStatus>>();
-    const unique = [...new Set(directories.filter(Boolean))];
-    await Promise.all(
-      unique.map(async (directory) => {
-        try {
-          result.set(directory, await this.requireClient().getSessionStatuses(directory));
-        } catch {
-          result.set(directory, {});
+      case "message.part.delta": {
+        const delta = payload.properties;
+        if (delta.field !== "text") return;
+        let part = this.parts.get(delta.partID);
+        if (!part) {
+          const native = (await this.sdk.session.message({ sessionID: delta.sessionID, messageID: delta.messageID, directory: event.directory }, this.requestOptions())).data;
+          const found = native.parts.find((item) => item.id === delta.partID);
+          if (!found || (found.type !== "text" && found.type !== "reasoning")) return;
+          part = { sessionId: delta.sessionID, messageId: delta.messageID, type: found.type };
+          this.parts.set(delta.partID, part);
         }
-      }),
-    );
-    return result;
-  }
-
-  private async ensureSessionInfo(
-    sessionId: string,
-    cwd?: string | null,
-  ): Promise<OpenCodeSessionInfo> {
-    const cached = this.sessionCache.get(sessionId)?.info;
-    if (cached) {
-      return cached;
-    }
-    if (cwd) {
-      const info = await this.requireClient().getSession({
-        directory: cwd,
-        sessionID: sessionId,
-      });
-      this.touchCache(info);
-      return info;
-    }
-
-    const match =
-      (await this.findSessionInfoById(sessionId, false)) ??
-      (await this.findSessionInfoById(sessionId, true));
-    if (!match) {
-      throw new Error(`OpenCode session "${sessionId}" was not found.`);
-    }
-    this.touchCache(match);
-    return match;
-  }
-
-  private async findSessionInfoById(
-    sessionId: string,
-    archived: boolean,
-  ): Promise<OpenCodeSessionInfo | null> {
-    let cursor: number | null = null;
-    while (true) {
-      const page = await this.requireClient().listGlobalSessions({
-        directory: this.defaultDirectory,
-        archived,
-        limit: 200,
-        cursor,
-      });
-      for (const session of page.sessions) {
-        this.touchCache(session);
-        if (session.id === sessionId) {
-          return session;
+        this.emit("liveEvent", part.type === "reasoning"
+          ? { type: "reasoning_delta", sessionId: delta.sessionID, itemId: delta.messageID, reasoningId: delta.partID, turnId: this.active.get(delta.sessionID)?.id, delta: delta.delta, summary: false }
+          : { type: "assistant_delta", sessionId: delta.sessionID, itemId: delta.messageID, turnId: this.active.get(delta.sessionID)?.id, delta: delta.delta });
+        return;
+      }
+      case "permission.asked": case "question.asked": {
+        const id = payload.properties.sessionID;
+        const info = await this.info(id, event.directory);
+        this.openAction(payload.type === "permission.asked" ? permissionToPendingAction(payload.properties, info.title, info.directory)
+          : questionToPendingAction(payload.properties, info.title, info.directory));
+        return;
+      }
+      case "permission.replied": this.resolveAction(`permission:${payload.properties.requestID}`); return;
+      case "question.replied": case "question.rejected": this.resolveAction(`question:${payload.properties.requestID}`); return;
+      case "session.status": {
+        const { sessionID: id, status } = payload.properties;
+        if (status.type === "idle") await this.finishTurn(id);
+        else this.emit("liveEvent", { type: "thread_status_changed", sessionId: id, status: "running" });
+        return;
+      }
+      case "session.idle": await this.finishTurn(payload.properties.sessionID); return;
+      case "session.error": {
+        const id = payload.properties.sessionID;
+        const active = id ? this.active.get(id) : null;
+        if (active) active.status = "failed";
+        this.warning(id, "opencode_session_error", formatError(payload.properties.error));
+        return;
+      }
+      case "todo.updated":
+        this.emit("liveEvent", { type: "plan_updated", sessionId: payload.properties.sessionID,
+          plan: payload.properties.todos.map((item): LivePlanStep => ({ step: item.content, status: item.status === "completed" ? "completed" : item.status === "in_progress" ? "in_progress" : "pending" })) }); return;
+      case "session.diff": {
+        const id = payload.properties.sessionID;
+        const diff = payload.properties.diff.flatMap((file) => file.patch ? [file.patch] : []).join("\n");
+        if (diff) {
+          const value: SessionActivity = { id: `opencode-diff:${id}`, type: "turn_diff", turnId: this.active.get(id)?.id ?? null,
+            diff, status: "completed", seq: 0, createdAt: Date.now() };
+          if (this.db.getProviderSession(this.providerId, id)) this.saveItem(id, { kind: "activity", value, nativeId: null, authority: "recovery" });
+          this.emit("liveEvent", { type: "activity_updated", sessionId: id, activity: value });
         }
+        this.invalidate(id); return;
       }
-      if (page.nextCursor == null || page.sessions.length === 0) {
-        return null;
-      }
-      cursor = page.nextCursor;
+      case "message.removed": case "message.part.removed": case "session.compacted":
+        this.invalidate(payload.properties.sessionID); return;
+      default: return;
     }
   }
 
-  private threadFromSession(
-    session: OpenCodeSessionInfo,
-    status: OpenCodeSessionStatus,
-    includeTurns: boolean,
-  ): ThreadRecord {
-    const cached = this.sessionCache.get(session.id);
-    const preview = cached?.preview?.trim() || session.title;
-    const activeFlags: string[] = [];
-    if (status.type === "busy") {
-      activeFlags.push("busy");
-    }
-    if (status.type === "retry") {
-      activeFlags.push("retry");
-    }
-    return {
-      id: session.id,
-      name: session.title,
-      preview,
-      createdAt: session.time.created,
-      updatedAt: session.time.updated,
-      cwd: session.directory,
-      source: "opencode",
-      subAgent: subAgentInfoForOpenCodeSession(session),
-      path: session.path ?? null,
-      status: {
-        type: status.type,
-        phase: statusToLiveThreadStatus(status),
-        ...(activeFlags.length > 0 ? { activeFlags } : {}),
-      },
-      ...(includeTurns ? { turns: [] } : {}),
-    };
+  private beginTurn(id: string, turnId: string): void {
+    if (this.closed) return;
+    const current = this.active.get(id);
+    if (current?.started) return;
+    if (current) current.started = true;
+    else this.active.set(id, { id: turnId, status: "completed", started: true, submitting: false });
+    this.emit("liveEvent", { type: "turn_started", sessionId: id, turnId });
   }
-
-  private touchCache(info: OpenCodeSessionInfo): void {
-    const existing = this.sessionCache.get(info.id);
-    this.sessionCache.set(info.id, {
-      info,
-      preview: existing?.preview ?? info.title,
-      runtime: existing?.runtime ?? buildSessionRuntime(info, []),
-      pendingActions: existing?.pendingActions ?? new Map(),
-    });
-  }
-
-  private cacheSession(
-    sessionId: string,
-    info: OpenCodeSessionInfo,
-    messages: OpenCodeMessage[],
-    runtime?: SessionRuntimeSummary | null,
-  ): void {
-    const existing = this.sessionCache.get(sessionId);
-    this.sessionCache.set(sessionId, {
-      info,
-      preview: buildPreview(messages, info.title),
-      runtime: runtime ?? buildSessionRuntime(info, messages),
-      pendingActions: existing?.pendingActions ?? new Map(),
-    });
-  }
-
-  private updateRuntimeCache(
-    sessionId: string,
-    runtime: SessionRuntimeSummary | null,
-  ): void {
-    const existing = this.sessionCache.get(sessionId);
-    if (!existing) {
-      return;
+  private async finishTurn(id: string): Promise<void> {
+    const currentTurn = this.active.get(id);
+    if (currentTurn?.submitting) return;
+    const info = await this.info(id);
+    const native = (await this.sdk.session.messages({ sessionID: id, directory: info.directory }, this.requestOptions())).data;
+    const status = (await this.sdk.session.status({ directory: info.directory }, this.requestOptions())).data[id];
+    if ((status && status.type !== "idle") || this.active.get(id) !== currentTurn) return;
+    const snapshot = this.saveHistory(info, native);
+    const active = this.active.get(id);
+    if (active) {
+      this.active.delete(id);
+      this.emit("liveEvent", { type: "runtime_updated", sessionId: id, runtime: snapshot.runtime ?? null });
+      if (active.started) this.emit("liveEvent", { type: "turn_completed", sessionId: id, turnId: active.id, status: active.status });
     }
-    this.sessionCache.set(sessionId, {
-      ...existing,
-      runtime,
-    });
+    for (const [key, part] of this.parts) if (part.sessionId === id) this.parts.delete(key);
+    this.emit("liveEvent", { type: "thread_status_changed", sessionId: id, status: "idle" });
+    this.invalidate(id);
   }
-
-  private async respondToPermission(
-    action: AgentPendingAction,
-    reply: "once" | "always" | "reject",
-  ): Promise<void> {
-    try {
-      const info = await this.ensureSessionInfo(action.sessionId);
-      await this.requireClient().replyPermission({
-        directory: info.directory,
-        requestID: String(action.providerRequestId),
-        reply,
-      });
-    } catch (error) {
-      this.reopenPendingAction(action);
-      this.emit("liveEvent", {
-        type: "provider_warning",
-        sessionId: action.sessionId,
-        level: "error",
-        message: formatError(error),
-        source: "opencode/permission",
-      });
-    }
+  private emitActivity(id: string, part: OpenCodeMessagePart, turnId: string | null, createdAt: number): void {
+    const value = materializeActivity(part, turnId, createdAt);
+    if (!value) return;
+    if (this.db.getProviderSession(this.providerId, id)) this.saveItem(id, { kind: "activity", value, nativeId: part.id, authority: "recovery" });
+    this.emit("liveEvent", { type: "activity_updated", sessionId: id, turnId: this.active.get(id)?.id, activity: value });
   }
-
-  private async respondToQuestion(
-    action: AgentPendingAction,
-    answers: string[][],
-  ): Promise<void> {
-    try {
-      const info = await this.ensureSessionInfo(action.sessionId);
-      await this.requireClient().replyQuestion({
-        directory: info.directory,
-        requestID: String(action.providerRequestId),
-        answers,
-      });
-    } catch (error) {
-      this.reopenPendingAction(action);
-      this.emit("liveEvent", {
-        type: "provider_warning",
-        sessionId: action.sessionId,
-        level: "error",
-        message: formatError(error),
-        source: "opencode/question",
-      });
-    }
-  }
-
-  private async rejectQuestion(action: AgentPendingAction): Promise<void> {
-    try {
-      const info = await this.ensureSessionInfo(action.sessionId);
-      await this.requireClient().rejectQuestion({
-        directory: info.directory,
-        requestID: String(action.providerRequestId),
-      });
-    } catch (error) {
-      this.reopenPendingAction(action);
-      this.emit("liveEvent", {
-        type: "provider_warning",
-        sessionId: action.sessionId,
-        level: "error",
-        message: formatError(error),
-        source: "opencode/question",
-      });
-    }
-  }
-
-  private reopenPendingAction(action: AgentPendingAction): void {
-    const cache = this.sessionCache.get(action.sessionId);
-    if (!cache || cache.pendingActions.has(action.id)) {
-      return;
-    }
-    cache.pendingActions.set(action.id, action);
+  private openAction(action: AgentPendingAction): void {
+    if (this.pending.has(action.id)) return;
+    this.pending.set(action.id, { action, responding: false });
     this.emit("liveEvent", { type: "action_opened", action });
   }
-}
-
-class HttpOpenCodeClient implements OpenCodeClient {
-  public constructor(
-    private readonly baseUrl: URL,
-    private readonly defaultDirectory: string,
-  ) {}
-
-  public getHealth(directory: string): Promise<{ healthy: true; version: string }> {
-    return this.requestJson("/global/health", { directory });
+  private resolveAction(id: string): void {
+    const item = this.pending.get(id);
+    if (!item) return;
+    this.pending.delete(id);
+    this.emit("liveEvent", { type: "action_resolved", sessionId: item.action.sessionId, actionId: id });
   }
-
-  public async listGlobalSessions(options: {
-    directory: string;
-    archived: boolean;
-    limit: number;
-    cursor?: number | null;
-  }): Promise<OpenCodeGlobalSessionPage> {
-    const url = this.buildUrl("/experimental/session");
-    url.searchParams.set("archived", options.archived ? "true" : "false");
-    url.searchParams.set("limit", String(options.limit));
-    if (options.cursor != null) {
-      url.searchParams.set("cursor", String(options.cursor));
-    }
-    const response = await this.request(url, {
-      headers: this.headers(options.directory),
-    });
-    const sessions = (await response.json()) as OpenCodeSessionInfo[];
-    return {
-      sessions,
-      nextCursor: parseIntegerHeader(response.headers.get("x-next-cursor")),
-    };
+  private syncActions(info: OpenCodeSessionInfo, permissions: OpenCodePermissionRequest[], questions: OpenCodeQuestionRequest[]): void {
+    const actions = [...permissions.filter((item) => item.sessionID === info.id).map((item) => permissionToPendingAction(item, info.title, info.directory)),
+      ...questions.filter((item) => item.sessionID === info.id).map((item) => questionToPendingAction(item, info.title, info.directory))];
+    const ids = new Set(actions.map((item) => item.id));
+    for (const [id, pending] of this.pending) if (pending.action.sessionId === info.id && !ids.has(id)) this.resolveAction(id);
+    for (const action of actions) this.openAction(action);
   }
-
-  public getSession(options: {
-    directory: string;
-    sessionID: string;
-  }): Promise<OpenCodeSessionInfo> {
-    return this.requestJson(`/session/${encodeURIComponent(options.sessionID)}`, {
-      directory: options.directory,
-    });
-  }
-
-  public getSessionStatuses(
-    directory: string,
-  ): Promise<Record<string, OpenCodeSessionStatus>> {
-    return this.requestJson("/session/status", { directory });
-  }
-
-  public listMessages(options: {
-    directory: string;
-    sessionID: string;
-  }): Promise<OpenCodeMessage[]> {
-    return this.requestJson(
-      `/session/${encodeURIComponent(options.sessionID)}/message`,
-      { directory: options.directory },
-    );
-  }
-
-  public createSession(options: {
-    directory: string;
-    title?: string | null;
-    agent?: string | null;
-    model?: OpenCodeModelRef | null;
-  }): Promise<OpenCodeSessionInfo> {
-    return this.requestJson("/session", {
-      method: "POST",
-      directory: options.directory,
-      body: {
-        ...(options.title ? { title: options.title } : {}),
-        ...(options.agent ? { agent: options.agent } : {}),
-        ...(options.model ? { model: options.model } : {}),
-      },
-    });
-  }
-
-  public setSessionName(options: {
-    directory: string;
-    sessionID: string;
-    title: string;
-  }): Promise<OpenCodeSessionInfo> {
-    return this.requestJson(`/session/${encodeURIComponent(options.sessionID)}`, {
-      method: "PATCH",
-      directory: options.directory,
-      body: { title: options.title },
-    });
-  }
-
-  public async promptAsync(options: {
-    directory: string;
-    sessionID: string;
-    input: OpenCodePromptInput;
-  }): Promise<void> {
-    const response = await this.request(
-      this.buildUrl(`/session/${encodeURIComponent(options.sessionID)}/prompt_async`),
-      {
-        method: "POST",
-        headers: this.jsonHeaders(options.directory),
-        body: JSON.stringify(options.input),
-      },
-    );
-    if (response.status !== 204) {
-      throw new Error(`OpenCode prompt_async returned ${response.status}`);
-    }
-  }
-
-  public async abortSession(options: {
-    directory: string;
-    sessionID: string;
-  }): Promise<boolean> {
-    const result = await this.requestJson<boolean>(
-      `/session/${encodeURIComponent(options.sessionID)}/abort`,
-      {
-        method: "POST",
-        directory: options.directory,
-      },
-    );
-    return result === true;
-  }
-
-  public listPermissions(directory: string): Promise<OpenCodePermissionRequest[]> {
-    return this.requestJson("/permission", { directory });
-  }
-
-  public replyPermission(options: {
-    directory: string;
-    requestID: string;
-    reply: "once" | "always" | "reject";
-  }): Promise<boolean> {
-    return this.requestJson(
-      `/permission/${encodeURIComponent(options.requestID)}/reply`,
-      {
-        method: "POST",
-        directory: options.directory,
-        body: { reply: options.reply },
-      },
-    );
-  }
-
-  public listQuestions(directory: string): Promise<OpenCodeQuestionRequest[]> {
-    return this.requestJson("/question", { directory });
-  }
-
-  public replyQuestion(options: {
-    directory: string;
-    requestID: string;
-    answers: string[][];
-  }): Promise<boolean> {
-    return this.requestJson(`/question/${encodeURIComponent(options.requestID)}/reply`, {
-      method: "POST",
-      directory: options.directory,
-      body: { answers: options.answers },
-    });
-  }
-
-  public rejectQuestion(options: {
-    directory: string;
-    requestID: string;
-  }): Promise<boolean> {
-    return this.requestJson(`/question/${encodeURIComponent(options.requestID)}/reject`, {
-      method: "POST",
-      directory: options.directory,
-    });
-  }
-
-  public listProviders(directory: string): Promise<OpenCodeProviderListResult> {
-    return this.requestJson("/provider", { directory });
-  }
-
-  public listAgents(directory: string): Promise<OpenCodeAgentInfo[]> {
-    return this.requestJson("/agent", { directory });
-  }
-
-  public listSkills(directory: string): Promise<OpenCodeSkillInfo[]> {
-    return this.requestJson("/skill", { directory });
-  }
-
-  private async requestJson<T>(
-    path: string,
-    options: {
-      method?: string;
-      directory?: string | null;
-      body?: unknown;
-    } = {},
-  ): Promise<T> {
-    const response = await this.request(this.buildUrl(path), {
-      method: options.method ?? (options.body === undefined ? "GET" : "POST"),
-      headers:
-        options.body === undefined
-          ? this.headers(options.directory)
-          : this.jsonHeaders(options.directory),
-      ...(options.body === undefined
-        ? {}
-        : { body: JSON.stringify(options.body) }),
-    });
-    return (await response.json()) as T;
-  }
-
-  private async request(url: URL, init: RequestInit): Promise<Response> {
-    const response = await fetch(url, {
-      ...init,
-      signal: AbortSignal.timeout(DEFAULT_REQUEST_TIMEOUT_MS),
-    });
-    if (response.ok) {
-      return response;
-    }
-
-    let message = `${response.status} ${response.statusText}`;
-    try {
-      const text = await response.text();
-      if (text.trim()) {
-        message = `${message}: ${text.trim()}`;
+  private async listNativeSessions(options: AgentSessionListOptions): Promise<OpenCodeSessionInfo[]> {
+    const matches: OpenCodeSessionInfo[] = [];
+    let cursor: number | undefined;
+    const cursors = new Set<number>();
+    while (matches.length < options.limit) {
+      const page = await this.sdk.experimental.session.list({ archived: options.archived, limit: Math.max(50, options.limit), cursor }, this.requestOptions());
+      for (const info of page.data) {
+        this.saveInfo(info);
+        if (Boolean(info.time.archived) === options.archived && (options.subAgentParentId ? info.parentID === options.subAgentParentId
+          : options.includeSubAgents || !info.parentID)) matches.push(info);
       }
-    } catch {
-      // Ignore body parsing failures.
+      const next = parseIntegerHeader(page.response.headers.get("x-next-cursor"));
+      if (next == null || page.data.length === 0) break;
+      if (cursors.has(next)) throw new Error("OpenCode session pagination did not advance");
+      cursors.add(next);
+      cursor = next;
     }
-    throw new Error(`OpenCode request failed for ${url.pathname}: ${message}`);
+    return matches.slice(0, options.limit);
   }
-
-  private buildUrl(path: string): URL {
-    return resolveOpenCodeUrl(this.baseUrl, path);
+  private async info(id: string, directory?: string): Promise<OpenCodeSessionInfo> {
+    await this.start();
+    const previous = this.db.getProviderSession(this.providerId, id);
+    const native = (await this.sdk.session.get({ sessionID: id, directory: previous?.cwd || directory || this.directory }, this.requestOptions())).data;
+    if (native.id !== id) throw new Error("OpenCode returned a different session identity");
+    this.saveInfo(native);
+    return native;
   }
-
-  private headers(directory?: string | null): OpenCodeHeaders {
-    return {
-      "x-opencode-directory": directory?.trim() || this.defaultDirectory,
-    };
+  private saveInfo(info: OpenCodeSessionInfo): void {
+    const previous = this.db.getProviderSession(this.providerId, info.id);
+    this.db.saveProviderSession(this.providerId, { id: info.id, nativeId: info.id, cwd: info.directory, name: info.title,
+      preview: previous?.preview || info.title, createdAt: info.time.created, updatedAt: info.time.updated,
+      archived: Boolean(info.time.archived), metadata: { info, runtime: this.metadata(previous)?.runtime ?? buildSessionRuntime(info, []) } });
   }
-
-  private jsonHeaders(directory?: string | null): OpenCodeHeaders {
-    return {
-      ...this.headers(directory),
-      "content-type": "application/json",
-    };
+  private saveItem(id: string, item: StoredSessionItem): void {
+    const previous = this.db.getSessionItem(this.providerId, id, item.value.id);
+    this.db.putSessionItem(this.providerId, id, { ...item, value: { ...item.value, seq: previous?.value.seq ?? this.db.nextSessionSequence(this.providerId, id), createdAt: previous?.value.createdAt ?? item.value.createdAt } } as StoredSessionItem);
   }
+  private saveHistory(info: OpenCodeSessionInfo, native: OpenCodeMessage[]): SessionLogSnapshot {
+    const snapshot = buildSessionLogSnapshot(native, info);
+    const items: StoredSessionItem[] = [...snapshot.messages.map((value): StoredSessionItem => ({ kind: "message", value, nativeId: value.id, authority: "cache" })),
+      ...snapshot.activities.map((value): StoredSessionItem => ({ kind: "activity", value, nativeId: value.id, authority: "cache" }))].sort((a, b) => a.value.seq - b.value.seq);
+    const merged = reconcileSessionHistory(this.db.readSessionItems(this.providerId, info.id), items);
+    const record = this.record(info.id);
+    this.db.replaceProviderHistory(this.providerId, { ...record, preview: buildPreview(native, record.preview),
+      metadata: { ...this.metadata(record), runtime: snapshot.runtime ?? null } }, merged);
+    const messages = merged.flatMap((item) => item.kind === "message" ? [item.value] : []);
+    const activities = merged.flatMap((item) => item.kind === "activity" ? [item.value] : []);
+    return { ...snapshot, messages, activities, totalMessages: messages.length, totalActivities: activities.length,
+      nextSeq: this.db.nextSessionSequence(this.providerId, info.id) };
+  }
+  private thread(info: OpenCodeSessionInfo, status: OpenCodeSessionStatus, includeTurns: boolean): ThreadRecord {
+    return { id: info.id, cwd: info.directory, name: info.title, preview: this.db.getProviderSession(this.providerId, info.id)?.preview ?? info.title,
+      createdAt: info.time.created / 1000, updatedAt: info.time.updated / 1000, source: "opencode", path: info.path ?? null,
+      subAgent: subAgentInfoForOpenCodeSession(info), status: { type: status.type, phase: statusToLiveThreadStatus(status) },
+      ...(includeTurns ? { turns: this.active.has(info.id) ? [{ id: this.active.get(info.id)!.id, status: "inProgress", startedAt: null, completedAt: null }] : [] } : {}) };
+  }
+  private requestOptions(timeout = 30_000) { return { throwOnError: true as const, signal: AbortSignal.any([this.abort.signal, AbortSignal.timeout(timeout)]) }; }
+  private get sdk(): OpencodeClient { if (!this.client) throw new Error("OpenCode has not started"); return this.client; }
+  private get db(): SessionStore { if (!this.store) throw new Error("OpenCode has not started"); return this.store; }
+  private record(id: string): StoredProviderSession { const record = this.db.getProviderSession(this.providerId, id); if (!record) throw new Error("OpenCode session not found"); return record; }
+  private metadata(record?: StoredProviderSession | null): OpenCodeMetadata { return (record?.metadata ?? {}) as OpenCodeMetadata; }
+  private warning(sessionId: string | undefined, code: string, message: string): void {
+    this.emit("liveEvent", { type: "provider_warning", sessionId, code, level: "warning", message, source: "opencode/sdk" });
+  }
+  private invalidate(sessionId: string): void { this.emit("liveEvent", { type: "history_invalidated", sessionId }); }
 }
 
-export function createOpenCodeClient(
-  options: OpenCodeClientFactoryOptions,
-): OpenCodeClient {
-  return new HttpOpenCodeClient(options.baseUrl, options.defaultDirectory);
+function validQuestionAnswers(questions: OpenCodeQuestionInfo[], answers: string[][]): boolean {
+  return questions.length === answers.length && questions.every((question, index) => {
+    const values = answers[index];
+    return values && values.length > 0 && (question.multiple || values.length === 1)
+      && (question.custom !== false || values.every((value) => question.options.some((option) => option.label === value)));
+  });
 }
 
-async function resolveOpenCodeApiBaseUrl(baseUrl: URL): Promise<URL> {
-  for (const candidate of [baseUrl, resolveOpenCodeUrl(baseUrl, "/api/")]) {
-    try {
-      const response = await fetch(resolveOpenCodeUrl(candidate, "/global/health"), {
-        signal: AbortSignal.timeout(DEFAULT_REQUEST_TIMEOUT_MS),
-      });
-      if (response.ok) {
-        return candidate;
-      }
-    } catch {
-      // Try the next candidate.
-    }
-  }
-  throw new Error(
-    "OpenCode server did not expose a supported headless HTTP API at /global/health or /api/global/health. The installed OpenCode build may be too old for the Sidemesh provider.",
-  );
-}
-
-export async function createOpenCodeServer(
-  options: OpenCodeServerFactoryOptions,
-): Promise<OpenCodeServerHandle> {
+export async function createOpenCodeServer(options: OpenCodeServerFactoryOptions): Promise<OpenCodeServerHandle> {
+  const env: NodeJS.ProcessEnv = { ...process.env, OPENCODE_SERVER_USERNAME: "opencode", OPENCODE_SERVER_PASSWORD: randomUUID() };
+  delete env.SIDEMESH_TOKEN;
   if (options.stateDir) {
-    await mkdir(options.stateDir, { recursive: true });
-    await mkdir(`${options.stateDir}/data`, { recursive: true });
-    await mkdir(`${options.stateDir}/config`, { recursive: true });
-    await mkdir(`${options.stateDir}/state`, { recursive: true });
-    await mkdir(`${options.stateDir}/cache`, { recursive: true });
-  }
-
-  const child: OpenCodeChildProcess = spawn(
-    options.bin,
-    ["serve", "--hostname", "127.0.0.1", "--port", "0"],
-    {
-      detached: process.platform !== "win32",
-      env: {
-        ...process.env,
-        ...(options.stateDir
-          ? {
-              XDG_DATA_HOME: `${options.stateDir}/data`,
-              XDG_CONFIG_HOME: `${options.stateDir}/config`,
-              XDG_STATE_HOME: `${options.stateDir}/state`,
-              XDG_CACHE_HOME: `${options.stateDir}/cache`,
-            }
-          : {}),
-      },
-      stdio: ["ignore", "pipe", "pipe"],
-    },
-  );
-
-  const baseUrl = await waitForOpenCodeReady(child, options);
-  let closed = false;
-  return {
-    baseUrl,
-    async close() {
-      if (closed) {
-        return;
-      }
-      closed = true;
-      await terminateChild(child);
-    },
-  };
-}
-
-async function waitForOpenCodeReady(
-  child: OpenCodeChildProcess,
-  options: OpenCodeServerFactoryOptions,
-): Promise<URL> {
-  return new Promise<URL>((resolve, reject) => {
-    let settled = false;
-    const readyTimeoutMs = options.readyTimeoutMs ?? DEFAULT_SERVER_READY_TIMEOUT_MS;
-    const stdout = createInterface({ input: child.stdout });
-    const stderr = createInterface({ input: child.stderr });
-    const readyTimer = setTimeout(() => {
-      finish(() => {
-        void terminateChild(child).catch(() => undefined);
-        reject(new Error(`OpenCode did not become ready within ${readyTimeoutMs}ms.`));
-      });
-    }, readyTimeoutMs);
-
-    const finish = (fn: () => void) => {
-      if (settled) {
-        return;
-      }
-      settled = true;
-      clearTimeout(readyTimer);
-      stdout.close();
-      stderr.close();
-      fn();
-    };
-
-    const onLine = (line: string) => {
-      if (line.startsWith(READY_LINE_PREFIX)) {
-        const raw = line.slice(READY_LINE_PREFIX.length).trim();
-        finish(() => resolve(new URL(raw)));
-        return;
-      }
-      if (line.trim()) {
-        options.onOutput(line);
-      }
-    };
-
-    stdout.on("line", onLine);
-    stderr.on("line", (line) => {
-      if (line.trim()) {
-        options.onOutput(line);
-      }
-    });
-    child.once("error", (error) => {
-      finish(() => reject(error));
-    });
-    child.once("exit", (code) => {
-      options.onExit(code);
-      finish(() =>
-        reject(
-          new Error(
-            `OpenCode exited before it became ready (code ${code ?? "unknown"}).`,
-          ),
-        ),
-      );
-    });
-  });
-}
-
-async function terminateChild(
-  child: OpenCodeChildProcess,
-): Promise<void> {
-  if (child.exitCode != null) {
-    return;
-  }
-  await new Promise<void>((resolve) => {
-    const timer = setTimeout(() => {
-      signalChild(child, "SIGKILL");
-    }, 5_000);
-    child.once("exit", () => {
-      clearTimeout(timer);
-      resolve();
-    });
-    signalChild(child, "SIGTERM");
-  });
-}
-
-function signalChild(
-  child: OpenCodeChildProcess,
-  signal: NodeJS.Signals,
-): void {
-  const pid = child.pid;
-  if (!pid) {
-    return;
-  }
-  if (process.platform !== "win32") {
-    try {
-      process.kill(-pid, signal);
-      return;
-    } catch {
-      // Fall back to the direct child signal below.
+    for (const [variable, name] of [["XDG_DATA_HOME", "data"], ["XDG_CONFIG_HOME", "config"], ["XDG_STATE_HOME", "state"], ["XDG_CACHE_HOME", "cache"]]) {
+      env[variable!] = join(options.stateDir, name!);
+      await mkdir(env[variable!]!, { recursive: true });
     }
   }
-  child.kill(signal);
+  options.signal?.throwIfAborted();
+  const child = spawn(options.bin, ["serve", "--hostname", "127.0.0.1", "--port", "0"],
+    { env, detached: process.platform !== "win32", stdio: "pipe" });
+  let exited = false;
+  let stopping = false;
+  const done = new Promise<void>((resolve) => child.once("close", (code) => { exited = true; options.onExit(code); resolve(); }));
+  const close = () => { if (!stopping) { stopping = true; if (!exited) terminatePipeProcess(child, () => exited); } return done; };
+  const abort = () => { void close(); };
+  options.signal?.addEventListener("abort", abort, { once: true });
+  const stdout = createInterface({ input: child.stdout });
+  const stderr = createInterface({ input: child.stderr });
+  stderr.on("line", options.onOutput);
+  try {
+    const baseUrl = await new Promise<URL>((resolve, reject) => {
+      let ready = false;
+      const timeout = options.readyTimeoutMs ?? 30_000;
+      const timer = setTimeout(() => reject(new Error(`OpenCode did not become ready within ${timeout}ms`)), timeout);
+      child.once("error", reject);
+      child.once("close", () => { clearTimeout(timer); if (!ready) reject(new Error("OpenCode exited before it became ready")); });
+      stdout.on("line", (line) => {
+        if (!ready && line.startsWith("opencode server listening on ")) {
+          try {
+            const url = new URL(line.slice("opencode server listening on ".length).trim());
+            if (url.protocol !== "http:" || url.hostname !== "127.0.0.1") throw new Error("OpenCode returned an unexpected server address");
+            ready = true; clearTimeout(timer); resolve(url);
+          } catch (error) { clearTimeout(timer); reject(error); }
+        } else if (line.trim()) options.onOutput(line);
+      });
+    });
+    return { baseUrl, headers: { Authorization: `Basic ${Buffer.from(`opencode:${env.OPENCODE_SERVER_PASSWORD}`).toString("base64")}` },
+      close: async () => { await close(); options.signal?.removeEventListener("abort", abort); stdout.close(); stderr.close(); } };
+  } catch (error) { await close(); options.signal?.removeEventListener("abort", abort); stdout.close(); stderr.close(); throw error; }
 }
-
 function preparePromptInput(input: AgentSessionInputItem[]): {
   parts: OpenCodePromptPart[];
   warnings: string[];
@@ -2205,9 +978,7 @@ function previewTextFromMessage(message: OpenCodeMessage): string {
   const file = message.parts.find(
     isFilePart,
   );
-  if (file?.source?.path) {
-    return file.source.path;
-  }
+  if (file?.source && "path" in file.source) return file.source.path;
   return "";
 }
 
@@ -2229,7 +1000,7 @@ function buildSessionRuntime(
       (message): message is OpenCodeMessage & { info: OpenCodeAssistantMessageInfo } =>
         message.info.role === "assistant",
     );
-  const model = lastUser?.info.model ?? session.model;
+  const model = lastUser?.info.model ?? (session.model ? { providerID: session.model.providerID, modelID: session.model.id, variant: session.model.variant } : undefined);
   const mode = lastAssistant?.info.agent ?? lastUser?.info.agent ?? session.agent;
   if (!model && !mode && !lastAssistant) {
     return null;
@@ -2342,7 +1113,7 @@ function toSessionMessage(message: OpenCodeMessage): SessionMessage {
     .filter((attachment): attachment is SessionMessageAttachment => attachment != null);
   const errorText =
     message.info.role === "assistant"
-      ? message.info.error?.data?.message?.trim() ?? ""
+      ? (typeof message.info.error?.data?.message === "string" ? message.info.error.data.message.trim() : "")
       : "";
   return {
     id: message.info.id,
@@ -2365,7 +1136,7 @@ function attachmentFromPart(
   if (!isFilePart(part)) {
     return null;
   }
-  const sourcePath = part.source?.path;
+  const sourcePath = part.source && "path" in part.source ? part.source.path : undefined;
   if (sourcePath) {
     return {
       type: part.mime.startsWith("image/") ? "localImage" : "file",
@@ -2387,11 +1158,7 @@ function materializeActivity(
   if (!draft) {
     return null;
   }
-  return {
-    ...draft,
-    createdAt: activityCreatedAt(part, fallbackCreatedAt),
-    seq: 0,
-  } as SessionActivity;
+  return materializeAgentActivityDraft(draft, { createdAt: activityCreatedAt(part, fallbackCreatedAt), seq: 0 });
 }
 
 function activityFromOpenCodePart(
@@ -2412,13 +1179,15 @@ function activityFromOpenCodePart(
           ? part.state.output
           : part.state.status === "error"
             ? part.state.error
-            : null,
+            : part.state.status === "running" && typeof part.state.metadata?.output === "string" ? part.state.metadata.output : null,
       result:
         part.state.status === "completed"
           ? { ...part.state.metadata, time: part.state.time }
           : part.state.status === "error"
             ? { ...(part.state.metadata ?? {}), error: part.state.error, time: part.state.time }
-            : null,
+            : part.state.status === "running" ? part.state.metadata ?? null : null,
+      ...(part.state.status === "completed" && part.state.attachments?.length
+        ? { attachments: part.state.attachments.map(attachmentFromPart).filter((item): item is SessionMessageAttachment => item != null) } : {}),
       isError: part.state.status === "error" ? true : null,
       semantic: null,
     } satisfies AgentSessionActivityDraft;
@@ -2733,27 +1502,6 @@ function encodeModelRef(model: OpenCodeModelRef): string {
     : `${model.providerID}/${model.modelID}`;
 }
 
-function parseModelRef(value: string | null | undefined): OpenCodeModelRef | null {
-  const trimmed = value?.trim();
-  if (!trimmed) {
-    return null;
-  }
-  const parts = trimmed.split("/");
-  if (parts.length < 2) {
-    return null;
-  }
-  const [providerID, modelID, ...variantParts] = parts;
-  if (!providerID || !modelID) {
-    return null;
-  }
-  const variant = normalizeVariantName(variantParts.join("/"));
-  return {
-    providerID,
-    modelID,
-    ...(variant ? { variant } : {}),
-  };
-}
-
 function statusToLiveThreadStatus(status: OpenCodeSessionStatus): LiveThreadStatus {
   switch (status.type) {
     case "idle":
@@ -2910,30 +1658,6 @@ function parseIntegerHeader(value: string | null): number | null {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
-function resolveOpenCodeUrl(baseUrl: URL, path: string): URL {
-  const resolved = new URL(baseUrl.href);
-  const basePath = resolved.pathname.endsWith("/")
-    ? resolved.pathname
-    : `${resolved.pathname}/`;
-  const normalizedPath = path.startsWith("/") ? path.slice(1) : path;
-  resolved.pathname = `${basePath}${normalizedPath}`.replace(/\/{2,}/g, "/");
-  resolved.search = "";
-  resolved.hash = "";
-  return resolved;
-}
-
-function cloneThreadRecord(thread: ThreadRecord): ThreadRecord {
-  return JSON.parse(JSON.stringify(thread)) as ThreadRecord;
-}
-
-function cloneMessage(message: SessionMessage): SessionMessage {
-  return JSON.parse(JSON.stringify(message)) as SessionMessage;
-}
-
-function cloneActivity(activity: SessionActivity): SessionActivity {
-  return JSON.parse(JSON.stringify(activity)) as SessionActivity;
-}
-
 function limitTail<T>(items: T[], limit: number | null): T[] {
   if (limit == null || limit < 0 || items.length <= limit) {
     return items;
@@ -2942,30 +1666,10 @@ function limitTail<T>(items: T[], limit: number | null): T[] {
 }
 
 function formatError(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
-}
-
-function delay(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-function findLastItem<T, S extends T>(
-  items: readonly T[],
-  predicate: (item: T, index: number, array: readonly T[]) => item is S,
-): S | undefined;
-function findLastItem<T>(
-  items: readonly T[],
-  predicate: (item: T, index: number, array: readonly T[]) => boolean,
-): T | undefined;
-function findLastItem<T>(
-  items: readonly T[],
-  predicate: (item: T, index: number, array: readonly T[]) => boolean,
-): T | undefined {
-  for (let index = items.length - 1; index >= 0; index -= 1) {
-    const item = items[index]!;
-    if (predicate(item, index, items)) {
-      return item;
-    }
+  if (error && typeof error === "object") {
+    if ("message" in error && typeof error.message === "string") return error.message;
+    if ("data" in error && error.data && typeof error.data === "object" && "message" in error.data && typeof error.data.message === "string") return error.data.message;
+    if ("name" in error && typeof error.name === "string") return error.name;
   }
-  return undefined;
+  return typeof error === "string" ? error : "OpenCode request failed";
 }

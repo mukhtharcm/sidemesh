@@ -261,6 +261,10 @@ export type AgentProviderLiveEvent =
       type: "skills_changed";
     }
   | {
+      type: "history_invalidated";
+      sessionId: string;
+    }
+  | {
       type: "turn_started";
       sessionId: string;
       turnId: string;

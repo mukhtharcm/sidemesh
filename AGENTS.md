@@ -333,6 +333,12 @@ specific agent provider.
   through `session.rpc.history.compact()`. The wire method `session.getMessages`
   is not a JavaScript method. Do not cast a client through `unknown` to a copied
   interface; this hides missing methods in production while mocks still pass.
+- **OpenCode SDK events**: use the official SDK and subscribe before reading
+  session state. A completed assistant message can be followed by more tools;
+  only native idle ends the turn. Reconnect invalidates loaded history and
+  refreshes pending requests. Keep prompt recovery until native history
+  confirms it. `stateDir` controls native XDG paths; host recovery uses the
+  shared session database. Never log the owned server's temporary password.
 - **WebSocket `hello`**: The server sends `{"type":"hello"}` on every WS
   connection.
 - **Session freshness**: recover through `GET /api/sessions/:id/log` on open,

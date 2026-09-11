@@ -350,11 +350,13 @@ const OPENCODE_PROVIDER_DEFINITION: AgentProviderDefinition = {
   ],
   supportedApprovalPolicies: [],
 
-  create(config) {
+  create(config, sessionStore) {
     const opencode = expectOpenCodeProviderConfig(config);
     return new OpenCodeAgentProvider({
       bin: opencode.bin,
       stateDir: opencode.stateDir,
+      providerId: opencode.id ?? opencode.kind,
+      sessionStore,
     });
   },
 
