@@ -723,6 +723,7 @@ class _SessionScreenState extends State<SessionScreen>
   List<_ComposerFileMention> _draftFileMentions =
       const <_ComposerFileMention>[];
   List<PendingSessionSend> _pendingSends = const <PendingSessionSend>[];
+  bool _pendingSendsLoadFailed = false;
   List<SkillSummary> _skills = const <SkillSummary>[];
   List<FsSearchResult> _fileSuggestions = const <FsSearchResult>[];
   NodeInfo? _nodeInfo;
@@ -2451,6 +2452,14 @@ class _SessionScreenState extends State<SessionScreen>
         // stale approvals after the server already resolved or forgot them.
         _pendingAction = null;
         _running = log.session.isActive;
+        if (_running && _liveAssistantMessage == null) {
+          if (log.liveAssistantText.isNotEmpty) {
+            _liveAssistantNotifier.value = _appendLiveAssistantDelta(null, log.liveAssistantText);
+          }
+          if (log.liveAssistantReasoning.isNotEmpty) {
+            _liveAssistantNotifier.value = _appendLiveAssistantReasoning(_liveAssistantMessage, log.liveAssistantReasoning);
+          }
+        }
         _loading = false;
         _showingCachedSnapshot = true;
         _showingPossiblyStaleSnapshot = false;
@@ -2527,6 +2536,8 @@ class _SessionScreenState extends State<SessionScreen>
           activities: _activities,
           pendingAction: null,
           history: _history,
+          liveAssistantText: _liveAssistantText,
+          liveAssistantReasoning: _liveAssistantMessage?.reasoning ?? '',
           latestPlanUpdate: _latestPlanUpdateForCache(),
         ),
       ),
@@ -3372,20 +3383,25 @@ class _SessionScreenState extends State<SessionScreen>
   }
 
   Future<void> _loadPendingSends() async {
-    final pending = await _sendOutbox.loadForSession(
-      widget.host,
-      widget.session.id,
-    );
-    if (!mounted || _disposed) {
-      return;
-    }
-    setState(() {
-      _pendingSends = pending;
-      for (final send in pending) {
-        _upsertOptimisticMessage(send.message);
+    try {
+      final pending = await _sendOutbox.loadForSession(
+        widget.host,
+        widget.session.id,
+      );
+      if (!mounted || _disposed) {
+        return;
       }
-    });
-    _schedulePendingSendRetry();
+      setState(() {
+        _pendingSends = pending;
+        _pendingSendsLoadFailed = false;
+        for (final send in pending) {
+          _upsertOptimisticMessage(send.message);
+        }
+      });
+      _schedulePendingSendRetry();
+    } catch (_) {
+      if (mounted) setState(() => _pendingSendsLoadFailed = true);
+    }
   }
 
   Future<bool> _queuePendingSend({
@@ -5971,18 +5987,7 @@ class _SessionScreenState extends State<SessionScreen>
         )) {
       return false;
     }
-    // Rollout history does not preserve clientMessageId, so use the pending
-    // send timestamps as a narrow window for stale outbox cleanup. This avoids
-    // treating an intentional same-text message much later as the pending send.
-    final lowerBound = pending.createdAt.subtract(const Duration(seconds: 90));
-    final latestKnownAttempt = [
-      pending.createdAt,
-      pending.updatedAt,
-      pending.nextAttemptAt,
-    ].reduce((left, right) => left.isAfter(right) ? left : right);
-    final upperBound = latestKnownAttempt.add(const Duration(minutes: 10));
-    return !persisted.createdAt.isBefore(lowerBound) &&
-        !persisted.createdAt.isAfter(upperBound);
+    return persisted.id == pending.clientMessageId;
   }
 
   bool _sameMessageAttachments(
@@ -6607,6 +6612,11 @@ class _SessionScreenState extends State<SessionScreen>
             onClose: _closeDockedBrowserPreview,
             onStop: () => unawaited(_stopDockedBrowserPreview()),
             onStopped: (_) => _closeDockedBrowserPreview(),
+          ),
+        if (_pendingSendsLoadFailed)
+          MaterialBanner(
+            content: const Text('Cannot load queued messages. Saved messages are still in local storage.'),
+            actions: [TextButton(onPressed: _loadPendingSends, child: const Text('Retry'))],
           ),
         if (_pendingSends.isNotEmpty)
           _PendingSendStrip(

@@ -2127,6 +2127,7 @@ class _InboxPaneState extends State<InboxPane> {
   final ApprovalInboxStore _store = ApprovalInboxStore.instance;
   final SessionSendOutboxStore _outbox = SessionSendOutboxStore.instance;
   List<PendingSessionSend> _pendingSends = const [];
+  bool _pendingSendsLoadFailed = false;
   Set<String> _retryingKeys = <String>{};
 
   @override
@@ -2176,18 +2177,23 @@ class _InboxPaneState extends State<InboxPane> {
   }
 
   Future<void> _loadPendingSends() async {
-    final pending = await _outbox.loadAll();
-    if (!mounted) {
-      return;
+    try {
+      final pending = await _outbox.loadAll();
+      if (!mounted) {
+        return;
+      }
+      pending.sort(_comparePendingSends);
+      setState(() {
+        _pendingSends = pending;
+        _pendingSendsLoadFailed = false;
+        _retryingKeys = _retryingKeys
+            .where((key) => pending.any((send) => send.key == key))
+            .toSet();
+      });
+      _emitCount();
+    } catch (_) {
+      if (mounted) setState(() => _pendingSendsLoadFailed = true);
     }
-    pending.sort(_comparePendingSends);
-    setState(() {
-      _pendingSends = pending;
-      _retryingKeys = _retryingKeys
-          .where((key) => pending.any((send) => send.key == key))
-          .toSet();
-    });
-    _emitCount();
   }
 
   Future<void> _refresh() async {
@@ -2415,7 +2421,6 @@ class _InboxPaneState extends State<InboxPane> {
       showAppSnackBar(context, 'The original host is no longer available.');
       return;
     }
-    await _outbox.remove(analysis.send);
     final rebound = analysis.send.copyWith(
       hostFingerprint: SessionSendOutboxStore.hostFingerprint(host),
       updatedAt: DateTime.now(),
@@ -2423,13 +2428,15 @@ class _InboxPaneState extends State<InboxPane> {
       lastError: 'Host configuration updated. Ready to retry.',
       blocked: false,
     );
-    await _outbox.upsert(rebound);
+    final saved = await _outbox.replaceIfPresent(analysis.send, rebound);
     if (!mounted) {
       return;
     }
     showAppSnackBar(
       context,
-      'Queued message is now bound to the current host configuration.',
+      saved
+          ? 'Queued message is now bound to the current host configuration.'
+          : 'Could not update the queued message. The original message is unchanged.',
     );
   }
 
@@ -2505,7 +2512,7 @@ class _InboxPaneState extends State<InboxPane> {
               })
               .toList(growable: false);
 
-    if (widget.allHosts.isEmpty && allPending.isEmpty) {
+    if (widget.allHosts.isEmpty && allPending.isEmpty && !_pendingSendsLoadFailed) {
       return MeshEmptyState(
         icon: widget.hasSavedHosts
             ? Icons.notifications_paused_rounded
@@ -2561,6 +2568,11 @@ class _InboxPaneState extends State<InboxPane> {
                 AppSpacing.xxl,
               ),
         children: [
+          if (_pendingSendsLoadFailed)
+            MaterialBanner(
+              content: const Text('Cannot load queued messages. Saved messages are still in local storage.'),
+              actions: [TextButton(onPressed: _loadPendingSends, child: const Text('Retry'))],
+            ),
           if (hasFailures)
             _RecentErrorBanner(
               hostLabels: _store.failedHostLabels,

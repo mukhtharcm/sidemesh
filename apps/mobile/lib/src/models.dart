@@ -3098,6 +3098,9 @@ class SessionLog {
     'pendingAction': pendingAction?.toJson(),
     'history': history?.toJson(),
     'latestPlanUpdate': latestPlanUpdate?.toJson(),
+    'revision': revision,
+    'liveAssistantText': liveAssistantText,
+    'liveAssistantReasoning': liveAssistantReasoning,
   };
 }
 

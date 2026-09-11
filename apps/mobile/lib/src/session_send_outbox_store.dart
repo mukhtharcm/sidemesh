@@ -1,9 +1,10 @@
-import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:sqflite/sqflite.dart';
 
+import 'db.dart';
 import 'models.dart';
 
 class PendingSessionSend {
@@ -53,7 +54,7 @@ class PendingSessionSend {
   final String? lastError;
   final bool blocked;
 
-  String get key => '$hostId:$hostFingerprint:$sessionId:$clientMessageId';
+  String get key => jsonEncode([hostId, hostFingerprint, sessionId, clientMessageId]);
 
   PendingSessionSend copyWith({
     String? hostFingerprint,
@@ -153,219 +154,199 @@ class SessionSendOutboxStore extends ChangeNotifier {
   static final SessionSendOutboxStore instance = SessionSendOutboxStore._();
 
   static const _key = 'sidemesh_pending_session_sends_v1';
+  static const _migration = 'session-outbox-prefs-v1';
   static const _maxEntries = 20;
-  static const _maxEntryChars = 192 * 1024;
-  static const _maxTotalChars = 512 * 1024;
-  static const _ttl = Duration(days: 7);
-
-  Future<void> _writeQueue = Future<void>.value();
+  static const _maxEntryBytes = 192 * 1024;
+  static const _maxTotalBytes = 512 * 1024;
+  static const _identityWhere =
+      'host_id = ? AND host_fingerprint = ? AND session_id = ? AND client_message_id = ?';
 
   Future<List<PendingSessionSend>> loadForSession(
     HostProfile host,
     String sessionId,
-  ) {
-    return _runExclusive(() async {
-      final prefs = await SharedPreferences.getInstance();
-      final entries = await _loadAll(prefs);
-      final fingerprint = hostFingerprint(host);
-      final now = DateTime.now();
-      final pruned = _prune(entries, now);
-      if (pruned.length != entries.length) {
-        await _saveAll(prefs, pruned);
-      }
-      return pruned
-          .where(
-            (entry) =>
-                entry.hostId == host.id &&
-                entry.hostFingerprint == fingerprint &&
-                entry.sessionId == sessionId,
-          )
-          .toList(growable: false);
-    });
+  ) async {
+    final db = await _database();
+    final rows = await db.query(
+      'session_outbox',
+      where: 'host_id = ? AND host_fingerprint = ? AND session_id = ?',
+      whereArgs: [host.id, hostFingerprint(host), sessionId],
+    );
+    return _decodeRows(rows);
   }
 
-  Future<List<PendingSessionSend>> loadAll() {
-    return _runExclusive(() async {
-      final prefs = await SharedPreferences.getInstance();
-      final entries = await _loadAll(prefs);
-      final pruned = _prune(entries, DateTime.now());
-      if (pruned.length != entries.length) {
-        await _saveAll(prefs, pruned);
-        notifyListeners();
-      }
-      return pruned;
-    });
+  Future<List<PendingSessionSend>> loadAll() async {
+    final db = await _database();
+    return _decodeRows(await db.query('session_outbox'));
   }
 
   Future<bool> upsert(PendingSessionSend entry) async {
-    final encodedEntry = jsonEncode(entry.toJson());
-    if (utf8.encode(encodedEntry).length > _maxEntryChars) {
-      return false;
-    }
-
-    return _runExclusive(() async {
-      final prefs = await SharedPreferences.getInstance();
-      final now = DateTime.now();
-      final entries = _prune(
-        await _loadAll(prefs),
-        now,
-      ).where((item) => item.key != entry.key).toList(growable: true);
-      entries.add(entry);
-      entries.sort((left, right) => right.updatedAt.compareTo(left.updatedAt));
-      while (entries.length > _maxEntries) {
-        entries.removeLast();
-      }
-      final saved = await _saveAllWithinBudget(prefs, entries, entry.key);
-      notifyListeners();
-      return saved;
-    });
+    final db = await _database();
+    final saved = await db.transaction((txn) => _save(txn, entry));
+    if (saved) notifyListeners();
+    return saved;
   }
 
-  Future<void> remove(PendingSessionSend entry) async {
-    await removeFor(
-      hostId: entry.hostId,
-      hostFingerprint: entry.hostFingerprint,
-      sessionId: entry.sessionId,
-      clientMessageId: entry.clientMessageId,
-    );
-  }
+  Future<void> remove(PendingSessionSend entry) => removeFor(
+    hostId: entry.hostId,
+    hostFingerprint: entry.hostFingerprint,
+    sessionId: entry.sessionId,
+    clientMessageId: entry.clientMessageId,
+  );
 
   Future<void> removeFor({
     required String hostId,
     required String hostFingerprint,
     required String sessionId,
     required String clientMessageId,
-  }) {
-    return _runExclusive(() async {
-      final prefs = await SharedPreferences.getInstance();
-      final key = '$hostId:$hostFingerprint:$sessionId:$clientMessageId';
-      final entries = (await _loadAll(
-        prefs,
-      )).where((item) => item.key != key).toList(growable: false);
-      await _saveAll(prefs, entries);
-      notifyListeners();
-    });
+  }) async {
+    final db = await _database();
+    final removed = await db.delete(
+      'session_outbox',
+      where: _identityWhere,
+      whereArgs: [hostId, hostFingerprint, sessionId, clientMessageId],
+    );
+    if (removed > 0) notifyListeners();
   }
 
-  Future<bool> contains(PendingSessionSend entry) {
-    return _runExclusive(() async {
-      final prefs = await SharedPreferences.getInstance();
-      final entries = await _loadAll(prefs);
-      return entries.any((item) => item.key == entry.key);
-    });
+  Future<bool> contains(PendingSessionSend entry) async {
+    final db = await _database();
+    return _contains(db, entry);
   }
 
   Future<bool> replaceIfPresent(
     PendingSessionSend current,
     PendingSessionSend replacement,
   ) async {
-    final encodedReplacement = jsonEncode(replacement.toJson());
-    if (utf8.encode(encodedReplacement).length > _maxEntryChars) {
+    final db = await _database();
+    final saved = await db.transaction((txn) async {
+      if (!await _contains(txn, current)) return false;
+      if (current.key != replacement.key && await _contains(txn, replacement)) {
+        return false;
+      }
+      if (!await _save(txn, replacement, replacing: current)) return false;
+      if (current.key != replacement.key) {
+        await txn.delete('session_outbox',
+          where: _identityWhere, whereArgs: _identity(current));
+      }
+      return true;
+    });
+    if (saved) notifyListeners();
+    return saved;
+  }
+
+  Future<void> clearAll() async {
+    final db = await SidemeshDb.instance;
+    await db.transaction((txn) async {
+      await txn.delete('session_outbox');
+      // Keep the import marker so an explicit discard cannot restore a backup.
+      await txn.insert('client_migrations', {'name': _migration},
+        conflictAlgorithm: ConflictAlgorithm.ignore);
+    });
+    notifyListeners();
+  }
+
+
+  Future<Database> _database() async {
+    final db = await SidemeshDb.instance;
+    if ((await db.query('client_migrations',
+      where: 'name = ?', whereArgs: [_migration])).isNotEmpty) {
+      return db;
+    }
+    final prefs = await SharedPreferences.getInstance();
+    final raw = prefs.getString(_key);
+    await db.transaction((txn) async {
+      if ((await txn.query('client_migrations',
+        where: 'name = ?', whereArgs: [_migration])).isNotEmpty) {
+        return;
+      }
+      if (raw != null && raw.isNotEmpty) {
+        final decoded = jsonDecode(raw);
+        if (decoded is! List) {
+          throw const FormatException('Cannot read saved pending messages.');
+        }
+        for (final item in decoded) {
+          final entry = _decodeEntry(item);
+          // Preserve every pending message, including old entries over the limit.
+          await txn.insert('session_outbox', _row(entry, jsonEncode(item)));
+        }
+      }
+      await txn.insert('client_migrations', {'name': _migration});
+    });
+    return db;
+  }
+
+  Future<bool> _save(
+    DatabaseExecutor db,
+    PendingSessionSend entry, {
+    PendingSessionSend? replacing,
+  }) async {
+    final encoded = jsonEncode(entry.toJson());
+    _decodeEntry(entry.toJson());
+    final size = utf8.encode(encoded).length;
+    if (size > _maxEntryBytes) return false;
+    final totals = (await db.rawQuery(
+      'SELECT COUNT(*) AS count, COALESCE(SUM(length(CAST(payload AS BLOB))), 0) AS bytes '
+      'FROM session_outbox WHERE NOT ($_identityWhere)',
+      _identity(replacing ?? entry),
+    )).single;
+    if ((totals['count'] as int) >= _maxEntries ||
+        (totals['bytes'] as int) + size > _maxTotalBytes) {
       return false;
     }
-
-    return _runExclusive(() async {
-      final prefs = await SharedPreferences.getInstance();
-      final entries = await _loadAll(prefs);
-      final index = entries.indexWhere((item) => item.key == current.key);
-      if (index == -1) return false;
-      final next = entries.toList(growable: true);
-      next[index] = replacement;
-      final saved = await _saveAllWithinBudget(prefs, next, replacement.key);
-      notifyListeners();
-      return saved;
-    });
+    await db.insert('session_outbox', _row(entry, encoded),
+      conflictAlgorithm: ConflictAlgorithm.replace);
+    return true;
   }
 
-  Future<void> clearAll() {
-    return _runExclusive(() async {
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.remove(_key);
-      notifyListeners();
-    });
+  Future<bool> _contains(DatabaseExecutor db, PendingSessionSend entry) async {
+    return (await db.query('session_outbox', columns: ['client_message_id'],
+      where: _identityWhere, whereArgs: _identity(entry))).isNotEmpty;
   }
 
-  Future<T> _runExclusive<T>(Future<T> Function() action) async {
-    final previous = _writeQueue;
-    final completer = Completer<void>();
-    _writeQueue = completer.future;
-    await previous.catchError((_) {});
-    try {
-      return await action();
-    } finally {
-      completer.complete();
-    }
-  }
+  List<String> _identity(PendingSessionSend entry) => [
+    entry.hostId, entry.hostFingerprint, entry.sessionId, entry.clientMessageId,
+  ];
 
-  Future<List<PendingSessionSend>> _loadAll(SharedPreferences prefs) async {
-    final raw = prefs.getString(_key);
-    if (raw == null || raw.isEmpty) {
-      return const <PendingSessionSend>[];
-    }
-    try {
-      final decoded = jsonDecode(raw);
-      if (decoded is! List<dynamic>) {
-        return const <PendingSessionSend>[];
+  Map<String, Object?> _row(PendingSessionSend entry, String payload) => {
+    'host_id': entry.hostId,
+    'host_fingerprint': entry.hostFingerprint,
+    'session_id': entry.sessionId,
+    'client_message_id': entry.clientMessageId,
+    'payload': payload,
+  };
+
+  List<PendingSessionSend> _decodeRows(List<Map<String, Object?>> rows) {
+    final entries = rows.map((row) {
+      final entry = _decodeEntry(jsonDecode(row['payload'] as String));
+      if (row['host_id'] != entry.hostId || row['host_fingerprint'] != entry.hostFingerprint ||
+          row['session_id'] != entry.sessionId || row['client_message_id'] != entry.clientMessageId) {
+        throw const FormatException('Saved pending message identity does not match its record.');
       }
-      return decoded
-          .whereType<Map<String, dynamic>>()
-          .map(PendingSessionSend.fromJson)
-          .where(
-            (entry) =>
-                entry.hostId.isNotEmpty &&
-                entry.hostFingerprint.isNotEmpty &&
-                entry.sessionId.isNotEmpty &&
-                entry.clientMessageId.isNotEmpty &&
-                entry.message.id.isNotEmpty &&
-                entry.inputItems.isNotEmpty,
-          )
-          .toList(growable: false);
-    } catch (_) {
-      await prefs.remove(_key);
-      return const <PendingSessionSend>[];
+      return entry;
+    }).toList();
+    entries.sort((left, right) => right.updatedAt.compareTo(left.updatedAt));
+    return entries;
+  }
+
+  PendingSessionSend _decodeEntry(Object? json) {
+    if (json is! Map<String, dynamic> || json['inputItems'] is! List ||
+        (json['inputItems'] as List).any((item) => item is! Map<String, dynamic>)) {
+      throw const FormatException('Cannot read saved pending message.');
     }
-  }
-
-  Future<bool> _saveAllWithinBudget(
-    SharedPreferences prefs,
-    List<PendingSessionSend> entries,
-    String requiredKey,
-  ) async {
-    var next = entries;
-    while (next.isNotEmpty) {
-      final encoded = _encode(next);
-      if (utf8.encode(encoded).length <= _maxTotalChars) {
-        await prefs.setString(_key, encoded);
-        return next.any((entry) => entry.key == requiredKey);
-      }
-      next = next.take(next.length - 1).toList(growable: false);
+    final entry = PendingSessionSend.fromJson(json);
+    if (entry.hostId.isEmpty || entry.hostFingerprint.isEmpty ||
+        entry.sessionId.isEmpty || entry.clientMessageId.isEmpty ||
+        entry.message.id.isEmpty || entry.inputItems.isEmpty ||
+        entry.inputItems.any((item) => switch (item.type) {
+          'text' => item.text == null,
+          'image' => item.url == null || item.url!.isEmpty,
+          'localImage' || 'file' => item.path == null || item.path!.isEmpty,
+          'skill' => item.name == null || item.name!.isEmpty || item.path == null || item.path!.isEmpty,
+          _ => true,
+        })) {
+      throw const FormatException('Saved pending message has no identity or input.');
     }
-    await prefs.remove(_key);
-    return false;
-  }
-
-  Future<void> _saveAll(
-    SharedPreferences prefs,
-    List<PendingSessionSend> entries,
-  ) async {
-    if (entries.isEmpty) {
-      await prefs.remove(_key);
-      return;
-    }
-    await prefs.setString(_key, _encode(entries));
-  }
-
-  List<PendingSessionSend> _prune(
-    List<PendingSessionSend> entries,
-    DateTime now,
-  ) {
-    return entries
-        .where((entry) => now.difference(entry.createdAt) <= _ttl)
-        .toList(growable: false);
-  }
-
-  String _encode(List<PendingSessionSend> entries) {
-    return jsonEncode(entries.map((entry) => entry.toJson()).toList());
+    return entry;
   }
 
   static String hostFingerprint(HostProfile host) {
