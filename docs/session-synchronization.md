@@ -11,12 +11,12 @@ Message and activity limits default to 200. Clients request larger windows when
 loading older history. A cached transcript remains marked stale until a snapshot
 succeeds, including when the provider's timestamp has not changed.
 
-`SessionStateStore` owns current turns, observed status, activities, runtime,
-partial output, and transcript ordering. Provider history remains durable storage;
-provider-specific parsers and recovery sidecars remain inside their adapters.
-`StateWriter` coalesces Pi and Copilot persistence requests and only acknowledges
-requests after their snapshot is saved. Copilot closes its SDK and flushes before
-shutdown completes.
+`SessionCoordinator` owns the published view, partial output, and transcript
+ordering. It reads one complete native snapshot before capturing the covered live
+revision. `SessionInputCoordinator` owns serialized input dispatch and the durable
+queue. The shared SQLite store retains local choices, input records, and
+unconfirmed output; native history remains with the agent. See
+[storage ownership and migration](session-storage.md).
 
 ## Events during a refresh
 
@@ -33,7 +33,7 @@ while provider history flushes, without replaying old draft/status transitions o
 duplicating a saved message with a different provider ID. Covered turn completions
 still trigger the delayed history and Git refresh.
 Finished tool overlays remain until the provider snapshot confirms their content
-(or another turn begins), so a completion cannot erase updates from a read
+across turn boundaries, so a completion cannot erase updates from a read
 already in progress. Warnings, queue changes, and retry notifications remain observable. A failed
 request drains buffered events and preserves the existing conversation.
 

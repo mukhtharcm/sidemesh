@@ -60,7 +60,6 @@ src/
   workspace-scope.ts           # Workspace path resolution / sandboxing
   session-store.ts             # Durable SQLite input records and saved plans
   session-coordinator.ts       # Published session view, native snapshots, durable input queue
-  state-writer.ts              # Coalesced durable snapshot writes
 apps/mobile/lib/src/
   screens/                     # Flutter screens
   theme/                       # App theming
@@ -325,6 +324,9 @@ specific agent provider.
   `apps/mobile/web/sqflite_sw.js` are generated runtime assets. Regenerate them
   from `apps/mobile/` with
   `dart run sqflite_common_ffi_web:setup --force` after upgrading the package.
+- **Windows npm prepare**: `npm.cmd` cannot run through `spawnSync` without a
+  shell. The package prepare script uses the Windows shell only for its fixed
+  `npm run build` command; do not interpolate user arguments into that command.
 - **No formatter**: No Prettier, Biome, or ESLint. Follow file-local style.
 - **Pi RPC**: execution uses the official `rpc-entry` process. Use
   `agent_settled` for completion; `agent_end` can precede automatic retries.
