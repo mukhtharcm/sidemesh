@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart';
 
 import 'models.dart';
+import 'session_identity_store.dart';
 
 /// In-memory overrides for [SessionSummary] fields that the user has
 /// just mutated locally (rename, archive, etc.).
@@ -23,7 +24,8 @@ class SessionOverridesStore extends ChangeNotifier {
     _overrides.clear();
   }
 
-  String _keyFor(String hostId, String sessionId) => '$hostId:$sessionId';
+  String _keyFor(String hostId, String sessionId) =>
+      SessionIdentityStore.instance.preferenceKey(hostId, sessionId, _overrides);
 
   /// Record a locally-confirmed summary for the given host. Replaces any
   /// existing override and notifies listeners so lists repaint.

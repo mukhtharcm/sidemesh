@@ -7,6 +7,8 @@ import 'package:sqflite/sqflite.dart';
 
 import 'db.dart';
 import 'models.dart';
+import 'session_identity.dart';
+import 'session_identity_store.dart';
 
 class CachedSessionLog {
   const CachedSessionLog({required this.log, required this.cachedAt});
@@ -47,6 +49,7 @@ class SessionLocalStore extends ChangeNotifier {
 
   Future<void> _ensureMigrated() async {
     if (_migrated) return;
+    await SessionIdentityStore.instance.ensureLoaded();
     final migrationFuture = _migrationFuture;
     if (migrationFuture != null) {
       await migrationFuture;
@@ -65,7 +68,96 @@ class SessionLocalStore extends ChangeNotifier {
     }
   }
 
-  String _favoriteKey(String hostId, String sessionId) => '$hostId::$sessionId';
+  String _favoriteKey(String hostId, String sessionId) =>
+      '$hostId::${SessionIdentityStore.instance.canonical(hostId, sessionId)}';
+
+  Future<void> adoptSessionAliases(HostProfile host, SessionAliases aliases) {
+    return _trackOperation(() async {
+      await _ensureMigrated();
+      final identities = SessionIdentityStore.instance;
+      final previous = identities.forHost(host.id);
+      if (jsonEncode(previous?.toJson()) == jsonEncode(aliases.toJson())) return;
+      if (previous != null && (previous.rawProviderId != aliases.rawProviderId ||
+          previous.aliases.entries.any((entry) => aliases.aliases[entry.key] != entry.value) ||
+          previous.kinds.entries.any((entry) => aliases.kinds[entry.key] != entry.value))) {
+        throw StateError('Host session ownership changed. Remove and pair this host again.');
+      }
+      final db = await SidemeshDb.instance;
+      await db.transaction((txn) async {
+        final rows = await txn.query('sessions', where: 'host_id = ?', whereArgs: [host.id],
+          orderBy: 'updated_at DESC, cached_at DESC');
+        final merged = <String, Map<String, Object?>>{};
+        for (final row in rows) {
+          final resolved = aliases.resolve(row['session_id'] as String);
+          final id = resolved?.sessionId ?? row['session_id'] as String;
+          final existing = merged[id];
+          if (existing == null) {
+            merged[id] = {...row, 'session_id': id,
+              if (resolved != null) ...{
+                'canonical_session_id': id, 'provider_id': resolved.providerId,
+                'provider': aliases.kinds[resolved.providerId],
+              },
+            };
+          } else {
+            if (row['is_favorite'] == 1) existing['is_favorite'] = 1;
+            if (row['source'] == 'recent') existing['source'] = 'recent';
+          }
+        }
+        await txn.delete('sessions', where: 'host_id = ?', whereArgs: [host.id]);
+        for (final row in merged.values) {
+          await txn.insert('sessions', row);
+        }
+        final logs = await txn.query('session_logs', where: 'host_id = ?', whereArgs: [host.id],
+          orderBy: 'cached_at DESC');
+        final seen = <String>{};
+        for (final row in logs) {
+          final oldId = row['session_id'] as String;
+          final resolved = aliases.resolve(oldId);
+          if (resolved == null) continue;
+          final id = resolved.sessionId;
+          if (seen.contains(id)) {
+            if (oldId != id) {
+              await txn.delete('session_logs',
+                where: 'host_id = ? AND session_id = ?', whereArgs: [host.id, oldId]);
+            }
+            continue;
+          }
+          Map<String, dynamic> payload;
+          try {
+            payload = jsonDecode(row['payload'] as String) as Map<String, dynamic>;
+            final session = payload['session'] as Map<String, dynamic>;
+            if (session['id'] != oldId) continue;
+            payload['session'] = {...session, 'id': id, 'canonicalSessionId': id,
+              'providerId': resolved.providerId, 'provider': aliases.kinds[resolved.providerId]};
+          } catch (_) {
+            continue;
+          }
+          seen.add(id);
+          if (oldId != id) {
+            await txn.delete('session_logs',
+              where: 'host_id = ? AND session_id = ?', whereArgs: [host.id, oldId]);
+          }
+          await txn.insert('session_logs', {...row, 'session_id': id, 'payload': jsonEncode(payload)},
+            conflictAlgorithm: ConflictAlgorithm.replace);
+        }
+      });
+      await identities.save(host.id, aliases);
+      _favoriteKeys.removeWhere((key) => key.startsWith('${host.id}::'));
+      final favorites = await db.query('sessions', columns: ['session_id'],
+        where: 'host_id = ? AND is_favorite = 1', whereArgs: [host.id]);
+      for (final row in favorites) {
+        _favoriteKeys.add(_favoriteKey(host.id, row['session_id'] as String));
+      }
+      notifyListeners();
+    });
+  }
+
+  SessionSummary _canonicalSession(String hostId, SessionSummary session) {
+    final resolved = SessionIdentityStore.instance.forHost(hostId)?.resolve(session.id);
+    return resolved == null ? session : session.copyWith(
+      id: resolved.sessionId, canonicalSessionId: resolved.sessionId, providerId: resolved.providerId,
+    );
+  }
 
   Future<T> _trackOperation<T>(Future<T> Function() action) {
     _pendingOperationCount += 1;
@@ -142,6 +234,7 @@ class SessionLocalStore extends ChangeNotifier {
   Future<bool> toggleFavorite(HostProfile host, String sessionId) {
     return _trackOperation(() async {
       await _ensureFavoritesLoaded();
+      sessionId = SessionIdentityStore.instance.canonical(host.id, sessionId);
       final key = _favoriteKey(host.id, sessionId);
       final current = _favoriteKeys.contains(key);
       final next = !current;
@@ -163,6 +256,7 @@ class SessionLocalStore extends ChangeNotifier {
   }) {
     return _trackOperation(() async {
       await _ensureFavoritesLoaded();
+      sessionId = SessionIdentityStore.instance.canonical(host.id, sessionId);
       final key = _favoriteKey(host.id, sessionId);
       final current = _favoriteKeys.contains(key);
       if (current == favorite) return;
@@ -245,22 +339,25 @@ class SessionLocalStore extends ChangeNotifier {
   Future<void> updateGhost(HostProfile host, SessionSummary session) {
     return _trackOperation(() async {
       await _ensureFavoritesLoaded();
+      session = _canonicalSession(host.id, session);
       if (!isFavorite(host, session.id)) return;
       final db = await SidemeshDb.instance;
       final now = DateTime.now().millisecondsSinceEpoch;
       await db.rawInsert(
       '''
       INSERT INTO sessions (
-        host_id, session_id, title, preview, cwd, provider, status,
+        host_id, session_id, title, preview, cwd, provider, provider_id, canonical_session_id, status,
         created_at, updated_at, runtime_json, git_info_json,
         is_sub_agent, sub_agent_json,
         is_favorite, source, cached_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 'favorite', ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 'favorite', ?)
       ON CONFLICT(host_id, session_id) DO UPDATE SET
         title = excluded.title,
         preview = excluded.preview,
         cwd = excluded.cwd,
         provider = excluded.provider,
+        provider_id = excluded.provider_id,
+        canonical_session_id = excluded.canonical_session_id,
         status = excluded.status,
         created_at = excluded.created_at,
         updated_at = excluded.updated_at,
@@ -278,6 +375,8 @@ class SessionLocalStore extends ChangeNotifier {
         session.preview,
         session.cwd,
         session.provider,
+        session.providerId,
+        session.canonicalSessionId,
         session.status,
         session.createdAt.millisecondsSinceEpoch,
         session.updatedAt.millisecondsSinceEpoch,
@@ -301,22 +400,25 @@ class SessionLocalStore extends ChangeNotifier {
     return _trackOperation(() async {
       await _ensureMigrated();
       final db = await SidemeshDb.instance;
+      sessions = sessions.map((session) => _canonicalSession(host.id, session)).toList();
       final batch = db.batch();
       final now = DateTime.now().millisecondsSinceEpoch;
     for (final s in sessions) {
       batch.execute(
         '''
         INSERT INTO sessions (
-          host_id, session_id, title, preview, cwd, provider, status,
+          host_id, session_id, title, preview, cwd, provider, provider_id, canonical_session_id, status,
           created_at, updated_at, runtime_json, git_info_json,
           is_sub_agent, sub_agent_json,
           is_favorite, source, cached_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(host_id, session_id) DO UPDATE SET
           title = excluded.title,
           preview = excluded.preview,
           cwd = excluded.cwd,
           provider = excluded.provider,
+          provider_id = excluded.provider_id,
+          canonical_session_id = excluded.canonical_session_id,
           status = excluded.status,
           created_at = excluded.created_at,
           updated_at = excluded.updated_at,
@@ -334,6 +436,8 @@ class SessionLocalStore extends ChangeNotifier {
           s.preview,
           s.cwd,
           s.provider,
+          s.providerId,
+          s.canonicalSessionId,
           s.status,
           s.createdAt.millisecondsSinceEpoch,
           s.updatedAt.millisecondsSinceEpoch,
@@ -409,6 +513,7 @@ class SessionLocalStore extends ChangeNotifier {
     return _trackOperation(() async {
       await _ensureMigrated();
       final db = await SidemeshDb.instance;
+      sessionId = SessionIdentityStore.instance.canonical(host.id, sessionId);
       final rows = await db.rawQuery(
         'SELECT * FROM sessions WHERE host_id = ? AND session_id = ?',
         [host.id, sessionId],
@@ -427,6 +532,7 @@ class SessionLocalStore extends ChangeNotifier {
         await txn.delete('session_logs', where: 'host_id = ?', whereArgs: [host.id]);
       });
       _favoriteKeys.removeWhere((key) => key.startsWith('${host.id}::'));
+      await SessionIdentityStore.instance.save(host.id, null);
     });
   }
 
@@ -447,6 +553,7 @@ class SessionLocalStore extends ChangeNotifier {
     return _trackOperation(() async {
       await _ensureMigrated();
       final db = await SidemeshDb.instance;
+      sessionId = SessionIdentityStore.instance.canonical(host.id, sessionId);
       await db.delete(
         'sessions',
         where: 'host_id = ? AND session_id = ?',
@@ -470,6 +577,8 @@ class SessionLocalStore extends ChangeNotifier {
       updatedAt: DateTime.fromMillisecondsSinceEpoch(row['updated_at'] as int),
       source: row['source'] as String,
       provider: row['provider'] as String?,
+      providerId: row['provider_id'] as String?,
+      canonicalSessionId: row['canonical_session_id'] as String?,
       status: row['status'] as String,
       runtime: runtimeJson != null
           ? SessionRuntimeSummary.fromJson(
@@ -500,6 +609,7 @@ class SessionLocalStore extends ChangeNotifier {
     return _trackOperation(() async {
       await _ensureMigrated();
       final db = await SidemeshDb.instance;
+      sessionId = SessionIdentityStore.instance.canonical(host.id, sessionId);
       final rows = await db.query('session_logs',
         where: 'host_id = ? AND session_id = ?', whereArgs: [host.id, sessionId]);
       if (rows.isEmpty) return null;
@@ -529,16 +639,19 @@ class SessionLocalStore extends ChangeNotifier {
     return _trackOperation(() async {
       await _ensureMigrated();
       final db = await SidemeshDb.instance;
-      final encoded = jsonEncode(log.toJson());
+      final payload = log.toJson();
+      final session = _canonicalSession(host.id, log.session);
+      payload['session'] = session.toJson();
+      final encoded = jsonEncode(payload);
       if (encoded.length > _maxSessionLogCacheChars) {
         await db.delete('session_logs', where: 'host_id = ? AND session_id = ?',
-          whereArgs: [host.id, log.session.id]);
+          whereArgs: [host.id, session.id]);
         return;
       }
       final now = DateTime.now().millisecondsSinceEpoch;
       await db.transaction((txn) async {
         await txn.insert('session_logs', {
-          'host_id': host.id, 'session_id': log.session.id,
+          'host_id': host.id, 'session_id': session.id,
           'cached_at': now, 'last_used_at': now, 'payload': encoded,
         }, conflictAlgorithm: ConflictAlgorithm.replace);
         await _pruneLogCache(txn);
@@ -609,12 +722,14 @@ class SessionLocalStore extends ChangeNotifier {
           } catch (_) {
             continue;
           }
-          for (final session in sessions) {
+          for (final original in sessions) {
+            final session = _canonicalSession(hostId, original);
             if (session.id.isEmpty) continue;
             await txn.insert('sessions', {
               'host_id': hostId, 'session_id': session.id,
               'title': session.title, 'preview': session.preview, 'cwd': session.cwd,
-              'provider': session.provider, 'status': session.status,
+              'provider': session.provider, 'provider_id': session.providerId,
+              'canonical_session_id': session.canonicalSessionId, 'status': session.status,
               'created_at': session.createdAt.millisecondsSinceEpoch,
               'updated_at': session.updatedAt.millisecondsSinceEpoch,
               'runtime_json': session.runtime == null ? null : jsonEncode(session.runtime!.toJson()),
@@ -633,7 +748,7 @@ class SessionLocalStore extends ChangeNotifier {
             "created_at, updated_at, is_favorite, source, cached_at) "
             "VALUES (?, ?, 'Unknown', '', '', 'unknown', 0, 0, 1, 'favorite', ?) "
             "ON CONFLICT(host_id, session_id) DO UPDATE SET is_favorite = 1",
-            [key.substring(0, separator), key.substring(separator + 2), now],
+            [key.substring(0, separator), SessionIdentityStore.instance.canonical(key.substring(0, separator), key.substring(separator + 2)), now],
           );
         }
       }
@@ -657,10 +772,11 @@ class SessionLocalStore extends ChangeNotifier {
           final suffix = ':${log.session.id}';
           if (log.session.id.isEmpty || !key.endsWith(suffix)) continue;
           final hostId = key.substring(_logPrefix.length + 1, key.length - suffix.length);
-          final encoded = jsonEncode(log.toJson());
+          final session = _canonicalSession(hostId, log.session);
+          final encoded = jsonEncode({...log.toJson(), 'session': session.toJson()});
           if (hostId.isEmpty || encoded.length > _maxSessionLogCacheChars) continue;
           row = {
-            'host_id': hostId, 'session_id': log.session.id, 'cached_at': cachedAt,
+            'host_id': hostId, 'session_id': session.id, 'cached_at': cachedAt,
             'last_used_at': lastUsed[key] ?? cachedAt, 'payload': encoded,
           };
         } catch (_) {

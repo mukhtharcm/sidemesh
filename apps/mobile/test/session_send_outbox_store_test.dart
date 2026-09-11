@@ -5,6 +5,8 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:sidemesh_mobile/src/db.dart';
 import 'package:sidemesh_mobile/src/models.dart';
 import 'package:sidemesh_mobile/src/session_send_outbox_store.dart';
+import 'package:sidemesh_mobile/src/session_identity.dart';
+import 'package:sidemesh_mobile/src/session_identity_store.dart';
 
 import 'test_path_provider.dart';
 
@@ -19,6 +21,7 @@ void main() {
   );
 
   setUp(() async {
+    SessionIdentityStore.instance.resetForTest();
     SharedPreferences.setMockInitialValues({});
     final db = await SidemeshDb.instance;
     await db.delete('session_outbox');
@@ -42,6 +45,23 @@ void main() {
       expect(await store.loadForSession(host, 'session-1'), isEmpty);
     },
   );
+
+  test('canonical session lookup retains the original pending request and receipt ID', () async {
+    final store = SessionSendOutboxStore.instance;
+    final pending = _pendingSend(host, sessionId: 'native-id');
+    await store.upsert(pending);
+    await SessionIdentityStore.instance.save(host.id, const SessionAliases(
+      rawProviderId: 'work', kinds: {'work': 'copilot', 'other': 'copilot'},
+      aliases: {'work': 'work', 'copilot': 'work', 'other': 'other'},
+    ));
+    final canonicalId = SessionAliases.wrap('work', pending.sessionId);
+    final loaded = (await store.loadForSession(host, canonicalId)).single;
+    expect(loaded.toJson(), PendingSessionSend.fromJson(pending.toJson()).toJson());
+    expect(await store.loadForSession(host, SessionAliases.wrap('other', pending.sessionId)), isEmpty);
+    await store.removeFor(hostId: host.id, hostFingerprint: pending.hostFingerprint,
+      sessionId: canonicalId, clientMessageId: pending.clientMessageId);
+    expect(await store.contains(pending), isFalse);
+  });
 
   test('rejects oversized payloads without changing saved messages', () async {
     final store = SessionSendOutboxStore.instance;

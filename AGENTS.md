@@ -410,6 +410,11 @@ specific agent provider.
   Drain buffered events on errors.
   Keep finished tool overlays until provider history confirms their content;
   clearing at turn completion can lose updates from a snapshot already reading.
+- **Client session aliases**: `session_identity_store.dart` retains host ownership
+  for offline use. `SessionLocalStore.adoptSessionAliases` moves cache rows in a
+  transaction; new writes normalize IDs too. Keep the original IDs on pending
+  sends and resolve aliases for lookup/removal. Preference edits must remove
+  equivalent old keys, so clearing a choice cannot restore an older value.
 - **Cached session verification**: cached transcripts remain stale until a full
   snapshot succeeds. Provider timestamps may be coarse and existing rows can
   change without a new transcript sequence number.

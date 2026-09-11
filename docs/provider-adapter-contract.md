@@ -35,6 +35,12 @@ and recovery are migrated together; a conflict preserves the source records
 and aborts the transaction. Old callers can use their saved aliases. HTTP and
 live responses retain the requested alias and expose `canonicalSessionId`.
 `sessionAliases` in the provider metadata supports client cache migration.
+The client saves that ownership map for offline use. It migrates cached session
+rows and logs in a database transaction, combines favorite flags, and retains
+provider instance IDs. Saved controls, pins, read state, and inspector choices
+resolve old keys through the same map. Pending sends retain their original
+session and client input IDs; lookup and removal accept equivalent aliases.
+An ownership change cannot reassign an existing client alias to another agent.
 
 ## Required Core
 
