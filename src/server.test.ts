@@ -1092,6 +1092,43 @@ async function waitFor<T>(
   throw new Error(`Timed out waiting for ${label}`);
 }
 
+it("gates session deletion and clears host data only after native success", async () => {
+  const stateDir = await mkdtemp(nodePath.join(tmpdir(), "sidemesh-delete-test-"));
+  const { runtime, provider } = makeSingleProviderRuntime({ latencyMs: 0, seedSessions: false, workspaceRoot: stateDir });
+  let deleted: string | null = null;
+  let fail = true;
+  Object.assign(provider, { deleteSession: async (id: string) => {
+    if (fail) throw new AgentProviderRequestError("Deletion failed", 409);
+    deleted = id;
+  } });
+  try {
+    await withServerRuntime(makeConfig(stateDir), runtime, async (server, config) => {
+      await runtime.ensure(runtime.defaultProvider);
+      const created = await provider.createSession({ cwd: stateDir, input: [], overrides: EMPTY_OVERRIDES });
+      const nativeId = created.thread.id;
+      const id = wrapProviderScopedId("fake", nativeId);
+      provider.emit("liveEvent", { type: "assistant_message_completed", sessionId: nativeId,
+        message: { id: "saved-answer", text: "Keep this until success" } });
+      provider.emit("liveEvent", { type: "plan_updated", sessionId: nativeId, plan: [{ step: "Saved", status: "pending" }] });
+      const send = () => request({ hostname: "127.0.0.1", port: server.port,
+        path: `/api/sessions/${encodeURIComponent(id)}`, method: "DELETE", headers: { Authorization: `Bearer ${config.token}` } });
+      assert.equal((await send()).statusCode, 501);
+      provider.capabilities.sessions.delete = true;
+      assert.equal((await send()).statusCode, 409);
+      const db = new DatabaseSync(nodePath.join(stateDir, "sessions-v1.db"));
+      try {
+        assert.ok(db.prepare("SELECT 1 FROM plans WHERE session_id = ?").get(id));
+        assert.ok(db.prepare("SELECT 1 FROM session_recovery WHERE session_id = ?").get(id));
+        fail = false;
+        assert.equal((await send()).statusCode, 200);
+        assert.equal(deleted, nativeId);
+        assert.equal(db.prepare("SELECT 1 FROM plans WHERE session_id = ?").get(id), undefined);
+        assert.equal(db.prepare("SELECT 1 FROM session_recovery WHERE session_id = ?").get(id), undefined);
+      } finally { db.close(); }
+    });
+  } finally { await rm(stateDir, { recursive: true, force: true }); }
+});
+
 describe("/healthz", () => {
   it("returns 200 when provider is healthy", async () => {
     const stateDir = await mkdtemp(nodePath.join(tmpdir(), "sidemesh-server-test-"));

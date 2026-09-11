@@ -877,6 +877,10 @@ class _SessionScreenState extends State<SessionScreen>
   bool get _supportsSessionArchive =>
       _supportsProviderCapability('sessions', 'archive');
 
+  bool get _supportsSessionDelete => _nodeInfo != null &&
+      _supportsProviderCapability('sessions', 'delete');
+  bool _sessionDeleted = false;
+
   bool get _supportsSessionCompact =>
       _supportsProviderCapability('sessions', 'compact');
 
@@ -2525,7 +2529,7 @@ class _SessionScreenState extends State<SessionScreen>
     _sessionCachePersistTimer?.cancel();
     _sessionCachePersistTimer = null;
     final session = _session;
-    if (session == null) {
+    if (session == null || _sessionDeleted) {
       return;
     }
     unawaited(
@@ -3527,7 +3531,7 @@ class _SessionScreenState extends State<SessionScreen>
   void _schedulePendingSendRetry() {
     _pendingSendRetryTimer?.cancel();
     _pendingSendRetryTimer = null;
-    if (_pendingSends.isEmpty || _disposed) {
+    if (_pendingSends.isEmpty || _disposed || _sessionDeleted) {
       return;
     }
     final now = DateTime.now();
@@ -3580,7 +3584,7 @@ class _SessionScreenState extends State<SessionScreen>
     if (_retryingPendingSend ||
         _pendingSends.isEmpty ||
         !mounted ||
-        _disposed) {
+        _disposed || _sessionDeleted) {
       return;
     }
     final pending = _nextPendingSendForRetry(manual: manual);
@@ -3628,7 +3632,7 @@ class _SessionScreenState extends State<SessionScreen>
       );
       HostStatusStore.instance.markOnline(widget.host.id);
       await _sendOutbox.remove(pending);
-      if (!mounted || _disposed) {
+      if (!mounted || _disposed || _sessionDeleted) {
         return;
       }
       setState(() {
@@ -3648,7 +3652,7 @@ class _SessionScreenState extends State<SessionScreen>
         duration: const Duration(seconds: 2),
       );
     } catch (error) {
-      if (!mounted || _disposed) {
+      if (!mounted || _disposed || _sessionDeleted) {
         return;
       }
       final message = friendlyError(error);
@@ -3663,14 +3667,14 @@ class _SessionScreenState extends State<SessionScreen>
           blocked: false,
         );
         final saved = await _sendOutbox.upsert(updated);
-        if (!mounted || _disposed) {
+        if (!mounted || _disposed || _sessionDeleted) {
           return;
         }
         if (saved) {
           setState(() => _upsertPendingSend(updated));
         } else {
           await _sendOutbox.remove(pending);
-          if (!mounted || _disposed) {
+          if (!mounted || _disposed || _sessionDeleted) {
             return;
           }
           setState(() => _removePendingSend(pending));
@@ -3687,14 +3691,14 @@ class _SessionScreenState extends State<SessionScreen>
           blocked: true,
         );
         await _sendOutbox.upsert(updated);
-        if (!mounted || _disposed) {
+        if (!mounted || _disposed || _sessionDeleted) {
           return;
         }
         setState(() => _upsertPendingSend(updated));
         showAppSnackBar(context, 'Pending message needs attention: $message');
       }
     } finally {
-      if (mounted && !_disposed) {
+      if (mounted && !_disposed && !_sessionDeleted) {
         setState(() => _retryingPendingSend = false);
         _schedulePendingSendRetry();
       } else {
@@ -4197,6 +4201,41 @@ class _SessionScreenState extends State<SessionScreen>
         return;
       }
       showAppSnackBar(context, "Failed to archive: ${friendlyError(error)}");
+    }
+  }
+
+  Future<void> _deleteSession() async {
+    if (!_supportsSessionDelete) return;
+    final confirmed = await _showSessionConfirmDialog(
+      icon: Icons.delete_outline,
+      title: 'Delete this session?',
+      body: 'This removes the session from the agent and clears its saved history and pending messages in this app. You cannot undo this action in Sidemesh.',
+      confirmLabel: 'Delete session',
+      danger: true,
+    );
+    if (!confirmed) return;
+    try {
+      await widget.api.deleteSession(widget.host, widget.session.id);
+      _sessionDeleted = true;
+      _pendingSendRetryTimer?.cancel();
+      for (final send in await _sendOutbox.loadForSession(widget.host, widget.session.id)) {
+        await _sendOutbox.remove(send);
+      }
+      _pendingSends = [];
+      _sessionCachePersistTimer?.cancel();
+      _session = null;
+      await _localStore.deleteSession(widget.host, widget.session.id, deleteLog: true);
+      if (!mounted) return;
+      unawaited(LiveActivityService.instance.endPrimarySession(
+        host: widget.host, sessionId: widget.session.id));
+      final onArchived = widget.onArchived;
+      if (onArchived != null) {
+        onArchived();
+      } else {
+        Navigator.of(context).pop();
+      }
+    } catch (error) {
+      if (mounted) showAppSnackBar(context, 'Failed to delete: ${friendlyError(error)}');
     }
   }
 
@@ -6116,6 +6155,9 @@ class _SessionScreenState extends State<SessionScreen>
       case 'archive':
         _archiveSession();
         break;
+      case 'delete':
+        unawaited(_deleteSession());
+        break;
     }
   }
 
@@ -6277,7 +6319,7 @@ class _SessionScreenState extends State<SessionScreen>
       ),
       if (_supportsProviderRestart ||
           _supportsSessionRename ||
-          _supportsSessionArchive)
+          _supportsSessionArchive || _supportsSessionDelete)
         _SessionActionGroup(
           label: 'Manage',
           actions: [
@@ -6294,6 +6336,13 @@ class _SessionScreenState extends State<SessionScreen>
                 label: 'Archive',
                 detail: 'Move this session out of recents.',
                 icon: Icons.archive_rounded,
+                tone: _SessionActionTone.danger,
+              ),
+            if (_supportsSessionDelete)
+              const _SessionActionSpec(
+                value: 'delete', label: 'Delete',
+                detail: 'Remove the session from the agent.',
+                icon: Icons.delete_outline,
                 tone: _SessionActionTone.danger,
               ),
           ],

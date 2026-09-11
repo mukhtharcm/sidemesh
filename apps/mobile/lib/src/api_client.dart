@@ -740,6 +740,12 @@ class ApiClient {
     );
   }
 
+  Future<void> deleteSession(HostProfile host, String sessionId) async {
+    final response = await _delete(host, '/api/sessions/$sessionId',
+      operation: 'delete session');
+    _throwIfBadStatus(response);
+  }
+
   Future<void> respondToAction(
     HostProfile host, {
     required String actionId,

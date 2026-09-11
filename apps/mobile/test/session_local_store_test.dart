@@ -55,6 +55,17 @@ void main() {
     expect(recents.last.id, 's1');
   });
 
+  test('explicit deletion clears the selected session log and favorite', () async {
+    final store = SessionLocalStore.instance;
+    await store.saveSessionLog(host, _log('deleted'));
+    await store.saveSessionLog(host, _log('kept'));
+    await store.setFavorite(host, 'deleted', favorite: true);
+    await store.deleteSession(host, 'deleted', deleteLog: true);
+    expect(await store.loadSessionLog(host, 'deleted'), isNull);
+    expect(await store.loadSessionLog(host, 'kept'), isNotNull);
+    expect(store.isFavorite(host, 'deleted'), isFalse);
+  });
+
   test('recent and favorite cache retain provider instance identity', () async {
     final store = SessionLocalStore.instance;
     final session = _summary('work:czE', updatedAt: DateTime.now()).copyWith(

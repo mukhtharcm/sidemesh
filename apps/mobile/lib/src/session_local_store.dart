@@ -549,16 +549,17 @@ class SessionLocalStore extends ChangeNotifier {
     });
   }
 
-  Future<void> deleteSession(HostProfile host, String sessionId) {
+  Future<void> deleteSession(HostProfile host, String sessionId, {bool deleteLog = false}) {
     return _trackOperation(() async {
       await _ensureMigrated();
       final db = await SidemeshDb.instance;
       sessionId = SessionIdentityStore.instance.canonical(host.id, sessionId);
-      await db.delete(
-        'sessions',
-        where: 'host_id = ? AND session_id = ?',
-        whereArgs: [host.id, sessionId],
-      );
+      await db.transaction((txn) async {
+        for (final table in ['sessions', if (deleteLog) 'session_logs']) {
+          await txn.delete(table, where: 'host_id = ? AND session_id = ?',
+            whereArgs: [host.id, sessionId]);
+        }
+      });
       _favoriteKeys.remove(_favoriteKey(host.id, sessionId));
     });
   }

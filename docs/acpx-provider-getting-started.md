@@ -70,6 +70,14 @@ Native session discovery uses an existing connection when the agent supports
 `session/list`. Each live session has its own connection, because some agents
 cannot keep several active sessions on one connection.
 
+When the agent advertises `session/delete`, the app offers **Delete** in session
+actions and asks for confirmation. Delete removes the session from the agent's
+session list, then clears the host display history and this app's cached log.
+The agent controls whether it also erases its native history files. A failed
+native delete keeps Sidemesh's saved history. Archive remains a local, reversible
+choice and never calls native deletion. Sidemesh retains input delivery IDs to
+prevent delayed retries from sending deleted input again.
+
 Configure different instance `id` values to use several ACP agents, or several
 instances of the same agent, in one daemon. Keep existing IDs when changing a
 command. The legacy launch entries are retained for compatibility; use an explicit

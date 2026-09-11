@@ -243,6 +243,14 @@ export class SessionCoordinator {
     this.publish({ type: "history_invalidated", sessionId: id });
   }
 
+  async deleteSessionView(id: string): Promise<void> {
+    await this.reads.get(id)?.catch(() => {});
+    this.clearActions(id);
+    this.store.deleteSessionView(id);
+    this.publish({ type: "history_invalidated", sessionId: id });
+    this.sessions.delete(id);
+  }
+
   snapshot(id: string, options: AgentSessionLogOptions = {}) {
     const previous = this.reads.get(id);
     const reading = previous ? previous.catch(() => {}).then(() => this.readSnapshot(id, options)) : this.readSnapshot(id, options);
