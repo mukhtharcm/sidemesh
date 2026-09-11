@@ -1,5 +1,9 @@
 # Pi Runtime Bridge Implementation Plan
 
+> Historical plan. Pi now uses its official RPC process and public history API.
+> See the [provider contract](../provider-adapter-contract.md) and
+> [selected runtime versions](../dependency-runtime-compatibility.md).
+
 ## Goal
 
 Expose Pi-specific runtime state through provider-neutral Sidemesh events and

@@ -1565,7 +1565,8 @@ describe("session input item parsing", () => {
       server = await startServer(config, makeCustomSingleProviderRuntime(provider));
       await waitFor(() => provider.submittedInputs === 1 ? true : null, "queued input after daemon restart");
       assert.deepEqual(provider.lastSubmitInput, [{ type: "text", text: "queue-one", text_elements: [] }]);
-      assert.equal((await send("queue-one")).statusCode, 200);
+      const repeated = await send("queue-one");
+      assert.equal(repeated.statusCode, 200, JSON.stringify(repeated));
       assert.equal((await send("queue-two")).statusCode, 200);
       const stopped = await request({ hostname: "127.0.0.1", port: server.port,
         path: `/api/sessions/${sessionId}/stop`, method: "POST",

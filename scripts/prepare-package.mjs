@@ -32,6 +32,8 @@ if (!existsSync(localTypeScript)) {
 const npmCommand = process.platform === "win32" ? "npm.cmd" : "npm";
 const result = spawnSync(npmCommand, ["run", "build"], {
   cwd: repoRoot,
+  // Windows command shims require cmd.exe; the command and arguments are fixed.
+  shell: process.platform === "win32",
   stdio: "inherit",
   env: process.env,
 });

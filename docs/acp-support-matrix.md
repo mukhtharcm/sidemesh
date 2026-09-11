@@ -75,6 +75,13 @@ checks delegated operations and exact permission choices. Server tests check
 HTTP authentication, input gates, and host recovery. Client tests check controls
 and content in light and dark modes on desktop and mobile layouts.
 
+For an installed agent, set `SIDEMESH_TEST_ACP_EXECUTABLE` and optional JSON-array
+`SIDEMESH_TEST_ACP_ARGS`, then run
+`node --import tsx --test src/acp-native.test.ts`. This check uses temporary native
+homes and sends no prompt. It checks an empty session or the explicit sign-in
+requirement, plus version negotiation and owned-process cleanup. The Codex ACP
+bridge `0.0.44` was checked with Codex `0.154.0` through its `CODEX_PATH` setting.
+
 These checks do not certify all releases of third-party ACP agents. Install a
 specific agent version and run its separate compatibility checks before changing
 a production launch entry. Opening saved session history does not install an
