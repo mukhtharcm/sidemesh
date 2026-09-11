@@ -388,6 +388,11 @@ specific agent provider.
   become confirmed only through explicit native identity or a completed protocol
   operation; matching display IDs or repeated prompt text is not proof. Pi needs
   an observed native timestamp and matching content in its durable entry file.
+- **Search summaries**: the disposable search database stores full session summaries
+  and provider instance IDs. Search results must not start native reads for each
+  result. Index from the coordinator snapshot; compare actual searchable content
+  and summary data, since existing messages can change without a new sequence or
+  timestamp. Apply configured provider IDs before the search result limit.
 - **Host session coordinator**: log, status, resource, and input-dispatch reads use
   one complete `readSessionSnapshot`. An input receipt does not start a turn.
   `busy` can be true without a native turn ID; providers own cancellation in

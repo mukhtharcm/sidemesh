@@ -5,28 +5,21 @@ import nodePath from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { afterEach, beforeEach, describe, it } from "node:test";
 
-import { SessionSearchIndex } from "./session-search-index.js";
+import { SessionSearchIndex, type SessionSearchDocument } from "./session-search-index.js";
+
+import type { SessionSummary } from "./types.js";
 
 const NOW = Date.now();
 
 function makeDoc(
   sessionKey: string,
-  overrides: Partial<Parameters<SessionSearchIndex["indexDocument"]>[0]> = {},
-): Parameters<SessionSearchIndex["indexDocument"]>[0] {
-  return {
-    sessionKey,
-    providerKind: "fake",
-    title: "Test Session",
-    preview: "preview",
-    cwd: "/tmp",
-    createdAt: NOW,
-    updatedAt: NOW,
-    archived: false,
-    fingerprint: `fp-${sessionKey}`,
-    messages: [],
-    activities: [],
-    ...overrides,
-  };
+  overrides: Partial<SessionSummary> & Partial<Pick<SessionSearchDocument, "messages" | "activities" | "archived">> & { providerKind?: string } = {},
+): SessionSearchDocument {
+  const { messages = [], activities = [], archived = false, providerKind = "fake", ...metadata } = overrides;
+  return { session: { id: sessionKey, title: "Test Session", preview: "preview", cwd: "/tmp",
+    createdAt: NOW, updatedAt: NOW, provider: providerKind, providerId: providerKind,
+    source: "test", status: "idle", rolloutPath: null, runtime: null, gitInfo: null, ...metadata },
+    messages, activities, archived };
 }
 
 describe("SessionSearchIndex", () => {
@@ -152,7 +145,6 @@ describe("SessionSearchIndex", () => {
     await index.open();
 
     const doc = makeDoc("session-2", {
-      fingerprint: "fp-stable",
       messages: [{ id: "m1", role: "user" as const, text: "hello", content: [], attachments: [], createdAt: Date.now(), seq: 1 }],
     });
 
@@ -165,8 +157,8 @@ describe("SessionSearchIndex", () => {
     results = await index.search("hello", 10);
     assert.equal(results.length, 1);
 
-    // Update content and fingerprint
-    await index.indexDocument({ ...doc, fingerprint: "fp-changed", messages: [{ id: "m1", role: "user" as const, text: "goodbye", content: [], attachments: [], createdAt: Date.now(), seq: 1 }] });
+    // An existing message can change without a new ID, sequence, or timestamp.
+    await index.indexDocument({ ...doc, messages: [{ id: "m1", role: "user" as const, text: "goodbye", content: [], attachments: [], createdAt: Date.now(), seq: 1 }] });
     results = await index.search("goodbye", 10);
     assert.equal(results.length, 1);
     results = await index.search("hello", 10);
@@ -264,6 +256,26 @@ describe("SessionSearchIndex", () => {
     assert.equal(filtered[0].sessionId, "pi-a");
 
     await index.close();
+  });
+
+  it("returns complete summaries and filters configured instances before the limit", async () => {
+    const index = new SessionSearchIndex(dbPath);
+    await index.open();
+    try {
+      const first = makeDoc("first:native", { providerId: "first", providerKind: "pi", title: "shared topic", updatedAt: NOW - 1 });
+      const second = makeDoc("second:native", { providerId: "second", providerKind: "pi", title: "shared topic", updatedAt: NOW });
+      await index.indexDocument(first);
+      await index.indexDocument(second);
+      const selected = await index.search("shared", 1, { providerIds: ["first"] });
+      assert.deepEqual(selected[0]?.session, first.session);
+      assert.deepEqual((await index.search("", 1, { providerId: "second" }))[0]?.session, second.session);
+      assert.deepEqual(await index.search("shared", 10, { providerIds: [] }), []);
+      assert.equal((await index.search("shared", 10, { providerKind: "pi" })).length, 2);
+      index.setProviderError("offline", "Could not connect", "pi");
+      assert.deepEqual(index.getStats().providers.find((entry) => entry.providerId === "offline"), {
+        providerId: "offline", providerKind: "pi", indexedSessions: 0, lastIndexedAt: null, lastError: "Could not connect",
+      });
+    } finally { await index.close(); }
   });
 
   it("filters search results by archived", async () => {
@@ -364,7 +376,7 @@ describe("SessionSearchIndex", () => {
   });
 
   it("keeps current search data on reopen", async () => {
-    // Simulate a v1 database by creating one manually
+    // Current search summaries survive a host restart.
     const index = new SessionSearchIndex(dbPath);
     await index.open();
 
@@ -372,7 +384,7 @@ describe("SessionSearchIndex", () => {
       messages: [{ id: "m1", role: "user" as const, text: "testing migration", content: [], attachments: [], createdAt: Date.now(), seq: 1 }],
     }));
 
-    // Close, reopen to trigger migration (should be a no-op since already at v2)
+    // Reopening the current schema does not discard indexed summaries.
     await index.close();
     const index2 = new SessionSearchIndex(dbPath);
     await index2.open();

@@ -1,5 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
+import type { SessionSummary } from "./types.js";
 import { wrapProviderScopedId, unwrapProviderScopedId } from "./session-identity.js";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
@@ -4703,6 +4704,16 @@ describe("GET /api/sessions/search", () => {
           "expected session newer than updatedAfter filter",
         );
 
+        let nativeReads = 0;
+        provider.readSessionThread = async () => { nativeReads += 1; throw new Error("Native reads unavailable"); };
+        provider.readSessionSnapshot = async () => { nativeReads += 1; throw new Error("Native snapshots unavailable"); };
+        const cached = await request({ hostname: "127.0.0.1", port: server.port,
+          headers: { Authorization: "Bearer " + config.token },
+          path: `/api/sessions/search?q=${encodeURIComponent("date filter fixture")}&providerId=fake`, method: "GET" });
+        assert.equal(cached.statusCode, 200);
+        assert.equal((cached.body as SessionSummary[])[0]?.id, wrapProviderScopedId("fake", "fixture-filter"));
+        assert.equal(nativeReads, 0, "search results must use the indexed summary");
+
         const excludeRes = await request({
           hostname: "127.0.0.1",
           port: server.port,
@@ -4713,6 +4724,7 @@ describe("GET /api/sessions/search", () => {
           method: "GET",
         });
         assert.equal(excludeRes.statusCode, 200);
+        assert.equal(nativeReads, 0);
         const excluded = excludeRes.body as any[];
         assert.ok(
           !excluded.some((session) => session.id === wrapProviderScopedId("fake", "fixture-filter")),

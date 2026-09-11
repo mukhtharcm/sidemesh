@@ -356,10 +356,6 @@ export async function startServer(
 
   function allocSeq(sessionId: string): number { return sessionState.allocSeq(sessionId); }
 
-  function sessionStatusOverrideForDisplay(sessionId: string): LiveThreadStatus | null {
-    return sessionState.get(sessionId).status;
-  }
-
   async function clearInterruptedSessionInputDedupe(
     interruptedTurnIds: Map<string, string>,
   ): Promise<void> {
@@ -429,7 +425,7 @@ export async function startServer(
     } else if (event.type === "turn_completed") {
       void pushNotifications.enqueue({ kind: /error|fail/i.test(event.status ?? "") ? "turn_failed" : "turn_completed",
         sessionId: event.sessionId, turnId: event.turnId });
-      void indexSessionForSearch(searchIndex, providerRuntime, event.sessionId).catch(() => {});
+      void indexSessionForSearch(searchIndex, sessionState, event.sessionId).catch(() => {});
     }
     if (!["assistant_delta", "reasoning_delta", "activity_updated", "plan_updated", "provider_warning"].includes(event.type)) {
       scheduleRecentSessionUpsert(event.sessionId, 0);
@@ -506,7 +502,6 @@ export async function startServer(
       sessionState,
       limit,
       runtimeMode,
-      sessionStatusOverrideForDisplay,
     );
     recentSessionsCache.set(cacheKey, {
       limit,
@@ -561,13 +556,7 @@ export async function startServer(
           broadcastRecentSessionsLive({ type: "remove", sessionId });
           return;
         }
-        const session = await buildRecentSessionSummary(
-          providerRuntime,
-          sessionState,
-          thread,
-          "active",
-          sessionStatusOverrideForDisplay,
-        );
+        const [session] = await buildRecentSessionSummaries(sessionState, [thread]);
         broadcastRecentSessionsLive({ type: "upsert", session });
       } catch {
         // The session may have been archived/removed before we could refresh it.
@@ -1025,33 +1014,37 @@ export async function startServer(
       if (!hostCapabilities.sessions.search) {
         return jsonResponse(c, { error: "Session search is not available" }, 503);
       }
-      const rawQuery = asString(readQuery(c)?.q);
+      const query = readQuery(c);
+      const rawQuery = asString(query.q);
       const normalizedQuery = rawQuery?.trim() ?? "";
-      const limit = Math.min(
-        asInteger(readQuery(c)?.limit) ?? 20,
+      const limit = Math.max(1, Math.min(
+        asInteger(query.limit) ?? 20,
         100,
-      );
+      ));
       if (normalizedQuery.length < 2) {
         const hasFilters =
-          asString(readQuery(c)?.provider) ||
-          asString(readQuery(c)?.cwd) ||
-          readQuery(c)?.archived !== undefined ||
-          asString(readQuery(c)?.updatedAfter) ||
-          asString(readQuery(c)?.updatedBefore);
+          asString(query.providerId) ||
+          asString(query.provider) ||
+          asString(query.cwd) ||
+          query.archived !== undefined ||
+          asString(query.updatedAfter) ||
+          asString(query.updatedBefore);
         if (!hasFilters) {
           return jsonResponse(c, { error: "Query must be at least 2 characters" }, 400);
         }
       }
-      const filter: SearchFilter = {};
-      const providerFilter = asString(readQuery(c)?.provider);
+      const filter: SearchFilter = { providerIds: providerRuntime.providers.map((entry) => entry.id) };
+      const providerId = asString(query.providerId);
+      if (providerId) filter.providerId = providerId;
+      const providerFilter = asString(query.provider);
       if (providerFilter) {
         filter.providerKind = providerFilter;
       }
-      const cwdFilter = asString(readQuery(c)?.cwd);
+      const cwdFilter = asString(query.cwd);
       if (cwdFilter) {
         filter.cwd = cwdFilter;
       }
-      const archivedFilter = readQuery(c)?.archived;
+      const archivedFilter = query.archived;
       if (archivedFilter === "true") {
         filter.archived = true;
       } else if (archivedFilter === "false") {
@@ -1059,55 +1052,19 @@ export async function startServer(
       } else {
         filter.archived = false;
       }
-      const updatedAfter = parseTimestamp(readQuery(c)?.updatedAfter);
+      const updatedAfter = parseTimestamp(query.updatedAfter);
       if (updatedAfter != null) {
         filter.updatedAfter = updatedAfter;
       }
-      const updatedBefore = parseTimestamp(readQuery(c)?.updatedBefore);
+      const updatedBefore = parseTimestamp(query.updatedBefore);
       if (updatedBefore != null) {
         filter.updatedBefore = updatedBefore;
       }
       await ensureSearchBackfill();
-      const searchResults = await searchIndex.search(
-        normalizedQuery,
-        Math.min(limit * 3, 300),
-        filter,
-      );
-      const sessionsById = new Map<string, SessionSummary>();
-      await Promise.all(
-        searchResults.map(async (result) => {
-          if (!providerEntryForSessionId(result.sessionId)) {
-            return null;
-          }
-          const thread = await readSession(providerRuntime, result.sessionId, false).catch(() => null);
-          if (!thread) {
-            return null;
-          }
-          if (sessionSubAgentForThread(thread)) {
-            await searchIndex.remove(result.sessionId).catch(() => undefined);
-            return null;
-          }
-          const runtime = sessionState.runtimeSummary(thread.id);
-          const session = mapSession(
-            thread,
-            runtime,
-            await sessionStatusOverrideForDisplay(thread.id),
-          );
-          const summary: SessionSummary = {
-            ...session,
-            matchSnippet: result.snippet ?? null,
-            matchRank: result.rank,
-          };
-          const existing = sessionsById.get(summary.id);
-          if (!existing || compareSessionSearchSummary(summary, existing) < 0) {
-            sessionsById.set(summary.id, summary);
-          }
-          return null;
-        }),
-      );
-      const sessions = [...sessionsById.values()]
-        .sort(compareSessionSearchSummary)
-        .slice(0, limit);
+      const searchResults = await searchIndex.search(normalizedQuery, limit, filter);
+      const sessions = searchResults.map((result) => ({
+        ...sessionState.projectSummary(result.session), matchSnippet: result.snippet, matchRank: result.rank,
+      }));
       return jsonResponse(c, sessions);
     },
   );
@@ -1161,7 +1118,6 @@ export async function startServer(
         sessionState,
         null,
         "none",
-        sessionStatusOverrideForDisplay,
       ),
     getSessionCwd,
     workspaceRoots: config.workspaceRoots,
@@ -1559,12 +1515,12 @@ export async function startServer(
         }, (error instanceof AgentProviderRequestError ? error.status : 502) as ContentfulStatusCode);
       }
       const response = jsonResponse(c, {
-        session: mapSession(started.thread, started.runtime, sessionStatusOverrideForDisplay(started.thread.id)),
+        session: sessionState.projectSummary(mapSession(started.thread, started.runtime)),
         activeTurnId: sessionState.get(started.thread.id).activeTurn?.turnId ?? null,
         input: receipt,
       }, 201);
       scheduleRecentSessionUpsert(started.thread.id, 0);
-      void indexSessionForSearch(searchIndex, providerRuntime, started.thread.id).catch(() => {});
+      void indexSessionForSearch(searchIndex, sessionState, started.thread.id).catch(() => {});
       return response;
     },
   );
@@ -1690,14 +1646,10 @@ export async function startServer(
       }
       await sessionProvider.provider.setSessionName!(sessionProvider.rawId, name);
       const thread = await readSession(providerRuntime, sessionId, false);
-      const session = mapSession(
-        thread,
-        null,
-        await sessionStatusOverrideForDisplay(thread.id),
-      );
+      const session = sessionState.projectSummary(mapSession(thread, thread.runtime ?? null));
       const response = jsonResponse(c, { session });
       scheduleRecentSessionUpsert(sessionId, 0);
-      void indexSessionForSearch(searchIndex, providerRuntime, sessionId).catch(() => {});
+      void indexSessionForSearch(searchIndex, sessionState, sessionId).catch(() => {});
       return response;
     },
   );
@@ -1714,7 +1666,7 @@ export async function startServer(
       await inputs.stop(sessionId, async () => { await sessionProvider.provider.archiveSession!(sessionProvider.rawId); });
       sessionState.invalidate(sessionId);
       broadcastRecentSessionRemove(sessionId);
-      void indexSessionForSearch(searchIndex, providerRuntime, sessionId, true).catch(() => {});
+      void indexSessionForSearch(searchIndex, sessionState, sessionId, true).catch(() => {});
       return c.body(null, 200);
     },
   );
@@ -1731,7 +1683,7 @@ export async function startServer(
       await sessionProvider.provider.unarchiveSession!(sessionProvider.rawId);
       const response = jsonResponse(c, { unarchived: true });
       scheduleRecentSessionUpsert(sessionId, 0);
-      void indexSessionForSearch(searchIndex, providerRuntime, sessionId, false).catch(() => {});
+      void indexSessionForSearch(searchIndex, sessionState, sessionId, false).catch(() => {});
       return response;
     },
   );
@@ -1842,7 +1794,6 @@ export async function startServer(
               sessionState,
               null,
               "none",
-              sessionStatusOverrideForDisplay,
             ),
           getSessionCwd,
           sessionId: params.get("sessionId"),
@@ -1975,11 +1926,11 @@ export async function startServer(
                 if (closing) break;
                 const sessionId = wrapProviderScopedId(entry.id, thread.id);
                 if (sessionSubAgentForThread(thread)) { await searchIndex.remove(sessionId); continue; }
-                await indexSessionForSearch(searchIndex, providerRuntime, sessionId, archived);
+                await indexSessionForSearch(searchIndex, sessionState, sessionId, archived);
               }
             }
           } catch (error) {
-            searchIndex.setProviderError(entry.id, error instanceof Error ? error.message : String(error));
+            searchIndex.setProviderError(entry.id, error instanceof Error ? error.message : String(error), entry.kind);
           }
         }
       } finally { searchIndex.setBackfillRunning(false); }
@@ -2024,6 +1975,7 @@ export async function startServer(
       providerRuntime.off("liveEvent", onProviderLiveEvent);
       providerRuntime.off("stderr", onProviderStderr);
       providerRuntime.off("state", onProviderState);
+      await sessionState.drain();
       const flushed = await Promise.allSettled([searchIndex.close(), pushNotifications.close(), Promise.resolve().then(() => sessionStore.close())]);
       const errors = [...stopped, ...flushed].flatMap((result) => result.status === "rejected" ? [result.reason] : []);
       if (errors.length) throw new AggregateError(errors, "Host shutdown did not finish cleanly");
@@ -2300,58 +2252,27 @@ async function enrichSessionsWithGitCommonDir(
 // Canonical recent-session projection used by /api/sessions and the recent
 // live socket so all delivery paths share the same runtime, status, and git
 // enrichment behavior.
-async function buildRecentSessionSummary(
-  providerRuntime: AgentProviderRuntime,
-  sessionState: SessionCoordinator,
-  thread: ThreadRecord,
-  runtimeMode: SessionRuntimeListMode = "active",
-  statusOverrideForSession?: (
-    sessionId: string,
-  ) => LiveThreadStatus | null | Promise<LiveThreadStatus | null>,
-): Promise<SessionSummary> {
-  const [session] = await buildRecentSessionSummaries(
-    providerRuntime,
-    sessionState,
-    [thread],
-    runtimeMode,
-    statusOverrideForSession,
-  );
-  return session;
-}
-
 async function buildRecentSessionSummaries(
-  providerRuntime: AgentProviderRuntime,
-  sessionState: SessionCoordinator,
+  coordinator: SessionCoordinator,
   threads: ThreadRecord[],
   runtimeMode: SessionRuntimeListMode = "active",
-  statusOverrideForSession?: (
-    sessionId: string,
-  ) => LiveThreadStatus | null | Promise<LiveThreadStatus | null>,
 ): Promise<SessionSummary[]> {
-  const topLevelThreads = threads.filter(
-    (thread) => sessionSubAgentForThread(thread) == null,
-  );
-  if (topLevelThreads.length === 0) {
-    return [];
-  }
-  const sessions = topLevelThreads.map((thread) => mapSession(thread,
-    runtimeMode === "none" ? null : thread.runtime ?? sessionState.runtimeSummary(thread.id)));
+  const sessions = threads.filter((thread) => sessionSubAgentForThread(thread) == null).map((thread) => {
+    const summary = coordinator.projectSummary(mapSession(thread, thread.runtime ?? null));
+    return runtimeMode === "none" ? { ...summary, runtime: null } : summary;
+  });
   return enrichSessionsWithGitCommonDir(sessions);
 }
 
 async function listSessions(
   providerRuntime: AgentProviderRuntime,
-  sessionState: SessionCoordinator,
+  coordinator: SessionCoordinator,
   limitOverride: number | null = null,
   runtimeMode: SessionRuntimeListMode = "active",
-  statusOverrideForSession?: (
-    sessionId: string,
-  ) => LiveThreadStatus | null | Promise<LiveThreadStatus | null>,
 ): Promise<SessionSummary[]> {
   const limit = normalizedSessionListLimit(limitOverride);
   const threads = await listProviderThreads(providerRuntime, { limit, archived: false, includeSubAgents: false });
-  const projected = threads.map((thread) => sessionState.projectListedThread(thread));
-  return buildRecentSessionSummaries(providerRuntime, sessionState, projected, runtimeMode);
+  return buildRecentSessionSummaries(coordinator, threads, runtimeMode);
 }
 
 async function listProviderThreads(
@@ -2500,37 +2421,16 @@ async function listPendingActions(
 
 async function indexSessionForSearch(
   searchIndex: SessionSearchIndex,
-  providerRuntime: AgentProviderRuntime,
+  coordinator: SessionCoordinator,
   sessionId: string,
   archived?: boolean,
 ): Promise<void> {
-  const resolved = providerRuntime.resolveSession(sessionId);
-  if (!resolved.entry.capabilities.sessions.history) return;
-  try {
-    const provider = await providerRuntime.ensure(resolved.entry);
-    const log = await requireProviderMethod(provider, "readSessionSnapshot", "session snapshot").call(provider, resolved.rawId, {
-      messageLimit: 200, activityLimit: 200,
-    });
-    const thread = providerRuntime.wrapThread(resolved.entry, log.thread);
-    if (sessionSubAgentForThread(thread)) { await searchIndex.remove(resolved.sessionId); return; }
-    const createdAt = threadTimestampMillis(thread.createdAt);
-    const updatedAt = threadTimestampMillis(thread.updatedAt);
-    await searchIndex.indexDocument({
-      sessionKey: resolved.sessionId,
-      providerKind: resolved.entry.kind,
-      title: thread.name || thread.preview,
-      preview: thread.preview,
-      cwd: thread.cwd,
-      createdAt,
-      updatedAt,
-      archived: archived ?? false,
-      fingerprint: `${resolved.entry.kind}|${thread.name || ""}|${thread.preview}|${thread.cwd}|${createdAt}|${updatedAt}|${archived ?? false}|${log.nextSeq}`,
-      messages: log.messages,
-      activities: log.activities,
-    });
-  } catch {
-    // Ignore indexing errors
-  }
+  const snapshot = await coordinator.snapshot(sessionId);
+  if (sessionSubAgentForThread(snapshot.thread)) { await searchIndex.remove(sessionId); return; }
+  await searchIndex.indexDocument({
+    session: mapSession(snapshot.thread, snapshot.runtime, snapshot.status),
+    archived: archived ?? false, messages: snapshot.messages, activities: snapshot.activities,
+  });
 }
 
 async function collectUsageObservations(
@@ -2836,25 +2736,6 @@ function providerKindForThread(thread: ThreadRecord): string | null {
   return null;
 }
 
-
-function compareSessionSearchSummary(
-  left: SessionSummary,
-  right: SessionSummary,
-): number {
-  const leftRank =
-    typeof left.matchRank === "number" ? left.matchRank : Number.POSITIVE_INFINITY;
-  const rightRank =
-    typeof right.matchRank === "number" ? right.matchRank : Number.POSITIVE_INFINITY;
-  const rankCompare = leftRank - rightRank;
-  if (rankCompare !== 0) {
-    return rankCompare;
-  }
-  const updatedCompare = right.updatedAt - left.updatedAt;
-  if (updatedCompare !== 0) {
-    return updatedCompare;
-  }
-  return left.id.localeCompare(right.id);
-}
 
 function mapGitInfo(raw: unknown): GitInfoSummary | null {
   if (!raw || typeof raw !== "object") {
