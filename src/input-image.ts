@@ -40,4 +40,3 @@ function imageMimeTypeFromPath(path: string): string | null {
       return null;
   }
 }
-
