@@ -5611,7 +5611,7 @@ describe("session-scoped filesystem routes", () => {
         assert.equal(listingResponse.statusCode, 200);
         assert.equal(
           (listingResponse.body as { path: string }).path,
-          secondarySession.cwd,
+          await realpath(secondarySession.cwd),
         );
       },
     );

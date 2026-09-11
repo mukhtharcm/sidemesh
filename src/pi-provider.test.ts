@@ -377,6 +377,7 @@ describe("PiAgentProvider", () => {
 
     const secondLog = await provider.readSessionLog(thread);
     assert.equal(secondLog.messages.length, 3);
+    await provider.close();
     assert.equal(saveStateCalls, 1);
     assert.equal(secondLog.messages[2]?.content[0]?.type, "text");
     assert.equal(
