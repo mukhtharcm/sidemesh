@@ -7,7 +7,7 @@ import { appendCommandActivityOutput, applyCommandTerminalInteraction, mergeActi
 import { toPublicPendingAction } from "./approvals.js";
 import { SessionInputCoordinator } from "./session-input-coordinator.js";
 import { SessionStore, type SessionRecoveryItem } from "./session-store.js";
-import type { ActiveTurnState, LatestPlanUpdate, LiveEvent, LiveThreadStatus, SessionActivity, SessionMessage, SessionRuntimeSummary, ThreadRecord } from "./types.js";
+import type { ActiveTurnState, LatestPlanUpdate, LiveEvent, LiveThreadStatus, SessionActivity, SessionMessage, SessionRuntimeSummary, SessionSummary } from "./types.js";
 
 
 interface SessionState {
@@ -73,13 +73,9 @@ export class SessionCoordinator {
   keys(): IterableIterator<string> { return this.sessions.keys(); }
   values(): IterableIterator<SessionState> { return this.sessions.values(); }
   get size(): number { return this.sessions.size; }
-  runtimeSummary(id: string): SessionRuntimeSummary | null { return this.sessions.get(id)?.runtime ?? null; }
-  projectListedThread(thread: ThreadRecord): ThreadRecord {
-    const state = this.sessions.get(thread.id);
-    // A list is metadata, not a complete native snapshot. It cannot clear a
-    // published approval, error, or completion observed through the coordinator.
-    return state?.status
-      ? { ...thread, status: { ...thread.status, phase: state.status } } : thread;
+  projectSummary(session: SessionSummary): SessionSummary {
+    const state = this.sessions.get(session.id);
+    return state ? { ...session, status: state.status ?? session.status, runtime: state.runtime ?? session.runtime } : session;
   }
   allocSeq(id: string): number { return this.get(id).nextSeq++; }
 
@@ -329,6 +325,8 @@ export class SessionCoordinator {
       revision: state.revision, nextSeq: state.nextSeq,
       liveAssistantText: draft?.text ?? "", liveAssistantReasoning: draft ? reasoningText(draft) : "" };
   }
+
+  async drain(): Promise<void> { await Promise.allSettled(this.reads.values()); }
 
   actionFor(id: string): AgentPendingAction | null {
     return [...this.pendingActions.values()].find((action) => action.sessionId === id) ?? null;
