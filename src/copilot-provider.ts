@@ -1,3 +1,4 @@
+import { elicitationFields } from "./elicitation.js";
 import { randomUUID } from "node:crypto";
 import { lookup } from "node:dns/promises";
 import { EventEmitter } from "node:events";
@@ -60,7 +61,6 @@ import { normalizeStoredSessionActivity } from "./activity.js";
 import type {
   LivePlanStep,
   ModelSummary,
-  PendingActionElicitationField,
   SessionActivity,
   SkillCatalogEntry,
   SkillSummary,
@@ -2868,7 +2868,7 @@ function buildCopilotElicitationAction(
   request: CopilotSdkElicitationContext,
 ): AgentPendingAction {
   const actionId = `copilot-elicitation-${randomUUID()}`;
-  const fields = normalizeCopilotElicitationFields(request.requestedSchema);
+  const fields = elicitationFields(request.requestedSchema);
   const message = request.message?.trim() || "Structured input requested";
   return {
     id: actionId,
@@ -2899,113 +2899,6 @@ function copilotPendingActionKind(kind: unknown): AgentPendingAction["kind"] {
   if (kind === "shell") return "command";
   if (kind === "write") return "file_change";
   return "permissions";
-}
-
-function normalizeCopilotElicitationFields(
-  schema: CopilotSdkElicitationContext["requestedSchema"],
-): PendingActionElicitationField[] {
-  if (!schema || schema.type !== "object" || !schema.properties) {
-    return [];
-  }
-  const required = new Set(schema.required ?? []);
-  return Object.entries(schema.properties)
-    .map(([key, field]) => normalizeCopilotElicitationField(key, field, required))
-    .filter((field): field is PendingActionElicitationField => field !== null);
-}
-
-function normalizeCopilotElicitationField(
-  key: string,
-  field: NonNullable<CopilotSdkElicitationContext["requestedSchema"]>["properties"][string],
-  required: Set<string>,
-): PendingActionElicitationField | null {
-  const title =
-    ("title" in field && typeof field.title === "string" && field.title.trim()) ||
-    key;
-  const description =
-    "description" in field && typeof field.description === "string"
-      ? field.description
-      : undefined;
-  const isRequired = required.has(key);
-
-  if (field.type === "boolean") {
-    return {
-      key,
-      type: "boolean",
-      title,
-      description,
-      required: isRequired,
-      ...(typeof field.default === "boolean"
-        ? { defaultValue: field.default }
-        : {}),
-    };
-  }
-  if (field.type === "number" || field.type === "integer") {
-    return {
-      key,
-      type: "number",
-      title,
-      description,
-      required: isRequired,
-      integer: field.type === "integer",
-      ...(typeof field.default === "number"
-        ? { defaultValue: field.default }
-        : {}),
-      ...(typeof field.minimum === "number" ? { minimum: field.minimum } : {}),
-      ...(typeof field.maximum === "number" ? { maximum: field.maximum } : {}),
-    };
-  }
-  if (field.type === "array") {
-    const options = "enum" in field.items
-      ? field.items.enum.map((value) => ({ value, label: value }))
-      : "anyOf" in field.items
-        ? field.items.anyOf
-            .filter((item) => typeof item.const === "string")
-            .map((item) => ({ value: item.const, label: item.title || item.const }))
-        : [];
-    return {
-      key,
-      type: "string[]",
-      title,
-      description,
-      required: isRequired,
-      options,
-      ...(Array.isArray(field.default) ? { defaultValue: field.default } : {}),
-      ...(typeof field.minItems === "number" ? { minItems: field.minItems } : {}),
-      ...(typeof field.maxItems === "number" ? { maxItems: field.maxItems } : {}),
-    };
-  }
-  const options =
-    "enum" in field
-      ? field.enum.map((value, index) => ({
-          value,
-          label:
-            Array.isArray(field.enumNames) &&
-            typeof field.enumNames[index] === "string" &&
-            field.enumNames[index].trim().length > 0
-              ? field.enumNames[index]
-              : value,
-        }))
-      : "oneOf" in field
-        ? field.oneOf
-            .filter((item) => typeof item.const === "string")
-            .map((item) => ({ value: item.const, label: item.title || item.const }))
-        : undefined;
-  return {
-    key,
-    type: "string",
-    title,
-    description,
-    required: isRequired,
-    ...(typeof field.default === "string" ? { defaultValue: field.default } : {}),
-    ...(("minLength" in field && typeof field.minLength === "number")
-      ? { minLength: field.minLength }
-      : {}),
-    ...(("maxLength" in field && typeof field.maxLength === "number")
-      ? { maxLength: field.maxLength }
-      : {}),
-    ...(("format" in field && field.format) ? { format: field.format } : {}),
-    ...(options && options.length > 0 ? { options } : {}),
-  };
 }
 
 function copilotApprovalCategory(

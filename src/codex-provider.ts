@@ -1,3 +1,4 @@
+import { elicitationFields } from "./elicitation.js";
 import { execFileSync } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import { EventEmitter } from "node:events";
@@ -65,7 +66,6 @@ import type {
   ThreadRecord,
   SessionMessageContentBlock,
   SessionMessageContentBlockThinking,
-  PendingActionElicitationField,
   UsageAccountRef,
   UsageCredits,
   UsageObservation,
@@ -3004,7 +3004,7 @@ function buildCodexElicitationAction(
       typed.requested_schema && typeof typed.requested_schema === "object"
         ? (typed.requested_schema as Record<string, any>)
         : null;
-    const fields = schema ? normalizeCodexElicitationFields(schema) : [];
+    const fields = schema ? elicitationFields(schema) : [];
 
     if (schema && Array.isArray(schema.required)) {
       const producedKeys = new Set(fields.map((f) => f.key));
@@ -3044,96 +3044,6 @@ function buildCodexElicitationAction(
   }
 
   return null;
-}
-
-function normalizeCodexElicitationFields(
-  schema: Record<string, any>,
-): PendingActionElicitationField[] {
-  if (schema.type !== "object" || !schema.properties) {
-    return [];
-  }
-  const required = new Set(Array.isArray(schema.required) ? schema.required : []);
-  return Object.entries(schema.properties as Record<string, any>)
-    .map(([key, field]) => normalizeCodexElicitationField(key, field, required))
-    .filter((field): field is PendingActionElicitationField => field !== null);
-}
-
-function normalizeCodexElicitationField(
-  key: string,
-  field: Record<string, any>,
-  required: Set<string>,
-): PendingActionElicitationField | null {
-  const title = asString(field.title) || key;
-  const description = asString(field.description) ?? undefined;
-  const isRequired = required.has(key);
-
-  if (field.type === "boolean") {
-    return {
-      key,
-      type: "boolean",
-      title,
-      description,
-      required: isRequired,
-      ...(typeof field.default === "boolean" ? { defaultValue: field.default } : {}),
-    };
-  }
-
-  if (field.type === "number" || field.type === "integer") {
-    return {
-      key,
-      type: "number",
-      title,
-      description,
-      required: isRequired,
-      integer: field.type === "integer",
-      ...(typeof field.default === "number" ? { defaultValue: field.default } : {}),
-      ...(typeof field.minimum === "number" ? { minimum: field.minimum } : {}),
-      ...(typeof field.maximum === "number" ? { maximum: field.maximum } : {}),
-    };
-  }
-
-  if (field.type === "array" && field.items && typeof field.items === "object") {
-    const items = field.items as Record<string, any>;
-    const options = Array.isArray(items.enum)
-      ? items.enum
-          .filter((v: unknown): v is string => typeof v === "string")
-          .map((value: string) => ({ value, label: value }))
-      : undefined;
-    return {
-      key,
-      type: "string[]",
-      title,
-      description,
-      required: isRequired,
-      options: options ?? [],
-      ...(Array.isArray(field.default) ? { defaultValue: field.default } : {}),
-      ...(typeof field.minItems === "number" ? { minItems: field.minItems } : {}),
-      ...(typeof field.maxItems === "number" ? { maxItems: field.maxItems } : {}),
-    };
-  }
-
-  if (field.type !== "string" && field.type !== undefined && field.type !== null) {
-    return null;
-  }
-
-  const options = Array.isArray(field.enum)
-    ? field.enum
-        .filter((v: unknown): v is string => typeof v === "string")
-        .map((value: string) => ({ value, label: value }))
-    : undefined;
-
-  return {
-    key,
-    type: "string",
-    title,
-    description,
-    required: isRequired,
-    ...(typeof field.default === "string" ? { defaultValue: field.default } : {}),
-    ...(options && options.length > 0 ? { options } : {}),
-    ...(typeof field.minLength === "number" ? { minLength: field.minLength } : {}),
-    ...(typeof field.maxLength === "number" ? { maxLength: field.maxLength } : {}),
-    ...(asString(field.format) ? { format: asString(field.format) as any } : {}),
-  };
 }
 
 function buildCodexActionResponse(

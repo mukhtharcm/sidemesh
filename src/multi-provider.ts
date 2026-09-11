@@ -384,6 +384,10 @@ export class MultiAgentProvider
     kind: string,
     event: AgentProviderLiveEvent,
   ): AgentProviderLiveEvent {
+    if (event.type === "action_resolved") {
+      return { ...event, sessionId: wrapProviderScopedId(kind, event.sessionId),
+        actionId: wrapProviderScopedId(kind, event.actionId) };
+    }
     if ("sessionId" in event && typeof event.sessionId === "string") {
       return {
         ...event,

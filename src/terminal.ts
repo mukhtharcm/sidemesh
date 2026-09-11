@@ -767,7 +767,7 @@ function spawnScriptTerminalProcess(
   };
 }
 
-function terminatePipeProcess(
+export function terminatePipeProcess(
   child: ChildProcessWithoutNullStreams,
   hasExited: () => boolean,
 ): void {
