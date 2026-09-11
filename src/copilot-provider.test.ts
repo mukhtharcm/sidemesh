@@ -2042,6 +2042,8 @@ describe("Copilot provider", () => {
   });
 });
 
+type SdkSkillSource = Awaited<ReturnType<CopilotSdkClient["rpc"]["skills"]["discover"]>>["skills"][number]["source"];
+
 class FakeCopilotSdkClient implements CopilotSdkClient {
   public readonly created: Array<{
     config: CopilotSdkSessionConfig;
@@ -2059,7 +2061,7 @@ class FakeCopilotSdkClient implements CopilotSdkClient {
   private readonly discoveredSkills: Array<{
     name: string;
     description: string;
-    source: string;
+    source: SdkSkillSource;
     enabled: boolean;
     userInvocable: boolean;
     path?: string;
@@ -2079,7 +2081,7 @@ class FakeCopilotSdkClient implements CopilotSdkClient {
       skills?: Array<{
         name: string;
         description: string;
-        source: string;
+        source: SdkSkillSource;
         enabled: boolean;
         userInvocable: boolean;
         path?: string;
@@ -2131,7 +2133,7 @@ class FakeCopilotSdkClient implements CopilotSdkClient {
         skills: Array<{
           name: string;
           description: string;
-          source: string;
+          source: SdkSkillSource;
           enabled: boolean;
           userInvocable: boolean;
           path?: string;
@@ -2250,7 +2252,7 @@ class FakeCopilotSdkSession implements CopilotSdkSession {
         skills: Array<{
           name: string;
           description: string;
-          source: string;
+          source: SdkSkillSource;
           enabled: boolean;
           userInvocable: boolean;
           path?: string;
@@ -2274,8 +2276,9 @@ class FakeCopilotSdkSession implements CopilotSdkSession {
       disable: async ({ name }: { name: string }): Promise<void> => {
         this.client.disabledSkills.add(name);
       },
-      reload: async (): Promise<void> => {
+      reload: async () => {
         this.skillReloadCount += 1;
+        return { warnings: [], errors: [] };
       },
     },
     plan: {
@@ -2289,7 +2292,7 @@ class FakeCopilotSdkSession implements CopilotSdkSession {
         path: this.planContent == null ? null : `/tmp/${this.sessionId}/plan.md`,
       }),
     },
-    compaction: {
+    history: {
       compact: async (): Promise<{
         success: boolean;
         tokensRemoved: number;
@@ -2346,11 +2349,12 @@ class FakeCopilotSdkSession implements CopilotSdkSession {
     this.holdResponses = holdResponses;
   }
 
-  public async getMessages(): Promise<CopilotSdkSessionEvent[]> {
+  public async getEvents(): Promise<CopilotSdkSessionEvent[]> {
     return this.historyEvents;
   }
 
-  public async send(options: CopilotSdkMessageOptions): Promise<string> {
+  public async send(input: string | CopilotSdkMessageOptions): Promise<string> {
+    const options = typeof input === "string" ? { prompt: input } : input;
     this.sent.push(options);
     const sendIndex = this.sent.length;
     let userInputResult:
