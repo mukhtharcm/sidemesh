@@ -3624,6 +3624,42 @@ describe("provider-scoped catalog routes", () => {
     );
   });
 
+  it("routes session configuration to the owning provider and preserves failures", async () => {
+    const stateDir = await mkdtemp(nodePath.join(tmpdir(), "sidemesh-server-test-"));
+    const config = makeConfig(stateDir);
+    const calls: unknown[] = [];
+    const provider = Object.assign(new FakeAgentProvider({ seedSessions: false }), {
+      async setSessionConfiguration(id: string, optionId: string, value: string | boolean) {
+        calls.push([id, optionId, value]);
+        if (optionId === "missing") throw new AgentProviderRequestError("Option is no longer available", 409);
+        return { configurationOptions: [{ id: optionId, label: "Setting", value }] };
+      },
+    });
+    provider.capabilities.configuration.sessionOptions = true;
+    const created = await provider.createSession({ cwd: stateDir, input: [], overrides: EMPTY_OVERRIDES });
+    await withServerRuntime(config, makeCustomSingleProviderRuntime(provider), async (server) => {
+      const requestOptions = { hostname: "127.0.0.1", port: server.port,
+        path: `/api/sessions/${wrapProviderScopedId("fake", created.thread.id)}/configuration`,
+        headers: { Authorization: "Bearer " + config.token, "Content-Type": "application/json" } };
+      assert.equal((await request({ ...requestOptions, method: "GET" })).statusCode, 200);
+      for (const value of [false, "choice"]) {
+        const response = await request({ ...requestOptions, method: "POST", body: JSON.stringify({ optionId: "setting", value }) });
+        assert.equal(response.statusCode, 200);
+        assert.deepEqual(calls.at(-1), [created.thread.id, "setting", value]);
+        assert.deepEqual(response.body, { runtime: { configurationOptions: [{ id: "setting", label: "Setting", value }] } });
+      }
+      const malformed = await request({ ...requestOptions, method: "POST", body: JSON.stringify({ optionId: "setting", value: 3 }) });
+      assert.equal(malformed.statusCode, 400);
+      assert.equal(calls.length, 2);
+      const rejected = await request({ ...requestOptions, method: "POST", body: JSON.stringify({ optionId: "missing", value: true }) });
+      assert.equal(rejected.statusCode, 409);
+      assert.deepEqual(rejected.body, { error: "Option is no longer available" });
+      provider.capabilities.configuration.sessionOptions = false;
+      assert.equal((await request({ ...requestOptions, method: "POST", body: JSON.stringify({ optionId: "setting", value: true }) })).statusCode, 501);
+      assert.equal(calls.length, 3);
+    });
+  });
+
   it("returns provider-defined mode catalogs when the provider exposes them", async () => {
     const stateDir = await mkdtemp(nodePath.join(tmpdir(), "sidemesh-server-test-"));
     const config = makeConfig(stateDir);

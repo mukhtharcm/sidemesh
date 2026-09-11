@@ -874,6 +874,10 @@ class _SessionControlsSheetState extends State<SessionControlsSheet> {
 
   @override
   Widget build(BuildContext context) {
+    if (_nodeInfo != null && _supports('configuration', 'sessionOptions')) {
+      return SessionConfigurationControls(api: widget.api, host: widget.host,
+        session: widget.session, onClose: _close);
+    }
     final colors = context.colors;
     final theme = Theme.of(context);
     final bottomInset = MediaQuery.of(context).viewInsets.bottom;

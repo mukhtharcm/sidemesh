@@ -123,12 +123,20 @@ Approvals:
 
 Configuration:
 
+- `setSessionConfiguration` (requires `configuration.sessionOptions`)
 - `listModels`
 - `listProfiles`
 - `listAccessModes`
 - `listPermissionProfiles` (legacy compatibility)
 - `listSkills`
 - `writeSkillConfig`
+
+`GET /api/sessions/:id/configuration` returns the current runtime options.
+`POST` on the same path applies one advertised `optionId` with a string or
+boolean `value`. The adapter validates the offered values and returns the
+confirmed runtime. The client keeps failed edits for retry and preserves option
+groups and descriptions. These controls replace fixed settings for providers
+that advertise `configuration.sessionOptions`.
 
 Access modes are provider-owned execution policies, not aliases for the
 daemon's workspace filesystem boundary. A provider that advertises

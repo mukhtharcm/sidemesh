@@ -484,6 +484,22 @@ class ApiClient {
     _throwIfBadStatus(response);
   }
 
+  Future<SessionRuntimeSummary> fetchSessionConfiguration(HostProfile host, String sessionId) async {
+    final response = await _get(host, '/api/sessions/$sessionId/configuration',
+      timeout: _transcriptReadTimeout, operation: 'load session settings');
+    final value = _decodeObject(response)['runtime'];
+    return SessionRuntimeSummary.fromJson(value is Map<String, dynamic> ? value : {});
+  }
+
+  Future<SessionRuntimeSummary> setSessionConfiguration(HostProfile host, String sessionId,
+      String optionId, Object value) async {
+    if (value is! String && value is! bool) throw ArgumentError.value(value, 'value');
+    final response = await _post(host, '/api/sessions/$sessionId/configuration',
+      body: {'optionId': optionId, 'value': value}, operation: 'apply session setting');
+    final runtime = _decodeObject(response)['runtime'];
+    return SessionRuntimeSummary.fromJson(runtime is Map<String, dynamic> ? runtime : {});
+  }
+
   Future<SessionLog> fetchLog(
     HostProfile host,
     String sessionId, {

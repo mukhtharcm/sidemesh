@@ -1573,6 +1573,31 @@ export async function startServer(
     },
   );
 
+  app.get("/api/sessions/:sessionId/configuration", async (c) => {
+    const sessionId = providerRuntime.resolveSession(c.req.param("sessionId")).sessionId;
+    const selected = await startedSessionProvider(sessionId);
+    requireProviderCapability(selected.provider, selected.provider.capabilities.configuration.sessionOptions === true,
+      "session configuration", "setSessionConfiguration");
+    const snapshot = await sessionState.snapshot(sessionId, { messageLimit: 1, activityLimit: 1 });
+    return jsonResponse(c, { runtime: snapshot.runtime });
+  });
+
+  app.post("/api/sessions/:sessionId/configuration", async (c) => {
+    const sessionId = providerRuntime.resolveSession(c.req.param("sessionId")).sessionId;
+    const selected = await startedSessionProvider(sessionId);
+    requireProviderCapability(selected.provider, selected.provider.capabilities.configuration.sessionOptions === true,
+      "session configuration", "setSessionConfiguration");
+    const body = await readJsonBody(c);
+    const optionId = asString(body?.optionId);
+    const value = body?.value;
+    if (!optionId || (typeof value !== "string" && typeof value !== "boolean")) {
+      return jsonResponse(c, { error: "optionId and a string or boolean value are required" }, 400);
+    }
+    const runtime = await selected.provider.setSessionConfiguration!(selected.rawId, optionId, value);
+    scheduleRecentSessionUpsert(sessionId, 0);
+    return jsonResponse(c, { runtime });
+  });
+
   app.post(
     "/api/sessions/:sessionId/stop",
     async (c) => {
