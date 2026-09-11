@@ -61,6 +61,9 @@ describe("Copilot provider", () => {
       assert.ok(log.activities.some((activity) => activity.type === "context_compaction" && activity.summary === "Keep this summary"));
       assert.ok(log.messages.some((message) => message.role === "system" && message.text === "Native service error"));
       assert.equal(log.messages.some((message) => message.text === "Child task failed"), false);
+      assert.equal(session.aborted, false);
+      await provider.interruptTurn(created.thread.id, null);
+      assert.equal(session.aborted, true, "Native work can be aborted without a local turn ID");
     } finally { await provider.close(); await rm(root, { recursive: true, force: true }); }
   });
 

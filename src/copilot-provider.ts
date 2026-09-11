@@ -647,13 +647,12 @@ export class CopilotAgentProvider
 
   public async interruptTurn(
     threadId: string,
-    turnId: string,
+    turnId: string | null,
   ): Promise<unknown> {
     const active = this.activeTurns.get(threadId);
-    if (!active || active.turnId !== turnId) {
-      return { interrupted: false };
-    }
-    await active.sdkSession.abort().catch(() => undefined);
+    if (active && turnId !== null && active.turnId !== turnId) return { interrupted: false };
+    const sdkSession = active?.sdkSession ?? await this.ensureSdkSession(await this.getWritableSession(threadId));
+    await sdkSession.abort();
     this.resolvePendingPermissionsForSession(threadId, rejectPermission());
     this.resolvePendingUserInputsForSession(threadId, {
       answer: "",

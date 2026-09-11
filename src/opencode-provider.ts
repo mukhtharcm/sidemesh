@@ -349,7 +349,7 @@ export class OpenCodeAgentProvider extends EventEmitter<AgentProviderEvents> imp
       throw error;
     }
   }
-  async interruptTurn(id: string, _turnId: string): Promise<unknown> {
+  async interruptTurn(id: string, _turnId: string | null): Promise<unknown> {
     const info = await this.info(id);
     const active = this.active.get(id);
     if (active) active.status = "interrupted";

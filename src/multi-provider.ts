@@ -356,7 +356,7 @@ export class MultiAgentProvider
 
   public async interruptTurn(
     threadId: string,
-    turnId: string,
+    turnId: string | null,
   ): Promise<unknown> {
     const resolved = this.resolveSessionId(threadId);
     return requireProviderMethod(

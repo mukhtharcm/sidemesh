@@ -496,9 +496,9 @@ export class FakeAgentProvider
     };
   }
 
-  public async interruptTurn(threadId: string, turnId: string): Promise<unknown> {
+  public async interruptTurn(threadId: string, turnId: string | null): Promise<unknown> {
     const session = this.requireSession(threadId);
-    const turn = session.turns.find((candidate) => candidate.id === turnId);
+    const turn = session.turns.find((candidate) => candidate.id === (turnId ?? this.activeTurnIds.get(threadId)));
     if (!turn || turn.status !== "inProgress") {
       return { interrupted: false };
     }

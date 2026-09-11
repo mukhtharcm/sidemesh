@@ -65,6 +65,8 @@ export type StoredSessionItem = {
   authority: "primary" | "recovery" | "cache";
 } & ({ kind: "message"; value: SessionMessage } | { kind: "activity"; value: SessionActivity });
 
+export type SessionRecoveryItem = StoredSessionItem & { draft?: boolean; turnId?: string };
+
 /** Durable host data. Native history and the disposable search index stay separate. */
 export class SessionStore {
   private constructor(private readonly db: DatabaseSync) {}
@@ -105,6 +107,10 @@ export class SessionStore {
           FOREIGN KEY(provider_id, session_id) REFERENCES provider_sessions(provider_id, id)
         );
         CREATE INDEX IF NOT EXISTS session_items_order ON session_items(provider_id, session_id, position);
+        CREATE TABLE IF NOT EXISTS session_recovery (
+          session_id TEXT NOT NULL, id TEXT NOT NULL, value TEXT NOT NULL,
+          PRIMARY KEY(session_id, id)
+        );
       `);
       const store = new SessionStore(db);
       if (!store.hasMigration("history-anchors-v1")) {
@@ -148,6 +154,21 @@ export class SessionStore {
   }
 
   close(): void { this.db.close(); }
+
+  readRecovery(sessionId: string): SessionRecoveryItem[] {
+    return (this.db.prepare("SELECT value FROM session_recovery WHERE session_id = ? ORDER BY rowid")
+      .all(sessionId) as { value: string }[]).map((row) => JSON.parse(row.value) as SessionRecoveryItem);
+  }
+
+  putRecovery(sessionId: string, item: SessionRecoveryItem): void {
+    this.db.prepare(`INSERT INTO session_recovery VALUES (?, ?, ?)
+      ON CONFLICT(session_id, id) DO UPDATE SET value = excluded.value`)
+      .run(sessionId, item.value.id, JSON.stringify(item));
+  }
+
+  deleteRecovery(sessionId: string, id: string): void {
+    this.db.prepare("DELETE FROM session_recovery WHERE session_id = ? AND id = ?").run(sessionId, id);
+  }
 
   getProviderSession(providerId: string, id: string): StoredProviderSession | null {
     const row = this.db.prepare("SELECT * FROM provider_sessions WHERE provider_id = ? AND id = ?")

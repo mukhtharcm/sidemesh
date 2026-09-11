@@ -381,6 +381,16 @@ describe("PiAgentProvider", () => {
     assert.ok(events.some((event) => event.type === "action_resolved"));
   });
 
+  it("aborts native work when no local turn ID is available", async () => {
+    const { provider, created } = await fixture();
+    await writeFile(nodePath.join(agentDir, "external-work"), "busy");
+    const before = await provider.readSessionSnapshot(created.thread.id);
+    assert.equal(before.busy, true);
+    assert.equal(before.activeTurnId, null);
+    assert.deepEqual(await provider.interruptTurn(created.thread.id, null), { interrupted: true });
+    assert.equal((await provider.readSessionSnapshot(created.thread.id)).busy, false);
+  });
+
   it("keeps one native turn for steering and aborts it before closing the process", async () => {
     const { provider, created, events, send } = await fixture();
     const first = await send("hold", "first");
@@ -541,7 +551,7 @@ async function until(predicate: () => boolean): Promise<void> {
 
 const RPC_FIXTURE = String.raw`
 import { createInterface } from 'node:readline';
-import { mkdirSync, writeFileSync, appendFileSync, readFileSync, existsSync } from 'node:fs';
+import { mkdirSync, writeFileSync, appendFileSync, readFileSync, existsSync, unlinkSync } from 'node:fs';
 import { join } from 'node:path';
 const dir = process.env.PI_CODING_AGENT_DIR;
 mkdirSync(dir, {recursive:true});
@@ -577,7 +587,7 @@ const finish = (text) => {
 createInterface({input:process.stdin}).on('line',(line) => {
   const request=JSON.parse(line); appendFileSync(join(dir,'requests'),line+'\n');
   switch(request.type) {
-    case 'get_state': reply(request,{sessionId:'native-session',sessionFile,sessionName:'Native session',isStreaming,isCompacting:false,thinkingLevel,pendingMessageCount:queued.length,messageCount:entries.length,autoCompactionEnabled,model}); break;
+    case 'get_state': reply(request,{sessionId:'native-session',sessionFile,sessionName:'Native session',isStreaming:isStreaming||existsSync(join(dir,'external-work')),isCompacting:false,thinkingLevel,pendingMessageCount:queued.length,messageCount:entries.length,autoCompactionEnabled,model}); break;
     case 'get_available_models': reply(request,{models:[model]}); break;
     case 'get_commands': reply(request,{commands:[{name:'fixture',description:'Local test command',source:'extension'}]}); break;
     case 'get_available_thinking_levels': reply(request,{levels:['off','medium','high']}); break;
@@ -602,7 +612,7 @@ createInterface({input:process.stdin}).on('line',(line) => {
       break;
     case 'steer': queued.push(request.message); emit({type:'queue_update',steering:queued,followUp:[]}); reply(request); break;
     case 'clear_queue': queued=[]; reply(request,{steering:[],followUp:[]}); break;
-    case 'abort': settle(); reply(request); break;
+    case 'abort': if(existsSync(join(dir,'external-work'))) unlinkSync(join(dir,'external-work')); settle(); reply(request); break;
     case 'extension_ui_response': settle(); break;
     default: emit({type:'response',id:request.id,command:request.type,success:false,error:'unsupported fixture command'});
   }
