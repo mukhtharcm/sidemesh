@@ -3,12 +3,15 @@ import { pathToFileURL } from "node:url";
 import type { ContentBlock, PromptCapabilities } from "@agentclientprotocol/sdk";
 import type { AgentSessionInputItem } from "./agent-provider.js";
 import type { SessionMessageAttachment } from "./types.js";
+import { parseContentInput, contentInputAttachment } from "./input-content.js";
 import { imageFromDataUrl, readLocalImage } from "./input-image.js";
 
 export function acpInputPreview(input: AgentSessionInputItem[]): string {
   return input.map((item) => item.type === "text" ? item.text : item.type === "file"
     ? `${item.isDirectory ? "Directory" : "File"}: ${item.path}`
-    : item.type === "image" || item.type === "localImage" ? "[Image]" : "").join("\n\n");
+    : item.type === "image" || item.type === "localImage" ? "[Image]"
+    : item.type === "audio" ? `[Audio: ${item.name ?? "Audio"}]`
+    : item.type === "resource" || item.type === "resourceLink" ? `[Resource: ${item.name ?? item.uri}]` : "").join("\n\n");
 }
 
 export async function prepareAcpInput(input: AgentSessionInputItem[], capabilities: PromptCapabilities = {}) {
@@ -16,6 +19,21 @@ export async function prepareAcpInput(input: AgentSessionInputItem[], capabiliti
   const attachments: SessionMessageAttachment[] = [];
   for (const item of input) {
     switch (item.type) {
+      case "audio":
+      case "resource":
+      case "resourceLink": {
+        const content = parseContentInput(item);
+        if (content.type === "audio") {
+          if (!capabilities.audio) throw new Error("This ACP agent does not support audio input");
+          prompt.push({ type: "audio", data: content.data, mimeType: content.mimeType });
+        } else if (content.type === "resource") {
+          if (!capabilities.embeddedContext) throw new Error("This ACP agent does not support embedded resources");
+          prompt.push({ type: "resource", resource: { uri: content.uri, mimeType: content.mimeType,
+            ...(typeof content.text === "string" ? { text: content.text } : { blob: content.blob! }) } });
+        } else prompt.push({ type: "resource_link", uri: content.uri, name: content.name, mimeType: content.mimeType });
+        attachments.push(contentInputAttachment(content));
+        break;
+      }
       case "text":
         if (item.text.trim()) prompt.push({ type: "text", text: item.text });
         break;

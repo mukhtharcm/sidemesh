@@ -13,6 +13,8 @@ class _Composer extends StatelessWidget {
     required this.controller,
     required this.focusNode,
     required this.attachments,
+    required this.content,
+    required this.onRemoveContent,
     required this.skills,
     required this.files,
     required this.activeSkillQuery,
@@ -48,6 +50,7 @@ class _Composer extends StatelessWidget {
     this.thinkingDetail,
     this.onThinkingTap,
     this.onCommandsTap,
+    this.onContentTap,
     this.submitOnEnter = false,
   });
 
@@ -55,6 +58,8 @@ class _Composer extends StatelessWidget {
   final FocusNode focusNode;
 
   final List<ComposerImageAttachment> attachments;
+  final List<SessionInputItem> content;
+  final ValueChanged<int> onRemoveContent;
   final List<_ComposerSkillMention> skills;
   final List<_ComposerFileMention> files;
 
@@ -101,6 +106,7 @@ class _Composer extends StatelessWidget {
   final String? thinkingDetail;
   final VoidCallback? onThinkingTap;
   final VoidCallback? onCommandsTap;
+  final VoidCallback? onContentTap;
 
   final bool submitOnEnter;
 
@@ -114,6 +120,9 @@ class _Composer extends StatelessWidget {
     final bool showThinkingButton =
         isDesktop && thinkingLabel != null && onThinkingTap != null;
     final controls = <AppComposerControl>[
+      if (onContentTap != null)
+        AppComposerControl(icon: Icons.attach_file_rounded, label: 'Content',
+          tooltip: 'Attach content', enabled: enabled && !sending, onPressed: onContentTap!),
       if (onCommandsTap != null)
         AppComposerControl(icon: Icons.terminal_rounded, label: 'Commands',
           tooltip: 'Choose an agent command', enabled: enabled && !sending, onPressed: onCommandsTap!),
@@ -137,7 +146,7 @@ class _Composer extends StatelessWidget {
         ),
     ];
     final hasContext =
-        attachments.isNotEmpty || skills.isNotEmpty || files.isNotEmpty;
+        attachments.isNotEmpty || content.isNotEmpty || skills.isNotEmpty || files.isNotEmpty;
     final leading = isDesktop && supportsImageInput
         ? _ComposerAttachButton(enabled: !sending, onPressed: onPickImages)
         : showPlusButton
@@ -216,6 +225,8 @@ class _Composer extends StatelessWidget {
             child: hasContext
                 ? _ComposerContextShelf(
                     attachments: attachments,
+                    content: content,
+                    onRemoveContent: onRemoveContent,
                     skills: skills,
                     files: files,
                     onRemoveAttachment: onRemoveAttachment,
@@ -238,6 +249,8 @@ class _Composer extends StatelessWidget {
 class _ComposerContextShelf extends StatelessWidget {
   const _ComposerContextShelf({
     required this.attachments,
+    required this.content,
+    required this.onRemoveContent,
     required this.skills,
     required this.files,
     required this.onRemoveAttachment,
@@ -247,6 +260,8 @@ class _ComposerContextShelf extends StatelessWidget {
   });
 
   final List<ComposerImageAttachment> attachments;
+  final List<SessionInputItem> content;
+  final ValueChanged<int> onRemoveContent;
   final List<_ComposerSkillMention> skills;
   final List<_ComposerFileMention> files;
   final ValueChanged<String> onRemoveAttachment;
@@ -275,6 +290,10 @@ class _ComposerContextShelf extends StatelessWidget {
     return AppComposerContextShelf(
       desktop: isDesktop,
       items: <AppComposerContextItem>[
+        for (final entry in content.indexed)
+          AppComposerContextItem(id: 'content-${entry.$1}',
+            icon: Icon(entry.$2.type == 'audio' ? Icons.audiotrack_rounded : Icons.description_outlined),
+            label: entry.$2.contentLabel, onRemove: () => onRemoveContent(entry.$1)),
         for (final a in attachments)
           AppComposerContextItem(
             id: 'image-${a.id}',

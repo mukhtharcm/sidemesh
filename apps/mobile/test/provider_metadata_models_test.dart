@@ -4,6 +4,20 @@ import 'package:sidemesh_mobile/src/provider_labels.dart';
 import 'package:sidemesh_mobile/src/session_identity.dart';
 
 void main() {
+  test('audio and resource inputs preserve their payload and display metadata', () {
+    const items = [
+      SessionInputItem.audio('UklGRg==', 'audio/wav', name: 'clip.wav'),
+      SessionInputItem.resource('attachment:///empty.txt', text: ''),
+      SessionInputItem.resource('attachment:///raw.bin', blob: 'AP8='),
+      SessionInputItem.resourceLink('urn:example:record', 'Record'),
+    ];
+    for (final item in items) {
+      final restored = SessionInputItem.fromJson(item.toJson());
+      expect(restored.toJson(), item.toJson());
+      expect(SessionMessageAttachment.fromJson(restored.contentAttachment.toJson()).toJson(), item.contentAttachment.toJson());
+    }
+  });
+
   test('instance identities keep capability lookup and legacy ownership separate', () {
     final payload = <String, dynamic>{
       'provider': 'copilot', 'providerId': 'second',

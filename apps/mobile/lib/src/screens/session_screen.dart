@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:math' as math;
 
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
@@ -717,6 +718,7 @@ class _SessionScreenState extends State<SessionScreen>
   List<SessionMessage> _messages = const [];
   List<SessionMessage> _optimisticMessages = const [];
   List<SessionActivity> _activities = const [];
+  List<SessionInputItem> _draftContent = [];
   List<ComposerImageAttachment> _draftAttachments =
       const <ComposerImageAttachment>[];
   List<_ComposerSkillMention> _draftSkillMentions =
@@ -1100,11 +1102,13 @@ class _SessionScreenState extends State<SessionScreen>
   }
 
   void _applyComposerSeed(SessionComposerSeed seed) {
+    final draftContent = <SessionInputItem>[];
     final draftAttachments = <ComposerImageAttachment>[];
     final draftSkillMentions = <_ComposerSkillMention>[];
     final draftFileMentions = <_ComposerFileMention>[];
     var attachmentIndex = 0;
     for (final item in seed.inputItems) {
+      if (item.isContent) { draftContent.add(item); continue; }
       switch (item.type) {
         case 'image':
           final dataUrl = item.url?.trim();
@@ -1167,6 +1171,7 @@ class _SessionScreenState extends State<SessionScreen>
       }
     }
 
+    _draftContent = draftContent;
     _draftAttachments = draftAttachments;
     _draftSkillMentions = draftSkillMentions
         .where((item) => seed.text.contains(item.tokenText))
@@ -3133,6 +3138,72 @@ class _SessionScreenState extends State<SessionScreen>
     _scrollToBottomFast();
   }
 
+  Future<void> _pickComposerContent() async {
+    if (_sending) return;
+    final type = await showModalBottomSheet<String>(
+      context: context,
+      useSafeArea: true,
+      builder: (context) => Column(mainAxisSize: MainAxisSize.min, children: [
+        for (final option in [('audio', 'audio', 'Attach audio'),
+          ('resource', 'embeddedResources', 'Attach file content'),
+          ('resourceLink', 'resourceLinks', 'Attach resource reference')])
+          if (_supportsProviderCapability('input', option.$2))
+            ListTile(title: Text(option.$3), onTap: () => Navigator.pop(context, option.$1)),
+      ]),
+    );
+    if (!mounted || type == null || _sending) return;
+    try {
+      SessionInputItem? item;
+      if (type == 'resourceLink') {
+        var resourceUri = '';
+        final uri = await showDialog<String>(context: context, builder: (context) => AlertDialog(
+          title: const Text('Resource reference'),
+          content: TextField(onChanged: (value) => resourceUri = value, autofocus: true,
+            decoration: const InputDecoration(labelText: 'Resource URI', hintText: 'https://example.com/document')),
+          actions: [TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
+            TextButton(onPressed: () => Navigator.pop(context, resourceUri.trim()), child: const Text('Attach'))],
+        ));
+        if (uri == null) return;
+        final parsed = Uri.tryParse(uri);
+        if (parsed == null || !parsed.hasScheme || uri.length > 4096 ||
+            RegExp(r'[\x00-\x20\x7f]').hasMatch(uri) ||
+            ['data', 'javascript', 'vbscript'].contains(parsed.scheme)) {
+          throw const FormatException('Enter a valid resource URI.');
+        }
+        item = SessionInputItem.resourceLink(uri, uri.length <= 512 ? uri : 'Resource reference');
+      } else {
+        final picked = await FilePicker.pickFiles(withData: true,
+          type: type == 'audio' ? FileType.custom : FileType.any,
+          allowedExtensions: type == 'audio' ? ['mp3', 'wav', 'ogg', 'm4a', 'flac', 'aac', 'webm'] : null);
+        if (picked == null || picked.files.isEmpty) return;
+        final file = picked.files.single;
+        final bytes = file.bytes;
+        if (bytes == null || bytes.length > 5 * 1024 * 1024) throw const FormatException('Attach a file of at most 5 MiB.');
+        if (type == 'audio') {
+          final mime = {'mp3': 'audio/mpeg', 'wav': 'audio/wav', 'ogg': 'audio/ogg',
+            'm4a': 'audio/mp4', 'flac': 'audio/flac', 'aac': 'audio/aac', 'webm': 'audio/webm'}[file.extension?.toLowerCase()];
+          if (mime == null || bytes.isEmpty) throw const FormatException('Choose a supported audio file.');
+          item = SessionInputItem.audio(base64Encode(bytes), mime, name: file.name);
+        } else {
+          final uri = 'attachment:///${Uri.encodeComponent(file.name)}';
+          String? text;
+          try { text = utf8.decode(bytes); } on FormatException { /* Use binary content. */ }
+          item = SessionInputItem.resource(uri, name: file.name,
+            mimeType: text == null ? 'application/octet-stream' : 'text/plain',
+            text: text, blob: text == null ? base64Encode(bytes) : null);
+        }
+      }
+      if (!mounted || _sending) return;
+      final candidate = [..._draftContent, item];
+      if (candidate.length > 4 || utf8.encode(jsonEncode(candidate.map((item) => item.toJson()).toList())).length > 9 * 1024 * 1024) {
+        throw const FormatException('Attach at most 4 items with a combined payload of at most 9 MiB.');
+      }
+      setState(() => _draftContent = candidate);
+    } catch (error) {
+      if (mounted) showAppSnackBar(context, 'Cannot attach content: ${friendlyError(error)}');
+    }
+  }
+
   Future<void> _pickComposerImages() async {
     if (_sending) {
       return;
@@ -3220,6 +3291,7 @@ class _SessionScreenState extends State<SessionScreen>
     List<_ComposerFileMention> files,
   ) {
     return <SessionInputItem>[
+      ..._draftContent,
       if (_supportsImageInput)
         ...attachments.map((item) => SessionInputItem.image(item.dataUrl)),
       if (_supportsSkillInput)
@@ -3742,6 +3814,7 @@ class _SessionScreenState extends State<SessionScreen>
   Future<void> _sendInput() async {
     if (_loading || _snapshotError != null) return;
     final text = _composerController.text.trim();
+    final draftContent = List<SessionInputItem>.from(_draftContent);
     final draftAttachments = List<ComposerImageAttachment>.from(
       _draftAttachments,
     );
@@ -3752,7 +3825,7 @@ class _SessionScreenState extends State<SessionScreen>
       _draftFileMentions.where((item) => text.contains(item.tokenText)),
     );
     if ((text.isEmpty &&
-            draftAttachments.isEmpty &&
+            draftAttachments.isEmpty && draftContent.isEmpty &&
             draftFileMentions.isEmpty) ||
         _sending) {
       return;
@@ -3799,7 +3872,8 @@ class _SessionScreenState extends State<SessionScreen>
       role: 'user',
       text: text,
       content: text.trim().isNotEmpty ? [TextBlock(text)] : const [],
-      attachments: _buildDraftMessageAttachments(draftAttachments),
+      attachments: [..._buildDraftMessageAttachments(draftAttachments),
+        ...draftContent.map((item) => item.contentAttachment)],
       createdAt: DateTime.now(),
       seq: _nextTimelineSeq(),
     );
@@ -3809,6 +3883,7 @@ class _SessionScreenState extends State<SessionScreen>
       _sending = true;
       _running = true;
       _awaitingAssistantReply = true;
+      _draftContent = [];
       _draftAttachments = const <ComposerImageAttachment>[];
       _draftSkillMentions = const <_ComposerSkillMention>[];
       _clearLiveAssistantMessage();
@@ -3914,6 +3989,7 @@ class _SessionScreenState extends State<SessionScreen>
         _optimisticMessages = _optimisticMessages
             .where((message) => message.id != optimisticMessage.id)
             .toList();
+        _draftContent = draftContent;
         _draftAttachments = restoredAttachments;
         _draftSkillMentions = restoredSkillMentions;
         _draftFileMentions = restoredFileMentions;
@@ -6736,6 +6812,10 @@ class _SessionScreenState extends State<SessionScreen>
               controller: _composerController,
               focusNode: _composerFocusNode,
               attachments: _draftAttachments,
+              content: _draftContent,
+              onRemoveContent: (index) => setState(() => _draftContent.removeAt(index)),
+              onContentTap: ['audio', 'embeddedResources', 'resourceLinks'].any(
+                (capability) => _supportsProviderCapability('input', capability)) ? _pickComposerContent : null,
               skills: _draftSkillMentions,
               files: _draftFileMentions,
               activeSkillQuery: _activeSkillQuery?.query,

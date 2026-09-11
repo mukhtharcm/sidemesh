@@ -1,3 +1,4 @@
+import { parseContentInput, contentInputAttachment } from "./input-content.js";
 import { createServer } from "node:http";
 import type { Server } from "node:http";
 import { homedir, hostname, platform } from "node:os";
@@ -2160,6 +2161,13 @@ function unsupportedInputCapability(
 ): string | null {
   for (const item of input) {
     switch (item.type) {
+      case "audio":
+      case "resource":
+      case "resourceLink": {
+        const capability = item.type === "audio" ? "audio" : item.type === "resource" ? "embeddedResources" : "resourceLinks";
+        if (!provider.capabilities.input[capability]) return `${provider.displayName} does not support ${item.type} input`;
+        break;
+      }
       case "text":
         if (!provider.capabilities.input.text) {
           return `${provider.displayName} does not support text input`;
@@ -3059,6 +3067,11 @@ function parseInputItems(value: unknown): AgentSessionInputItem[] {
     }
     const typed = item as Record<string, unknown>;
     switch (typed.type) {
+      case "audio":
+      case "resource":
+      case "resourceLink":
+        items.push(parseContentInput(typed));
+        break;
       case "text": {
         const text = asString(typed.text);
         if (!text) {
@@ -3207,6 +3220,10 @@ function buildSubmittedUserMessageAttachments(
 ): SessionMessageAttachment[] {
   const attachments: SessionMessageAttachment[] = [];
   for (const item of input) {
+    if (item.type === "audio" || item.type === "resource" || item.type === "resourceLink") {
+      attachments.push(contentInputAttachment(item));
+      continue;
+    }
     if (item.type === "image") {
       attachments.push({ type: "image", url: item.url });
       continue;

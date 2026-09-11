@@ -489,7 +489,9 @@ export interface SessionMessage {
 }
 
 export interface SessionMessageAttachment {
-  type: "image" | "localImage" | "file";
+  type: "image" | "localImage" | "file" | "audio" | "resource" | "resourceLink";
+  name?: string;
+  mimeType?: string;
   url?: string;
   path?: string;
 }
