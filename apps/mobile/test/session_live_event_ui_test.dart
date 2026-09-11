@@ -118,6 +118,26 @@ void main() {
     expect(find.text('Draft saved before disconnect'), findsOneWidget);
   });
 
+  testWidgets('history invalidation replaces saved transcript without reconnect', (tester) async {
+    final session = _session('history-invalidation');
+    final api = _RichEventFakeApi(sessionSummary: session, messages: [
+      _assistantMessage(id: 'old', text: 'Before history change', content: const [TextBlock('Before history change')]),
+    ]);
+    addTearDown(api.dispose);
+    await _pumpApp(tester, SessionScreen(
+      host: _host(session.id), session: session, api: api, desktopMode: true,
+    ), size: const Size(1180, 900));
+    await _pumpFrames(tester);
+    expect(find.text('Before history change'), findsOneWidget);
+    api.messages = [
+      _assistantMessage(id: 'new', text: 'After history change', content: const [TextBlock('After history change')]),
+    ];
+    api.emit({'type': 'history_invalidated', 'sessionId': session.id, 'revision': 2});
+    await _pumpFrames(tester);
+    expect(find.text('Before history change'), findsNothing);
+    expect(find.text('After history change'), findsOneWidget);
+  });
+
   testWidgets('snapshot draft and buffered live text join exactly once', (tester) async {
     final session = _session('snapshot-live-boundary', status: 'running');
     final api = _RichEventFakeApi(sessionSummary: session);
