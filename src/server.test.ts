@@ -2058,6 +2058,43 @@ describe("session input item parsing", () => {
 
 
 
+  it("blocks retries after an uncertain provider send, including after daemon restart", async () => {
+    const stateDir = await mkdtemp(nodePath.join(tmpdir(), "sidemesh-server-test-"));
+    const provider = new RestartableFakeProvider();
+    const config = makeConfig(stateDir);
+    const runtime = makeCustomSingleProviderRuntime(provider);
+    let sessionId = "";
+    let sends = 0;
+    provider.submitInput = async () => {
+      sends += 1;
+      throw new Error("Connection lost after send");
+    };
+    const send = (server: RunningServer) => request({
+      hostname: "127.0.0.1", port: server.port,
+      path: `/api/sessions/${encodeURIComponent(sessionId)}/input`, method: "POST",
+      headers: { Authorization: "Bearer " + config.token, "content-type": "application/json" },
+      body: JSON.stringify({ clientMessageId: "uncertain-1", input: [{ type: "text", text: "send once" }] }),
+    });
+    let server: RunningServer | null = null;
+    try {
+      server = await startServer(config, runtime);
+      const created = await provider.createSession({ cwd: stateDir, input: [], overrides: EMPTY_OVERRIDES });
+      sessionId = created.thread.id;
+      assert.equal((await send(server)).statusCode, 500);
+      const retry = await send(server);
+      assert.equal(retry.statusCode, 409);
+      assert.equal((retry.body as { code: string }).code, "input_delivery_uncertain");
+      await server.close();
+      server = null;
+      server = await startServer(config, makeCustomSingleProviderRuntime(provider));
+      assert.equal((await send(server)).statusCode, 409);
+      assert.equal(sends, 1);
+    } finally {
+      await server?.close();
+      await rm(stateDir, { recursive: true, force: true });
+    }
+  });
+
   it("deduplicates concurrent file input retries before file resolution", async () => {
     const stateDir = await mkdtemp(nodePath.join(tmpdir(), "sidemesh-server-test-"));
     const cwd = await prepareFileInputWorkspace(stateDir);

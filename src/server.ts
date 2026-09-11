@@ -5,10 +5,7 @@ import { createHash, randomUUID, timingSafeEqual } from "node:crypto";
 import {
   chmod,
   mkdir,
-  readFile,
-  rename,
   stat,
-  writeFile,
 } from "node:fs/promises";
 import nodePath from "node:path";
 
@@ -107,10 +104,7 @@ import {
   collectWorkspaceRoots,
   resolveWorkspacePath,
 } from "./workspace-scope.js";
-import {
-  SessionInputDedupeStore,
-  type StoredSessionInputDedupeEntry,
-} from "./session-input-dedupe-store.js";
+import { SessionStore, type SessionInputReceipt } from "./session-store.js";
 import { startupSummaryLines } from "./startup-summary.js";
 import { getCodexRpcAuditSnapshot } from "./codex-rpc-audit.js";
 import { SessionSearchIndex, type SearchFilter } from "./session-search-index.js";
@@ -129,12 +123,6 @@ import {
   type JsonRouteResponse,
 } from "./hono-route-adapter.js";
 
-const SESSION_INPUT_DEDUPE_LIMIT = 500;
-const SESSION_INPUT_DEDUPE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
-const SESSION_INPUT_DEDUPE_FILE = "session-input-dedupe-v1.json";
-const SESSION_RUNTIME_SIGNALS_LIMIT = 500;
-const SESSION_RUNTIME_SIGNALS_TTL_MS = 30 * 24 * 60 * 60 * 1000;
-const SESSION_RUNTIME_SIGNALS_FILE = "session-runtime-signals-v1.json";
 const CLIENT_MESSAGE_ID_MAX_LENGTH = 128;
 const CLIENT_MESSAGE_ID_PATTERN = /^[A-Za-z0-9._:-]+$/;
 const RECENT_UNINDEXED_SESSION_SCAN_LIMIT = 50;
@@ -163,24 +151,6 @@ interface SessionHistorySummary {
   returnedMessages: number;
   totalActivities: number;
   returnedActivities: number;
-}
-
-interface SessionRuntimeSignalsEntry {
-  latestPlanUpdate: LatestPlanUpdate | null;
-  updatedAt: number;
-}
-
-interface SessionInputReceipt {
-  mode: "steer" | "turn";
-  turnId: string | null;
-  messageId: string;
-}
-
-interface SessionInputDedupeEntry {
-  signatureHash: string;
-  createdAt: number;
-  promise?: Promise<SessionInputReceipt>;
-  receipt?: SessionInputReceipt;
 }
 
 interface InstallInfoRefreshResult {
@@ -251,28 +221,11 @@ export async function startServer(
   const searchIndex = new SessionSearchIndex(
     nodePath.join(config.stateDir, "search-index-v1.db"),
   );
-  const sessionRuntimeSignals = await loadSessionRuntimeSignalsState(
-    nodePath.join(config.stateDir, SESSION_RUNTIME_SIGNALS_FILE),
-  );
-  const sessionInputDedupe = new Map<string, SessionInputDedupeEntry>();
-  let sessionRuntimeSignalsSaveChain = Promise.resolve();
-  const sessionInputDedupeStore = await SessionInputDedupeStore.open(
-    nodePath.join(config.stateDir, SESSION_INPUT_DEDUPE_FILE),
-    {
-      ttlMs: SESSION_INPUT_DEDUPE_TTL_MS,
-      limit: SESSION_INPUT_DEDUPE_LIMIT,
-    },
-  );
+  const sessionStore = await SessionStore.open(config.stateDir);
+  const pendingInputs = new Map<string, Promise<SessionInputReceipt>>();
   const pushNotifications = await PushNotificationDispatcher.open(
     config.stateDir,
   );
-  for (const entry of sessionInputDedupeStore.entries()) {
-    sessionInputDedupe.set(entry.key, {
-      signatureHash: entry.signatureHash,
-      createdAt: entry.createdAt,
-      receipt: entry.receipt,
-    });
-  }
   let providerVersion = "unknown";
   const providerVersions = new Map<string, string>();
   let installInfo = {
@@ -399,7 +352,7 @@ export async function startServer(
   }
 
   function latestPlanUpdateForSession(sessionId: string): LatestPlanUpdate | null {
-    return sessionRuntimeSignals.get(sessionId)?.latestPlanUpdate ?? null;
+    return sessionStore.getPlan(sessionId);
   }
 
   function latestThreadStatusForSession(sessionId: string): LiveThreadStatus | null {
@@ -643,79 +596,17 @@ export async function startServer(
     );
   }
 
-  function persistSessionRuntimeSignalsEventually(): void {
-    sessionRuntimeSignalsSaveChain = sessionRuntimeSignalsSaveChain
-      .catch(() => undefined)
-      .then(() =>
-        saveSessionRuntimeSignalsState(
-          nodePath.join(config.stateDir, SESSION_RUNTIME_SIGNALS_FILE),
-          sessionRuntimeSignals,
-        )
-      );
-    void sessionRuntimeSignalsSaveChain.catch((error: unknown) => {
-      console.error(
-        error instanceof Error
-          ? `Failed to persist session runtime signals: ${error.message}`
-          : "Failed to persist session runtime signals.",
-      );
-    });
-  }
-
   function setLatestPlanUpdateForSession(
     sessionId: string,
     latestPlanUpdate: LatestPlanUpdate | null,
   ): void {
-    const normalized = normalizeLatestPlanUpdate(latestPlanUpdate, sessionId);
-    if (normalized == null) {
-      sessionRuntimeSignals.delete(sessionId);
-    } else {
-      sessionRuntimeSignals.set(sessionId, {
-        latestPlanUpdate: normalized,
-        updatedAt: Date.now(),
-      });
-    }
-    persistSessionRuntimeSignalsEventually();
-  }
-
-  function sessionInputDedupeKey(
-    sessionId: string,
-    clientMessageId: string,
-  ): string {
-    return `${sessionId}:${clientMessageId}`;
-  }
-
-  function sessionInputDedupeKeyMatchesSession(
-    key: string,
-    sessionId: string,
-  ): boolean {
-    return key.startsWith(`${sessionId}:`);
+    sessionStore.setPlan(sessionId, normalizeLatestPlanUpdate(latestPlanUpdate, sessionId));
   }
 
   async function clearInterruptedSessionInputDedupe(
     interruptedTurnIds: Map<string, string>,
   ): Promise<void> {
-    if (interruptedTurnIds.size === 0) {
-      return;
-    }
-    const keysToDelete: string[] = [];
-    for (const [key, entry] of sessionInputDedupe) {
-      for (const [sessionId, turnId] of interruptedTurnIds) {
-        if (!sessionInputDedupeKeyMatchesSession(key, sessionId)) {
-          continue;
-        }
-        if (entry.promise || entry.receipt?.turnId === turnId) {
-          keysToDelete.push(key);
-        }
-        break;
-      }
-    }
-    if (keysToDelete.length === 0) {
-      return;
-    }
-    for (const key of keysToDelete) {
-      sessionInputDedupe.delete(key);
-    }
-    await sessionInputDedupeStore.deleteMany(keysToDelete);
+    sessionStore.clearInterruptedInputs(interruptedTurnIds);
   }
 
   function providerEntryForKind(kind: string | null | undefined) {
@@ -814,28 +705,6 @@ export async function startServer(
         ...(next.telemetry ?? {}),
       },
     };
-  }
-
-  function pruneSessionInputDedupe(now = Date.now()): void {
-    for (const [key, entry] of sessionInputDedupe) {
-      if (
-        !entry.promise &&
-        now - entry.createdAt > SESSION_INPUT_DEDUPE_TTL_MS
-      ) {
-        sessionInputDedupe.delete(key);
-      }
-    }
-
-    if (sessionInputDedupe.size <= SESSION_INPUT_DEDUPE_LIMIT) {
-      return;
-    }
-    const stale = [...sessionInputDedupe.entries()]
-      .filter(([, entry]) => !entry.promise)
-      .sort((left, right) => left[1].createdAt - right[1].createdAt)
-      .slice(0, sessionInputDedupe.size - SESSION_INPUT_DEDUPE_LIMIT);
-    for (const [key] of stale) {
-      sessionInputDedupe.delete(key);
-    }
   }
 
   // Sequence values order transcript items, not reconnect recovery.
@@ -1531,7 +1400,7 @@ export async function startServer(
         activeTurns: [...sessionState.values()].filter((state) => state.activeTurn).length,
         pendingActions: pendingActions.size,
         liveActivityItems,
-        inputDedupe: sessionInputDedupe.size,
+        inputDedupe: sessionStore.inputCount(),
       },
       sockets: {
         sessionRooms: socketsBySession.size,
@@ -2604,25 +2473,31 @@ export async function startServer(
         input,
         turnOverrides,
       );
-      const dedupeKey = clientMessageId
-        ? sessionInputDedupeKey(sessionId, clientMessageId)
-        : null;
-      if (dedupeKey) {
-        pruneSessionInputDedupe();
-        const existing = sessionInputDedupe.get(dedupeKey);
-        if (existing) {
-          if (existing.signatureHash !== inputSignatureHash) {
-            response.status(409).json({
-              error: "clientMessageId was already used with different input",
-            });
-            return;
-          }
-          const receipt = existing.receipt ?? (await existing.promise);
-          if (receipt) {
-            response.json({ ...receipt, replayed: true });
-            return;
-          }
+      const dedupeKey = `${sessionId}:${clientMessageId || randomUUID()}`;
+      const existing = sessionStore.getInput(dedupeKey);
+      if (existing) {
+        if (existing.signatureHash !== inputSignatureHash) {
+          response.status(409).json({ error: "clientMessageId was already used with different input" });
+          return;
         }
+        const pending = pendingInputs.get(dedupeKey);
+        if (pending || existing.receipt) {
+          const receipt = existing.receipt ?? await pending;
+          response.json({ ...receipt, replayed: true });
+          return;
+        }
+        if (existing.state !== "prepared") {
+          response.status(409).json({
+            code: "input_delivery_uncertain",
+            error: "The agent may have received this input. Check the session before sending it again.",
+          });
+          return;
+        }
+      } else {
+        sessionStore.prepareInput({
+          key: dedupeKey, sessionId, signatureHash: inputSignatureHash,
+          payload: { input, overrides: turnOverrides },
+        });
       }
 
       const submit = async (): Promise<SessionInputReceipt> => {
@@ -2635,12 +2510,17 @@ export async function startServer(
           allocSeq(sessionId),
         );
         const state = await loadRunState(provider, sessionId, sessionState);
+        sessionStore.dispatchInput(dedupeKey);
         const submitted = await provider.submitInput!({
           sessionId,
           input: inputForSubmit,
           activeTurnId: state.turnId,
           overrides: turnOverrides,
         });
+        const receipt: SessionInputReceipt = {
+          mode: submitted.mode, turnId: submitted.turnId, messageId: submittedMessage.id,
+        };
+        sessionStore.acceptInput(dedupeKey, receipt);
         if (
           await shouldTrackProviderTurn(
             provider,
@@ -2669,52 +2549,20 @@ export async function startServer(
           turnId: submitted.turnId || undefined,
           messageItem: submittedMessage,
         });
-        return {
-          mode: submitted.mode,
-          turnId: submitted.turnId,
-          messageId: submittedMessage.id,
-        };
+        return receipt;
       };
 
       const promise = submit();
-      if (dedupeKey) {
-        sessionInputDedupe.set(dedupeKey, {
-          signatureHash: inputSignatureHash,
-          createdAt: Date.now(),
-          promise,
-        });
-        pruneSessionInputDedupe();
-      }
-
+      pendingInputs.set(dedupeKey, promise);
       try {
         const receipt = await promise;
-        if (dedupeKey) {
-          const createdAt =
-            sessionInputDedupe.get(dedupeKey)?.createdAt ?? Date.now();
-          sessionInputDedupe.set(dedupeKey, {
-            signatureHash: inputSignatureHash,
-            createdAt,
-            receipt,
-          });
-          await persistSessionInputDedupeReceipt(
-            sessionInputDedupeStore,
-            dedupeKey,
-            inputSignatureHash,
-            createdAt,
-            receipt,
-          );
-          pruneSessionInputDedupe();
-        }
         response.json({ ...receipt, replayed: false });
         scheduleRecentSessionUpsert(sessionId, 0);
       } catch (error) {
-        if (dedupeKey) {
-          const current = sessionInputDedupe.get(dedupeKey);
-          if (current?.promise === promise) {
-            sessionInputDedupe.delete(dedupeKey);
-          }
-        }
+        sessionStore.failInput(dedupeKey);
         throw error;
+      } finally {
+        pendingInputs.delete(dedupeKey);
       }
     }),
   );
@@ -3307,11 +3155,11 @@ export async function startServer(
       recentSessionBroadcastTimers.clear();
       await searchIndexBackfill.catch(() => undefined);
       await searchIndex.close();
-      await sessionRuntimeSignalsSaveChain.catch(() => undefined);
       try {
         await provider.close?.();
       } finally {
         provider.off("stderr", onProviderStderr);
+        sessionStore.close();
         await pushNotifications.close();
       }
     },
@@ -4454,23 +4302,6 @@ function isValidClientMessageId(value: string): boolean {
   );
 }
 
-async function persistSessionInputDedupeReceipt(
-  store: SessionInputDedupeStore,
-  key: string,
-  signatureHash: string,
-  createdAt: number,
-  receipt: SessionInputReceipt,
-): Promise<void> {
-  const entry: StoredSessionInputDedupeEntry = {
-    key,
-    signatureHash,
-    createdAt,
-    updatedAt: Date.now(),
-    receipt,
-  };
-  await store.put(entry);
-}
-
 function asInteger(value: unknown): number | null {
   if (typeof value === "number" && Number.isFinite(value)) {
     return Math.trunc(value);
@@ -4722,89 +4553,6 @@ function nextSeqForLatestPlanUpdate(
     return nextSeq;
   }
   return Math.max(nextSeq, latestPlanUpdate.seq + 1);
-}
-
-async function loadSessionRuntimeSignalsState(
-  filePath: string,
-): Promise<Map<string, SessionRuntimeSignalsEntry>> {
-  try {
-    const raw = await readFile(filePath, "utf8");
-    const parsed = JSON.parse(raw) as {
-      sessions?: Array<{
-        sessionId?: string;
-        updatedAt?: number;
-        latestPlanUpdate?: LatestPlanUpdate | null;
-      }>;
-    };
-    const loaded = new Map<string, SessionRuntimeSignalsEntry>();
-    const now = Date.now();
-    for (const item of parsed.sessions ?? []) {
-      const sessionId = typeof item.sessionId === "string" ? item.sessionId.trim() : "";
-      const latestPlanUpdate = normalizeLatestPlanUpdate(
-        item.latestPlanUpdate ?? null,
-        sessionId,
-      );
-      const updatedAt = typeof item.updatedAt === "number" ? item.updatedAt : now;
-      if (!sessionId || latestPlanUpdate == null) {
-        continue;
-      }
-      if (now - updatedAt > SESSION_RUNTIME_SIGNALS_TTL_MS) {
-        continue;
-      }
-      loaded.set(sessionId, {
-        latestPlanUpdate,
-        updatedAt,
-      });
-    }
-    while (loaded.size > SESSION_RUNTIME_SIGNALS_LIMIT) {
-      const oldest = [...loaded.entries()].sort(
-        (left, right) => left[1].updatedAt - right[1].updatedAt,
-      )[0]?.[0];
-      if (!oldest) {
-        break;
-      }
-      loaded.delete(oldest);
-    }
-    return loaded;
-  } catch {
-    return new Map<string, SessionRuntimeSignalsEntry>();
-  }
-}
-
-async function saveSessionRuntimeSignalsState(
-  filePath: string,
-  sessionRuntimeSignals: Map<string, SessionRuntimeSignalsEntry>,
-): Promise<void> {
-  await mkdir(nodePath.dirname(filePath), { recursive: true, mode: 0o700 });
-  const now = Date.now();
-  const sessions = [...sessionRuntimeSignals.entries()]
-    .filter(([, entry]) => now - entry.updatedAt <= SESSION_RUNTIME_SIGNALS_TTL_MS)
-    .sort((left, right) => right[1].updatedAt - left[1].updatedAt)
-    .slice(0, SESSION_RUNTIME_SIGNALS_LIMIT)
-    .flatMap(([sessionId, entry]) => {
-      const latestPlanUpdate = normalizeLatestPlanUpdate(
-        entry.latestPlanUpdate,
-        sessionId,
-      );
-      if (latestPlanUpdate == null) {
-        return [];
-      }
-      return [{
-        sessionId,
-        updatedAt: entry.updatedAt,
-        latestPlanUpdate,
-      }];
-    });
-  const tmpPath = `${filePath}.${process.pid}.${Date.now()}.tmp`;
-  await writeFile(
-    tmpPath,
-    JSON.stringify({ sessions }, null, 2),
-    {
-      encoding: "utf8",
-      mode: 0o600,
-    },
-  );
-  await rename(tmpPath, filePath);
 }
 
 function buildSessionHistorySummary(

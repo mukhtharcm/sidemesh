@@ -58,7 +58,7 @@ src/
   daemon-lifecycle.ts          # Daemon PID/state management
   git.ts                       # Git operations
   workspace-scope.ts           # Workspace path resolution / sandboxing
-  session-input-dedupe-store.ts  # On-disk input deduplication ledger
+  session-store.ts             # Durable SQLite input records and saved plans
   session-state.ts             # Current session overlay and transcript ordering
   state-writer.ts              # Coalesced durable snapshot writes
 apps/mobile/lib/src/
@@ -223,6 +223,10 @@ specific agent provider.
 
 - **Duplicate daemon guard**: `sidemesh start` checks `healthz` and refuses to
   start if occupied. Use `--allow-duplicate` to skip.
+- **Durable session state**: `sessions-v1.db` holds host input records and saved
+  plans. It imports the old input ledger and runtime signals transactionally;
+  keep the original JSON files. An input in `dispatching` becomes `uncertain`
+  after restart. Never resend it automatically or prune its recovery payload.
 - **Config persistence**: `sidemesh setup` writes to `~/.sidemesh/config.json`
   (or `SIDEMESH_CONFIG`). Atomic write-then-rename with `0o600` permissions.
   The daemon reads from `SIDEMESH_STATE_DIR` (defaults to `~/.sidemesh`).
