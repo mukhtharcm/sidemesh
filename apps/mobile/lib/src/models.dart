@@ -1173,7 +1173,7 @@ class SessionCommandSummary {
   static List<SessionCommandSummary> listFromJson(Object? value) {
     if (value is! List) return const [];
     return value.whereType<Map<String, dynamic>>().where((entry) =>
-      entry['name'] is String && (entry['name'] as String).isNotEmpty)
+      entry['name'] is String && RegExp(r'^/?[^\s/]+$').hasMatch(entry['name'] as String))
       .map((entry) => SessionCommandSummary(name: entry['name'] as String,
         description: _stringValue(entry['description']), inputHint: _stringOrNull(entry['inputHint']))).toList();
   }
@@ -3319,18 +3319,20 @@ class RecentSessionsLiveEvent {
 }
 
 class LiveEventPlanStep {
-  const LiveEventPlanStep({required this.step, required this.status});
+  const LiveEventPlanStep({required this.step, required this.status, this.priority});
 
   final String step;
   final String status;
+  final String? priority;
 
   factory LiveEventPlanStep.fromJson(Map<String, dynamic> json) =>
       LiveEventPlanStep(
         step: _stringValue(json['step']),
         status: _stringValue(json['status']),
+        priority: _stringOrNull(json['priority']),
       );
 
-  Map<String, dynamic> toJson() => {'step': step, 'status': status};
+  Map<String, dynamic> toJson() => {'step': step, 'status': status, if (priority != null) 'priority': priority};
 }
 
 class LiveEvent {

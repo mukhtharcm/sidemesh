@@ -47,6 +47,7 @@ class _Composer extends StatelessWidget {
     this.thinkingLabel,
     this.thinkingDetail,
     this.onThinkingTap,
+    this.onCommandsTap,
     this.submitOnEnter = false,
   });
 
@@ -99,6 +100,7 @@ class _Composer extends StatelessWidget {
   final String? thinkingLabel;
   final String? thinkingDetail;
   final VoidCallback? onThinkingTap;
+  final VoidCallback? onCommandsTap;
 
   final bool submitOnEnter;
 
@@ -112,6 +114,9 @@ class _Composer extends StatelessWidget {
     final bool showThinkingButton =
         isDesktop && thinkingLabel != null && onThinkingTap != null;
     final controls = <AppComposerControl>[
+      if (onCommandsTap != null)
+        AppComposerControl(icon: Icons.terminal_rounded, label: 'Commands',
+          tooltip: 'Choose an agent command', enabled: enabled && !sending, onPressed: onCommandsTap!),
       if (showModelButton)
         AppComposerControl(
           key: modelAnchorKey,

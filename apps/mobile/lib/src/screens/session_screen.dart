@@ -4781,6 +4781,24 @@ class _SessionScreenState extends State<SessionScreen>
     if (!mounted || _disposed) return;
   }
 
+  Future<void> _chooseSessionCommand() async {
+    final commands = (_session ?? widget.session).runtime?.commands ?? const <SessionCommandSummary>[];
+    if (commands.isEmpty) return;
+    final selected = await showDialog<SessionCommandSummary>(context: context, builder: (dialogContext) =>
+      MeshDialogScaffold(icon: Icons.terminal_rounded, title: 'Agent commands', showCloseButton: true,
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          for (final command in commands) AppSettingsRow(icon: null, title: command.name,
+            subtitle: [command.description, if (command.inputHint != null) command.inputHint!].where((value) => value.isNotEmpty).join('\n'),
+            onTap: () => Navigator.of(dialogContext).pop(command)),
+        ])));
+    if (!mounted || selected == null) return;
+    final name = selected.name.startsWith('/') ? selected.name : '/${selected.name}';
+    final arguments = _composerController.text.replaceFirst(RegExp(r'^/[^\s]+(?:\s|$)'), '');
+    final text = '$name $arguments';
+    _composerController.value = TextEditingValue(text: text, selection: TextSelection.collapsed(offset: text.length));
+    _composerFocusNode.requestFocus();
+  }
+
   Future<T?> _showComposerPicker<T>({
     required GlobalKey anchor,
     required double height,
@@ -6679,6 +6697,8 @@ class _SessionScreenState extends State<SessionScreen>
               onRemoveSkill: _removeDraftSkillMention,
               onSelectFile: _insertFileMention,
               onRemoveFile: _removeDraftFileMention,
+              onCommandsTap: _nodeInfo != null && _supportsProviderCapability('configuration', 'commands') &&
+                  (session.runtime?.commands.isNotEmpty ?? false) ? _chooseSessionCommand : null,
               onSend: _sendInput,
               onDismiss: _dismissKeyboard,
               onAddSkillTrigger: _supportsSkillInput

@@ -700,6 +700,7 @@ export type LiveThreadStatus =
 export type LivePlanStepStatus = "pending" | "in_progress" | "completed";
 
 export interface LivePlanStep {
+  priority?: "high" | "medium" | "low";
   step: string;
   status: LivePlanStepStatus;
 }

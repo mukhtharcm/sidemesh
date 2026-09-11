@@ -157,6 +157,7 @@ describe("AcpAgentProvider", () => {
     }
     assert.equal(log.runtime?.commands?.[0]?.name, "help");
     assert.equal(log.latestPlanUpdate?.plan[0]?.status, "completed");
+    assert.equal(log.latestPlanUpdate?.plan[0]?.priority, "medium");
     assert.ok(store.readSessionItems("acpx", created.thread.id).every((item) => item.authority === "cache"));
     assert.equal((await provider.getVersion()), "wire-fixture 1 (ACP 1)");
     const replay = await provider.readSessionLog(created.thread);

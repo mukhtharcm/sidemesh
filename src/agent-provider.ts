@@ -237,6 +237,7 @@ export interface AgentProviderCapabilities {
   };
   configuration: {
     sessionOptions?: boolean;
+    commands?: boolean;
     models: boolean;
     profiles: boolean;
     accessModes: boolean;
