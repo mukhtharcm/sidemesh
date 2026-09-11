@@ -1713,6 +1713,21 @@ export async function startServer(
     },
   );
 
+  app.delete("/api/sessions/:sessionId", async (c) => {
+    const sessionId = providerRuntime.resolveSession(c.req.param("sessionId")).sessionId;
+    const sessionProvider = await startedSessionProvider(sessionId);
+    if (!sessionProvider) return jsonResponse(c, { error: "unknown provider" }, 400);
+    requireProviderCapability(sessionProvider.provider, sessionProvider.provider.capabilities.sessions.delete === true,
+      "session deletion", "deleteSession");
+    await inputs.stop(sessionId, async () => {
+      await sessionProvider.provider.deleteSession!(sessionProvider.rawId);
+      await sessionState.deleteSessionView(sessionId);
+      await searchIndex.remove(sessionId);
+    });
+    broadcastRecentSessionRemove(sessionId);
+    return jsonResponse(c, { deleted: true });
+  });
+
   app.post(
     "/api/actions/:actionId/respond",
     async (c) => {

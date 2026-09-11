@@ -209,6 +209,7 @@ export interface AgentProviderCapabilities {
     resume: boolean;
     rename: boolean;
     archive: boolean;
+    delete?: boolean;
     compact: boolean;
     interrupt: boolean;
     history: boolean;
@@ -421,6 +422,7 @@ export interface AgentSessionLifecycleProvider {
   ): Promise<unknown>;
   setSessionName(threadId: string, name: string): Promise<unknown>;
   archiveSession(threadId: string): Promise<unknown>;
+  deleteSession(threadId: string): Promise<unknown>;
   unarchiveSession(threadId: string): Promise<unknown>;
   compactSession(threadId: string): Promise<unknown>;
   createSession(request: AgentCreateSessionRequest): Promise<AgentCreateSessionResult>;

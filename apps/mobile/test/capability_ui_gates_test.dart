@@ -125,10 +125,51 @@ void main() {
     expect(find.text('Browser'), findsNothing);
     expect(find.text('Rename'), findsNothing);
     expect(find.text('Archive'), findsNothing);
+    expect(find.text('Delete'), findsNothing);
 
     await tester.pumpWidget(const SizedBox.shrink());
     await tester.pump();
   });
+
+  for (final mode in [ThemeMode.light, ThemeMode.dark]) {
+    for (final desktop in [true, false]) {
+      testWidgets('session deletion requires confirmation in $mode (desktop: $desktop)', (tester) async {
+        final capabilities = <String, Object?>{
+          ..._minimalCapabilities,
+          'sessions': {'history': true, 'delete': true},
+        };
+        final api = _CapabilityFakeApi(_nodeForCapabilities(capabilities));
+        addTearDown(api.dispose);
+        var removed = false;
+        await _pumpApp(tester, SessionScreen(
+          host: _host('delete-session'), session: _session('delete-me'), api: api,
+          desktopMode: desktop, onArchived: () => removed = true,
+        ), size: desktop ? const Size(1180, 900) : const Size(390, 840), themeMode: mode);
+        await _pumpFrames(tester);
+        await tester.tap(find.byTooltip('Session actions').first);
+        await _pumpFrames(tester);
+        await tester.ensureVisible(find.text('Delete'));
+        await tester.tap(find.text('Delete'));
+        await _pumpFrames(tester);
+        expect(api.deletedSession, isNull);
+        expect(find.text('Delete this session?'), findsOneWidget);
+        await tester.tap(find.text('Cancel'));
+        await _pumpFrames(tester);
+        expect(api.deletedSession, isNull);
+        await tester.tap(find.byTooltip('Session actions').first);
+        await _pumpFrames(tester);
+        await tester.ensureVisible(find.text('Delete'));
+        await tester.tap(find.text('Delete'));
+        await _pumpFrames(tester);
+        await tester.tap(find.text('Delete session'));
+        await _pumpFrames(tester);
+        expect(api.deletedSession, 'delete-me');
+        expect(removed, isTrue);
+        expect(tester.takeException(), isNull);
+        await tester.pumpWidget(const SizedBox.shrink());
+      });
+    }
+  }
 
   testWidgets('session screen hides agents without session history', (
     tester,
@@ -2958,6 +2999,12 @@ class _CapabilityFakeApi extends ApiClient {
   final _IdleWebSocketChannel _actionsChannel = _IdleWebSocketChannel()
     ..addIncoming(jsonEncode({'type': 'snapshot', 'actions': []}));
   _CapturedCreateSessionRequest? lastCreateRequest;
+  String? deletedSession;
+
+  @override
+  Future<void> deleteSession(HostProfile host, String sessionId) async {
+    deletedSession = sessionId;
+  }
 
   @override
   Future<NodeInfo> fetchNode(HostProfile host) async => node;

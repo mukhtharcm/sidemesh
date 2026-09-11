@@ -24,7 +24,7 @@ function harness() {
     { id: "auto", type: "boolean", name: "Automatic", currentValue: false },
   ];
   const result = { history, sessions, connects: 0, prompts: [] as string[], promptBlocks: [] as ContentBlock[][], images: false, loadFails: false, loadCalls: 0,
-    onPrompt: null as (() => void) | null,
+    onPrompt: null as (() => void) | null, deleteSupported: true, deleteFails: false, deleted: [] as string[],
     requireAuth: false, authenticated: "", loadSupported: true, closed: 0, configurationRequests: [] as unknown[],
     connect: async (app: ClientApp, cwd: string) => {
       result.connects++;
@@ -32,7 +32,9 @@ function harness() {
       const server = agent()
         .onRequest(methods.agent.initialize, () => ({ protocolVersion: PROTOCOL_VERSION,
           agentInfo: { name: "wire-fixture", version: "1" },
-          agentCapabilities: { loadSession: result.loadSupported, promptCapabilities: { image: result.images }, sessionCapabilities: { list: {}, resume: {}, close: {} } },
+          agentCapabilities: { loadSession: result.loadSupported, promptCapabilities: { image: result.images }, sessionCapabilities: {
+            list: {}, resume: {}, close: {}, ...(result.deleteSupported ? { delete: {} } : {}),
+          } },
           authMethods: [{ id: "first", name: "First account" }, { id: "second", name: "Second account" }],
         }))
         .onRequest(methods.agent.authenticate, ({ params }) => { result.authenticated = params.methodId; return {}; })
@@ -68,6 +70,14 @@ function harness() {
         })
         .onRequest(methods.agent.session.setMode, () => ({}))
         .onRequest(methods.agent.session.close, () => { result.closed++; return {}; })
+        .onRequest(methods.agent.session.delete, ({ params }) => {
+          if (result.deleteFails) throw RequestError.internalError(undefined, "Deletion failed");
+          result.deleted.push(params.sessionId);
+          history.delete(params.sessionId);
+          const index = sessions.findIndex((session) => session.sessionId === params.sessionId);
+          if (index >= 0) sessions.splice(index, 1);
+          return {};
+        })
         .onNotification(methods.agent.session.cancel, ({ params }) => held.get(params.sessionId)?.())
         .onRequest(methods.agent.session.prompt, async ({ params, client, signal }) => {
           const text = params.prompt.flatMap((block) => block.type === "text" ? [block.text] : []).join("");
@@ -135,6 +145,48 @@ describe("AcpAgentProvider", () => {
     await provider.start();
   });
   afterEach(async () => { await provider.close(); store.close(); await rm(directory, { recursive: true, force: true }); });
+
+  it("keeps archive separate from native deletion and deletes without loading history", async () => {
+    const done = completion(provider);
+    const created = await provider.createSession({ cwd: directory, input: textInput("saved"), overrides });
+    await done;
+    assert.equal(provider.capabilities.sessions.delete, true);
+    const nativeId = store.getProviderSession("acpx", created.thread.id)!.nativeId;
+    await provider.archiveSession(created.thread.id);
+    assert.deepEqual(wire.deleted, []);
+    await provider.close();
+    provider = createProvider();
+    await provider.start();
+    assert.equal(provider.capabilities.sessions.delete, true);
+    wire.loadFails = true;
+    const loads = wire.loadCalls;
+    await provider.deleteSession(created.thread.id);
+    assert.equal(wire.loadCalls, loads);
+    assert.deepEqual(wire.deleted, [nativeId]);
+    assert.equal(store.getProviderSession("acpx", created.thread.id), null);
+    assert.deepEqual(store.readSessionItems("acpx", created.thread.id), []);
+    assert.deepEqual(await provider.listLoadedSessionIds(), []);
+    await assert.rejects(provider.readSessionThread(created.thread.id, false), /not found/);
+  });
+
+  it("keeps history when deletion is unsupported or fails", async () => {
+    wire.deleteSupported = false;
+    const created = await provider.createSession({ cwd: directory, input: [], overrides });
+    await assert.rejects(provider.deleteSession(created.thread.id), /does not support/);
+    assert.ok(store.getProviderSession("acpx", created.thread.id));
+    wire.deleteSupported = true;
+    wire.deleteFails = true;
+    await assert.rejects(provider.deleteSession(created.thread.id), /Deletion failed/);
+    assert.ok(store.getProviderSession("acpx", created.thread.id));
+    assert.deepEqual(wire.deleted, []);
+    assert.deepEqual(await provider.listLoadedSessionIds(), []);
+    store.saveProviderSession("acpx", { id: "local-only", nativeId: null, cwd: directory, name: null,
+      preview: "Failed before creation", createdAt: 1, updatedAt: 1, archived: false, metadata: {} });
+    const connects = wire.connects;
+    await provider.deleteSession("local-only");
+    assert.equal(wire.connects, connects);
+    assert.equal(store.getProviderSession("acpx", "local-only"), null);
+  });
 
   it("negotiates image input and sends ACP image and resource blocks", async () => {
     assert.equal(provider.capabilities.input.imageUrl, false);

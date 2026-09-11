@@ -256,6 +256,22 @@ export class SessionStore {
         session.createdAt, session.updatedAt, Number(session.archived), JSON.stringify(session.metadata));
   }
 
+  deleteProviderSession(providerId: string, sessionId: string): void {
+    this.transaction(() => {
+      this.db.prepare("DELETE FROM session_items WHERE provider_id = ? AND session_id = ?").run(providerId, sessionId);
+      this.db.prepare("DELETE FROM provider_sessions WHERE provider_id = ? AND id = ?").run(providerId, sessionId);
+    });
+  }
+
+  deleteSessionView(sessionId: string): void {
+    this.transaction(() => {
+      this.db.prepare("DELETE FROM plans WHERE session_id = ?").run(sessionId);
+      this.db.prepare("DELETE FROM session_recovery WHERE session_id = ?").run(sessionId);
+      // Retain delivery identities so a delayed client retry cannot send deleted input again.
+      this.db.prepare("UPDATE inputs SET payload = NULL WHERE session_id = ?").run(sessionId);
+    });
+  }
+
   getSessionItem(providerId: string, sessionId: string, kind: StoredSessionItem["kind"], id: string): StoredSessionItem | null {
     const row = this.db.prepare("SELECT * FROM session_items WHERE provider_id = ? AND session_id = ? AND kind = ? AND id = ?")
       .get(providerId, sessionId, kind, id) as SessionItemRow | undefined;

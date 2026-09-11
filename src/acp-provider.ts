@@ -64,6 +64,7 @@ interface AcpProviderDependencies {
   connect?: (app: ClientApp, cwd: string) => Promise<AcpTransport>;
 }
 interface AcpSessionMetadata {
+  sessionDeletion?: { commandHash: string; supported: boolean };
   agentInfo?: { commandHash: string; name: string; version: string; protocolVersion: number };
   promptCapabilities?: { commandHash: string; value: PromptCapabilities };
   runtime?: SessionRuntimeSummary | null;
@@ -114,6 +115,7 @@ export class AcpAgentProvider extends EventEmitter<AgentProviderEvents> implemen
   private closed = false;
   private readonly sessions = new Map<string, ConnectedSession>();
   private readonly connecting = new Map<string, Promise<ConnectedSession>>();
+  private readonly deleting = new Set<string>();
 
   constructor(options: AcpAgentProviderOptions, private readonly dependencies: AcpProviderDependencies = {}) {
     super();
@@ -142,6 +144,8 @@ export class AcpAgentProvider extends EventEmitter<AgentProviderEvents> implemen
         const saved = this.store.listProviderSessions(this.providerId)
           .map((record) => this.metadata(record).promptCapabilities).find((saved) => saved?.commandHash === this.commandHash);
         if (saved) this.applyPromptCapabilities(saved.value);
+        this.capabilities.sessions.delete = this.db.listProviderSessions(this.providerId)
+          .map((record) => this.metadata(record).sessionDeletion).find((saved) => saved?.commandHash === this.commandHash)?.supported === true;
       }
       catch (error) {
         if (!this.dependencies.sessionStore) this.store.close();
@@ -229,6 +233,39 @@ export class AcpAgentProvider extends EventEmitter<AgentProviderEvents> implemen
     return { unarchived: true };
   }
 
+  async deleteSession(id: string): Promise<unknown> {
+    if (this.deleting.has(id)) throw new AgentProviderRequestError("Session deletion is in progress", 409);
+    this.deleting.add(id);
+    let state: ConnectedSession | undefined;
+    try {
+      await this.start();
+      await this.connecting.get(id);
+      if (!this.record(id).nativeId) {
+        this.db.deleteProviderSession(this.providerId, id);
+        return { deleted: true };
+      }
+      state = await this.ensureConnection(id, false);
+      await state.loading;
+      if (!state.initialized.agentCapabilities?.sessionCapabilities?.delete) {
+        throw new AgentProviderRequestError("This ACP agent does not support session deletion", 409);
+      }
+      if (state.active) await this.interruptTurn(id, state.active.turnId);
+      if (state.transport.connection.signal.aborted) state = await this.ensureConnection(id, false);
+      const connected = state;
+      if (!connected.initialized.agentCapabilities?.sessionCapabilities?.delete) {
+        throw new AgentProviderRequestError("This ACP agent does not support session deletion", 409);
+      }
+      await this.authenticated(connected, () => connected.transport.connection.agent.request(methods.agent.session.delete,
+        { sessionId: connected.host.nativeSessionId! }));
+      await this.disconnect(connected);
+      this.db.deleteProviderSession(this.providerId, id);
+      return { deleted: true };
+    } finally {
+      try { if (state) await this.disconnect(state); }
+      finally { this.deleting.delete(id); }
+    }
+  }
+
   async createSession(request: AgentCreateSessionRequest): Promise<AgentCreateSessionResult> {
     await this.start();
     const id = `acp-${randomUUID()}`;
@@ -246,12 +283,13 @@ export class AcpAgentProvider extends EventEmitter<AgentProviderEvents> implemen
     let prepared: Awaited<ReturnType<typeof prepareAcpInput>>;
     try {
       await this.start();
+      if (this.deleting.has(request.sessionId)) throw new Error("Session deletion is in progress");
       state = await this.ensureConnection(request.sessionId);
       await state.loading;
       if (state.active) throw new Error("Session is busy; the host must queue this input");
       prepared = await prepareAcpInput(request.input, state.initialized.agentCapabilities?.promptCapabilities);
       await this.applyControls(request.sessionId, state, request.overrides);
-      if (this.closed || state.active) throw new Error("Session is busy or closed");
+      if (this.closed || state.active || this.deleting.has(request.sessionId)) throw new Error("Session is busy or closed");
     } catch (error) {
       throw new AgentProviderRequestError(errorMessage(error), 409, true);
     }
@@ -324,21 +362,22 @@ export class AcpAgentProvider extends EventEmitter<AgentProviderEvents> implemen
     return [...models.values()];
   }
 
-  private async ensureConnection(id: string): Promise<ConnectedSession> {
+  private async ensureConnection(id: string, loadSession = true): Promise<ConnectedSession> {
     if (this.closed) throw new Error("ACP provider is closed");
+    if (loadSession && this.deleting.has(id)) throw new AgentProviderRequestError("Session deletion is in progress", 409);
     const pending = this.connecting.get(id);
     if (pending) return pending;
     const existing = this.sessions.get(id);
     if (existing && !existing.transport.connection.signal.aborted) return existing;
     if (existing) await this.disconnect(existing);
     if (this.closed) throw new Error("ACP provider is closed");
-    const promise = this.connectSession(id);
+    const promise = this.connectSession(id, loadSession);
     this.connecting.set(id, promise);
     try { return await promise; }
     finally { this.connecting.delete(id); }
   }
 
-  private async connectSession(id: string): Promise<ConnectedSession> {
+  private async connectSession(id: string, loadSession: boolean): Promise<ConnectedSession> {
     const record = this.record(id);
     let state: ConnectedSession | undefined;
     const host = new AcpHost(id, record.cwd, this.permissionMode, (event) => this.emit("liveEvent", event), (params) => {
@@ -370,13 +409,16 @@ export class AcpAgentProvider extends EventEmitter<AgentProviderEvents> implemen
       if (state.initialized.protocolVersion !== PROTOCOL_VERSION) throw new Error("Unsupported ACP protocol version");
       const promptCapabilities = state.initialized.agentCapabilities?.promptCapabilities ?? {};
       this.applyPromptCapabilities(promptCapabilities);
+      this.capabilities.sessions.delete = Boolean(state.initialized.agentCapabilities?.sessionCapabilities?.delete);
       this.db.saveProviderSession(this.providerId, { ...this.record(id), metadata: {
-        ...this.metadata(this.record(id)), promptCapabilities: { commandHash: this.commandHash, value: promptCapabilities },
+        ...this.metadata(this.record(id)), sessionDeletion: { commandHash: this.commandHash, supported: this.capabilities.sessions.delete },
+        promptCapabilities: { commandHash: this.commandHash, value: promptCapabilities },
         ...(state.initialized.agentInfo ? { agentInfo: { commandHash: this.commandHash,
           name: state.initialized.agentInfo.name, version: state.initialized.agentInfo.version,
           protocolVersion: state.initialized.protocolVersion } } : {}),
       } });
       if (record.nativeId) {
+        if (!loadSession) return state;
         if (state.initialized.agentCapabilities?.loadSession) await this.refreshHistory(id, state);
         else if (state.initialized.agentCapabilities?.sessionCapabilities?.resume) {
           const response = await this.authenticated(state, () => transport.connection.agent.request(methods.agent.session.resume,
@@ -397,7 +439,7 @@ export class AcpAgentProvider extends EventEmitter<AgentProviderEvents> implemen
   }
 
   private async refreshHistory(id: string, state: ConnectedSession): Promise<void> {
-    if (state.active || !state.initialized.agentCapabilities?.loadSession) return;
+    if (state.active || this.deleting.has(id) || !state.initialized.agentCapabilities?.loadSession) return;
     if (state.loading) return state.loading;
     state.loading = (async () => {
       const items = new Map<string, StoredSessionItem>();
