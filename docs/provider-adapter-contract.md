@@ -293,3 +293,11 @@ exit status completes sign-in. Terminal methods never call ACP `authenticate`.
 Legacy shell commands continue to support agent-managed authentication only.
 The session and inbox can open the exact sign-in terminal and cancel sign-in.
 An expired sign-in terminal cannot start or replace a normal shell.
+
+Providers can expose `lifecycle.logout` with an optional `logout()` method.
+`POST /api/admin/provider/:kind/logout` requires host authentication and this
+capability. The machine actions menu lists sign-out for each supported instance.
+ACP enables it after a connected agent declares `agentCapabilities.auth.logout`.
+Sign-out rejects active operations, blocks new prompts during logout, closes idle
+connections after success, and keeps saved session history. It never signs out
+as part of startup, restart, or shutdown.

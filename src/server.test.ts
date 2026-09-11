@@ -1842,6 +1842,29 @@ describe("session input item parsing", () => {
   });
 });
 
+describe("POST /api/admin/provider/:kind/logout", () => {
+  it("requires authentication and declared support before calling the selected agent", async () => {
+    const stateDir = await mkdtemp(nodePath.join(tmpdir(), "sidemesh-server-test-"));
+    class LogoutProvider extends RestartableFakeProvider {
+      override readonly capabilities = structuredClone(FAKE_PROVIDER_CAPABILITIES);
+      logouts = 0;
+      async logout(): Promise<void> { this.logouts++; }
+    }
+    const provider = new LogoutProvider();
+    await withServerRuntime(makeConfig(stateDir), makeCustomSingleProviderRuntime(provider), async (server, config) => {
+      const send = (authenticated: boolean) => request({ hostname: "127.0.0.1", port: server.port,
+        path: "/api/admin/provider/fake/logout", method: "POST",
+        headers: authenticated ? { Authorization: "Bearer " + config.token } : {} });
+      assert.equal((await send(false)).statusCode, 401);
+      assert.notEqual((await send(true)).statusCode, 200);
+      assert.equal(provider.logouts, 0);
+      provider.capabilities.lifecycle.logout = true;
+      assert.equal((await send(true)).statusCode, 200);
+      assert.equal(provider.logouts, 1);
+    });
+  });
+});
+
 describe("POST /api/admin/provider/:kind/restart", () => {
   it("returns 400 for unknown provider kind", async () => {
     const stateDir = await mkdtemp(nodePath.join(tmpdir(), "sidemesh-server-test-"));

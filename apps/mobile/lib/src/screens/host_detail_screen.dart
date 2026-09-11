@@ -599,6 +599,7 @@ class _HostManagementCardState extends State<_HostManagementCard> {
   bool _updating = false;
   bool _restartingDaemon = false;
   bool _restartingProvider = false;
+  bool _signingOut = false;
   bool _savingUpdateChannel = false;
   bool _pollingUpdateStatus = false;
   int _updateStatusPollFailures = 0;
@@ -764,6 +765,19 @@ class _HostManagementCardState extends State<_HostManagementCard> {
       showAppSnackBar(context, 'Restart failed: ${friendlyError(e)}');
     } finally {
       if (mounted) setState(() => _restartingProvider = false);
+    }
+  }
+
+  Future<void> _logoutProvider(String id, String label) async {
+    if (_signingOut) return;
+    setState(() => _signingOut = true);
+    try {
+      await widget.api.logoutProvider(widget.host, id);
+      if (mounted) showAppSnackBar(context, 'Signed out of $label');
+    } catch (error) {
+      if (mounted) showAppSnackBar(context, 'Sign-out failed: ${friendlyError(error)}');
+    } finally {
+      if (mounted) setState(() => _signingOut = false);
     }
   }
 
@@ -1086,6 +1100,14 @@ class _HostManagementCardState extends State<_HostManagementCard> {
                               : _pickUpdateChannel,
                           child: const Text('Release track'),
                         ),
+                      for (final provider in widget.node.supportedProviders)
+                        if (provider.capabilities.supports('lifecycle', 'logout'))
+                          MenuItemButton(
+                            onPressed: isOffline || _signingOut
+                                ? null
+                                : () => _logoutProvider(provider.id, provider.label),
+                            child: Text('Sign out of ${provider.label}'),
+                          ),
                       if (_supportsRestart)
                         MenuItemButton(
                           onPressed: isOffline || _restartingProvider

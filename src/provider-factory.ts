@@ -57,7 +57,7 @@ export class AgentProviderRuntime extends EventEmitter<ProviderRuntimeEvents> {
       const entry: AgentProviderRuntimeEntry = { ...source, instance: null, state: "idle", version: null, error: null,
         get capabilities() {
           const capabilities = entry.instance?.capabilities ?? entry.definitionSummary.capabilities;
-          return { ...capabilities, lifecycle: { restart: true } };
+          return { ...capabilities, lifecycle: { ...capabilities.lifecycle, restart: true } };
         },
         get displayName() { return entry.instance?.displayName ?? entry.definitionSummary.displayName; },
       };

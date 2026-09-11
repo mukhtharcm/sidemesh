@@ -903,6 +903,15 @@ export async function startServer(
     },
   );
 
+  app.post("/api/admin/provider/:kind/logout", async (c) => {
+    const selected = providerRuntime.providerForKind(c.req.param("kind"));
+    if (!selected) return jsonResponse(c, { error: "unknown provider kind" }, 400);
+    const provider = await providerRuntime.ensure(selected);
+    requireProviderCapability(provider, provider.capabilities.lifecycle.logout === true, "sign-out", "logout");
+    await requireProviderMethod(provider, "logout", "sign-out").call(provider);
+    return jsonResponse(c, { ok: true });
+  });
+
   app.post(
     "/api/admin/restart",
     async (c) => {
