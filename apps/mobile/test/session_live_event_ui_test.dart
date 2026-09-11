@@ -34,6 +34,42 @@ void main() {
     SharedPreferences.setMockInitialValues(<String, Object>{});
   });
 
+  for (final mode in [ThemeMode.light, ThemeMode.dark]) {
+    testWidgets('advertised commands fill the draft and plan priorities remain visible ($mode)', (tester) async {
+      final session = _session('provider-commands').copyWith(runtime: const SessionRuntimeSummary(commands: [
+        SessionCommandSummary(name: 'review', description: 'Review a file', inputHint: 'File path'),
+      ]));
+      final api = _RichEventFakeApi(sessionSummary: session,
+        nodeInfo: NodeInfo.fromJson({'provider': 'codex', 'defaultProviderCapabilities': {
+          'configuration': {'commands': true}, 'sessions': {'history': true}, 'input': {'text': true},
+        }}), latestPlanUpdate: LiveEvent(type: 'plan_updated', sessionId: session.id, plan: const [
+          LiveEventPlanStep(step: 'Read the file', status: 'completed', priority: 'high'),
+          LiveEventPlanStep(step: 'Write the review', status: 'pending', priority: 'low'),
+        ]));
+      addTearDown(api.dispose);
+      await _pumpApp(tester, SessionScreen(host: _host(session.id), session: session, api: api, desktopMode: true),
+        size: const Size(1180, 900), themeMode: mode);
+      await _pumpFrames(tester);
+      await tester.tap(find.text('Plan update'));
+      await _pumpFrames(tester);
+      expect(find.text('Read the file'), findsOneWidget);
+      expect(find.text('Write the review'), findsOneWidget);
+      expect(find.text('Priority: high'), findsOneWidget);
+      expect(find.text('Priority: low'), findsOneWidget);
+      await tester.enterText(find.byType(TextField).first, 'README.md');
+      await tester.tap(find.text('Commands'));
+      await _pumpFrames(tester);
+      expect(find.textContaining('File path'), findsOneWidget);
+      await tester.tap(find.text('review'));
+      await _pumpFrames(tester);
+      expect(tester.widget<TextField>(find.byType(TextField).first).controller!.text, '/review README.md');
+      expect(api.sendInputCalls, 0);
+      api.emit({'type': 'runtime_updated', 'sessionId': session.id, 'runtime': {'commands': []}});
+      await _pumpFrames(tester);
+      expect(find.text('Commands'), findsNothing);
+    });
+  }
+
   testWidgets('pending cleanup requires the same client identity for repeated text', (tester) async {
     final session = _session('pending-identity');
     final host = _host(session.id);
@@ -2286,6 +2322,7 @@ Future<void> _pumpApp(
   WidgetTester tester,
   Widget child, {
   required Size size,
+  ThemeMode themeMode = ThemeMode.system,
 }) async {
   tester.view
     ..devicePixelRatio = 1
@@ -2298,6 +2335,7 @@ Future<void> _pumpApp(
   final palette = ThemeVariant.codexAmber;
   await tester.pumpWidget(
     MaterialApp(
+      themeMode: themeMode,
       theme: buildLightTheme(
         palette.light,
         platform: size.width >= 760 ? TargetPlatform.macOS : TargetPlatform.iOS,

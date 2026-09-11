@@ -82,7 +82,7 @@ export const ACP_PROVIDER_CAPABILITIES: AgentProviderCapabilities = {
   input: { text: true, imageUrl: false, localImage: false, skills: false, fileMentions: true, steer: false },
   interaction: { userInput: true, elicitation: true },
   approvals: { command: true, tool: true, fileChange: true, permissions: true, approveForSession: true },
-  configuration: { sessionOptions: true, models: true, profiles: false, accessModes: false, skills: false, skillManagement: false },
+  configuration: { sessionOptions: true, commands: true, models: true, profiles: false, accessModes: false, skills: false, skillManagement: false },
   runtimeControls: { model: true, mode: true, reasoningEffort: false, fastMode: false,
     approvalPolicy: false, sandboxMode: false, networkAccess: false, webSearch: false, accessMode: false },
   lifecycle: { restart: false },
@@ -424,7 +424,7 @@ export class AcpAgentProvider extends EventEmitter<AgentProviderEvents> implemen
     } else if (update.sessionUpdate === "plan") {
       const record = this.record(id);
       const plan: LatestPlanUpdate = { type: "plan_updated", sessionId: id,
-        plan: update.entries.map((entry) => ({ step: entry.content, status: entry.status })) };
+        plan: update.entries.map((entry) => ({ step: entry.content, status: entry.status, priority: entry.priority })) };
       this.db.saveProviderSession(this.providerId, { ...record, metadata: { ...this.metadata(record), latestPlanUpdate: plan } });
       this.emit("liveEvent", plan);
     }
