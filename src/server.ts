@@ -104,7 +104,8 @@ import {
   collectWorkspaceRoots,
   resolveWorkspacePath,
 } from "./workspace-scope.js";
-import { SessionStore, type SessionInputReceipt } from "./session-store.js";
+import { SessionStore } from "./session-store.js";
+import { SessionInputCoordinator, SessionInputError } from "./session-input-coordinator.js";
 import { startupSummaryLines } from "./startup-summary.js";
 import { getCodexRpcAuditSnapshot } from "./codex-rpc-audit.js";
 import { SessionSearchIndex, type SearchFilter } from "./session-search-index.js";
@@ -229,7 +230,6 @@ export async function startServer(
   const searchIndex = new SessionSearchIndex(
     nodePath.join(config.stateDir, "search-index-v1.db"),
   );
-  const pendingInputs = new Map<string, Promise<SessionInputReceipt>>();
   const pushNotifications = await PushNotificationDispatcher.open(
     config.stateDir,
   );
@@ -897,6 +897,36 @@ export async function startServer(
 
   const fsWatchRegistry = new FsWatchRegistry();
 
+  const inputs = new SessionInputCoordinator(sessionStore, {
+    canSteer: (id) => providerEntryForSessionId(id)?.provider.capabilities.input.steer !== false,
+    runState: async (id) => {
+      const state = await loadFastRunState(provider, id, sessionState);
+      return { turnId: state.turnId, busy: state.isRunning || state.status === "unknown" };
+    },
+    prepare: async (id, payload) => ({ ...payload,
+      input: await resolveFileInputItemsForSession(provider, id, payload.input) }),
+    dispatch: (request) => provider.submitInput!(request),
+    submitted: async (request, receipt) => {
+      const id = request.sessionId;
+      if (await shouldTrackProviderTurn(provider, id, receipt.turnId)) {
+        const previousStartedAt = request.activeTurnId ? sessionState.get(id).activeTurn?.startedAt : undefined;
+        sessionState.get(id).activeTurn = { turnId: receipt.turnId!, startedAt: previousStartedAt ?? Date.now() };
+        sessionState.get(id).recoveredStatus = null;
+        setLatestThreadStatusForSession(id, hasPendingActionForSession(pendingActions, id) ? "waiting_for_approval" : "running");
+      }
+      broadcastLive(id, { type: "user_message_submitted", sessionId: id, turnId: receipt.turnId ?? undefined,
+        messageItem: buildSubmittedUserMessage(request.input, receipt.messageId, allocSeq(id)) });
+      scheduleRecentSessionUpsert(id, 0);
+    },
+    queueChanged: (id, queued) => {
+      if (providerEntryForSessionId(id)?.provider.capabilities.input.steer !== false) return;
+      broadcastLive(id, { type: "queue_updated", sessionId: id, steeringCount: 0, followUpCount: queued.length,
+        steeringPreview: [], followUpPreview: queued.map((item) => buildSubmittedUserMessageText(item.payload?.input ?? [])) });
+    },
+    warning: (id, error) => broadcastProviderWarning({ level: "warning", sessionId: id,
+      code: "queued_input_failed", message: error instanceof Error ? error.message : String(error) }),
+  });
+
   const onProviderLiveEvent = (event: AgentProviderLiveEvent): void => {
     switch (event.type) {
       case "skills_changed":
@@ -1125,6 +1155,7 @@ export async function startServer(
 
         scheduleRecentSessionUpsert(event.sessionId, 0);
         void indexSessionForSearch(searchIndex, providerRuntime, event.sessionId).catch(() => {});
+        inputs.wake(event.sessionId);
         // Transcript order remains stable across turns.
         return;
       case "action_resolved":
@@ -2493,97 +2524,10 @@ export async function startServer(
         turnOverrides,
       );
       const dedupeKey = `${sessionId}:${clientMessageId || randomUUID()}`;
-      const existing = sessionStore.getInput(dedupeKey);
-      if (existing) {
-        if (existing.signatureHash !== inputSignatureHash) {
-          response.status(409).json({ error: "clientMessageId was already used with different input" });
-          return;
-        }
-        const pending = pendingInputs.get(dedupeKey);
-        if (pending || existing.receipt) {
-          const receipt = existing.receipt ?? await pending;
-          response.json({ ...receipt, replayed: true });
-          return;
-        }
-        if (existing.state !== "prepared") {
-          response.status(409).json({
-            code: "input_delivery_uncertain",
-            error: "The agent may have received this input. Check the session before sending it again.",
-          });
-          return;
-        }
-      } else {
-        sessionStore.prepareInput({
-          key: dedupeKey, sessionId, signatureHash: inputSignatureHash,
-          payload: { input, overrides: turnOverrides },
-        });
-      }
-
-      const submit = async (): Promise<SessionInputReceipt> => {
-        const inputForSubmit = await resolveFileInputItemsForSession(
-          provider, sessionId, input,
-        );
-        const submittedMessage = buildSubmittedUserMessage(
-          inputForSubmit,
-          clientMessageId,
-          allocSeq(sessionId),
-        );
-        const state = await loadRunState(provider, sessionId, sessionState);
-        sessionStore.dispatchInput(dedupeKey);
-        const submitted = await provider.submitInput!({
-          sessionId,
-          input: inputForSubmit,
-          activeTurnId: state.turnId,
-          overrides: turnOverrides,
-          clientMessageId: submittedMessage.id,
-        });
-        const receipt: SessionInputReceipt = {
-          mode: submitted.mode, turnId: submitted.turnId, messageId: submittedMessage.id,
-        };
-        sessionStore.acceptInput(dedupeKey, receipt);
-        if (
-          await shouldTrackProviderTurn(
-            provider,
-            sessionId,
-            submitted.turnId,
-          )
-        ) {
-          const previousStartedAt = state.turnId
-            ? sessionState.get(sessionId).activeTurn?.startedAt
-            : undefined;
-          sessionState.get(sessionId).activeTurn = {
-            turnId: submitted.turnId!,
-            startedAt: previousStartedAt ?? Date.now(),
-          };
-          sessionState.get(sessionId).recoveredStatus = null;
-          setLatestThreadStatusForSession(
-            sessionId,
-            hasPendingActionForSession(pendingActions, sessionId)
-              ? "waiting_for_approval"
-              : "running",
-          );
-        }
-        broadcastLive(sessionId, {
-          type: "user_message_submitted",
-          sessionId,
-          turnId: submitted.turnId || undefined,
-          messageItem: submittedMessage,
-        });
-        return receipt;
-      };
-
-      const promise = submit();
-      pendingInputs.set(dedupeKey, promise);
-      try {
-        const receipt = await promise;
-        response.json({ ...receipt, replayed: false });
-        scheduleRecentSessionUpsert(sessionId, 0);
-      } catch (error) {
-        sessionStore.failInput(dedupeKey, error instanceof AgentProviderRequestError && error.inputNotDispatched);
-        throw error;
-      } finally {
-        pendingInputs.delete(dedupeKey);
-      }
+      response.json(await inputs.submit({
+        key: dedupeKey, sessionId, signatureHash: inputSignatureHash,
+        payload: { input, overrides: turnOverrides },
+      }));
     }),
   );
 
@@ -2607,16 +2551,16 @@ export async function startServer(
       ) {
         return;
       }
-      const state = await loadRunState(provider, sessionId, sessionState);
-      if (!state.turnId) {
-        response.json({ stopped: false });
-        return;
-      }
-      await provider.interruptTurn!(sessionId, state.turnId);
-      sessionState.get(sessionId).activeTurn = null;
-      sessionState.get(sessionId).unverifiedTurn = false;
-      sessionState.get(sessionId).recoveredStatus = null;
-      response.json({ stopped: true, turnId: state.turnId });
+      let turnId: string | null = null;
+      await inputs.stop(sessionId, async () => {
+        const state = await loadRunState(provider, sessionId, sessionState);
+        turnId = state.turnId;
+        if (turnId) await provider.interruptTurn!(sessionId, turnId);
+        sessionState.get(sessionId).activeTurn = null;
+        sessionState.get(sessionId).unverifiedTurn = false;
+        sessionState.get(sessionId).recoveredStatus = null;
+      });
+      response.json({ stopped: turnId !== null, turnId });
     }),
   );
 
@@ -2739,7 +2683,7 @@ export async function startServer(
       ) {
         return;
       }
-      await provider.archiveSession!(sessionId);
+      await inputs.stop(sessionId, async () => { await provider.archiveSession!(sessionId); });
       sessionState.get(sessionId).activeTurn = null;
       sessionState.get(sessionId).unverifiedTurn = false;
       sessionState.get(sessionId).recoveredStatus = null;
@@ -3002,6 +2946,9 @@ export async function startServer(
     if (error instanceof HTTPException) {
       return c.json({ error: message }, error.status as ContentfulStatusCode);
     }
+    if (error instanceof SessionInputError) {
+      return c.json({ error: message, code: error.code }, error.status as ContentfulStatusCode);
+    }
     if (
       error instanceof AgentProviderRequestError ||
       error instanceof TerminalError ||
@@ -3015,6 +2962,7 @@ export async function startServer(
   });
 
   await listen(server, config.port);
+  inputs.recover();
 
   // Open search index and warm all provider indexes in the background
   const searchIndexBackfill = searchIndex.open().then(async () => {
@@ -3159,6 +3107,7 @@ export async function startServer(
   runningServerRef = {
     port: boundPort,
     close: async () => {
+      inputs.close();
       healthMonitorStopped = true;
       if (healthMonitor) clearTimeout(healthMonitor);
       terminalRegistry.dispose();
@@ -3179,6 +3128,7 @@ export async function startServer(
         await provider.close?.();
       } finally {
         provider.off("stderr", onProviderStderr);
+        await inputs.drain();
         sessionStore.close();
         await pushNotifications.close();
       }

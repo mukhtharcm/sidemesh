@@ -2058,6 +2058,53 @@ describe("session input item parsing", () => {
 
 
 
+  it("recovers queued input after restart and cancels the next queued input before stop", async () => {
+    class QueueProvider extends RestartableFakeProvider {
+      override readonly capabilities = { ...RESTARTABLE_FAKE_CAPABILITIES,
+        input: { ...RESTARTABLE_FAKE_CAPABILITIES.input, steer: false } };
+      async interruptTurn(sessionId: string, turnId: string): Promise<void> {
+        await this.restart();
+        this.emit("liveEvent", { type: "turn_completed", sessionId, turnId, status: "interrupted" });
+      }
+    }
+    const stateDir = await mkdtemp(nodePath.join(tmpdir(), "sidemesh-server-queue-"));
+    const config = makeConfig(stateDir);
+    const provider = new QueueProvider();
+    let server: RunningServer | null = null;
+    let sessionId = "";
+    const send = (id: string) => request({ hostname: "127.0.0.1", port: server!.port,
+      path: `/api/sessions/${sessionId}/input`, method: "POST",
+      headers: { Authorization: "Bearer " + config.token, "content-type": "application/json" },
+      body: JSON.stringify({ clientMessageId: id, input: [{ type: "text", text: id }] }),
+    });
+    try {
+      server = await startServer(config, makeCustomSingleProviderRuntime(provider));
+      const created = await provider.createSession({ cwd: stateDir, input: [], overrides: EMPTY_OVERRIDES });
+      sessionId = created.thread.id;
+      const queued = await send("queue-one");
+      assert.equal(queued.statusCode, 200);
+      assert.equal((queued.body as { mode: string }).mode, "queued");
+      assert.equal(provider.submittedInputs, 0);
+      await server.close();
+      server = null;
+      await provider.restart();
+      server = await startServer(config, makeCustomSingleProviderRuntime(provider));
+      await waitFor(() => provider.submittedInputs === 1 ? true : null, "queued input after daemon restart");
+      assert.deepEqual(provider.lastSubmitInput, [{ type: "text", text: "queue-one", text_elements: [] }]);
+      assert.equal((await send("queue-one")).statusCode, 200);
+      assert.equal((await send("queue-two")).statusCode, 200);
+      const stopped = await request({ hostname: "127.0.0.1", port: server.port,
+        path: `/api/sessions/${sessionId}/stop`, method: "POST",
+        headers: { Authorization: "Bearer " + config.token },
+      });
+      assert.equal(stopped.statusCode, 200);
+      const cancelled = await send("queue-two");
+      assert.equal(cancelled.statusCode, 409);
+      assert.equal((cancelled.body as { code: string }).code, "input_cancelled");
+      assert.equal(provider.submittedInputs, 1);
+    } finally { await server?.close(); await rm(stateDir, { recursive: true, force: true }); }
+  });
+
   it("blocks retries after an uncertain provider send, including after daemon restart", async () => {
     const stateDir = await mkdtemp(nodePath.join(tmpdir(), "sidemesh-server-test-"));
     const provider = new RestartableFakeProvider();
@@ -2456,7 +2503,7 @@ describe("POST /api/admin/provider/:kind/restart", () => {
     });
   });
 
-  it("clears interrupted input dedupe receipts after provider restart", async () => {
+  it("retains interrupted input and blocks an uncertain resend after provider restart", async () => {
     const stateDir = await mkdtemp(nodePath.join(tmpdir(), "sidemesh-server-test-"));
     const provider = new RestartableFakeProvider();
     const runtime = makeCustomSingleProviderRuntime(provider);
@@ -2537,9 +2584,9 @@ describe("POST /api/admin/provider/:kind/restart", () => {
           clientMessageId: "local-1",
         }),
       });
-      assert.equal(retryAfterRestart.statusCode, 200);
-      assert.equal((retryAfterRestart.body as any).replayed, false);
-      assert.equal(provider.submittedInputs, 2);
+      assert.equal(retryAfterRestart.statusCode, 409);
+      assert.equal((retryAfterRestart.body as { code: string }).code, "input_delivery_uncertain");
+      assert.equal(provider.submittedInputs, 1);
     });
   });
 });

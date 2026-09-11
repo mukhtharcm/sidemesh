@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import { it } from "node:test";
 
 import { SessionStore } from "./session-store.js";
@@ -37,7 +38,8 @@ it("retains input and acceptance across restarts without resending uncertain wor
       key: "session:accepted", sessionId: "session", signatureHash: "other", payload,
     }), /UNIQUE/);
     store.clearInterruptedInputs(new Map([["session", "turn-1"]]));
-    assert.equal(store.getInput("session:accepted"), null);
+    assert.equal(store.getInput("session:accepted")?.state, "uncertain");
+    assert.deepEqual(store.getInput("session:accepted")?.payload, payload);
     assert.equal(store.getInput("session:unknown")?.state, "uncertain");
     if (process.platform !== "win32") {
       for (const name of ["sessions-v1.db", "sessions-v1.db-wal", "sessions-v1.db-shm"]) {
@@ -74,7 +76,7 @@ it("imports legacy receipts and plans once and preserves the original files", as
     store.setPlan(plan.sessionId, null);
     store.close();
     store = await SessionStore.open(dir);
-    assert.equal(store.getInput("copilot:session:input-1"), null);
+    assert.equal(store.getInput("copilot:session:input-1")?.state, "uncertain");
     assert.equal(store.getPlan(plan.sessionId), null);
     assert.equal(await readFile(inputFile, "utf8"), source);
     assert.ok(await readFile(planFile, "utf8"));
@@ -82,6 +84,33 @@ it("imports legacy receipts and plans once and preserves the original files", as
     store.close();
     await rm(dir, { recursive: true, force: true });
   }
+});
+
+it("never expires unconfirmed, cancelled, or queued payloads with old dedupe receipts", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "sidemesh-input-retention-"));
+  let store = await SessionStore.open(dir);
+  try {
+    for (let index = 0; index < 505; index++) {
+      const key = `session:input-${index}`;
+      store.prepareInput({ key, sessionId: "session", signatureHash: key, payload });
+      store.dispatchInput(key);
+      store.acceptInput(key, receipt);
+    }
+    store.prepareInput({ key: "session:cancelled", sessionId: "session", signatureHash: "cancelled", payload });
+    store.cancelQueuedInputs("session");
+    store.prepareInput({ key: "session:queued", sessionId: "session", signatureHash: "queued", payload });
+    store.queueInput("session:queued", "queued", payload);
+    const db = new DatabaseSync(join(dir, "sessions-v1.db"));
+    db.exec("UPDATE inputs SET updated_at = 1");
+    db.close();
+    store.close();
+    store = await SessionStore.open(dir);
+    assert.equal(store.inputCount(), 507);
+    assert.equal(store.getInput("session:input-0")?.state, "uncertain");
+    assert.deepEqual(store.getInput("session:input-0")?.payload, payload);
+    assert.equal(store.getInput("session:cancelled")?.state, "cancelled");
+    assert.equal(store.getInput("session:queued")?.state, "queued");
+  } finally { store.close(); await rm(dir, { recursive: true, force: true }); }
 });
 
 it("does not mark an invalid legacy import complete", async () => {
