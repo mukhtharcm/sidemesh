@@ -7,7 +7,7 @@ import type { AgentSessionInputItem, AgentSessionOverrides } from "./agent-provi
 import type { LatestPlanUpdate, SessionActivity, SessionMessage } from "./types.js";
 
 const receiptSchema = z.object({
-  mode: z.enum(["steer", "turn"]),
+  mode: z.enum(["steer", "turn", "queued"]),
   turnId: z.string().nullable(),
   messageId: z.string(),
 });
@@ -37,7 +37,7 @@ export interface SessionInputRecord {
   key: string;
   sessionId: string;
   signatureHash: string;
-  state: "prepared" | "dispatching" | "uncertain" | "accepted";
+  state: "prepared" | "queued" | "dispatching" | "uncertain" | "accepted" | "confirmed" | "cancelled";
   payload: { input: AgentSessionInputItem[]; overrides: AgentSessionOverrides } | null;
   receipt: SessionInputReceipt | null;
 }
@@ -101,10 +101,26 @@ export class SessionStore {
         CREATE INDEX IF NOT EXISTS session_items_order ON session_items(provider_id, session_id, position);
       `);
       const store = new SessionStore(db);
+      if (!store.hasMigration("durable-queue-v1")) {
+        store.transaction(() => {
+          db.exec(`
+            ALTER TABLE inputs RENAME TO inputs_legacy;
+            CREATE TABLE inputs (
+              key TEXT PRIMARY KEY, session_id TEXT NOT NULL, signature_hash TEXT NOT NULL,
+              state TEXT NOT NULL CHECK(state IN ('prepared', 'queued', 'dispatching', 'uncertain', 'accepted', 'confirmed', 'cancelled')),
+              payload TEXT, receipt TEXT, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL
+            );
+            INSERT INTO inputs SELECT * FROM inputs_legacy;
+            DROP TABLE inputs_legacy;
+            CREATE INDEX inputs_session ON inputs(session_id);
+            INSERT INTO migrations VALUES ('durable-queue-v1');
+          `);
+        });
+      }
       await store.importLegacy(stateDir);
       // The provider can have accepted a request before the daemon stopped.
       // Never dispatch these rows again without an explicit recovery decision.
-      db.exec("UPDATE inputs SET state = 'uncertain' WHERE state = 'dispatching'");
+      db.exec("UPDATE inputs SET state = 'uncertain' WHERE state = 'dispatching' OR (state = 'accepted' AND payload IS NOT NULL)");
       store.prune();
       return store;
     } catch (error) {
@@ -212,10 +228,10 @@ export class SessionStore {
       .run(record.key, record.sessionId, record.signatureHash, JSON.stringify(record.payload), now, now);
   }
 
-  dispatchInput(key: string): void {
+  dispatchInput(key: string, payload?: SessionInputRecord["payload"]): void {
     const result = this.db.prepare(
-      "UPDATE inputs SET state = 'dispatching', updated_at = ? WHERE key = ? AND state = 'prepared'",
-    ).run(Date.now(), key);
+      "UPDATE inputs SET state = 'dispatching', payload = coalesce(?, payload), updated_at = ? WHERE key = ? AND state IN ('prepared', 'queued')",
+    ).run(payload ? JSON.stringify(payload) : null, Date.now(), key);
     if (result.changes !== 1) throw new Error("Input is not ready for dispatch");
   }
 
@@ -228,15 +244,40 @@ export class SessionStore {
 
   failInput(key: string, notDispatched = false): void {
     this.db.prepare(
-      "UPDATE inputs SET state = ?, updated_at = ? WHERE key = ? AND state = 'dispatching'",
-    ).run(notDispatched ? "prepared" : "uncertain", Date.now(), key);
+      `UPDATE inputs SET state = CASE WHEN ? THEN
+        CASE WHEN json_extract(receipt, '$.mode') = 'queued' THEN 'queued' ELSE 'prepared' END
+        ELSE 'uncertain' END, updated_at = ? WHERE key = ? AND state = 'dispatching'`,
+    ).run(Number(notDispatched), Date.now(), key);
     // A failure before dispatch is safe to retry; the durable payload remains prepared.
   }
 
   clearInterruptedInputs(interruptedTurnIds: Map<string, string>): void {
-    const remove = this.db.prepare(`DELETE FROM inputs WHERE session_id = ? AND state = 'accepted'
+    const update = this.db.prepare(`UPDATE inputs SET state = 'uncertain', updated_at = ? WHERE session_id = ? AND state = 'accepted'
       AND json_extract(receipt, '$.turnId') = ?`);
-    for (const [sessionId, turnId] of interruptedTurnIds) remove.run(sessionId, turnId);
+    for (const [sessionId, turnId] of interruptedTurnIds) update.run(Date.now(), sessionId, turnId);
+  }
+
+  queueInput(key: string, messageId: string, payload: NonNullable<SessionInputRecord["payload"]>): SessionInputReceipt {
+    const receipt: SessionInputReceipt = { mode: "queued", turnId: null, messageId };
+    const result = this.db.prepare(`UPDATE inputs SET state = 'queued', receipt = ?, payload = ?, updated_at = ?
+      WHERE key = ? AND state = 'prepared'`).run(JSON.stringify(receipt), JSON.stringify(payload), Date.now(), key);
+    if (result.changes !== 1) throw new Error("Input is not ready to queue");
+    return receipt;
+  }
+
+  queuedInputs(sessionId: string): SessionInputRecord[] {
+    return (this.db.prepare("SELECT key FROM inputs WHERE session_id = ? AND state = 'queued' ORDER BY rowid")
+      .all(sessionId) as { key: string }[]).map(({ key }) => this.getInput(key)!);
+  }
+
+  queuedSessionIds(): string[] {
+    return (this.db.prepare("SELECT DISTINCT session_id FROM inputs WHERE state = 'queued'")
+      .all() as { session_id: string }[]).map((row) => row.session_id);
+  }
+
+  cancelQueuedInputs(sessionId: string): void {
+    this.db.prepare(`UPDATE inputs SET state = 'cancelled', updated_at = ?
+      WHERE session_id = ? AND state IN ('prepared', 'queued')`).run(Date.now(), sessionId);
   }
 
   inputCount(): number {
@@ -260,16 +301,13 @@ export class SessionStore {
   }
 
   private prune(): void {
-    // Uncertain and unsent requests are user data, not an expiring dedupe cache.
-    this.db.prepare("DELETE FROM inputs WHERE state = 'accepted' AND updated_at < ?")
+    // Only receipts whose payload is no longer needed may expire. Native queue
+    // acceptance is not evidence that an input was executed or saved upstream.
+    this.db.prepare("DELETE FROM inputs WHERE (state = 'confirmed' OR (state = 'accepted' AND payload IS NULL)) AND updated_at < ?")
       .run(Date.now() - 7 * 24 * 60 * 60 * 1000);
     this.db.exec(`DELETE FROM inputs WHERE key IN (
-      SELECT key FROM inputs WHERE state = 'accepted' ORDER BY updated_at DESC LIMIT -1 OFFSET 500
-    )`);
-    this.db.prepare("DELETE FROM plans WHERE updated_at < ?")
-      .run(Date.now() - 30 * 24 * 60 * 60 * 1000);
-    this.db.exec(`DELETE FROM plans WHERE session_id IN (
-      SELECT session_id FROM plans ORDER BY updated_at DESC LIMIT -1 OFFSET 500
+      SELECT key FROM inputs WHERE state = 'confirmed' OR (state = 'accepted' AND payload IS NULL)
+      ORDER BY updated_at DESC LIMIT -1 OFFSET 500
     )`);
   }
 

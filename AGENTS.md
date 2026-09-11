@@ -332,6 +332,14 @@ specific agent provider.
   Snapshot/live `revision` identifies events covered by the latest snapshot,
   including delayed WebSocket deliveries after the HTTP response. It resets
   with the daemon and must never skip a reconnect refresh.
+- **Input delivery**: `SessionInputCoordinator` owns input serialization and
+  the SQLite queue. Set `capabilities.input.steer = false` when an adapter
+  cannot accept input during a turn. A `queued` receipt means the host saved
+  the payload; it does not mean execution started. Native acceptance is also
+  not proof of durable completion. Keep unconfirmed payloads and block retries
+  with an uncertain delivery result. Only set `inputNotDispatched` on a provider
+  error when the prompt was never sent. Stop/archive cancel queued rows before
+  interruption, and shutdown retains queued rows without starting new work.
 - **Image-bearing tool results**: expose screenshots and other returned images
   through provider-neutral `ToolActivity.attachments`, not fabricated assistant
   messages. Shared normalization recognizes common OpenAI, MCP, and ACP content

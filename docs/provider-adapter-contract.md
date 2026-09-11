@@ -69,6 +69,16 @@ Session lifecycle:
 - `unarchiveSession`
 - `interruptTurn`
 
+`SessionInputCoordinator` serializes host input dispatch and saves queue payloads
+and receipts in SQLite. An adapter that cannot accept input while busy sets
+`input.steer` to `false`; the host returns `mode: "queued"` after saving the
+request. Only known unsent rows can run automatically after restart. Native
+acceptance does not confirm execution or durable history. Unknown sends keep
+their payload and return `input_delivery_uncertain` on retry. Stop and archive
+cancel queued rows before interruption; daemon shutdown retains those rows.
+Adapters can set `AgentProviderRequestError.inputNotDispatched` only when the
+prompt was never sent.
+
 Approvals:
 
 - `respondToPendingAction`
