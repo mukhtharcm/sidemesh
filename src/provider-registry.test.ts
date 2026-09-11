@@ -76,7 +76,7 @@ describe("provider registry", () => {
       {
         kind: "pi",
         displayName: "Pi",
-        defaultCommand: "sdk",
+        defaultCommand: "rpc",
         commandEnvironmentVariables: [
           "SIDEMESH_PI_AGENT_DIR",
           "SIDEMESH_PI_STATE_DIR",
@@ -254,7 +254,7 @@ describe("provider registry", () => {
     });
     assert.deepEqual(summarizeAgentProviderConfig(config), {
       kind: "pi",
-      command: "sdk",
+      command: "rpc",
     });
 
     const provider = createAgentProviderFromConfig(config);
@@ -270,7 +270,7 @@ describe("provider registry", () => {
     assert.equal(provider.capabilities.configuration.skillManagement, false);
     assert.equal(provider.capabilities.runtimeControls.model, true);
     assert.equal(provider.capabilities.runtimeControls.reasoningEffort, true);
-    assert.equal(provider.capabilities.interaction.userInput, false);
+    assert.equal(provider.capabilities.interaction.userInput, true);
   });
 
   it("loads and constructs the OpenCode provider", () => {

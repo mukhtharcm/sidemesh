@@ -19,7 +19,8 @@ import { AgentProviderRequestError, type AgentProvider, type AgentProviderEvents
 import type { PendingActionResponseInput } from "./approvals.js";
 import { AcpHost } from "./acp-host.js";
 import { importAcpxHistory } from "./acp-history.js";
-import { AcpTranscript, reconcileAcpReplay } from "./acp-transcript.js";
+import { AcpTranscript } from "./acp-transcript.js";
+import { reconcileSessionHistory } from "./session-history.js";
 import { SessionStore, type StoredProviderSession, type StoredSessionItem } from "./session-store.js";
 import { terminatePipeProcess } from "./terminal.js";
 import type { AcpxPermissionMode, ThreadRecord, SessionLogSnapshot, SessionRuntimeSummary,
@@ -376,7 +377,7 @@ export class AcpAgentProvider extends EventEmitter<AgentProviderEvents> implemen
           { sessionId: state.host.nativeSessionId!, cwd: record.cwd, mcpServers: [] }));
         writer.finish();
         const updates = state.replay.updates;
-        const reconciled = reconcileAcpReplay(this.db.readSessionItems(this.providerId, id), [...items.values()]);
+        const reconciled = reconcileSessionHistory(this.db.readSessionItems(this.providerId, id), [...items.values()].map((item) => ({ ...item, authority: "cache" })));
         this.db.replaceProviderHistory(this.providerId, this.record(id), reconciled);
         state.replay = undefined;
         this.applySessionOptions(id, response);

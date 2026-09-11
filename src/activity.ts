@@ -358,6 +358,8 @@ export function mergeActivity(
       ...incoming,
       createdAt: existing.createdAt,
       seq: existing.seq,
+      ...(incoming.summary ?? (existing as ContextCompactionActivity).summary
+        ? { summary: incoming.summary ?? (existing as ContextCompactionActivity).summary } : {}),
     };
   }
 
