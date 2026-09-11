@@ -26,7 +26,8 @@ function harness() {
   const result = { history, sessions, connects: 0, prompts: [] as string[], promptBlocks: [] as ContentBlock[][], images: false, loadFails: false, loadCalls: 0,
     onPrompt: null as (() => void) | null, deleteSupported: true, deleteFails: false, deleted: [] as string[],
     authMethods: [{ id: "first", name: "First account" }, { id: "second", name: "Second account" }] as AuthMethod[],
-    terminalAuthAdvertised: false, authenticateCalls: 0,
+    terminalAuthAdvertised: false, authenticateCalls: 0, logoutSupported: false, logoutCalls: 0, holdReady: false,
+    onLogout: null as (() => Promise<void>) | null,
     requireAuth: false, authenticated: "", loadSupported: true, closed: 0, configurationRequests: [] as unknown[],
     connect: async (app: ClientApp, cwd: string) => {
       result.connects++;
@@ -36,11 +37,12 @@ function harness() {
           result.terminalAuthAdvertised = params.clientCapabilities?.auth?.terminal === true;
           return { protocolVersion: PROTOCOL_VERSION,
           agentInfo: { name: "wire-fixture", version: "1" },
-          agentCapabilities: { loadSession: result.loadSupported, promptCapabilities: { image: result.images }, sessionCapabilities: {
+          agentCapabilities: { auth: result.logoutSupported ? { logout: {} } : {}, loadSession: result.loadSupported, promptCapabilities: { image: result.images }, sessionCapabilities: {
             list: {}, resume: {}, close: {}, ...(result.deleteSupported ? { delete: {} } : {}),
           } },
           authMethods: result.authMethods,
         }; })
+        .onRequest(methods.agent.logout, async () => { result.logoutCalls++; await result.onLogout?.(); return {}; })
         .onRequest(methods.agent.authenticate, ({ params }) => { result.authenticateCalls++; result.authenticated = params.methodId; return {}; })
         .onRequest(methods.agent.session.new, () => {
           if (result.requireAuth && !result.authenticated) throw RequestError.authRequired();
@@ -97,6 +99,7 @@ function harness() {
           if (text === "hold") {
             await new Promise<void>((resolve) => {
               held.set(params.sessionId, resolve);
+              result.holdReady = true;
               signal.addEventListener("abort", () => resolve(), { once: true });
             });
             held.delete(params.sessionId);
@@ -149,6 +152,30 @@ describe("AcpAgentProvider", () => {
     await provider.start();
   });
   afterEach(async () => { await provider.close(); store.close(); await rm(directory, { recursive: true, force: true }); });
+
+  it("gates sign-out, rejects active work, and preserves saved history", async () => {
+    await assert.rejects(provider.logout(), /No connected agent supports/);
+    wire.logoutSupported = true;
+    const done = completion(provider);
+    const created = await provider.createSession({ cwd: directory, input: textInput("hold"), overrides });
+    assert.equal(provider.capabilities.lifecycle.logout, true);
+    await assert.rejects(provider.logout(), /Wait for agent operations/);
+    while (!wire.holdReady) await new Promise((resolve) => setImmediate(resolve));
+    await provider.interruptTurn(created.thread.id, null);
+    await done;
+    let release!: () => void;
+    wire.onLogout = () => new Promise<void>((resolve) => { release = resolve; });
+    const signingOut = provider.logout();
+    await assert.rejects(provider.resumeSessionThread(created.thread.id), /sign-out is in progress/);
+    while (!release) await new Promise((resolve) => setImmediate(resolve));
+    release();
+    await signingOut;
+    assert.equal(wire.logoutCalls, 1);
+    assert.equal(provider.capabilities.lifecycle.logout, false);
+    assert.deepEqual(await provider.listLoadedSessionIds(), []);
+    assert.ok((await provider.readSessionSnapshot(created.thread.id)).messages.length > 0);
+    assert.deepEqual(wire.deleted, []);
+  });
 
   it("keeps archive separate from native deletion and deletes without loading history", async () => {
     const done = completion(provider);

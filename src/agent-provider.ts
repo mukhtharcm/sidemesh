@@ -259,6 +259,7 @@ export interface AgentProviderCapabilities {
   };
   lifecycle: {
     restart: boolean;
+    logout?: boolean;
   };
   usage: {
     accountLimits: boolean;
@@ -403,6 +404,7 @@ export interface AgentProviderCore extends EventEmitter<AgentProviderEvents> {
   start(): Promise<void>;
   close?(): Promise<void>;
   restart?(): Promise<void>;
+  logout?(): Promise<void>;
   health?(): Promise<boolean>;
   getVersion(): Promise<string>;
 }

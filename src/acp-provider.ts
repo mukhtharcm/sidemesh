@@ -116,6 +116,8 @@ export class AcpAgentProvider extends EventEmitter<AgentProviderEvents> implemen
   private store: SessionStore | null = null;
   private starting?: Promise<void>;
   private closed = false;
+  private signingOut = false;
+  private requestsInFlight = 0;
   private readonly sessions = new Map<string, ConnectedSession>();
   private readonly connecting = new Map<string, Promise<ConnectedSession>>();
   private readonly deleting = new Set<string>();
@@ -168,6 +170,22 @@ export class AcpAgentProvider extends EventEmitter<AgentProviderEvents> implemen
     await this.starting?.catch(() => {});
     if (!this.dependencies.sessionStore) this.store?.close();
     this.store = null;
+  }
+
+  async logout(): Promise<void> {
+    if (this.closed || this.signingOut || this.requestsInFlight || this.connecting.size || this.deleting.size ||
+        [...this.sessions.values()].some((state) => state.active || state.loading || state.disconnecting)) {
+      throw new AgentProviderRequestError("Wait for agent operations to finish before sign-out", 409);
+    }
+    const state = [...this.sessions.values()].find((state) =>
+      !state.transport.connection.signal.aborted && state.initialized.agentCapabilities?.auth?.logout);
+    if (!state) throw new AgentProviderRequestError("No connected agent supports sign-out", 409);
+    this.signingOut = true;
+    try {
+      await this.requestWithTimeout(state, state.transport.connection.agent.request(methods.agent.logout, {}));
+      await Promise.all([...this.sessions.values()].map((session) => this.disconnect(session)));
+      this.capabilities.lifecycle.logout = false;
+    } finally { this.signingOut = false; }
   }
 
   async health(): Promise<boolean> { return !this.closed; }
@@ -271,6 +289,7 @@ export class AcpAgentProvider extends EventEmitter<AgentProviderEvents> implemen
 
   async createSession(request: AgentCreateSessionRequest): Promise<AgentCreateSessionResult> {
     await this.start();
+    if (this.signingOut) throw new AgentProviderRequestError("Agent sign-out is in progress", 409);
     const id = `acp-${randomUUID()}`;
     this.db.saveProviderSession(this.providerId, { id, nativeId: null, cwd: resolve(request.cwd || this.cwd),
       name: null, preview: acpInputPreview(request.input).slice(0, 160), createdAt: Date.now(), updatedAt: Date.now(), archived: false, metadata: {} });
@@ -292,7 +311,7 @@ export class AcpAgentProvider extends EventEmitter<AgentProviderEvents> implemen
       if (state.active) throw new Error("Session is busy; the host must queue this input");
       prepared = await prepareAcpInput(request.input, state.initialized.agentCapabilities?.promptCapabilities);
       await this.applyControls(request.sessionId, state, request.overrides);
-      if (this.closed || state.active || this.deleting.has(request.sessionId)) throw new Error("Session is busy or closed");
+      if (this.closed || this.signingOut || state.active || this.deleting.has(request.sessionId)) throw new Error("Session is busy or closed");
     } catch (error) {
       throw new AgentProviderRequestError(errorMessage(error), 409, true);
     }
@@ -332,6 +351,7 @@ export class AcpAgentProvider extends EventEmitter<AgentProviderEvents> implemen
   async setSessionConfiguration(id: string, optionId: string, value: string | boolean): Promise<SessionRuntimeSummary | null> {
     const state = await this.ensureConnection(id);
     await state.loading;
+    if (this.signingOut) throw new AgentProviderRequestError("Agent sign-out is in progress", 409);
     const option = this.metadata(this.record(id)).runtime?.configurationOptions?.find((option) => option.id === optionId);
     if (!option || typeof option.value !== typeof value || (option.options && !option.options.some((entry) => entry.value === value))) {
       throw new AgentProviderRequestError("Unsupported session configuration value");
@@ -366,6 +386,7 @@ export class AcpAgentProvider extends EventEmitter<AgentProviderEvents> implemen
   }
 
   private async ensureConnection(id: string, loadSession = true): Promise<ConnectedSession> {
+    if (this.signingOut) throw new AgentProviderRequestError("Agent sign-out is in progress", 409);
     if (this.closed) throw new Error("ACP provider is closed");
     if (loadSession && this.deleting.has(id)) throw new AgentProviderRequestError("Session deletion is in progress", 409);
     const pending = this.connecting.get(id);
@@ -412,6 +433,7 @@ export class AcpAgentProvider extends EventEmitter<AgentProviderEvents> implemen
       if (state.initialized.protocolVersion !== PROTOCOL_VERSION) throw new Error("Unsupported ACP protocol version");
       const promptCapabilities = state.initialized.agentCapabilities?.promptCapabilities ?? {};
       this.applyPromptCapabilities(promptCapabilities);
+      this.capabilities.lifecycle.logout = Boolean(state.initialized.agentCapabilities?.auth?.logout);
       this.capabilities.sessions.delete = Boolean(state.initialized.agentCapabilities?.sessionCapabilities?.delete);
       this.db.saveProviderSession(this.providerId, { ...this.record(id), metadata: {
         ...this.metadata(this.record(id)), sessionDeletion: { commandHash: this.commandHash, supported: this.capabilities.sessions.delete },
@@ -442,7 +464,7 @@ export class AcpAgentProvider extends EventEmitter<AgentProviderEvents> implemen
   }
 
   private async refreshHistory(id: string, state: ConnectedSession): Promise<void> {
-    if (state.active || this.deleting.has(id) || !state.initialized.agentCapabilities?.loadSession) return;
+    if (this.signingOut || state.active || this.deleting.has(id) || !state.initialized.agentCapabilities?.loadSession) return;
     if (state.loading) return state.loading;
     state.loading = (async () => {
       const items = new Map<string, StoredSessionItem>();
@@ -525,7 +547,8 @@ export class AcpAgentProvider extends EventEmitter<AgentProviderEvents> implemen
     for (const category of ["model", "mode"] as const) {
       const value = overrides[category];
       if (!value) continue;
-      const option = this.metadata(this.record(id)).runtime?.configurationOptions?.find((option) => option.category === category);
+      if (this.signingOut) throw new AgentProviderRequestError("Agent sign-out is in progress", 409);
+    const option = this.metadata(this.record(id)).runtime?.configurationOptions?.find((option) => option.category === category);
       if (!option) throw new Error(`Agent does not offer a ${category} control`);
       if (option.value !== value) await this.setSessionConfiguration(id, option.id, value);
     }
@@ -563,6 +586,7 @@ export class AcpAgentProvider extends EventEmitter<AgentProviderEvents> implemen
   }
 
   private async discoverSessions(): Promise<void> {
+    if (this.signingOut) return;
     const state = [...this.sessions.values()].find((state) => state.initialized.agentCapabilities?.sessionCapabilities?.list && !state.active && !state.loading);
     if (!state) return;
     try {
@@ -609,12 +633,13 @@ export class AcpAgentProvider extends EventEmitter<AgentProviderEvents> implemen
   }
 
   private async requestWithTimeout<T>(state: ConnectedSession, request: Promise<T>, timeoutMs = 30_000): Promise<T> {
+    this.requestsInFlight++;
     const timer = setTimeout(() => {
       state.transport.connection.close(new Error("ACP request timed out"));
       void this.disconnect(state);
     }, timeoutMs);
     timer.unref();
-    try { return await request; } finally { clearTimeout(timer); }
+    try { return await request; } finally { clearTimeout(timer); this.requestsInFlight--; }
   }
 
   private async disconnect(state: ConnectedSession): Promise<void> {

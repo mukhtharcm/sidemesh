@@ -292,6 +292,15 @@ class ApiClient {
     );
   }
 
+  Future<void> logoutProvider(HostProfile host, String providerId) async {
+    await _post(
+      host,
+      '/api/admin/provider/${Uri.encodeComponent(providerId)}/logout',
+      body: const {},
+      operation: 'sign out of agent',
+    );
+  }
+
   Future<void> restartDaemon(HostProfile host) async {
     await _post(
       host,
