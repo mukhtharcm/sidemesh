@@ -29,6 +29,9 @@ void main() {
     SessionLocalStore.instance.resetMigrationState();
     final db = await SidemeshDb.instance;
     await db.delete('sessions');
+    await db.delete('session_logs');
+    await db.delete('session_outbox');
+    await db.delete('client_migrations');
     SharedPreferences.setMockInitialValues(<String, Object>{});
   });
 

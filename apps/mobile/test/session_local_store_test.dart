@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sidemesh_mobile/src/db.dart';
 import 'package:sidemesh_mobile/src/models.dart';
@@ -28,6 +30,9 @@ void main() {
     // Wipe DB before each test
     final db = await SidemeshDb.instance;
     await db.delete('sessions');
+    await db.delete('session_logs');
+    await db.delete('session_outbox');
+    await db.delete('client_migrations');
   });
 
   test('upsert and getRecentSessions', () async {
@@ -341,7 +346,9 @@ void main() {
     expect(favorites.first.id, 'old-fav');
 
     final prefs = await SharedPreferences.getInstance();
-    expect(prefs.getBool('sidemesh_sqflite_migrated_v1'), true);
+    expect(prefs.getStringList('sidemesh_session_favorites_v1'), ['host-1::old-fav']);
+    final db = await SidemeshDb.instance;
+    expect(await db.query('client_migrations'), hasLength(1));
   });
 
   test('clearAll wipes sessions and logs', () async {
@@ -361,6 +368,93 @@ void main() {
     expect(recents, isEmpty);
     expect(cachedLog, isNull);
   });
+  test('schema upgrade retains sessions and creates durable client storage', () async {
+    final store = SessionLocalStore.instance;
+    await store.upsertSessions(host, [_summary('kept')]);
+    final db = await SidemeshDb.instance;
+    await db.execute('DROP TABLE session_logs');
+    await db.execute('DROP TABLE session_outbox');
+    await db.execute('DROP TABLE client_migrations');
+    await db.execute('PRAGMA user_version = 2');
+    await SidemeshDb.close();
+    store.resetMigrationState();
+    expect((await store.getRecentSessions(host)).single.id, 'kept');
+    final upgraded = await SidemeshDb.instance;
+    expect((await upgraded.rawQuery('PRAGMA user_version')).single['user_version'], 3);
+    expect(await upgraded.query('session_outbox'), isEmpty);
+    await store.saveSessionLog(host, _log('kept'));
+    expect(await store.loadSessionLog(host, 'kept'), isNotNull);
+  });
+
+  test('transactional import preserves favorite recents, logs, and original preferences', () async {
+    final store = SessionLocalStore.instance;
+    const colonHost = HostProfile(id: 'host:one', label: 'Host', baseUrl: 'http://localhost', token: 'test');
+    final log = _log('session:one');
+    final now = DateTime.now().millisecondsSinceEpoch;
+    final original = jsonEncode({'cachedAt': now, 'log': log.toJson()});
+    SharedPreferences.setMockInitialValues({
+      'sidemesh_cached_recent_sessions_v1:host:one': jsonEncode([log.session.toJson()]),
+      'sidemesh_session_favorites_v1': ['host:one::session:one'],
+      'sidemesh_cached_session_log_v1:host:one:session:one': original,
+    });
+    final db = await SidemeshDb.instance;
+    await db.execute("CREATE TRIGGER reject_log_import BEFORE INSERT ON session_logs BEGIN SELECT RAISE(ABORT, 'fixture failure'); END");
+    await expectLater(store.ensureLoaded(), throwsA(isA<Exception>()));
+    expect(await db.query('sessions'), isEmpty);
+    expect(await db.query('client_migrations'), isEmpty);
+    await db.execute('DROP TRIGGER reject_log_import');
+    await store.ensureLoaded();
+    expect(store.isFavorite(colonHost, log.session.id), isTrue);
+    expect((await store.getRecentSessions(colonHost)).single.title, log.session.title);
+    expect((await store.loadSessionLog(colonHost, log.session.id))!.log.messages.single.text, 'hello');
+    expect((await SharedPreferences.getInstance()).getString('sidemesh_cached_session_log_v1:host:one:session:one'), original);
+    await SidemeshDb.close();
+    store.resetMigrationState();
+    expect((await store.loadSessionLog(colonHost, log.session.id))!.log.session.id, log.session.id);
+    await store.clearAll();
+    store.resetMigrationState();
+    expect(await store.loadSessionLog(colonHost, log.session.id), isNull);
+    expect(await store.getFavoriteSessions(colonHost), isEmpty);
+  });
+
+  test('cached drafts survive serialization and corrupt or expired cache rows are replaced', () async {
+    final store = SessionLocalStore.instance;
+    final log = SessionLog(
+      session: _summary('draft'), messages: const [], activities: const [],
+      pendingAction: null, history: null, revision: 9,
+      liveAssistantText: 'working', liveAssistantReasoning: 'thinking',
+    );
+    await store.saveSessionLog(host, log);
+    final cached = (await store.loadSessionLog(host, 'draft'))!.log;
+    expect(cached.liveAssistantText, 'working');
+    expect(cached.liveAssistantReasoning, 'thinking');
+    expect(cached.revision, 9);
+    final db = await SidemeshDb.instance;
+    await db.update('session_logs', {'payload': '{'});
+    expect(await store.loadSessionLog(host, 'draft'), isNull);
+    expect(await db.query('session_logs'), isEmpty);
+    await store.saveSessionLog(host, log);
+    await db.update('session_logs', {'cached_at': DateTime.now().subtract(const Duration(days: 15)).millisecondsSinceEpoch});
+    expect(await store.loadSessionLog(host, 'draft'), isNull);
+    await store.saveSessionLog(host, log);
+    await store.clearHost(host);
+    expect(await store.loadSessionLog(host, 'draft'), isNull);
+  });
+
+  test('log cache keeps the 20 most recently used rows', () async {
+    final store = SessionLocalStore.instance;
+    for (var i = 0; i < 20; i += 1) {
+      await store.saveSessionLog(host, _log('session-$i'));
+    }
+    final db = await SidemeshDb.instance;
+    await db.update('session_logs', {'last_used_at': 0});
+    await store.loadSessionLog(host, 'session-0');
+    await store.saveSessionLog(host, _log('session-new'));
+    expect(await db.query('session_logs'), hasLength(20));
+    expect(await store.loadSessionLog(host, 'session-0'), isNotNull);
+    expect(await store.loadSessionLog(host, 'session-1'), isNull);
+  });
+
 }
 
 SessionSummary _summary(

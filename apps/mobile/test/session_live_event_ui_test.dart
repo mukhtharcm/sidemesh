@@ -11,6 +11,7 @@ import 'package:sidemesh_mobile/src/db.dart';
 import 'package:sidemesh_mobile/src/models.dart';
 import 'package:sidemesh_mobile/src/screens/session_screen.dart';
 import 'package:sidemesh_mobile/src/session_local_store.dart';
+import 'package:sidemesh_mobile/src/session_send_outbox_store.dart';
 import 'package:sidemesh_mobile/src/theme/app_palettes.dart';
 import 'package:sidemesh_mobile/src/theme/app_theme.dart';
 import 'package:stream_channel/stream_channel.dart';
@@ -27,7 +28,58 @@ void main() {
     SessionLocalStore.instance.resetMigrationState();
     final db = await SidemeshDb.instance;
     await db.delete('sessions');
+    await db.delete('session_logs');
+    await db.delete('session_outbox');
+    await db.delete('client_migrations');
     SharedPreferences.setMockInitialValues(<String, Object>{});
+  });
+
+  testWidgets('pending cleanup requires the same client identity for repeated text', (tester) async {
+    final session = _session('pending-identity');
+    final host = _host(session.id);
+    final now = DateTime.now();
+    final pending = PendingSessionSend(
+      hostId: host.id, hostFingerprint: SessionSendOutboxStore.hostFingerprint(host),
+      sessionId: session.id, clientMessageId: 'pending-client-id', text: 'Repeat this message',
+      inputItems: const [SessionInputItem.text('Repeat this message')],
+      message: SessionMessage(id: 'pending-client-id', role: 'user', text: 'Repeat this message',
+        attachments: const [], createdAt: now, seq: 2),
+      createdAt: now, updatedAt: now, nextAttemptAt: now, retryCount: 0, blocked: true,
+    );
+    final outbox = SessionSendOutboxStore.instance;
+    await outbox.upsert(pending);
+    final api = _RichEventFakeApi(sessionSummary: session, messages: [
+      SessionMessage(id: 'different-native-id', role: 'user', text: pending.text,
+        attachments: const [], createdAt: now, seq: 1),
+    ]);
+    addTearDown(api.dispose);
+    await _pumpApp(tester, SessionScreen(host: host, session: session, api: api, desktopMode: true),
+      size: const Size(1180, 900));
+    await _pumpFrames(tester);
+    api.emit({'type': 'hello', 'sessionId': session.id});
+    await _pumpFrames(tester);
+    expect(await outbox.contains(pending), isTrue);
+    expect(find.text('1 message needs attention'), findsOneWidget);
+    api.messages = [pending.message];
+    api.emit({'type': 'hello', 'sessionId': session.id});
+    await _pumpFrames(tester);
+    expect(await outbox.contains(pending), isFalse);
+    expect(find.text('1 message needs attention'), findsNothing);
+  });
+
+  testWidgets('cached live text remains visible while the host is offline', (tester) async {
+    final session = _session('cached-live-text', status: 'running');
+    final host = _host(session.id);
+    await _saveSessionLog(tester,host, SessionLog(
+      session: session, messages: const [], activities: const [], pendingAction: null, history: null,
+      liveAssistantText: 'Draft saved before disconnect', liveAssistantReasoning: 'Saved reasoning',
+    ));
+    final api = _RichEventFakeApi(sessionSummary: session, fetchLogError: StateError('offline'));
+    addTearDown(api.dispose);
+    await _pumpApp(tester, SessionScreen(host: host, session: session, api: api, desktopMode: true),
+      size: const Size(1180, 900));
+    await _pumpFrames(tester);
+    expect(find.text('Draft saved before disconnect'), findsOneWidget);
   });
 
   testWidgets('snapshot draft and buffered live text join exactly once', (tester) async {
@@ -865,7 +917,7 @@ void main() {
     );
     addTearDown(api.dispose);
 
-    await SessionLocalStore.instance.saveSessionLog(
+    await _saveSessionLog(tester,
       host,
       SessionLog(
         session: session,
@@ -1093,7 +1145,7 @@ void main() {
       );
       addTearDown(api.dispose);
 
-      await SessionLocalStore.instance.saveSessionLog(
+      await _saveSessionLog(tester,
         host,
         SessionLog(
           session: session,
@@ -1208,7 +1260,7 @@ void main() {
     );
     addTearDown(api.dispose);
 
-    await SessionLocalStore.instance.saveSessionLog(
+    await _saveSessionLog(tester,
       host,
       SessionLog(
         session: session,
@@ -1277,7 +1329,7 @@ void main() {
       );
       addTearDown(api.dispose);
 
-      await SessionLocalStore.instance.saveSessionLog(
+      await _saveSessionLog(tester,
         host,
         SessionLog(
           session: session,
@@ -1306,7 +1358,7 @@ void main() {
       );
       await _pumpFrames(tester);
 
-      final cached = await SessionLocalStore.instance.loadSessionLog(
+      final cached = await _loadSessionLog(tester,
         host,
         session.id,
       );
@@ -1333,7 +1385,7 @@ void main() {
     );
     addTearDown(api.dispose);
 
-    await SessionLocalStore.instance.saveSessionLog(
+    await _saveSessionLog(tester,
       host,
       SessionLog(
         session: session,
@@ -1388,7 +1440,7 @@ void main() {
       );
       addTearDown(api.dispose);
 
-      await SessionLocalStore.instance.saveSessionLog(
+      await _saveSessionLog(tester,
         host,
         SessionLog(
           session: session,
@@ -1455,7 +1507,7 @@ void main() {
       );
       addTearDown(api.dispose);
 
-      await SessionLocalStore.instance.saveSessionLog(
+      await _saveSessionLog(tester,
         host,
         SessionLog(
           session: session,
@@ -1560,7 +1612,7 @@ void main() {
     );
     addTearDown(api.dispose);
 
-    await SessionLocalStore.instance.saveSessionLog(
+    await _saveSessionLog(tester,
       host,
       SessionLog(
         session: session,
@@ -2185,6 +2237,14 @@ void main() {
       expect(find.text('Agent stopped.'), findsOneWidget);
     },
   );
+}
+
+Future<void> _saveSessionLog(WidgetTester tester, HostProfile host, SessionLog log) async {
+  await tester.runAsync(() => SessionLocalStore.instance.saveSessionLog(host, log));
+}
+
+Future<CachedSessionLog?> _loadSessionLog(WidgetTester tester, HostProfile host, String sessionId) {
+  return tester.runAsync<CachedSessionLog?>(() => SessionLocalStore.instance.loadSessionLog(host, sessionId));
 }
 
 Future<void> _pumpFrames(WidgetTester tester) async {

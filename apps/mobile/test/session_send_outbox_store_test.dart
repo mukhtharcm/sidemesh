@@ -1,9 +1,16 @@
+import 'dart:convert';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:sidemesh_mobile/src/db.dart';
 import 'package:sidemesh_mobile/src/models.dart';
 import 'package:sidemesh_mobile/src/session_send_outbox_store.dart';
 
+import 'test_path_provider.dart';
+
 void main() {
+  setUpAll(configureTestDatabaseFactory);
+  tearDownAll(SidemeshDb.close);
   const host = HostProfile(
     id: 'host-1',
     label: 'MacBook',
@@ -11,8 +18,11 @@ void main() {
     token: 'secret',
   );
 
-  setUp(() {
+  setUp(() async {
     SharedPreferences.setMockInitialValues({});
+    final db = await SidemeshDb.instance;
+    await db.delete('session_outbox');
+    await db.delete('client_migrations');
   });
 
   test(
@@ -33,7 +43,7 @@ void main() {
     },
   );
 
-  test('rejects oversized payloads instead of bloating preferences', () async {
+  test('rejects oversized payloads without changing saved messages', () async {
     final store = SessionSendOutboxStore.instance;
     final oversized = _pendingSend(
       host,
@@ -130,6 +140,75 @@ void main() {
     expect(loaded, hasLength(1));
     expect(loaded.single.lastError, isNull);
   });
+  test('imports old pending messages once and keeps them after database reopen', () async {
+    final store = SessionSendOutboxStore.instance;
+    final entry = _pendingSend(host, sessionId: 'session:with:colons');
+    final json = entry.toJson();
+    json['createdAt'] = DateTime.now().subtract(const Duration(days: 90)).millisecondsSinceEpoch;
+    final original = jsonEncode([json]);
+    SharedPreferences.setMockInitialValues({'sidemesh_pending_session_sends_v1': original});
+    expect((await store.loadAll()).single.createdAt, isNot(entry.createdAt));
+    await SidemeshDb.close();
+    expect((await store.loadForSession(host, entry.sessionId)).single.clientMessageId, entry.clientMessageId);
+    expect((await SharedPreferences.getInstance()).getString('sidemesh_pending_session_sends_v1'), original);
+    await store.remove(entry);
+    await SidemeshDb.close();
+    expect(await store.loadAll(), isEmpty);
+  });
+
+  test('failed legacy import rolls back and keeps its source for retry', () async {
+    final store = SessionSendOutboxStore.instance;
+    final entry = _pendingSend(host, sessionId: 'session-1');
+    final original = jsonEncode([entry.toJson(), {'inputItems': []}]);
+    SharedPreferences.setMockInitialValues({'sidemesh_pending_session_sends_v1': original});
+    await expectLater(store.loadAll(), throwsFormatException);
+    final db = await SidemeshDb.instance;
+    expect(await db.query('session_outbox'), isEmpty);
+    expect(await db.query('client_migrations'), isEmpty);
+    final prefs = await SharedPreferences.getInstance();
+    expect(prefs.getString('sidemesh_pending_session_sends_v1'), original);
+    await prefs.setString('sidemesh_pending_session_sends_v1', jsonEncode([entry.toJson()]));
+    expect(await store.loadAll(), hasLength(1));
+    await store.clearAll();
+    expect(await store.loadAll(), isEmpty);
+  });
+
+  test('full outbox rejects another entry without evicting pending messages', () async {
+    final store = SessionSendOutboxStore.instance;
+    for (var i = 0; i < 20; i += 1) {
+      expect(await store.upsert(_pendingSend(host, sessionId: 'session-$i')), isTrue);
+    }
+    expect(await store.upsert(_pendingSend(host, sessionId: 'overflow')), isFalse);
+    expect(await store.loadAll(), hasLength(20));
+    expect(await store.contains(_pendingSend(host, sessionId: 'session-0')), isTrue);
+    expect(await store.upsert(_pendingSend(host, sessionId: 'session-0').copyWith(lastError: 'offline')), isTrue);
+  });
+
+  test('byte limit and identity collision leave existing rows unchanged', () async {
+    final store = SessionSendOutboxStore.instance;
+    final large = _pendingSend(host, sessionId: 'large', inputItems: [SessionInputItem.text('a' * (170 * 1024))]);
+    final second = _pendingSend(host, sessionId: 'second', inputItems: large.inputItems);
+    final third = _pendingSend(host, sessionId: 'third', inputItems: large.inputItems);
+    expect(await store.upsert(large), isTrue);
+    expect(await store.upsert(second), isTrue);
+    expect(await store.upsert(third), isTrue);
+    expect(await store.upsert(_pendingSend(host, sessionId: 'overflow', inputItems: [SessionInputItem.text('b' * 4096)])), isFalse);
+    expect(await store.replaceIfPresent(large, second), isFalse);
+    expect(await store.contains(large), isTrue);
+    expect(await store.loadAll(), hasLength(3));
+  });
+
+  test('column identities distinguish colon-delimited message keys', () async {
+    final store = SessionSendOutboxStore.instance;
+    final first = _pendingSend(host, sessionId: 'session:part', clientMessageId: 'message');
+    final second = _pendingSend(host, sessionId: 'session', clientMessageId: 'part:message');
+    expect(first.key, isNot(second.key));
+    expect(await store.upsert(first), isTrue);
+    expect(await store.upsert(second), isTrue);
+    await store.remove(first);
+    expect(await store.contains(second), isTrue);
+  });
+
 }
 
 PendingSessionSend _pendingSend(

@@ -413,6 +413,12 @@ specific agent provider.
 - **Cached session verification**: cached transcripts remain stale until a full
   snapshot succeeds. Provider timestamps may be coarse and existing rows can
   change without a new transcript sequence number.
+- **Client storage**: transcripts and pending sends use the existing SQLite
+  database. Import preferences and the import marker in one transaction; keep
+  the source preferences as a backup. Clearing data must keep the marker so
+  that old messages and favorites cannot return. Pending sends have no expiry
+  and must never be evicted to make space. Reject a save that exceeds capacity.
+  Match sent messages by client input identity, never by repeated text and time.
 - **Workspace sandboxing**: `resolveWorkspacePath` uses `realpath` and prefix
   match against workspace roots. `WorkspaceAccessError` extends `Error` with
   a `status` field (default 403) that HTTP handlers can throw directly. Roots

@@ -3,6 +3,7 @@ import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:sqflite/sqflite.dart';
 
 import 'db.dart';
 import 'models.dart';
@@ -24,7 +25,7 @@ class SessionLocalStore extends ChangeNotifier {
 
   bool _migrated = false;
   Future<void>? _migrationFuture;
-  Future<void> _operationQueue = Future<void>.value();
+  Future<void>? _operationQueue;
   int _pendingOperationCount = 0;
   Completer<void>? _idleCompleter;
 
@@ -35,7 +36,7 @@ class SessionLocalStore extends ChangeNotifier {
     _favoritesLoaded = false;
     _favoritesLoadFuture = null;
     _favoriteKeys.clear();
-    _operationQueue = Future<void>.value();
+    _operationQueue = null;
     _pendingOperationCount = 0;
     _idleCompleter = null;
   }
@@ -69,13 +70,15 @@ class SessionLocalStore extends ChangeNotifier {
   Future<T> _trackOperation<T>(Future<T> Function() action) {
     _pendingOperationCount += 1;
     _idleCompleter ??= Completer<void>();
-    final queued = _operationQueue
-        .catchError((error) {})
-        .then<T>((_) => action());
+    final previous = _operationQueue;
+    final queued = previous == null
+        ? Future<T>.sync(action)
+        : previous.catchError((error) {}).then<T>((_) => action());
     _operationQueue = queued.then<void>((_) {}, onError: (error, stackTrace) {});
     return queued.whenComplete(() {
       _pendingOperationCount -= 1;
       if (_pendingOperationCount == 0) {
+        _operationQueue = null;
         _idleCompleter?.complete();
         _idleCompleter = null;
       }
@@ -142,12 +145,12 @@ class SessionLocalStore extends ChangeNotifier {
       final key = _favoriteKey(host.id, sessionId);
       final current = _favoriteKeys.contains(key);
       final next = !current;
+      await _persistFavoriteFlag(host, sessionId, favorite: next);
       if (next) {
         _favoriteKeys.add(key);
       } else {
         _favoriteKeys.remove(key);
       }
-      await _persistFavoriteFlag(host, sessionId, favorite: next);
       notifyListeners();
       return next;
     });
@@ -163,12 +166,12 @@ class SessionLocalStore extends ChangeNotifier {
       final key = _favoriteKey(host.id, sessionId);
       final current = _favoriteKeys.contains(key);
       if (current == favorite) return;
+      await _persistFavoriteFlag(host, sessionId, favorite: favorite);
       if (favorite) {
         _favoriteKeys.add(key);
       } else {
         _favoriteKeys.remove(key);
       }
-      await _persistFavoriteFlag(host, sessionId, favorite: favorite);
       notifyListeners();
     });
   }
@@ -419,7 +422,10 @@ class SessionLocalStore extends ChangeNotifier {
     return _trackOperation(() async {
       await _ensureMigrated();
       final db = await SidemeshDb.instance;
-      await db.delete('sessions', where: 'host_id = ?', whereArgs: [host.id]);
+      await db.transaction((txn) async {
+        await txn.delete('sessions', where: 'host_id = ?', whereArgs: [host.id]);
+        await txn.delete('session_logs', where: 'host_id = ?', whereArgs: [host.id]);
+      });
       _favoriteKeys.removeWhere((key) => key.startsWith('${host.id}::'));
     });
   }
@@ -480,10 +486,9 @@ class SessionLocalStore extends ChangeNotifier {
     );
   }
 
-  // ─── Session log cache (SharedPreferences — small data, best-effort) ───
+  // ─── Session log cache ───
 
   static const _logPrefix = 'sidemesh_cached_session_log_v1';
-  static const _logIndexKey = 'sidemesh_cached_session_log_index_v1';
   static const _maxSessionLogCacheChars = 2 * 1024 * 1024;
   static const _maxSessionLogEntries = 20;
   static const _sessionLogTtl = Duration(days: 14);
@@ -491,274 +496,181 @@ class SessionLocalStore extends ChangeNotifier {
   Future<CachedSessionLog?> loadSessionLog(
     HostProfile host,
     String sessionId,
-  ) async {
-    final prefs = await SharedPreferences.getInstance();
-    final key = _logKey(host, sessionId);
-    final raw = prefs.getString(key);
-    if (raw == null || raw.isEmpty) return null;
-    try {
-      final decoded = jsonDecode(raw);
-      if (decoded is! Map<String, dynamic>) return null;
-      final cachedAtMs = decoded['cachedAt'];
-      final logJson = decoded['log'];
-      if (cachedAtMs is! int || logJson is! Map<String, dynamic>) return null;
-      final cachedAt = DateTime.fromMillisecondsSinceEpoch(cachedAtMs);
-      if (DateTime.now().difference(cachedAt) > _sessionLogTtl) {
-        await prefs.remove(key);
-        await _removeLogIndexEntry(prefs, key);
-        return null;
+  ) {
+    return _trackOperation(() async {
+      await _ensureMigrated();
+      final db = await SidemeshDb.instance;
+      final rows = await db.query('session_logs',
+        where: 'host_id = ? AND session_id = ?', whereArgs: [host.id, sessionId]);
+      if (rows.isEmpty) return null;
+      final row = rows.single;
+      CachedSessionLog? cached;
+      try {
+        final cachedAt = DateTime.fromMillisecondsSinceEpoch(row['cached_at'] as int);
+        if (DateTime.now().difference(cachedAt) <= _sessionLogTtl) {
+          final log = SessionLog.fromJson(jsonDecode(row['payload'] as String) as Map<String, dynamic>);
+          if (log.session.id == sessionId) cached = CachedSessionLog(log: log, cachedAt: cachedAt);
+        }
+      } catch (_) {
+        // A cache can be replaced by the next complete server snapshot.
       }
-      final log = SessionLog.fromJson(logJson);
-      await _touchLogIndex(prefs, key);
-      return CachedSessionLog(log: log, cachedAt: cachedAt);
-    } catch (_) {
-      await prefs.remove(key);
-      await _removeLogIndexEntry(prefs, key);
-      return null;
-    }
-  }
-
-  Future<void> saveSessionLog(HostProfile host, SessionLog log) async {
-    final prefs = await SharedPreferences.getInstance();
-    final encoded = jsonEncode({
-      'cachedAt': DateTime.now().millisecondsSinceEpoch,
-      'log': log.toJson(),
+      if (cached == null) {
+        await db.delete('session_logs',
+          where: 'host_id = ? AND session_id = ?', whereArgs: [host.id, sessionId]);
+      } else {
+        await db.update('session_logs', {'last_used_at': DateTime.now().millisecondsSinceEpoch},
+          where: 'host_id = ? AND session_id = ?', whereArgs: [host.id, sessionId]);
+      }
+      return cached;
     });
-    final key = _logKey(host, log.session.id);
-    if (encoded.length > _maxSessionLogCacheChars) {
-      await prefs.remove(key);
-      await _removeLogIndexEntry(prefs, key);
-      return;
-    }
-    await prefs.setString(key, encoded);
-    final now = DateTime.now();
-    await _updateLogIndex(prefs, key, cachedAt: now, lastUsedAt: now);
   }
 
-  Future<void> clearHostLogs(HostProfile host) async {
-    final prefs = await SharedPreferences.getInstance();
-    final logPrefix = '$_logPrefix:${host.id}';
-    for (final key in prefs.getKeys().toList(growable: false)) {
-      if (key.startsWith('$logPrefix:')) {
-        await prefs.remove(key);
+  Future<void> saveSessionLog(HostProfile host, SessionLog log) {
+    return _trackOperation(() async {
+      await _ensureMigrated();
+      final db = await SidemeshDb.instance;
+      final encoded = jsonEncode(log.toJson());
+      if (encoded.length > _maxSessionLogCacheChars) {
+        await db.delete('session_logs', where: 'host_id = ? AND session_id = ?',
+          whereArgs: [host.id, log.session.id]);
+        return;
       }
-    }
-    final index = await _loadLogIndex(prefs);
-    final filtered = index
-        .where((entry) => !entry.key.startsWith('$logPrefix:'))
-        .toList(growable: false);
-    await _saveLogIndex(prefs, filtered);
+      final now = DateTime.now().millisecondsSinceEpoch;
+      await db.transaction((txn) async {
+        await txn.insert('session_logs', {
+          'host_id': host.id, 'session_id': log.session.id,
+          'cached_at': now, 'last_used_at': now, 'payload': encoded,
+        }, conflictAlgorithm: ConflictAlgorithm.replace);
+        await _pruneLogCache(txn);
+      });
+    });
   }
 
-  Future<void> clearAll() async {
-    await _ensureMigrated();
-    final db = await SidemeshDb.instance;
-    await db.delete('sessions');
-    _favoriteKeys.clear();
-    await clearAllLogs();
+  Future<void> clearHostLogs(HostProfile host) {
+    return _trackOperation(() async {
+      await _ensureMigrated();
+      final db = await SidemeshDb.instance;
+      await db.delete('session_logs', where: 'host_id = ?', whereArgs: [host.id]);
+    });
   }
 
-  Future<void> clearAllLogs() async {
-    final prefs = await SharedPreferences.getInstance();
-    for (final key in prefs.getKeys().toList(growable: false)) {
-      if (key.startsWith('$_logPrefix:')) {
-        await prefs.remove(key);
-      }
-    }
-    await prefs.remove(_logIndexKey);
+  Future<void> clearAll() {
+    return _trackOperation(() async {
+      await _ensureMigrated();
+      final db = await SidemeshDb.instance;
+      await db.transaction((txn) async {
+        await txn.delete('sessions');
+        await txn.delete('session_logs');
+      });
+      _favoriteKeys.clear();
+      notifyListeners();
+    });
   }
 
-  String _logKey(HostProfile host, String sessionId) =>
-      '$_logPrefix:${host.id}:$sessionId';
-
-  // ─── Log index helpers ───
-
-  Future<List<_LogCacheIndexEntry>> _loadLogIndex(
-    SharedPreferences prefs,
-  ) async {
-    final raw = prefs.getString(_logIndexKey);
-    if (raw == null || raw.isEmpty) return const <_LogCacheIndexEntry>[];
-    try {
-      final decoded = jsonDecode(raw);
-      if (decoded is! List<dynamic>) return const <_LogCacheIndexEntry>[];
-      return decoded
-          .whereType<Map<String, dynamic>>()
-          .map(_LogCacheIndexEntry.fromJson)
-          .where((entry) => entry.key.isNotEmpty)
-          .toList(growable: false);
-    } catch (_) {
-      await prefs.remove(_logIndexKey);
-      return const <_LogCacheIndexEntry>[];
-    }
+  Future<void> clearAllLogs() {
+    return _trackOperation(() async {
+      await _ensureMigrated();
+      final db = await SidemeshDb.instance;
+      await db.delete('session_logs');
+    });
   }
 
-  Future<void> _saveLogIndex(
-    SharedPreferences prefs,
-    List<_LogCacheIndexEntry> entries,
-  ) async {
-    if (entries.isEmpty) {
-      await prefs.remove(_logIndexKey);
-      return;
-    }
-    await prefs.setString(
-      _logIndexKey,
-      jsonEncode(entries.map((entry) => entry.toJson()).toList()),
+  Future<void> _pruneLogCache(DatabaseExecutor db) async {
+    await db.delete('session_logs', where: 'cached_at < ?',
+      whereArgs: [DateTime.now().subtract(_sessionLogTtl).millisecondsSinceEpoch]);
+    await db.execute(
+      'DELETE FROM session_logs WHERE rowid NOT IN '
+      '(SELECT rowid FROM session_logs ORDER BY last_used_at DESC, rowid DESC LIMIT ?)',
+      [_maxSessionLogEntries],
     );
   }
 
-  Future<void> _touchLogIndex(SharedPreferences prefs, String key) async {
-    final index = await _loadLogIndex(prefs);
-    final now = DateTime.now();
-    final updated = index
-        .map(
-          (entry) => entry.key == key ? entry.copyWith(lastUsedAt: now) : entry,
-        )
-        .toList(growable: false);
-    await _pruneLogCache(prefs, updated);
-  }
-
-  Future<void> _updateLogIndex(
-    SharedPreferences prefs,
-    String key, {
-    required DateTime cachedAt,
-    required DateTime lastUsedAt,
-  }) async {
-    final index = await _loadLogIndex(prefs);
-    final updated = [
-      ...index.where((entry) => entry.key != key),
-      _LogCacheIndexEntry(key: key, cachedAt: cachedAt, lastUsedAt: lastUsedAt),
-    ];
-    await _pruneLogCache(prefs, updated);
-  }
-
-  Future<void> _removeLogIndexEntry(SharedPreferences prefs, String key) async {
-    final index = await _loadLogIndex(prefs);
-    final updated = index
-        .where((entry) => entry.key != key)
-        .toList(growable: false);
-    await _saveLogIndex(prefs, updated);
-  }
-
-  Future<void> _pruneLogCache(
-    SharedPreferences prefs,
-    List<_LogCacheIndexEntry> index,
-  ) async {
-    final now = DateTime.now();
-    final valid = <_LogCacheIndexEntry>[];
-    for (final entry in index) {
-      if (now.difference(entry.cachedAt) > _sessionLogTtl) {
-        await prefs.remove(entry.key);
-      } else {
-        valid.add(entry);
-      }
-    }
-    valid.sort((left, right) => right.lastUsedAt.compareTo(left.lastUsedAt));
-
-    final kept = valid.take(_maxSessionLogEntries).toList(growable: false);
-    final keptKeys = kept.map((entry) => entry.key).toSet();
-    for (final entry in valid.skip(_maxSessionLogEntries)) {
-      await prefs.remove(entry.key);
-    }
-    for (final key in prefs.getKeys().toList(growable: false)) {
-      if (key.startsWith('$_logPrefix:') && !keptKeys.contains(key)) {
-        await prefs.remove(key);
-      }
-    }
-    await _saveLogIndex(prefs, kept);
-  }
-
-  // ─── Migration from SharedPreferences ───
+  // ─── Transactional import; preferences remain as the original backup ───
 
   Future<void> _migrateFromSharedPreferences() async {
-    final prefs = await SharedPreferences.getInstance();
-    if (prefs.getBool('sidemesh_sqflite_migrated_v1') == true) return;
-
-    // 1. Migrate session cache
-    final oldCache = SessionCacheStoreInternal();
-    final hosts = await oldCache._loadHostIds();
-    for (final hostId in hosts) {
-      final cached = await oldCache._loadRecentSessionsForHost(hostId);
-      if (cached.isEmpty) continue;
-      final db = await SidemeshDb.instance;
-      final now = DateTime.now().millisecondsSinceEpoch;
-      final batch = db.batch();
-      for (final s in cached) {
-        batch.execute(
-          '''
-          INSERT INTO sessions (
-            host_id, session_id, title, preview, cwd, provider, status,
-            created_at, updated_at, runtime_json, git_info_json,
-            is_sub_agent, sub_agent_json,
-            is_favorite, source, cached_at
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 'recent', ?)
-          ON CONFLICT(host_id, session_id) DO UPDATE SET
-            title = excluded.title,
-            preview = excluded.preview,
-            cwd = excluded.cwd,
-            provider = excluded.provider,
-            status = excluded.status,
-            created_at = excluded.created_at,
-            updated_at = excluded.updated_at,
-            runtime_json = excluded.runtime_json,
-            git_info_json = excluded.git_info_json,
-            is_sub_agent = excluded.is_sub_agent,
-            sub_agent_json = excluded.sub_agent_json,
-            source = excluded.source,
-            cached_at = excluded.cached_at
-        ''',
-          [
-            hostId,
-            s.id,
-            s.title,
-            s.preview,
-            s.cwd,
-            s.provider,
-            s.status,
-            s.createdAt.millisecondsSinceEpoch,
-            s.updatedAt.millisecondsSinceEpoch,
-            s.runtime != null ? jsonEncode(s.runtime!.toJson()) : null,
-            s.gitInfo != null ? jsonEncode(s.gitInfo!.toJson()) : null,
-            s.isSubAgent ? 1 : 0,
-            _encodeSubAgentInfo(s.subAgent),
-            now,
-          ],
-        );
-      }
-      await batch.commit(noResult: true);
-    }
-
-    // 2. Migrate favorites
-    final oldFavorites = SessionFavoritesStoreInternal();
-    await oldFavorites._load();
     final db = await SidemeshDb.instance;
-    final now = DateTime.now().millisecondsSinceEpoch;
-    for (final key in oldFavorites._favoriteKeys) {
-      final parts = key.split('::');
-      if (parts.length != 2) continue;
-      final hostId = parts[0];
-      final sessionId = parts[1];
-      await db.rawInsert(
-        '''
-        INSERT OR IGNORE INTO sessions (
-          host_id, session_id, title, preview, cwd, status,
-          created_at, updated_at, is_sub_agent, sub_agent_json,
-          is_favorite, source, cached_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, NULL, 1, 'favorite', ?)
-      ''',
-        [hostId, sessionId, 'Unknown', '', '', 'unknown', 0, 0, now],
-      );
-    }
-
-    // 3. Flip migration flag
-    await prefs.setBool('sidemesh_sqflite_migrated_v1', true);
-
-    // 4. Best-effort cleanup of old prefs keys
-    await prefs.remove('sidemesh_session_favorites_v1');
-    for (final key in prefs.getKeys().toList(growable: false)) {
-      if (key.startsWith('sidemesh_cached_recent_sessions_v1:')) {
-        await prefs.remove(key);
+    final prefs = await SharedPreferences.getInstance();
+    const migration = 'session-cache-prefs-v1';
+    await db.transaction((txn) async {
+      if ((await txn.query('client_migrations',
+        where: 'name = ?', whereArgs: [migration])).isNotEmpty) {
+        return;
       }
-    }
+      final now = DateTime.now().millisecondsSinceEpoch;
+      if (prefs.getBool('sidemesh_sqflite_migrated_v1') != true) {
+        const recentPrefix = 'sidemesh_cached_recent_sessions_v1:';
+        for (final key in prefs.getKeys().where((key) => key.startsWith(recentPrefix))) {
+          final hostId = key.substring(recentPrefix.length);
+          if (hostId.isEmpty) continue;
+          List<SessionSummary> sessions;
+          try {
+            sessions = (jsonDecode(prefs.getString(key)!) as List)
+                .map((item) => SessionSummary.fromJson(item as Map<String, dynamic>)).toList();
+          } catch (_) {
+            continue;
+          }
+          for (final session in sessions) {
+            if (session.id.isEmpty) continue;
+            await txn.insert('sessions', {
+              'host_id': hostId, 'session_id': session.id,
+              'title': session.title, 'preview': session.preview, 'cwd': session.cwd,
+              'provider': session.provider, 'status': session.status,
+              'created_at': session.createdAt.millisecondsSinceEpoch,
+              'updated_at': session.updatedAt.millisecondsSinceEpoch,
+              'runtime_json': session.runtime == null ? null : jsonEncode(session.runtime!.toJson()),
+              'git_info_json': session.gitInfo == null ? null : jsonEncode(session.gitInfo!.toJson()),
+              'is_sub_agent': session.isSubAgent ? 1 : 0,
+              'sub_agent_json': _encodeSubAgentInfo(session.subAgent),
+              'source': 'recent', 'cached_at': now,
+            }, conflictAlgorithm: ConflictAlgorithm.ignore);
+          }
+        }
+        for (final key in prefs.getStringList('sidemesh_session_favorites_v1') ?? const <String>[]) {
+          final separator = key.indexOf('::');
+          if (separator <= 0 || separator + 2 >= key.length) continue;
+          await txn.rawInsert(
+            "INSERT INTO sessions (host_id, session_id, title, preview, cwd, status, "
+            "created_at, updated_at, is_favorite, source, cached_at) "
+            "VALUES (?, ?, 'Unknown', '', '', 'unknown', 0, 0, 1, 'favorite', ?) "
+            "ON CONFLICT(host_id, session_id) DO UPDATE SET is_favorite = 1",
+            [key.substring(0, separator), key.substring(separator + 2), now],
+          );
+        }
+      }
+      final lastUsed = <String, int>{};
+      try {
+        final index = jsonDecode(prefs.getString('sidemesh_cached_session_log_index_v1') ?? '[]') as List;
+        for (final item in index.whereType<Map<String, dynamic>>()) {
+          if (item['key'] is String && item['lastUsedAt'] is int) {
+            lastUsed[item['key'] as String] = item['lastUsedAt'] as int;
+          }
+        }
+      } catch (_) {
+        // Cache timestamps also provide a valid order if the old index is corrupt.
+      }
+      for (final key in prefs.getKeys().where((key) => key.startsWith('$_logPrefix:'))) {
+        Map<String, Object?> row;
+        try {
+          final decoded = jsonDecode(prefs.getString(key)!) as Map<String, dynamic>;
+          final log = SessionLog.fromJson(decoded['log'] as Map<String, dynamic>);
+          final cachedAt = decoded['cachedAt'] as int;
+          final suffix = ':${log.session.id}';
+          if (log.session.id.isEmpty || !key.endsWith(suffix)) continue;
+          final hostId = key.substring(_logPrefix.length + 1, key.length - suffix.length);
+          final encoded = jsonEncode(log.toJson());
+          if (hostId.isEmpty || encoded.length > _maxSessionLogCacheChars) continue;
+          row = {
+            'host_id': hostId, 'session_id': log.session.id, 'cached_at': cachedAt,
+            'last_used_at': lastUsed[key] ?? cachedAt, 'payload': encoded,
+          };
+        } catch (_) {
+          continue;
+        }
+        await txn.insert('session_logs', row, conflictAlgorithm: ConflictAlgorithm.ignore);
+      }
+      await _pruneLogCache(txn);
+      await txn.insert('client_migrations', {'name': migration});
+    });
   }
 }
 
@@ -782,95 +694,4 @@ SessionSubAgentInfo? _decodeSubAgentInfo(String? raw) {
   } catch (_) {
     return null;
   }
-}
-
-// ─── Internal helpers for migration (read old SharedPreferences shapes) ───
-
-class SessionCacheStoreInternal {
-  static const _recentPrefix = 'sidemesh_cached_recent_sessions_v1';
-
-  Future<List<String>> _loadHostIds() async {
-    final prefs = await SharedPreferences.getInstance();
-    final ids = <String>{};
-    for (final key in prefs.getKeys()) {
-      if (key.startsWith('$_recentPrefix:')) {
-        final parts = key.split(':');
-        if (parts.length >= 2) {
-          ids.add(parts[1]);
-        }
-      }
-    }
-    return ids.toList();
-  }
-
-  Future<List<SessionSummary>> _loadRecentSessionsForHost(String hostId) async {
-    final prefs = await SharedPreferences.getInstance();
-    final raw = prefs.getString('$_recentPrefix:$hostId');
-    if (raw == null || raw.isEmpty) return const <SessionSummary>[];
-    try {
-      final decoded = jsonDecode(raw);
-      if (decoded is! List<dynamic>) return const <SessionSummary>[];
-      return decoded
-          .whereType<Map<String, dynamic>>()
-          .map(SessionSummary.fromJson)
-          .toList(growable: false);
-    } catch (_) {
-      return const <SessionSummary>[];
-    }
-  }
-}
-
-class SessionFavoritesStoreInternal {
-  static const _prefsKey = 'sidemesh_session_favorites_v1';
-
-  final Set<String> _favoriteKeys = <String>{};
-
-  Future<void> _load() async {
-    final prefs = await SharedPreferences.getInstance();
-    final stored = prefs.getStringList(_prefsKey) ?? const <String>[];
-    _favoriteKeys
-      ..clear()
-      ..addAll(stored.where((entry) => entry.isNotEmpty));
-  }
-}
-
-class _LogCacheIndexEntry {
-  const _LogCacheIndexEntry({
-    required this.key,
-    required this.cachedAt,
-    required this.lastUsedAt,
-  });
-
-  final String key;
-  final DateTime cachedAt;
-  final DateTime lastUsedAt;
-
-  _LogCacheIndexEntry copyWith({DateTime? lastUsedAt}) => _LogCacheIndexEntry(
-    key: key,
-    cachedAt: cachedAt,
-    lastUsedAt: lastUsedAt ?? this.lastUsedAt,
-  );
-
-  factory _LogCacheIndexEntry.fromJson(Map<String, dynamic> json) =>
-      _LogCacheIndexEntry(
-        key: json['key'] as String? ?? '',
-        cachedAt: _dateFromJson(json['cachedAt']),
-        lastUsedAt: _dateFromJson(json['lastUsedAt']),
-      );
-
-  Map<String, dynamic> toJson() => {
-    'key': key,
-    'cachedAt': cachedAt.millisecondsSinceEpoch,
-    'lastUsedAt': lastUsedAt.millisecondsSinceEpoch,
-  };
-}
-
-DateTime _dateFromJson(Object? value) {
-  if (value is int) {
-    return DateTime.fromMillisecondsSinceEpoch(value);
-  }
-  if (value is num) {
-    return DateTime.fromMillisecondsSinceEpoch(value.toInt());
-  }
-  return DateTime.fromMillisecondsSinceEpoch(0);
 }
