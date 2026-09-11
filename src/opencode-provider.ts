@@ -654,7 +654,7 @@ export class OpenCodeAgentProvider extends EventEmitter<AgentProviderEvents> imp
       archived: Boolean(info.time.archived), metadata: { info, runtime: this.metadata(previous)?.runtime ?? buildSessionRuntime(info, []) } });
   }
   private saveItem(id: string, item: StoredSessionItem): void {
-    const previous = this.db.getSessionItem(this.providerId, id, item.value.id);
+    const previous = this.db.getSessionItem(this.providerId, id, item.kind, item.value.id);
     this.db.putSessionItem(this.providerId, id, { ...item, value: { ...item.value, seq: previous?.value.seq ?? this.db.nextSessionSequence(this.providerId, id), createdAt: previous?.value.createdAt ?? item.value.createdAt } } as StoredSessionItem);
   }
   private saveHistory(info: OpenCodeSessionInfo, native: OpenCodeMessage[]): SessionLogSnapshot {

@@ -618,7 +618,7 @@ export class PiAgentProvider extends EventEmitter<AgentProviderEvents> implement
         const delta = event.assistantMessageEvent;
         if (delta.type !== "text_delta" && delta.type !== "thinking_delta") return;
         state.draft ??= { id: `pi-message-${randomUUID()}`, indexes: [] };
-        const previous = this.db.getSessionItem(this.providerId, id, state.draft.id);
+        const previous = this.db.getSessionItem(this.providerId, id, "message", state.draft.id);
         const value: SessionMessage = previous?.kind === "message" ? previous.value : {
           id: state.draft.id, role: "assistant", text: "", content: [], attachments: [], createdAt: Date.now(),
           seq: this.db.nextSessionSequence(this.providerId, id), phase: "commentary" };
@@ -642,7 +642,7 @@ export class PiAgentProvider extends EventEmitter<AgentProviderEvents> implement
         const createdAt = typeof message.timestamp === "number" ? message.timestamp : Date.now();
         if (message.role === "toolResult") { this.toolResult(id, state, message, createdAt); return; }
         if (message.role === "assistant") {
-          const draft = state.draft ? this.db.getSessionItem(this.providerId, id, state.draft.id) : null;
+          const draft = state.draft ? this.db.getSessionItem(this.providerId, id, "message", state.draft.id) : null;
           const content = extractPiMessageContentBlocks(message);
           const text = extractPiMessageText(message) || (typeof message.errorMessage === "string" ? message.errorMessage : "");
           const value: SessionMessage = { id: state.draft?.id ?? `pi-message-${randomUUID()}`, role: "assistant",
@@ -665,11 +665,11 @@ export class PiAgentProvider extends EventEmitter<AgentProviderEvents> implement
         const role = message.role === "user" ? "user" : "system";
         const text = (role === "user" ? extractPiMessageText(message) : customPiMessageText(message)) ?? "";
         const pendingId = role === "user" ? state.pendingInputIds.find((key) => {
-          const item = this.db.getSessionItem(this.providerId, id, key);
+          const item = this.db.getSessionItem(this.providerId, id, "message", key);
           return item?.kind === "message" && item.value.text === text
             && isDeepStrictEqual(item.value.attachments, extractSessionAttachments(message.content));
         }) : undefined;
-        const previous = pendingId ? this.db.getSessionItem(this.providerId, id, pendingId) : null;
+        const previous = pendingId ? this.db.getSessionItem(this.providerId, id, "message", pendingId) : null;
         if (pendingId) state.pendingInputIds.splice(state.pendingInputIds.indexOf(pendingId), 1);
         this.put(id, { kind: "message", nativeId: null, authority: "recovery", anchorId: this.metadata(this.record(id)).leafId ?? undefined,
           clientInputId: previous?.clientInputId, nativeInputTimestamp: previous?.clientInputId ? createdAt : undefined,
@@ -683,7 +683,7 @@ export class PiAgentProvider extends EventEmitter<AgentProviderEvents> implement
         this.activity(id, state, toolExecutionStartDraft(event, this.record(id).cwd, state.active?.id ?? null));
         return;
       case "tool_execution_update": {
-        const previous = this.db.getSessionItem(this.providerId, id, activityIdForToolCall(event.toolName, event.toolCallId));
+        const previous = this.db.getSessionItem(this.providerId, id, "activity", activityIdForToolCall(event.toolName, event.toolCallId));
         if (previous?.kind !== "activity" || (previous.value.type !== "command" && previous.value.type !== "tool")) return;
         this.activity(id, state, { ...previous.value, output: extractPiPartialToolText(event.partialResult) ?? previous.value.output,
           ...(previous.value.type === "tool" ? { result: event.partialResult } : {}) });
@@ -699,14 +699,14 @@ export class PiAgentProvider extends EventEmitter<AgentProviderEvents> implement
   }
 
   private finishMessage(id: string, state: ConnectedPiSession): void {
-    const item = state.draft ? this.db.getSessionItem(this.providerId, id, state.draft.id) : null;
+    const item = state.draft ? this.db.getSessionItem(this.providerId, id, "message", state.draft.id) : null;
     state.draft = undefined;
     if (item?.kind !== "message") return;
     this.emit("liveEvent", { type: "assistant_message_completed", sessionId: id, turnId: state.active?.id, message: item.value });
   }
 
   private activity(id: string, state: ConnectedPiSession, draft: AgentSessionActivityDraft): SessionActivity {
-    const previous = this.db.getSessionItem(this.providerId, id, draft.id);
+    const previous = this.db.getSessionItem(this.providerId, id, "activity", draft.id);
     const value = materializeAgentActivityDraft(draft, { seq: previous?.value.seq ?? this.db.nextSessionSequence(this.providerId, id),
       createdAt: previous?.value.createdAt ?? Date.now() });
     this.put(id, { kind: "activity", value, nativeId: value.id, authority: "recovery",
@@ -717,7 +717,7 @@ export class PiAgentProvider extends EventEmitter<AgentProviderEvents> implement
 
   private toolResult(id: string, state: ConnectedPiSession, message: Record<string, unknown>, createdAt: number): void {
     if (typeof message.toolName !== "string" || typeof message.toolCallId !== "string") throw new Error("Pi tool result has no identity");
-    const previous = this.db.getSessionItem(this.providerId, id, activityIdForToolCall(message.toolName, message.toolCallId));
+    const previous = this.db.getSessionItem(this.providerId, id, "activity", activityIdForToolCall(message.toolName, message.toolCallId));
     const args = previous?.kind === "activity" ? previous.value.type === "tool" ? previous.value.args
       : previous.value.type === "command" ? { command: previous.value.command } : null : null;
     const value = this.activity(id, state, { ...persistedPiToolResultActivity(message.toolName, message.toolCallId, args, message,

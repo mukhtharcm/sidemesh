@@ -127,7 +127,7 @@ export class SessionCoordinator {
       authority: "recovery", value, draft: true, turnId: event.turnId });
     if (movingReasoning && current) {
       state.messages.delete(current.value.id);
-      this.store.deleteRecovery(event.sessionId, current.value.id);
+      this.store.deleteRecovery(event.sessionId, "message", current.value.id);
     }
     state.draftId = id;
   }
@@ -165,7 +165,7 @@ export class SessionCoordinator {
         if (draft) {
           if (draft.value.id !== message.id) {
             state.messages.delete(draft.value.id);
-            this.store.deleteRecovery(id, draft.value.id);
+            this.store.deleteRecovery(id, "message", draft.value.id);
           }
           state.draftId = null;
         }
@@ -294,7 +294,7 @@ export class SessionCoordinator {
       const saved = index >= 0 ? messages[index]! : null;
       if (saved && (messageCovered(saved, item.value, item.draft === true))) {
         state.messages.delete(item.value.id);
-        this.store.deleteRecovery(id, item.value.id);
+        this.store.deleteRecovery(id, "message", item.value.id);
         if (state.draftId === item.value.id) state.draftId = null;
         continue;
       }
@@ -307,7 +307,7 @@ export class SessionCoordinator {
       if (!live) continue;
       if (activityCovered(activity, live)) {
         state.activities.delete(activity.id);
-        this.store.deleteRecovery(id, activity.id);
+        this.store.deleteRecovery(id, "activity", activity.id);
       } else if (activity.status !== "in_progress" && live.status === "in_progress") {
         this.saveActivity(id, { ...live, status: activity.status });
       }

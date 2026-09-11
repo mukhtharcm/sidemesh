@@ -372,7 +372,7 @@ export class AcpAgentProvider extends EventEmitter<AgentProviderEvents> implemen
     if (state.loading) return state.loading;
     state.loading = (async () => {
       const items = new Map<string, StoredSessionItem>();
-      const writer = new AcpTranscript(id, 0, (key) => items.get(key) ?? null, (item) => items.set(item.value.id, item));
+      const writer = new AcpTranscript(id, 0, (kind, key) => items.get(`${kind}:${key}`) ?? null, (item) => items.set(`${item.kind}:${item.value.id}`, item));
       state.replay = { items, writer, updates: [] };
       try {
         const record = this.record(id);
@@ -479,7 +479,7 @@ export class AcpAgentProvider extends EventEmitter<AgentProviderEvents> implemen
 
   private transcript(id: string): AcpTranscript {
     return new AcpTranscript(id, this.db.nextSessionSequence(this.providerId, id),
-      (key) => this.db.getSessionItem(this.providerId, id, key),
+      (kind, key) => this.db.getSessionItem(this.providerId, id, kind, key),
       (item) => {
         this.db.putSessionItem(this.providerId, id, item);
         const record = this.record(id);

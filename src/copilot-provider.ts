@@ -629,7 +629,7 @@ export class CopilotAgentProvider
     const sent = (async () => {
       try {
         const nativeId = await sdkSession.send({ prompt: inputPromptText(request.input), displayPrompt: inputDisplayText(request.input), attachments, mode: nativeBusy ? "immediate" : "enqueue" });
-        const recovery = this.db.getSessionItem(this.providerId, session.thread.id, message.id);
+        const recovery = this.db.getSessionItem(this.providerId, session.thread.id, "message", message.id);
         if (recovery) this.db.putSessionItem(this.providerId, session.thread.id, { ...recovery, nativeId });
       } catch (error) {
         if (!this.closed) {
@@ -1717,7 +1717,7 @@ export class CopilotAgentProvider
 
   private syncDraftAssistantMessages(session: CopilotSessionState, active: ActiveCopilotTurn): void {
     for (const [id, text] of active.assistantBuffers) {
-      const previous = this.db.getSessionItem(this.providerId, session.thread.id, id);
+      const previous = this.db.getSessionItem(this.providerId, session.thread.id, "message", id);
       const value: SessionMessage = { id, role: "assistant", text, content: buildAssistantMessageContent(text, active.reasoningBlocks),
         attachments: [], phase: "final_answer", createdAt: previous?.value.createdAt ?? Date.now(),
         seq: previous?.value.seq ?? this.db.nextSessionSequence(this.providerId, session.thread.id) };
@@ -1751,7 +1751,7 @@ export class CopilotAgentProvider
       createdAt: Date.now(),
       seq: this.db.nextSessionSequence(this.providerId, session.thread.id),
     };
-    const previous = this.db.getSessionItem(this.providerId, session.thread.id, next.id);
+    const previous = this.db.getSessionItem(this.providerId, session.thread.id, "message", next.id);
     if (previous) { next.seq = previous.value.seq; next.createdAt = previous.value.createdAt; }
     this.db.putSessionItem(this.providerId, session.thread.id, { kind: "message", value: next,
       nativeId: message.nativeId ?? (message.role === "assistant" ? next.id : null), clientInputId: message.clientInputId ?? previous?.clientInputId, authority: "recovery" });
@@ -1880,7 +1880,7 @@ export class CopilotAgentProvider
     void this.persistSoon(session).catch((error: unknown) => this.emit("stderr", `Copilot state persistence failed: ${String(error)}`));
   }
   private activity(session: CopilotSessionState, id: string): SessionActivity | undefined {
-    const item = this.db.getSessionItem(this.providerId, session.thread.id, id);
+    const item = this.db.getSessionItem(this.providerId, session.thread.id, "activity", id);
     return item?.kind === "activity" ? item.value : undefined;
   }
   private get db(): SessionStore { if (!this.store) throw new Error("Copilot storage has not started"); return this.store; }
