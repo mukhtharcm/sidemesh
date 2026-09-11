@@ -2708,6 +2708,9 @@ class _SessionScreenState extends State<SessionScreen>
     }
 
     switch (event.type) {
+      case 'history_invalidated':
+        _markTranscriptPossiblyStale();
+        unawaited(_loadSnapshot(scrollToBottom: false));
       case 'user_message_submitted':
         final message = event.messageItem;
         if (message == null) {
