@@ -374,6 +374,12 @@ specific agent provider.
   Provider adapters must filter before applying the requested limit, and
   multi-provider wrapping must namespace `subAgent.parentSessionId` as well as
   the child thread id.
+- **Provider snapshots and input proof**: `readSessionSnapshot` returns native
+  history, runtime, thread data, busy state, and available turn identity after
+  all upstream reads. A busy agent can have no public turn ID. Input receipts
+  become confirmed only through explicit native identity or a completed protocol
+  operation; matching display IDs or repeated prompt text is not proof. Pi needs
+  an observed native timestamp and matching content in its durable entry file.
 - **Snapshot/live boundary**: finish provider reads before capturing live state
   and its revision. The client buffers live events during a snapshot, discards
   covered additive text, and preserves newer events and informational warnings.

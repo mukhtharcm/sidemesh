@@ -147,3 +147,18 @@ function deferred(): { promise: Promise<void>; resolve(): void } {
   const promise = new Promise<void>((done) => { resolve = done; });
   return { promise, resolve };
 }
+
+it("preserves colons in queued client IDs and replays confirmed delivery after a lost reply", async () => {
+  const f = await fixture();
+  const queue = f.coordinator();
+  try {
+    await queue.submit(request("client:one"));
+    f.state.busy = false;
+    queue.wake("session");
+    await queue.drain();
+    assert.equal(f.state.calls[0]?.clientMessageId, "client:one");
+    f.state.store.confirmInputs("session", ["client:one"]);
+    assert.equal((await queue.submit(request("client:one"))).replayed, true);
+    assert.equal(f.state.calls.length, 1);
+  } finally { queue.close(); await queue.drain(); await f.cleanup(); }
+});

@@ -130,3 +130,26 @@ it("does not mark an invalid legacy import complete", async () => {
     await rm(dir, { recursive: true, force: true });
   }
 });
+
+it("keeps native confirmation across a late acknowledgement, a lost reply, and restart", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "sidemesh-input-proof-"));
+  let store = await SessionStore.open(dir);
+  try {
+    for (const id of ["before:reply", "lost:reply", "unsent"]) {
+      store.prepareInput({ key: `session:${id}`, sessionId: "session", signatureHash: id, payload });
+      if (id !== "unsent") store.dispatchInput(`session:${id}`);
+    }
+    store.confirmInputs("session", ["before:reply", "lost:reply", "unsent"]);
+    store.acceptInput("session:before:reply", { ...receipt, messageId: "before:reply" });
+    store.failInput("session:lost:reply");
+    store.close();
+    store = await SessionStore.open(dir);
+    for (const id of ["before:reply", "lost:reply"]) {
+      const record = store.getInput(`session:${id}`)!;
+      assert.equal(record.state, "confirmed");
+      assert.equal(record.payload, null);
+      assert.equal(record.receipt?.messageId, id);
+    }
+    assert.equal(store.getInput("session:unsent")?.state, "prepared");
+  } finally { store.close(); await rm(dir, { recursive: true, force: true }); }
+});

@@ -319,6 +319,7 @@ export class CodexAgentProvider
       ...log, thread: normalized, runtime: runtime ?? log.runtime,
       messages: options.messageLimit && options.messageLimit > 0 ? log.messages.slice(-options.messageLimit) : log.messages,
       activities: options.activityLimit && options.activityLimit > 0 ? log.activities.slice(-options.activityLimit) : log.activities,
+      busy: thread.status.type === "active",
       activeTurnId: thread.status.type === "active"
         ? [...thread.turns].reverse().find((turn) => turn.status === "inProgress")?.id ?? null : null,
     };

@@ -109,7 +109,7 @@ export class SessionInputCoordinator {
     }
   }
 
-  private messageId(record: InputRequest): string { return record.key.slice(record.key.lastIndexOf(":") + 1); }
+  private messageId(record: InputRequest): string { return record.key.slice(record.sessionId.length + 1); }
   private queueChanged(sessionId: string): void { this.callbacks.queueChanged(sessionId, this.store.queuedInputs(sessionId)); }
   private assertOpen(sessionId: string): void {
     if (this.closed || this.stopping.has(sessionId)) throw new SessionInputError("session_stopping", "The session is stopping. Try again after it stops.", 503);

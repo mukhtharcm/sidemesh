@@ -8,7 +8,7 @@ import { z } from "zod";
 import { AgentProviderRequestError, materializeAgentActivityDraft, type AgentProvider, type AgentProviderEvents,
   type AgentProviderCapabilities, type AgentCreateSessionRequest, type AgentCreateSessionResult,
   type AgentSubmitInputRequest, type AgentSubmitInputResult, type AgentSessionListOptions,
-  type AgentSessionLogOptions, type AgentSessionResumeOptions, type AgentModelListOptions,
+  type AgentSessionLogOptions, type AgentSessionSnapshot, type AgentSessionResumeOptions, type AgentModelListOptions,
   type AgentSkillListOptions, type AgentPendingAction, type AgentSessionActivityDraft } from "./agent-provider.js";
 import { parsePendingActionDecision, parsePendingActionUserInputResponse, type PendingActionResponseInput } from "./approvals.js";
 import { PiRpc, type PiRpcEvent } from "./pi-rpc.js";
@@ -19,7 +19,7 @@ import { parsePiSessionHistory, piBranch, preparePiInput, runtimeFromAssistantMe
   activityIdForToolCall, extractPiPartialToolText, formatPiModelRef, resolvePiModel,
   describePiModelLookupFailure, isPiThinkingLevel, piSkillToSummary, type PiSessionSummary } from "./pi-mapping.js";
 import { SessionStore, type StoredProviderSession, type StoredSessionItem } from "./session-store.js";
-import { reconcileSessionHistory } from "./session-history.js";
+import { reconcileSessionHistory, confirmedSessionInputIds } from "./session-history.js";
 import { extractSessionAttachments } from "./session-attachments.js";
 import type { ThreadRecord, SessionLogSnapshot, SessionRuntimeSummary, SessionMessage, SessionActivity,
   ModelSummary, SkillCatalogEntry } from "./types.js";
@@ -183,14 +183,26 @@ export class PiAgentProvider extends EventEmitter<AgentProviderEvents> implement
   }
 
   async readSessionLog(thread: ThreadRecord, options: AgentSessionLogOptions = {}): Promise<SessionLogSnapshot> {
-    await this.findRecord(thread.id);
-    const branch = await this.refreshHistory(thread.id, this.connections.get(thread.id));
-    const items = this.db.readSessionItems(this.providerId, thread.id).filter((item) => !branch || !item.anchorId || branch.has(item.anchorId));
+    return this.readSessionSnapshot(thread.id, options);
+  }
+
+  async readSessionSnapshot(id: string, options: AgentSessionLogOptions = {}): Promise<AgentSessionSnapshot> {
+    await this.findRecord(id);
+    const state = this.connections.get(id);
+    const branch = await this.refreshHistory(id, state);
+    const native = state?.native && !state.stopping ? await this.readState(id, state) : null;
+    const busy = Boolean(native && (native.isStreaming || native.isCompacting || native.pendingMessageCount));
+    const items = this.db.readSessionItems(this.providerId, id).filter((item) => !branch || !item.anchorId || branch.has(item.anchorId));
     const messages = items.flatMap((item) => item.kind === "message" ? [item.value] : []);
     const activities = items.flatMap((item) => item.kind === "activity" ? [item.value] : []);
-    return { messages: tail(messages, options.messageLimit), activities: tail(activities, options.activityLimit),
+    const record = this.record(id);
+    const thread = this.thread(record, true);
+    thread.status = { type: record.archived ? "closed" : busy ? "running" : "idle" };
+    if (!busy) thread.turns = [];
+    return { thread, busy, activeTurnId: busy ? state?.active?.id ?? null : null, confirmedInputIds: confirmedSessionInputIds(items),
+      messages: tail(messages, options.messageLimit), activities: tail(activities, options.activityLimit),
       totalMessages: messages.length, totalActivities: activities.length,
-      nextSeq: this.db.nextSessionSequence(this.providerId, thread.id), runtime: this.metadata(this.record(thread.id)).runtime ?? null };
+      nextSeq: this.db.nextSessionSequence(this.providerId, id), runtime: this.metadata(record).runtime ?? null };
   }
 
   async readSessionRuntime(thread: ThreadRecord): Promise<SessionRuntimeSummary | null> {
@@ -235,12 +247,11 @@ export class PiAgentProvider extends EventEmitter<AgentProviderEvents> implement
     const message: SessionMessage = { id: request.clientMessageId ?? `pi-user-${randomUUID()}`, role: "user", text: prepared.text,
       content: [{ type: "text", text: prepared.text }], attachments: prepared.attachments,
       createdAt: Date.now(), seq: this.db.nextSessionSequence(this.providerId, request.sessionId) };
-    this.put(request.sessionId, { kind: "message", value: message, nativeId: null, authority: "recovery",
+    this.put(request.sessionId, { kind: "message", value: message, nativeId: null, clientInputId: request.clientMessageId, authority: "recovery",
       anchorId: this.metadata(this.record(request.sessionId)).leafId ?? undefined });
     state.pendingInputIds.push(message.id);
     state.active = active;
     clearTimeout(state.idleTimer);
-    if (mode === "turn") this.emit("liveEvent", { type: "turn_started", sessionId: request.sessionId, turnId: active.id });
     try {
       await state.rpc.request({ type: mode === "steer" ? "steer" : "prompt", message: prepared.text, images: prepared.images }, 120_000);
       const native = await this.readState(request.sessionId, state);
@@ -548,11 +559,10 @@ export class PiAgentProvider extends EventEmitter<AgentProviderEvents> implement
   private onEvent(id: string, state: ConnectedPiSession, event: PiRpcEvent): void {
     switch (event.type) {
       case "agent_start":
-        if (!state.active) {
-          state.active = { id: `pi-turn-${randomUUID()}`, status: "completed", started: true };
-          this.emit("liveEvent", { type: "turn_started", sessionId: id, turnId: state.active.id });
-        }
+        state.active ??= { id: `pi-turn-${randomUUID()}`, status: "completed", started: false };
+        if (!state.active.started) this.emit("liveEvent", { type: "turn_started", sessionId: id, turnId: state.active.id });
         state.active.started = true;
+        if (state.native) state.native = { ...state.native, isStreaming: true };
         clearTimeout(state.idleTimer);
         return;
       case "agent_settled": void this.finishTurn(id, state); return;
@@ -652,11 +662,13 @@ export class PiAgentProvider extends EventEmitter<AgentProviderEvents> implement
         const text = (role === "user" ? extractPiMessageText(message) : customPiMessageText(message)) ?? "";
         const pendingId = role === "user" ? state.pendingInputIds.find((key) => {
           const item = this.db.getSessionItem(this.providerId, id, key);
-          return item?.kind === "message" && item.value.text === text;
+          return item?.kind === "message" && item.value.text === text
+            && isDeepStrictEqual(item.value.attachments, extractSessionAttachments(message.content));
         }) : undefined;
         const previous = pendingId ? this.db.getSessionItem(this.providerId, id, pendingId) : null;
         if (pendingId) state.pendingInputIds.splice(state.pendingInputIds.indexOf(pendingId), 1);
         this.put(id, { kind: "message", nativeId: null, authority: "recovery", anchorId: this.metadata(this.record(id)).leafId ?? undefined,
+          clientInputId: previous?.clientInputId, nativeInputTimestamp: previous?.clientInputId ? createdAt : undefined,
           value: { id: pendingId ?? `pi-message-${randomUUID()}`, role, text, content: extractPiMessageContentBlocks(message),
             attachments: extractSessionAttachments(message.content), createdAt,
             seq: previous?.value.seq ?? this.db.nextSessionSequence(this.providerId, id) } });

@@ -311,7 +311,10 @@ describe("PiAgentProvider", () => {
     assert.equal(events.filter((event) => event.type === "turn_completed").length, 0);
     await until(() => events.some((event) => event.type === "turn_completed"));
     assert.equal((await provider.readSessionThread(created.thread.id, true)).status?.type, "idle");
-    const log = await provider.readSessionLog(created.thread);
+    const log = await provider.readSessionSnapshot(created.thread.id);
+    assert.equal(log.busy, false);
+    assert.equal(log.activeTurnId, null);
+    assert.deepEqual(log.confirmedInputIds, ["client-hello"]);
     assert.deepEqual(log.messages.map((message) => message.text), ["hello", "Done."]);
     assert.equal(log.messages[0]?.id, "client-hello");
     assert.deepEqual(log.messages[1]?.content, [{ type: "thinking", thinking: "Think first." }, { type: "text", text: "Done." }]);
@@ -335,13 +338,26 @@ describe("PiAgentProvider", () => {
     const { provider, created, events, send } = await fixture();
     await send("undurable", "client-undurable");
     await until(() => events.some((event) => event.type === "turn_completed"));
-    const warm = await provider.readSessionLog(created.thread);
+    const warm = await provider.readSessionSnapshot(created.thread.id);
+    assert.deepEqual(warm.confirmedInputIds, []);
     assert.equal(warm.messages.at(-1)?.text, "Done.");
     await provider.close();
     const reopened = new PiAgentProvider({ agentDir, stateDir });
     providers.push(reopened);
     const cold = await reopened.readSessionLog(created.thread);
     assert.deepEqual(cold.messages, warm.messages);
+  });
+
+  it("does not bind an input when a native event has different image content", async () => {
+    const { provider, created, events } = await fixture();
+    await provider.submitInput({ sessionId: created.thread.id, activeTurnId: null, clientMessageId: "image-input", overrides,
+      input: [{ type: "text", text: "changed-image", text_elements: [] }, { type: "image", url: "data:image/png;base64,aGk=" }] });
+    await until(() => events.some((event) => event.type === "turn_completed"));
+    // This fixture emits text-only user history even when the prompt has an image.
+    const snapshot = await provider.readSessionSnapshot(created.thread.id);
+    assert.deepEqual(snapshot.confirmedInputIds, []);
+    assert.equal(snapshot.messages.find((message) => message.id === "image-input")?.attachments.length, 1);
+    assert.equal(snapshot.messages.filter((message) => message.role === "user").length, 2);
   });
 
   it("routes extension choices and cancellation and rejects unsupported input before prompt", async () => {
@@ -371,6 +387,10 @@ describe("PiAgentProvider", () => {
     const second = await send("later", "second");
     assert.equal(second.mode, "steer");
     assert.equal(second.turnId, first.turnId);
+    const snapshot = await provider.readSessionSnapshot(created.thread.id);
+    assert.equal(snapshot.busy, true);
+    assert.equal(snapshot.activeTurnId, first.turnId);
+    assert.deepEqual(snapshot.confirmedInputIds, []);
     assert.equal(events.filter((event) => event.type === "turn_started").length, 1);
     await provider.interruptTurn(created.thread.id, first.turnId!);
     assert.ok(events.some((event) => event.type === "turn_completed" && event.status === "interrupted"));
@@ -575,7 +595,7 @@ createInterface({input:process.stdin}).on('line',(line) => {
     }
     case 'prompt':
       isStreaming=true; active=request.message; emit({type:'agent_start'});
-      append({role:'user',content:[{type:'text',text:request.message},...(request.images??[])],timestamp:Date.now()});
+      append({role:'user',content:[{type:'text',text:request.message},...(request.message==='changed-image'?[]:request.images??[])],timestamp:Date.now()});
       reply(request);
       if(request.message==='question') emit({type:'extension_ui_request',id:'pick',method:'select',title:'Choose one',options:['First','Second']});
       else if(request.message!=='hold') setTimeout(()=>finish(request.message),30);

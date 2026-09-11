@@ -1042,7 +1042,10 @@ describe("OpenCode SDK event boundary", () => {
     assert.equal(client.promptInputs.length, 1);
     client.statusesByDirectory.set(created.thread.cwd, { [id]: { type: "idle" } }); client.publish();
     await waitForEvent(events, (event) => event.type === "turn_completed");
-    const log = await provider.readSessionLog(created.thread);
+    const log = await provider.readSessionSnapshot(created.thread.id);
+    assert.equal(log.busy, false);
+    assert.equal(log.activeTurnId, null);
+    assert.deepEqual(log.confirmedInputIds, ["client-1"]);
     assert.equal(log.messages[0]?.id, "client-1");
     assert.equal(log.messages[1]?.text, "first step");
     const requests = client.requests.length;

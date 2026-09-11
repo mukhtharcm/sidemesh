@@ -21,7 +21,7 @@ import {
   type AgentSessionActivityDraft,
   type AgentSessionInputItem,
   type AgentSessionListOptions,
-  type AgentSessionLogOptions,
+  type AgentSessionLogOptions, type AgentSessionSnapshot,
   type AgentSessionResumeOptions,
   type AgentSkillConfigWriteRequest,
   type AgentSkillListOptions,
@@ -367,6 +367,13 @@ export class FakeAgentProvider
       totalActivities: session.activities.size,
       nextSeq: session.nextSeq,
     };
+  }
+
+  public async readSessionSnapshot(id: string, options: AgentSessionLogOptions = {}): Promise<AgentSessionSnapshot> {
+    const session = this.requireSession(id);
+    const log = await this.readSessionLog(session.thread, options);
+    const activeTurnId = this.activeTurnIds.get(id) ?? null;
+    return { ...log, thread: this.cloneThread(session, true), activeTurnId, busy: activeTurnId !== null };
   }
 
   public async readSessionRuntime(thread: ThreadRecord): Promise<SessionRuntimeSummary | null> {

@@ -81,6 +81,7 @@ export interface AgentSessionLogOptions {
 export interface AgentSessionSnapshot extends SessionLogSnapshot {
   thread: ThreadRecord;
   activeTurnId: string | null;
+  busy: boolean;
   /** Native history explicitly binds these client input IDs. */
   confirmedInputIds?: string[];
 }
@@ -264,6 +265,11 @@ export interface AgentProviderCapabilities {
 }
 
 export type AgentProviderLiveEvent =
+  | {
+      type: "input_confirmed";
+      sessionId: string;
+      clientInputId: string;
+    }
   | {
       type: "skills_changed";
     }

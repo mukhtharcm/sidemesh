@@ -9,13 +9,15 @@ export function reconcileSessionHistory(local: StoredSessionItem[], replay: Stor
   const result = replay.map((item, index): StoredSessionItem => {
     const sameId = item.nativeId ? local.find((saved) => saved.kind === item.kind && saved.nativeId === item.nativeId) : undefined;
     const sameTime = matchTimestamps ? local.find((saved) => !confirmed.has(saved.value.id)
+      && (!saved.clientInputId || saved.nativeInputTimestamp === item.value.createdAt)
       && saved.kind === item.kind && saved.value.createdAt === item.value.createdAt && sameContent(saved, item)) : undefined;
-    const candidate = sameId ?? sameTime ?? (prefixMatches ? local[index] : undefined);
+    const candidate = sameId ?? sameTime ?? (prefixMatches && !local[index]?.clientInputId ? local[index] : undefined);
     const matches = candidate && sameContent(candidate, item);
     prefixMatches = Boolean(prefixMatches && matches && candidate === local[index]);
     if (matches) {
       confirmed.add(candidate.value.id);
-      return { ...withItemMetadata(item, { id: candidate.value.id, createdAt: candidate.value.createdAt }), authority: item.authority };
+      return { ...withItemMetadata(item, { id: candidate.value.id, createdAt: candidate.value.createdAt }), authority: item.authority,
+        ...(candidate.clientInputId ? { clientInputId: candidate.clientInputId, nativeInputTimestamp: candidate.nativeInputTimestamp } : {}) };
     }
     return { ...item, authority: item.authority };
   });
@@ -45,3 +47,8 @@ function sameContent(left: StoredSessionItem, right: StoredSessionItem): boolean
   return left.kind === right.kind && isDeepStrictEqual(a, b);
 }
 
+/** Only a bound input in durable native history can release its host recovery payload. */
+export function confirmedSessionInputIds(items: StoredSessionItem[]): string[] {
+  return items.flatMap((item) => item.kind === "message" && item.value.role === "user"
+    && item.clientInputId && item.nativeId && item.authority === "cache" ? [item.clientInputId] : []);
+}
