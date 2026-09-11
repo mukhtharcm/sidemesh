@@ -419,6 +419,8 @@ const ACPX_PROVIDER_DEFINITION: AgentProviderDefinition = {
       providerId: acpx.id ?? acpx.kind,
       agent: acpx.agent,
       command: acpx.command,
+      executable: acpx.executable,
+      args: acpx.args,
       stateDir: acpx.stateDir,
       permissionMode: acpx.permissionMode,
     }, { sessionStore });
@@ -444,6 +446,8 @@ const ACPX_PROVIDER_DEFINITION: AgentProviderDefinition = {
     const acpx = base?.kind === "acpx" ? base : null;
     return {
       kind: "acpx",
+      ...(!env.SIDEMESH_ACPX_COMMAND?.trim() && !env.SIDEMESH_PROVIDER_COMMAND?.trim() && acpx?.executable
+        ? { executable: acpx.executable, args: acpx.args ?? [] } : {}),
       agent:
         env.SIDEMESH_ACPX_AGENT?.trim() ||
         acpx?.agent ||
@@ -471,7 +475,7 @@ const ACPX_PROVIDER_DEFINITION: AgentProviderDefinition = {
     const acpx = expectAcpxProviderConfig(config);
     return {
       kind: acpx.kind,
-      command: acpx.command ?? acpx.agent,
+      command: acpx.executable ?? acpx.command ?? acpx.agent,
     };
   },
 };

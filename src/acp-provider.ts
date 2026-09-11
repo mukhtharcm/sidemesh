@@ -47,6 +47,8 @@ export function resolveAcpCommand(agent: string, command?: string | null): strin
 export interface AcpAgentProviderOptions {
   agent: string;
   command?: string | null;
+  executable?: string;
+  args?: string[];
   stateDir?: string | null;
   providerId?: string;
   permissionMode?: AcpxPermissionMode;
@@ -62,6 +64,7 @@ interface AcpProviderDependencies {
   connect?: (app: ClientApp, cwd: string) => Promise<AcpTransport>;
 }
 interface AcpSessionMetadata {
+  agentInfo?: { commandHash: string; name: string; version: string; protocolVersion: number };
   promptCapabilities?: { commandHash: string; value: PromptCapabilities };
   runtime?: SessionRuntimeSummary | null;
   latestPlanUpdate?: LatestPlanUpdate | null;
@@ -99,6 +102,8 @@ export class AcpAgentProvider extends EventEmitter<AgentProviderEvents> implemen
   readonly capabilities = structuredClone(ACP_PROVIDER_CAPABILITIES);
   private readonly providerId: string;
   private readonly command: string;
+  private readonly executable?: string;
+  private readonly args: string[];
   private readonly commandHash: string;
   private readonly stateDir: string;
   private readonly cwd: string;
@@ -114,8 +119,13 @@ export class AcpAgentProvider extends EventEmitter<AgentProviderEvents> implemen
     super();
     const agent = options.agent.trim().toLowerCase() || ACP_DEFAULT_AGENT;
     this.providerId = options.providerId ?? "acpx";
+    if (options.executable !== undefined && (!options.executable.trim() || options.executable.includes("\0"))) throw new Error("ACP executable is invalid");
+    if (options.args && (!options.executable || options.args.some((arg) => typeof arg !== "string" || arg.includes("\0")))) throw new Error("ACP arguments require a valid executable and strings without NUL");
+    if (options.executable && options.command) throw new Error("Use either an ACP executable or a legacy command");
+    this.executable = options.executable?.trim();
+    this.args = [...options.args ?? []];
     this.command = resolveAcpCommand(agent, options.command);
-    this.commandHash = createHash("sha256").update(this.command).digest("hex");
+    this.commandHash = createHash("sha256").update(this.executable ? JSON.stringify([this.executable, this.args]) : this.command).digest("hex");
     this.cwd = resolve(options.cwd || process.cwd());
     this.stateDir = resolve(options.stateDir || join(homedir(), ".sidemesh", "acpx-provider", agent.replace(/[^A-Za-z0-9._-]/g, "-")));
     this.permissionMode = options.permissionMode ?? "approve-reads";
@@ -155,7 +165,9 @@ export class AcpAgentProvider extends EventEmitter<AgentProviderEvents> implemen
 
   async health(): Promise<boolean> { return !this.closed; }
   async getVersion(): Promise<string> {
-    const info = this.sessions.values().next().value?.initialized.agentInfo;
+    await this.start();
+    const info = this.sessions.values().next().value?.initialized.agentInfo ?? this.db.listProviderSessions(this.providerId)
+      .map((record) => this.metadata(record).agentInfo).find((info) => info?.commandHash === this.commandHash);
     return info ? `${info.name} ${info.version} (ACP ${PROTOCOL_VERSION})` : `ACP ${PROTOCOL_VERSION}`;
   }
 
@@ -360,6 +372,9 @@ export class AcpAgentProvider extends EventEmitter<AgentProviderEvents> implemen
       this.applyPromptCapabilities(promptCapabilities);
       this.db.saveProviderSession(this.providerId, { ...this.record(id), metadata: {
         ...this.metadata(this.record(id)), promptCapabilities: { commandHash: this.commandHash, value: promptCapabilities },
+        ...(state.initialized.agentInfo ? { agentInfo: { commandHash: this.commandHash,
+          name: state.initialized.agentInfo.name, version: state.initialized.agentInfo.version,
+          protocolVersion: state.initialized.protocolVersion } } : {}),
       } });
       if (record.nativeId) {
         if (state.initialized.agentCapabilities?.loadSession) await this.refreshHistory(id, state);
@@ -567,7 +582,8 @@ export class AcpAgentProvider extends EventEmitter<AgentProviderEvents> implemen
   private async spawnConnection(app: ClientApp, cwd: string): Promise<AcpTransport> {
     const env = { ...process.env };
     delete env.SIDEMESH_TOKEN;
-    const child = spawn(this.command, { cwd, env, shell: true, stdio: "pipe", detached: process.platform !== "win32" });
+    const child = spawn(this.executable ?? this.command, this.executable ? this.args : [],
+      { cwd, env, shell: !this.executable, stdio: "pipe", detached: process.platform !== "win32" });
     let exited = false;
     const done = new Promise<void>((resolve) => child.once("close", () => { exited = true; resolve(); }));
     const connection = app.connect(ndJsonStream(Writable.toWeb(child.stdin), Readable.toWeb(child.stdout)));
