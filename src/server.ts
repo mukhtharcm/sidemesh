@@ -622,7 +622,7 @@ export async function startServer(
     const sessionIdsNeedingIdleBroadcast = new Set<string>();
     const interruptedTurnIds = new Map<string, string>();
     const isProviderSession = (sessionId: string): boolean =>
-      providerEntryForSessionId(sessionId)?.kind === kind;
+      (providerEntryForSessionId(sessionId)?.id ?? providerEntryForSessionId(sessionId)?.kind) === kind;
 
     for (const sessionId of sessionState.keys()) {
       if (!isProviderSession(sessionId)) continue;
@@ -1153,12 +1153,12 @@ export async function startServer(
 
   for (const entry of providerRuntime.providers) {
     providerVersions.set(
-      entry.kind,
+      entry.id ?? entry.kind,
       await entry.provider.getVersion().catch(() => "unknown"),
     );
   }
   providerVersion =
-    providerVersions.get(providerRuntime.defaultProviderKind) ??
+    providerVersions.get(providerRuntime.defaultProviderId ?? providerRuntime.defaultProviderKind) ??
     (await provider.getVersion().catch(() => "unknown"));
 
   try {
@@ -1242,10 +1242,11 @@ export async function startServer(
     const defaultProviderCapabilities = defaultProvider.provider.capabilities;
     const supportedProviders = providerRuntime.providers.map((entry) => ({
       ...entry.definitionSummary,
+      id: entry.id ?? entry.kind,
       config: entry.configSummary,
       capabilities: entry.provider.capabilities,
-      version: providerVersions.get(entry.kind) ?? "unknown",
-      isDefault: entry.kind === providerRuntime.defaultProviderKind,
+      version: providerVersions.get(entry.id ?? entry.kind) ?? "unknown",
+      isDefault: entry === providerRuntime.defaultProvider,
     }));
     response.json({
       label: config.label,
@@ -1253,6 +1254,7 @@ export async function startServer(
       platform: platform(),
       homeDirectory: homedir(),
       provider: providerRuntime.defaultProviderKind,
+      providerId: providerRuntime.defaultProviderId ?? providerRuntime.defaultProviderKind,
       providerName:
         supportedProviders.find((item) => item.isDefault)?.displayName ??
         defaultProvider.provider.displayName,
@@ -1300,12 +1302,14 @@ export async function startServer(
   app.get("/api/providers", jsonRoute((_request, response) => {
     response.json({
       currentProvider: providerRuntime.defaultProviderKind,
+      currentProviderId: providerRuntime.defaultProviderId ?? providerRuntime.defaultProviderKind,
       providers: providerRuntime.providers.map((entry) => ({
         ...entry.definitionSummary,
+        id: entry.id ?? entry.kind,
         config: entry.configSummary,
         capabilities: entry.provider.capabilities,
-        version: providerVersions.get(entry.kind) ?? "unknown",
-        isDefault: entry.kind === providerRuntime.defaultProviderKind,
+        version: providerVersions.get(entry.id ?? entry.kind) ?? "unknown",
+        isDefault: entry === providerRuntime.defaultProvider,
       })),
     });
   }));
@@ -1391,6 +1395,7 @@ export async function startServer(
       platform: platform(),
       uptimeSeconds: Math.round(process.uptime()),
       provider: providerRuntime.defaultProviderKind,
+      providerId: providerRuntime.defaultProviderId ?? providerRuntime.defaultProviderKind,
       memory: process.memoryUsage(),
       resourceUsage: process.resourceUsage(),
       caches: {
@@ -1423,13 +1428,12 @@ export async function startServer(
     "/api/admin/provider/:kind/restart",
     asyncRoute(async (request, response) => {
       const kind = Array.isArray(request.params.kind) ? request.params.kind[0] : request.params.kind;
-      if (!isAgentProviderKind(kind)) {
+      const selectedProvider = providerRuntime.providerForKind(kind);
+      if (!selectedProvider) {
         response.status(400).json({ error: "unknown provider kind" });
         return;
       }
-      const selectedProvider = providerRuntime.providerForKind(kind);
       if (
-        !selectedProvider ||
         !selectedProvider.provider.capabilities.lifecycle.restart ||
         !selectedProvider.provider.restart
       ) {
@@ -1437,7 +1441,7 @@ export async function startServer(
         return;
       }
       await selectedProvider.provider.restart();
-      await clearProviderScopedRuntimeState(kind);
+      await clearProviderScopedRuntimeState(selectedProvider.id ?? selectedProvider.kind);
       response.json({ ok: true, kind });
     }),
   );
@@ -2383,7 +2387,7 @@ export async function startServer(
         cwd,
         input: scopedInput,
         overrides,
-        provider: selectedProvider.kind,
+        provider: selectedProvider.id ?? selectedProvider.kind,
       });
       if (
         await shouldTrackProviderTurn(
@@ -3027,7 +3031,7 @@ export async function startServer(
                 if (sessionSubAgentForThread(thread)) {
                   const staleSessionKey = indexedSessionIdForProvider(
                     providerRuntime,
-                    providerKind,
+                    entry.id ?? entry.kind,
                     thread.id,
                   );
                   await searchIndex.remove(staleSessionKey);
@@ -3042,7 +3046,7 @@ export async function startServer(
                 const updatedAt = threadTimestampMillis(thread.updatedAt);
                 const sessionKey = indexedSessionIdForProvider(
                   providerRuntime,
-                  providerKind,
+                  entry.id ?? entry.kind,
                   thread.id,
                 );
                 await searchIndex.indexDocument({
@@ -4077,6 +4081,7 @@ function mapSession(
     updatedAt: threadTimestampMillis(thread.updatedAt),
     source: sourceLabelForThread(thread, subAgent),
     provider,
+    providerId: thread.providerId,
     status: resolvedSessionStatus(thread, statusOverride),
     rolloutPath: thread.path,
     runtime,
@@ -4100,6 +4105,7 @@ function mapAgentRun(thread: ThreadRecord): AgentRunSummary | null {
     createdAt: threadTimestampMillis(thread.createdAt),
     updatedAt: threadTimestampMillis(thread.updatedAt),
     provider: providerKindForThread(thread),
+    providerId: thread.providerId,
     status: resolvedSessionStatus(thread, null),
     agentName: subAgent.agentName ?? null,
     agentDisplayName: subAgent.agentDisplayName ?? null,
@@ -4194,6 +4200,7 @@ function formatSubAgentSourceKind(kind: string): string {
 }
 
 function providerKindForThread(thread: ThreadRecord): string | null {
+  if (thread.providerKind) return thread.providerKind;
   const separator = thread.id.indexOf(":");
   if (separator > 0) {
     const prefix = thread.id.slice(0, separator);
@@ -4217,8 +4224,7 @@ function indexedSessionIdForProvider(
   sessionId: string,
 ): string {
   if (
-    providerRuntime.provider instanceof MultiAgentProvider &&
-    isAgentProviderKind(providerKind)
+    providerRuntime.provider instanceof MultiAgentProvider
   ) {
     return wrapProviderScopedId(providerKind, sessionId);
   }

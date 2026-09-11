@@ -2,7 +2,8 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
 import { createAgentProviderRuntime } from "./provider-factory.js";
-import type { NodeConfig } from "./types.js";
+import { wrapProviderScopedId } from "./multi-provider.js";
+import type { ThreadRecord, NodeConfig } from "./types.js";
 
 describe("createAgentProviderRuntime", () => {
   it("keeps default provider capabilities separate from other providers", () => {
@@ -33,6 +34,43 @@ describe("createAgentProviderRuntime", () => {
       false,
     );
   });
+
+  it("routes identical native session IDs and events to distinct instances", async () => {
+    const config = makeMultiProviderConfig();
+    const fake = config.providers[0]!;
+    config.providers = [{ ...fake, id: "fake" }, { ...fake, id: "reviewer" }];
+    config.defaultProviderKind = "fake";
+    config.defaultProviderId = "reviewer";
+    const runtime = createAgentProviderRuntime(config);
+    assert.equal(runtime.providerForKind(null)?.id, "reviewer");
+    assert.equal(runtime.providerForKind("fake")?.id, "fake");
+    const thread: ThreadRecord = {
+      id: "same-native-id", name: null, preview: "", createdAt: 1, updatedAt: 1,
+      cwd: "/tmp", source: "fake", path: null, status: { type: "idle", phase: "idle" },
+    };
+    const observed: string[] = [];
+    runtime.provider.on("liveEvent", (event) => {
+      if ("sessionId" in event && event.sessionId) observed.push(event.sessionId);
+    });
+    for (const entry of runtime.providers) {
+      const publicId = wrapProviderScopedId(entry.id!, thread.id);
+      entry.provider.readSessionThread = async (id) => {
+        assert.equal(id, thread.id);
+        return thread;
+      };
+      assert.equal(runtime.providerForSessionId(publicId), entry);
+      const loaded = await runtime.provider.readSessionThread!(publicId, false);
+      assert.equal(loaded.id, publicId);
+      assert.equal(loaded.providerId, entry.id);
+      assert.equal(loaded.providerKind, "fake");
+      entry.provider.emit("liveEvent", { type: "turn_started", sessionId: thread.id, turnId: "turn" });
+    }
+    assert.equal(new Set(observed).size, 2);
+    assert.equal(runtime.providerForSessionId(wrapProviderScopedId("missing", thread.id)), null);
+    // A legacy raw session ID retains the configured default route.
+    assert.equal(runtime.providerForSessionId(thread.id), runtime.defaultProvider);
+  });
+
 });
 
 function makeMultiProviderConfig(): NodeConfig {

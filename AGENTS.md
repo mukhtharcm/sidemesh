@@ -144,7 +144,10 @@ Every provider implements the interface in `src/agent-provider.ts`.
 
 - When `config.providers.length > 1`, `provider-factory.ts` wraps them in
   `MultiAgentProvider` automatically.
-- IDs are namespaced: `kind:base64url(rawId)`.
+- Configured providers have stable `id` values. Old entries default to their kind.
+  Keep the old entry ID when adding another instance of that kind. Set
+  `defaultProviderId` to select an instance. IDs are namespaced as
+  `instanceId:base64url(rawId)`; kind-only aliases resolve only when unambiguous.
 - `MultiAgentProvider.capabilities` reflects the default provider only; use
   `supportedProviders[].capabilities` from `/api/node` for per-provider truth.
 - `stderr` gets a `[kind] ` prefix for non-default providers.
