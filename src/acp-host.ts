@@ -17,6 +17,7 @@ import type { AgentPendingAction, AgentProviderLiveEvent } from "./agent-provide
 import type { AcpxPermissionMode, PendingActionApprovalTarget } from "./types.js";
 import { elicitationFields } from "./elicitation.js";
 import { writeFileAtomically } from "./fs-routes.js";
+import type { AuthenticationTerminalRequest } from "./terminal.js";
 import { terminatePipeProcess } from "./terminal.js";
 import { resolveWorkspacePath, WorkspaceAccessError } from "./workspace-scope.js";
 
@@ -81,10 +82,10 @@ export class AcpHost {
     return this.pending.get(actionId)?.respond(input) ?? false;
   }
 
-  async selectAuthentication(authMethods: AuthMethod[], signal: AbortSignal): Promise<string | null> {
-    const offered = authMethods.filter((method) => !("type" in method && method.type === "terminal"));
+  async selectAuthentication(authMethods: AuthMethod[], signal: AbortSignal, terminal = false): Promise<string | null> {
+    const offered = authMethods.filter((method) => terminal || !("type" in method && method.type === "terminal"));
     if (!offered.length) return null;
-    const choices = offered.map((method) => `${method.name} (${method.id})`);
+    const choices = [...offered.map((method) => `${method.name} (${method.id})`), "Cancel sign-in"];
     const action: AgentPendingAction = {
       ...this.action("tool", "Agent sign-in", "Select the agent sign-in method.", []),
       kind: "user_input", approval: undefined, canApprove: false, canDecline: false,
@@ -93,9 +94,31 @@ export class AcpHost {
     const result = await this.ask<{ methodId: string | null }>(action, signal, (input) => {
       const response = parsePendingActionUserInputResponse(input);
       const index = response ? choices.indexOf(response.answer) : -1;
-      return index >= 0 ? { methodId: offered[index]!.id } : null;
+      return index >= 0 ? { methodId: offered[index]?.id ?? null } : null;
     }, { methodId: null });
     return result.methodId;
+  }
+
+  async authenticateInTerminal(
+    run: (request: AuthenticationTerminalRequest) => Promise<void>,
+    request: Omit<AuthenticationTerminalRequest, "cwd" | "sessionId" | "onReady">,
+  ): Promise<void> {
+    const cancelled = new AbortController();
+    try {
+      await run({ ...request, cwd: this.cwd, sessionId: this.sessionId,
+        signal: AbortSignal.any([request.signal, cancelled.signal]),
+        onReady: (terminalId) => {
+          const action: AgentPendingAction = {
+            ...this.action("tool", "Agent sign-in", "Open the terminal to sign in.", []),
+            terminalId, kind: "user_input", approval: undefined, canApprove: false, canDecline: false,
+            userInput: { question: "Complete sign-in in the terminal.", choices: ["Cancel sign-in"], allowFreeform: false },
+          };
+          void this.ask(action, cancelled.signal, (input) =>
+            parsePendingActionUserInputResponse(input)?.answer === "Cancel sign-in" ? true : null, false)
+            .then(() => cancelled.abort());
+        },
+      });
+    } finally { cancelled.abort(); }
   }
 
   cancelPending(): void {

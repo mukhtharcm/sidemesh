@@ -1,3 +1,4 @@
+import type { AuthenticationTerminalRequest } from "./terminal.js";
 import type { EventEmitter } from "node:events";
 
 import type { PendingActionResponseInput } from "./approvals.js";
@@ -389,11 +390,16 @@ export type AgentProviderLiveEvent =
       action: AgentPendingAction;
     };
 
+export interface AgentHostServices {
+  runAuthenticationTerminal(request: AuthenticationTerminalRequest): Promise<void>;
+}
+
 export interface AgentProviderCore extends EventEmitter<AgentProviderEvents> {
   readonly kind: string;
   readonly displayName: string;
   readonly capabilities: AgentProviderCapabilities;
 
+  attachHostServices?(services: AgentHostServices): void;
   start(): Promise<void>;
   close?(): Promise<void>;
   restart?(): Promise<void>;

@@ -432,6 +432,13 @@ specific agent provider.
   the comma-separated `SIDEMESH_WORKSPACE_ROOTS` list.
 - **Terminal security**: `SIDEMESH_TOKEN` is deleted from env before spawning
   the shell; `SIDEMESH_TERMINAL_SESSION=1` is injected.
+- **ACP terminal sign-in**: advertise `auth.terminal` only with an explicit
+  executable/argument configuration and an enabled host terminal service. Run
+  the configured program separately, append the supplied auth arguments, and
+  never pass a terminal method ID to ACP `authenticate`. The host terminal ID
+  belongs in the pending action; arguments, environment values, and output
+  must stay out of transcripts. Open the exact terminal ID and remove its
+  replay output on exit. Do not replace it with a shell or reuse it by cwd.
 - **Termux / Android PTY support**: keep `node-pty` optional. Do not
   reintroduce eager top-level PTY imports or make `node-pty` a required npm
   dependency; Termux installs can lack a working native addon, so the daemon

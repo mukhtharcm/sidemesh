@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { agent, methods, PROTOCOL_VERSION, RequestError,
-  type ContentBlock, type SessionUpdate, type SessionConfigOption, type ClientApp, type SessionInfo } from "@agentclientprotocol/sdk";
+  type ContentBlock, type AuthMethod, type SessionUpdate, type SessionConfigOption, type ClientApp, type SessionInfo } from "@agentclientprotocol/sdk";
 import { AcpAgentProvider } from "./acp-provider.js";
 import { AgentProviderRequestError, type AgentPendingAction, type AgentProviderLiveEvent } from "./agent-provider.js";
 import { SessionStore } from "./session-store.js";
@@ -25,19 +25,23 @@ function harness() {
   ];
   const result = { history, sessions, connects: 0, prompts: [] as string[], promptBlocks: [] as ContentBlock[][], images: false, loadFails: false, loadCalls: 0,
     onPrompt: null as (() => void) | null, deleteSupported: true, deleteFails: false, deleted: [] as string[],
+    authMethods: [{ id: "first", name: "First account" }, { id: "second", name: "Second account" }] as AuthMethod[],
+    terminalAuthAdvertised: false, authenticateCalls: 0,
     requireAuth: false, authenticated: "", loadSupported: true, closed: 0, configurationRequests: [] as unknown[],
     connect: async (app: ClientApp, cwd: string) => {
       result.connects++;
       const held = new Map<string, () => void>();
       const server = agent()
-        .onRequest(methods.agent.initialize, () => ({ protocolVersion: PROTOCOL_VERSION,
+        .onRequest(methods.agent.initialize, ({ params }) => {
+          result.terminalAuthAdvertised = params.clientCapabilities?.auth?.terminal === true;
+          return { protocolVersion: PROTOCOL_VERSION,
           agentInfo: { name: "wire-fixture", version: "1" },
           agentCapabilities: { loadSession: result.loadSupported, promptCapabilities: { image: result.images }, sessionCapabilities: {
             list: {}, resume: {}, close: {}, ...(result.deleteSupported ? { delete: {} } : {}),
           } },
-          authMethods: [{ id: "first", name: "First account" }, { id: "second", name: "Second account" }],
-        }))
-        .onRequest(methods.agent.authenticate, ({ params }) => { result.authenticated = params.methodId; return {}; })
+          authMethods: result.authMethods,
+        }; })
+        .onRequest(methods.agent.authenticate, ({ params }) => { result.authenticateCalls++; result.authenticated = params.methodId; return {}; })
         .onRequest(methods.agent.session.new, () => {
           if (result.requireAuth && !result.authenticated) throw RequestError.authRequired();
           const sessionId = `native-${++counter}`;
@@ -330,6 +334,44 @@ describe("AcpAgentProvider", () => {
     assert.equal(provider.respondToPendingAction(action, { answer: "Second account (second)", wasFreeform: false }), true);
     await created;
     assert.equal(wire.authenticated, "second");
+  });
+
+  it("runs selected terminal authentication without passing its ID to authenticate", async () => {
+    await provider.close();
+    provider = new AcpAgentProvider({ agent: "fixture", executable: "/configured-agent", args: ["--acp"],
+      stateDir: join(directory, "legacy"), cwd: directory }, { sessionStore: store, connect: wire.connect });
+    wire.requireAuth = true;
+    wire.authMethods = [{ type: "terminal", id: "terminal", name: "Terminal account", args: ["--login"], env: { AUTH_VALUE: "private" } }];
+    const opened: AgentPendingAction[] = [];
+    provider.on("liveEvent", (event) => {
+      if (event.type !== "action_opened") return;
+      opened.push(event.action);
+      if (!event.action.terminalId) provider.respondToPendingAction(event.action, { answer: "Terminal account (terminal)", wasFreeform: false });
+    });
+    provider.attachHostServices({ runAuthenticationTerminal: async (request) => {
+      assert.equal(request.executable, "/configured-agent");
+      assert.deepEqual(request.args, ["--acp", "--login"]);
+      assert.deepEqual(request.env, { AUTH_VALUE: "private" });
+      assert.equal(request.cwd, directory);
+      request.onReady("host-terminal");
+      assert.equal(opened.at(-1)?.terminalId, "host-terminal");
+      assert.equal(JSON.stringify(opened).includes("private"), false);
+      wire.authenticated = "terminal-success";
+    } });
+    await provider.createSession({ cwd: directory, input: [], overrides });
+    assert.equal(wire.terminalAuthAdvertised, true);
+    assert.equal(wire.authenticateCalls, 0);
+    assert.equal(opened.length, 2);
+  });
+
+  it("does not offer terminal authentication without a configured program and host terminal service", async () => {
+    wire.requireAuth = true;
+    wire.authMethods = [{ type: "terminal", id: "terminal", name: "Terminal account" }];
+    provider.attachHostServices({ runAuthenticationTerminal: async () => assert.fail("legacy command cannot run terminal auth") });
+    await assert.rejects(provider.createSession({ cwd: directory, input: [], overrides }), /auth/i);
+    assert.equal(wire.terminalAuthAdvertised, false);
+    assert.equal(wire.authenticateCalls, 0);
+    assert.equal(events.some((event) => event.type === "action_opened"), false);
   });
 
   it("discovers native sessions through pagination and keeps resume distinct from replay", async () => {

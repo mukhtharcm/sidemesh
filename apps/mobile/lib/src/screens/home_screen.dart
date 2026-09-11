@@ -45,6 +45,7 @@ import 'host_detail_screen.dart';
 import 'pair_scanner_sheet.dart';
 import 'settings_screen.dart';
 import 'session_screen.dart';
+import 'terminal_screen.dart';
 import 'usage_pane.dart';
 import '../theme/app_control_styles.dart';
 import '../theme/app_status_styles.dart';
@@ -2606,6 +2607,7 @@ class _InboxPaneState extends State<InboxPane> {
             for (var index = 0; index < entries.length; index += 1) ...[
               _InboxCard(
                 entry: entries[index],
+                api: widget.api,
                 dense: widget.dense,
                 onOpenSession: () => widget.onOpenSession(
                   entries[index].host,
@@ -3187,12 +3189,14 @@ String _hostEndpointLabel(String baseUrl) {
 class _InboxCard extends StatelessWidget {
   const _InboxCard({
     required this.entry,
+    required this.api,
     required this.onOpenSession,
     required this.onRespond,
     this.dense = false,
   });
 
   final PendingActionEntry entry;
+  final ApiClient api;
   final VoidCallback onOpenSession;
   final ValueChanged<PendingActionResponseDraft> onRespond;
   final bool dense;
@@ -3204,7 +3208,7 @@ class _InboxCard extends StatelessWidget {
     final hostMeta = action.sessionTitle == null || action.sessionTitle!.isEmpty
         ? entry.host.label
         : '${entry.host.label} · ${action.sessionTitle}';
-    if (dense) {
+    if (dense && !action.isUserInput) {
       // Compact row for the desktop sidebar — tap the row to open the
       // session; inline ✓/✕ buttons let the user resolve without leaving
       // the sidebar. Long-press on approve surfaces "approve for session".
@@ -3343,9 +3347,29 @@ class _InboxCard extends StatelessWidget {
             ),
           ],
           const SizedBox(height: AppSpacing.compact),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.end,
+          Wrap(
+            alignment: WrapAlignment.end,
+            spacing: AppSpacing.sm,
+            runSpacing: AppSpacing.sm,
             children: [
+              if (action.terminalId != null)
+                TextButton.icon(
+                  onPressed: () => Navigator.of(context).push(
+                    MaterialPageRoute<void>(builder: (_) => TerminalScreen(
+                      host: entry.host, api: api, cwd: action.cwd ?? '',
+                      sessionId: action.sessionId, terminalId: action.terminalId,
+                      title: 'Agent sign-in',
+                    )),
+                  ),
+                  icon: const Icon(Icons.terminal_rounded),
+                  label: const Text('Open sign-in terminal'),
+                ),
+              if (action.isUserInput)
+                for (final choice in action.userInput!.choices)
+                  TextButton(
+                    onPressed: () => onRespond(PendingActionResponseDraft.userInput(answer: choice, wasFreeform: false)),
+                    child: Text(choice),
+                  ),
               if (action.approval?.providerOptions.isNotEmpty ?? false)
                 for (final option in action.approval!.providerOptions) ...[
                   if (option != action.approval!.providerOptions.first)

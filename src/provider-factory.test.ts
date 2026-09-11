@@ -4,7 +4,7 @@ import { describe, it } from "node:test";
 
 import { AgentProviderRuntime, createAgentProviderRuntime } from "./provider-factory.js";
 import { listAgentProviderDefinitionSummaries, summarizeAgentProviderConfig } from "./provider-registry.js";
-import { AgentProviderRequestError, type AgentProviderEvents, type AgentProviderLiveEvent } from "./agent-provider.js";
+import { AgentProviderRequestError, type AgentProviderEvents, type AgentHostServices, type AgentProviderLiveEvent } from "./agent-provider.js";
 import { FAKE_PROVIDER_CAPABILITIES } from "./fake-provider.js";
 import { wrapProviderScopedId } from "./session-identity.js";
 import type { NodeConfig, ThreadRecord } from "./types.js";
@@ -13,6 +13,8 @@ class TestProvider extends EventEmitter<AgentProviderEvents> {
   readonly kind = "fake";
   readonly displayName = "Test provider";
   readonly capabilities = FAKE_PROVIDER_CAPABILITIES;
+  hostServices?: AgentHostServices;
+  attachHostServices(services: AgentHostServices): void { this.hostServices = services; }
   starts = 0;
   closes = 0;
   healthy = true;
@@ -29,6 +31,22 @@ function runtimeFor(factories: Record<string, () => TestProvider>): AgentProvide
 }
 
 describe("configured provider runtime", () => {
+  it("scopes authentication terminals to the configured instance before and after startup", async () => {
+    const a = new TestProvider();
+    const b = new TestProvider();
+    const runtime = runtimeFor({ writer: () => a, reviewer: () => b });
+    const sessions: string[] = [];
+    try {
+      await runtime.ensure(runtime.providers[0]!);
+      runtime.attachHostServices({ runAuthenticationTerminal: async (request) => { sessions.push(request.sessionId); } });
+      await runtime.ensure(runtime.providers[1]!);
+      for (const provider of [a, b]) await provider.hostServices!.runAuthenticationTerminal({
+        cwd: "/tmp", sessionId: "same", executable: "/agent", args: [], signal: new AbortController().signal, onReady: () => {},
+      });
+      assert.deepEqual(sessions, ["writer", "reviewer"].map((id) => wrapProviderScopedId(id, "same")));
+    } finally { await runtime.close(); }
+  });
+
   it("keeps instances lazy and capabilities specific to each configured provider", async () => {
     const runtime = createAgentProviderRuntime(makeMultiProviderConfig());
     try {
