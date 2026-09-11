@@ -56,6 +56,8 @@ export interface StoredProviderSession {
 
 export type StoredSessionItem = {
   nativeId: string | null;
+  /** Native branch entry before this recovery item, when the provider has trees. */
+  anchorId?: string;
   authority: "primary" | "recovery" | "cache";
 } & ({ kind: "message"; value: SessionMessage } | { kind: "activity"; value: SessionActivity });
 
@@ -101,6 +103,11 @@ export class SessionStore {
         CREATE INDEX IF NOT EXISTS session_items_order ON session_items(provider_id, session_id, position);
       `);
       const store = new SessionStore(db);
+      if (!store.hasMigration("history-anchors-v1")) {
+        store.transaction(() => {
+          db.exec("ALTER TABLE session_items ADD COLUMN anchor_id TEXT; INSERT INTO migrations VALUES ('history-anchors-v1')");
+        });
+      }
       if (!store.hasMigration("durable-queue-v1")) {
         store.transaction(() => {
           db.exec(`
@@ -168,11 +175,11 @@ export class SessionStore {
   }
 
   putSessionItem(providerId: string, sessionId: string, item: StoredSessionItem): void {
-    this.db.prepare(`INSERT INTO session_items VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    this.db.prepare(`INSERT INTO session_items VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(provider_id, session_id, id) DO UPDATE SET kind = excluded.kind, native_id = excluded.native_id,
-      authority = excluded.authority, position = excluded.position, value = excluded.value`)
+      authority = excluded.authority, position = excluded.position, value = excluded.value, anchor_id = excluded.anchor_id`)
       .run(providerId, sessionId, item.value.id, item.kind, item.nativeId, item.authority,
-        item.value.seq, JSON.stringify(item.value));
+        item.value.seq, JSON.stringify(item.value), item.anchorId ?? null);
   }
 
   replaceProviderHistory(providerId: string, session: StoredProviderSession, items: StoredSessionItem[]): void {
@@ -358,8 +365,9 @@ function providerSessionFromRow(row: ProviderSessionRow): StoredProviderSession 
     createdAt: row.created_at, updatedAt: row.updated_at, archived: row.archived === 1, metadata: JSON.parse(row.metadata) };
 }
 interface SessionItemRow {
-  kind: StoredSessionItem["kind"]; native_id: string | null; authority: StoredSessionItem["authority"]; value: string;
+  kind: StoredSessionItem["kind"]; native_id: string | null; authority: StoredSessionItem["authority"]; value: string; anchor_id: string | null;
 }
 function sessionItemFromRow(row: SessionItemRow): StoredSessionItem {
-  return { kind: row.kind, nativeId: row.native_id, authority: row.authority, value: JSON.parse(row.value) };
+  return { kind: row.kind, nativeId: row.native_id, authority: row.authority, value: JSON.parse(row.value),
+    ...(row.anchor_id ? { anchorId: row.anchor_id } : {}) };
 }

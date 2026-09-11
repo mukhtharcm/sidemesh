@@ -74,7 +74,7 @@ export interface AgentProviderDefinitionSummary {
 
 export const DEFAULT_AGENT_PROVIDER_KIND: AgentProviderKind = "codex";
 const CODEX_DEFAULT_COMMAND = "codex";
-const PI_DEFAULT_COMMAND = "sdk";
+const PI_DEFAULT_COMMAND = "rpc";
 const OPENCODE_DEFAULT_COMMAND = "opencode";
 const FAKE_DEFAULT_COMMAND = "builtin";
 const COPILOT_DEFAULT_COMMAND = "copilot";
@@ -209,11 +209,13 @@ const PI_PROVIDER_DEFINITION: AgentProviderDefinition = {
   ],
   supportedApprovalPolicies: [],
 
-  create(config) {
+  create(config, sessionStore) {
     const pi = expectPiProviderConfig(config);
     return new PiAgentProvider({
       agentDir: pi.agentDir,
       stateDir: pi.stateDir,
+      providerId: pi.id ?? pi.kind,
+      sessionStore,
     });
   },
 

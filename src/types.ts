@@ -651,6 +651,7 @@ export interface ImageGenerationActivity extends SessionActivityBase {
 
 export interface ContextCompactionActivity extends SessionActivityBase {
   type: "context_compaction";
+  summary?: string;
 }
 
 export type SessionActivity =

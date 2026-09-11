@@ -314,6 +314,15 @@ specific agent provider.
   from `apps/mobile/` with
   `dart run sqflite_common_ffi_web:setup --force` after upgrading the package.
 - **No formatter**: No Prettier, Biome, or ESLint. Follow file-local style.
+- **Pi RPC**: execution uses the official `rpc-entry` process. Use
+  `agent_settled` for completion; `agent_end` can precede automatic retries.
+  `get_entries` follows `leafId`, and its entries can precede native disk writes.
+  Confirm durable history against the native file before removing recovery
+  records. Use `parseSessionEntries` with a read-only file read;
+  `SessionManager.open` repairs partial files and must not be used for reads.
+  Load the public SDK only for file discovery/history and catalogs.
+  Extension UI requests can occur during startup; session reads must not wait
+  for startup questions to finish. Never use private SDK event queues.
 - **Codex history messages**: newer rollouts use `event_msg.item_completed`
   with `UserMessage` / `AgentMessage` items instead of `user_message` /
   `agent_message` events. Read both formats for transcripts and previews.

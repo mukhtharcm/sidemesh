@@ -26,28 +26,16 @@ Never restart the Sidemesh service from a session running inside that service.
 
 ## Intentional pins
 
-### Pi coding agent `0.80.3`
+### Pi coding agent `0.85.1`
 
-The current adapter depends on the Pi service surface exported by `0.80.3`.
-Pi `0.80.10` no longer exposes the `modelRegistry` shape used by Sidemesh, so a
-version-only bump does not compile. Upgrade Pi only together with an adapter
-migration and focused provider tests.
+Pi runs in its official RPC process. Sidemesh uses the exported RPC wire types
+and the documented JSONL protocol, including `agent_settled` and extension UI
+requests. The public SDK is loaded only for native history and catalog reads.
+Do not use private session queues or SDK execution internals.
 
-Pi also ships an npm shrinkwrap that pins vulnerable transitive versions.
-`scripts/patch-pi-transitives.mjs` replaces only the audited packages after
-install:
-
-- `brace-expansion` `5.0.9`
-- `protobufjs` `7.6.5`
-- `undici` `8.9.0`
-
-Keep those root dependencies exact, and keep their nested Pi lockfile entries in
-sync. Npm dependency updates may restore vulnerable entries from the upstream
-shrinkwrap. Verify a clean `npm ci`, the installed nested versions, and a separate
-`npm audit` after the postinstall remediation.
-
-`protobufjs` 8 is not a drop-in replacement
-for Pi's `^7.5.4` consumer constraint.
+The version is exact so protocol changes must pass the RPC boundary tests.
+This version contains the transitive dependency fixes that previously needed
+a Sidemesh install script. A clean install no longer copies packages into Pi.
 
 ### GitHub Copilot SDK `1.0.4`
 
