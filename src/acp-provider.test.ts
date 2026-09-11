@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { agent, methods, PROTOCOL_VERSION, RequestError,
-  type SessionUpdate, type SessionConfigOption, type ClientApp, type SessionInfo } from "@agentclientprotocol/sdk";
+  type ContentBlock, type SessionUpdate, type SessionConfigOption, type ClientApp, type SessionInfo } from "@agentclientprotocol/sdk";
 import { AcpAgentProvider } from "./acp-provider.js";
 import { AgentProviderRequestError, type AgentPendingAction, type AgentProviderLiveEvent } from "./agent-provider.js";
 import { SessionStore } from "./session-store.js";
@@ -23,7 +23,7 @@ function harness() {
       options: [{ value: "first", name: "First" }, { value: "second", name: "Second" }, { value: "broken", name: "Unavailable" }] },
     { id: "auto", type: "boolean", name: "Automatic", currentValue: false },
   ];
-  const result = { history, sessions, connects: 0, prompts: [] as string[], loadFails: false, loadCalls: 0,
+  const result = { history, sessions, connects: 0, prompts: [] as string[], promptBlocks: [] as ContentBlock[][], images: false, loadFails: false, loadCalls: 0,
     onPrompt: null as (() => void) | null,
     requireAuth: false, authenticated: "", loadSupported: true, closed: 0, configurationRequests: [] as unknown[],
     connect: async (app: ClientApp, cwd: string) => {
@@ -32,7 +32,7 @@ function harness() {
       const server = agent()
         .onRequest(methods.agent.initialize, () => ({ protocolVersion: PROTOCOL_VERSION,
           agentInfo: { name: "wire-fixture", version: "1" },
-          agentCapabilities: { loadSession: result.loadSupported, sessionCapabilities: { list: {}, resume: {}, close: {} } },
+          agentCapabilities: { loadSession: result.loadSupported, promptCapabilities: { image: result.images }, sessionCapabilities: { list: {}, resume: {}, close: {} } },
           authMethods: [{ id: "first", name: "First account" }, { id: "second", name: "Second account" }],
         }))
         .onRequest(methods.agent.authenticate, ({ params }) => { result.authenticated = params.methodId; return {}; })
@@ -72,13 +72,14 @@ function harness() {
         .onRequest(methods.agent.session.prompt, async ({ params, client, signal }) => {
           const text = params.prompt.flatMap((block) => block.type === "text" ? [block.text] : []).join("");
           result.prompts.push(text);
+          result.promptBlocks.push(params.prompt);
           result.onPrompt?.();
           const index = result.prompts.length;
           const send = async (update: SessionUpdate) => {
             history.get(params.sessionId)!.push(update);
             await client.notify(methods.client.session.update, { sessionId: params.sessionId, update });
           };
-          await send({ sessionUpdate: "user_message_chunk", messageId: `user-${index}`, content: { type: "text", text } });
+          for (const content of params.prompt) await send({ sessionUpdate: "user_message_chunk", messageId: `user-${index}`, content });
           if (text === "hold") {
             await new Promise<void>((resolve) => {
               held.set(params.sessionId, resolve);
@@ -134,6 +135,45 @@ describe("AcpAgentProvider", () => {
     await provider.start();
   });
   afterEach(async () => { await provider.close(); store.close(); await rm(directory, { recursive: true, force: true }); });
+
+  it("negotiates image input and sends ACP image and resource blocks", async () => {
+    assert.equal(provider.capabilities.input.imageUrl, false);
+    wire.images = true;
+    const local = join(directory, "image.png");
+    await writeFile(local, Buffer.from(png, "base64"));
+    const done = completion(provider);
+    const created = await provider.createSession({ cwd: directory, input: [
+      { type: "image", url: `data:image/png;base64,${png}` },
+      { type: "localImage", path: local }, { type: "file", path: join(directory, "a #b.txt") },
+    ], overrides });
+    await done;
+    assert.equal(provider.capabilities.input.imageUrl, true);
+    assert.equal(provider.capabilities.input.localImage, true);
+    assert.deepEqual(wire.promptBlocks[0]!.slice(0, 2), [0, 1].map(() => ({ type: "image", data: png, mimeType: "image/png" })));
+    assert.equal(wire.promptBlocks[0]![2]!.type, "resource_link");
+    assert.match(JSON.stringify(wire.promptBlocks[0]![2]), /a%20%23b.txt/);
+    const log = await provider.readSessionLog(created.thread);
+    assert.ok(log.messages.find((message) => message.role === "user")?.attachments.some((item) => item.url === `data:image/png;base64,${png}`));
+    await provider.close();
+    provider = createProvider();
+    await provider.start();
+    assert.equal(provider.capabilities.input.imageUrl, true);
+    const changed = new AcpAgentProvider({ agent: "fixture", command: "different-agent-command", cwd: directory }, { sessionStore: store, connect: wire.connect });
+    await changed.start();
+    assert.equal(changed.capabilities.input.imageUrl, false);
+    await changed.close();
+  });
+
+  it("rejects unsupported and invalid images before sending a prompt", async () => {
+    const created = await provider.createSession({ cwd: directory, input: [], overrides });
+    await assert.rejects(provider.submitInput({ sessionId: created.thread.id, input: [{ type: "image", url: `data:image/png;base64,${png}` }], overrides, activeTurnId: null }), /does not support image/);
+    wire.images = true;
+    const imageSession = await provider.createSession({ cwd: directory, input: [], overrides });
+    for (const url of ["https://example.com/image.png", "data:image/png;base64,abc"]) {
+      await assert.rejects(provider.submitInput({ sessionId: imageSession.thread.id, input: [{ type: "image", url }], overrides, activeTurnId: null }), /local images or image data URLs/);
+    }
+    assert.equal(wire.prompts.length, 0);
+  });
 
   it("uses SDK sessions, preserves partial tool updates and images, and commits complete replay", async () => {
     const done = completion(provider);
