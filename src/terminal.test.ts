@@ -36,6 +36,65 @@ describe("terminal configuration", () => {
     );
   });
 
+  it("runs terminal sign-in with literal arguments, a filtered environment, and no retained output", async () => {
+    const registry = new TerminalRegistry({ enabled: true, resolveCwd: async (cwd) => cwd });
+    const socket = new FakeSocket();
+    let terminalId = "";
+    try {
+      const done = registry.runAuthentication({
+        cwd: process.cwd(), sessionId: "auth-session", executable: process.execPath,
+        args: ["-e", "console.log('AUTH_READY'); process.stdin.once('data', () => process.exit(process.stdout.isTTY && !process.env.SIDEMESH_TOKEN && process.env.AUTH_TEST === 'private-value' && process.argv[1] === '$(do-not-run)' ? 0 : 2))", "$(do-not-run)"],
+        env: { AUTH_TEST: "private-value", SIDEMESH_TOKEN: "must-be-removed" },
+        signal: new AbortController().signal,
+        onReady: (id) => {
+          terminalId = id;
+          registry.attach(socket as unknown as WebSocket, id, -1);
+          const publicInfo = JSON.stringify(registry.get(id));
+          assert.equal(publicInfo.includes("private-value"), false);
+          assert.equal(publicInfo.includes("do-not-run"), false);
+          assert.equal(registry.get(id)?.purpose, "authentication");
+        },
+      });
+      await waitForFrame(socket, (frame) => frame.type === "output" && String(frame.data).includes("AUTH_READY"));
+      socket.emit("message", Buffer.from(JSON.stringify({ type: "input", data: "finish\n" })));
+      await done;
+      assert.equal(registry.get(terminalId), null);
+      assert.equal(socket.readyState, 3);
+      assert.deepEqual(registry.list(), []);
+    } finally { registry.dispose(); }
+  });
+
+  it("cancels sign-in even when the program ignores termination", async () => {
+    const registry = new TerminalRegistry({ enabled: true, resolveCwd: async (cwd) => cwd });
+    const socket = new FakeSocket();
+    const cancelled = new AbortController();
+    try {
+      const done = registry.runAuthentication({
+        cwd: process.cwd(), sessionId: "auth-session", executable: process.execPath,
+        args: ["-e", "process.on('SIGTERM', () => {}); process.on('SIGHUP', () => {}); console.log('AUTH_READY'); setInterval(() => {}, 1000)"],
+        signal: cancelled.signal, onReady: (id) => registry.attach(socket as unknown as WebSocket, id, -1),
+      });
+      const rejected = assert.rejects(done, (error: Error) => error.name === "AbortError");
+      await waitForFrame(socket, (frame) => frame.type === "output" && String(frame.data).includes("AUTH_READY"));
+      cancelled.abort();
+      await rejected;
+      assert.deepEqual(registry.list(), []);
+    } finally { registry.dispose(); }
+  });
+
+  it("applies terminal access and workspace checks to sign-in", async () => {
+    for (const enabled of [false, true]) {
+      const registry = new TerminalRegistry({ enabled, resolveCwd: async () => { throw new Error("outside workspace"); } });
+      try {
+        await assert.rejects(registry.runAuthentication({
+          cwd: "/unknown", sessionId: "auth-session", executable: process.execPath, args: [],
+          signal: new AbortController().signal, onReady: () => assert.fail("must not spawn"),
+        }), enabled ? /outside workspace/ : /terminal access is disabled/);
+        assert.deepEqual(registry.list(), []);
+      } finally { registry.dispose(); }
+    }
+  });
+
   it("notifies attached viewers when a session terminal is replaced", async () => {
     const registry = new TerminalRegistry({
       enabled: true,

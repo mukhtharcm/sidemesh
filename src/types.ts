@@ -871,6 +871,7 @@ export interface PendingActionElicitationRequest {
 }
 
 export interface PendingAction {
+  terminalId?: string;
   id: string;
   sessionId: string;
   kind: PendingActionKind;

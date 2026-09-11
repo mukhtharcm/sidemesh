@@ -5122,6 +5122,15 @@ class _SessionScreenState extends State<SessionScreen>
     );
   }
 
+  Future<void> _openAuthenticationTerminal(PendingAction action) async {
+    await Navigator.of(context).push(MaterialPageRoute<void>(
+      builder: (_) => TerminalScreen(
+        host: widget.host, api: widget.api, cwd: action.cwd ?? widget.session.cwd,
+        sessionId: action.sessionId, terminalId: action.terminalId, title: 'Agent sign-in',
+      ),
+    ));
+  }
+
   Future<void> _openBrowserPreviewTarget(
     BrowserPreviewTargetCandidate candidate,
   ) async {
@@ -6467,6 +6476,7 @@ class _SessionScreenState extends State<SessionScreen>
             child: _PendingActionCard(
               action: _pendingAction!,
               onRespond: _respondAction,
+              onOpenTerminal: () => _openAuthenticationTerminal(_pendingAction!),
             ),
           ),
         if (_showOfflineTranscriptStatus)

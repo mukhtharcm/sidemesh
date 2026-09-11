@@ -6,6 +6,7 @@ void main() {
   test('PendingAction parses user-input payloads', () {
     final action = PendingAction.fromJson({
       'id': 'ask-1',
+      'terminalId': 'sign-in-terminal',
       'sessionId': 'session-1',
       'kind': 'user_input',
       'title': 'Agent question',
@@ -21,6 +22,8 @@ void main() {
       },
     });
 
+    expect(action.terminalId, 'sign-in-terminal');
+    expect(PendingAction.fromJson(action.toJson()).terminalId, 'sign-in-terminal');
     expect(action.isUserInput, isTrue);
     expect(action.userInput?.choices, ['staging', 'production']);
   });

@@ -344,6 +344,9 @@ export async function startServer(
         config.workspaceRoots,
       ),
   });
+  if (terminalRegistry.isEnabled()) providerRuntime.attachHostServices({
+    runAuthenticationTerminal: (request) => terminalRegistry.runAuthentication(request),
+  });
   const browserPreviewRegistry = new BrowserPreviewRegistry({
     enabled: hostCapabilities.workspace.browserPreview,
     chromePath: config.browserPreview.chromePath,

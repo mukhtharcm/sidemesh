@@ -29,6 +29,7 @@ class TerminalScreen extends StatefulWidget {
     required this.api,
     required this.cwd,
     this.sessionId,
+    this.terminalId,
     this.title,
     this.onClose,
   });
@@ -37,6 +38,7 @@ class TerminalScreen extends StatefulWidget {
   final ApiClient api;
   final String cwd;
   final String? sessionId;
+  final String? terminalId;
   final String? title;
   final VoidCallback? onClose;
 
@@ -113,6 +115,7 @@ class _TerminalScreenState extends State<TerminalScreen> {
         api: widget.api,
         cwd: widget.cwd,
         sessionId: widget.sessionId,
+        terminalId: widget.terminalId,
         title: widget.title,
         reuseExisting: true,
         onAppBarControlsChanged: (controls) {
@@ -161,6 +164,7 @@ class TerminalPane extends StatefulWidget {
     required this.api,
     required this.cwd,
     this.sessionId,
+    this.terminalId,
     this.title,
     this.reuseExisting = true,
     this.compact = false,
@@ -171,6 +175,7 @@ class TerminalPane extends StatefulWidget {
   final ApiClient api;
   final String cwd;
   final String? sessionId;
+  final String? terminalId;
   final String? title;
   final bool reuseExisting;
   final bool compact;
@@ -233,7 +238,8 @@ class _TerminalPaneState extends State<TerminalPane> {
         oldWidget.host.baseUrl == widget.host.baseUrl &&
         oldWidget.host.token == widget.host.token &&
         oldWidget.cwd == widget.cwd &&
-        oldWidget.sessionId == widget.sessionId) {
+        oldWidget.sessionId == widget.sessionId &&
+        oldWidget.terminalId == widget.terminalId) {
       return;
     }
     if (oldWidget.host.id != widget.host.id) {
@@ -284,6 +290,9 @@ class _TerminalPaneState extends State<TerminalPane> {
     try {
       var terminal = await _findReusableTerminal(reuseExisting);
       if (!mounted) return;
+      if (terminal == null && widget.terminalId != null) {
+        throw StateError("The sign-in terminal is closed.");
+      }
       if (terminal == null) {
         setState(() => _creating = true);
         terminal = await widget.api.createTerminal(
@@ -313,9 +322,14 @@ class _TerminalPaneState extends State<TerminalPane> {
   }
 
   Future<HostTerminalInfo?> _findReusableTerminal(bool enabled) async {
-    if (!enabled) return null;
+    if (!enabled && widget.terminalId == null) return null;
     final terminals = await widget.api.fetchTerminals(widget.host);
     for (final terminal in terminals) {
+      if (widget.terminalId != null) {
+        if (terminal.id == widget.terminalId && terminal.sessionId == widget.sessionId) return terminal;
+        continue;
+      }
+      if (terminal.purpose == 'authentication') continue;
       if (!terminal.isRunning) continue;
       if (terminal.cwd != widget.cwd) continue;
       final sessionId = widget.sessionId;
@@ -431,6 +445,7 @@ class _TerminalPaneState extends State<TerminalPane> {
           final previous = _terminalInfo;
           if (previous != null) {
             _terminalInfo = HostTerminalInfo(
+              purpose: previous.purpose,
               id: previous.id,
               title: previous.title,
               cwd: previous.cwd,
@@ -453,6 +468,7 @@ class _TerminalPaneState extends State<TerminalPane> {
         _focusNode.unfocus();
         return;
       case 'replace':
+        if (widget.terminalId != null) return;
         final seq = _intOrNull(frame['seq']);
         if (seq != null && seq > _lastSeq) {
           _lastSeq = seq;
@@ -466,7 +482,14 @@ class _TerminalPaneState extends State<TerminalPane> {
         return;
       case 'error':
         final message = frame['message']?.toString() ?? 'Something went wrong';
-        setState(() => _error = message);
+        setState(() {
+          _error = message;
+          if (widget.terminalId != null && _terminalInfo != null) {
+            _terminalInfo = _stoppedTerminal(_terminalInfo!);
+            _connecting = false;
+            _reconnecting = false;
+          }
+        });
         return;
     }
   }
@@ -700,7 +723,7 @@ class _TerminalPaneState extends State<TerminalPane> {
   }
 
   Future<void> _restartTerminal() async {
-    if (_starting) return;
+    if (_starting || widget.terminalId != null) return;
     unawaited(_subscription?.cancel());
     unawaited(_channel?.sink.close());
     if (!mounted) return;
@@ -830,7 +853,7 @@ class _TerminalPaneState extends State<TerminalPane> {
                                 style: Theme.of(context).textTheme.titleSmall,
                               ),
                               const SizedBox(height: AppSpacing.sm),
-                              FilledButton.icon(
+                              if (widget.terminalId == null) FilledButton.icon(
                                 onPressed: _restartTerminal,
                                 icon: const Icon(Icons.restart_alt_rounded),
                                 label: const Text('Start terminal'),
@@ -862,6 +885,7 @@ class _TerminalPaneState extends State<TerminalPane> {
   ) {
     final running = terminal?.isRunning == true;
     final canRestart =
+        widget.terminalId == null &&
         !running &&
         !_starting &&
         !_connecting &&
@@ -885,6 +909,7 @@ class _TerminalPaneState extends State<TerminalPane> {
 HostTerminalInfo _stoppedTerminal(HostTerminalInfo terminal) {
   if (!terminal.isRunning) return terminal;
   return HostTerminalInfo(
+    purpose: terminal.purpose,
     id: terminal.id,
     title: terminal.title,
     cwd: terminal.cwd,

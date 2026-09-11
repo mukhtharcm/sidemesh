@@ -12,7 +12,7 @@ import {
   type PromptCapabilities,
 } from "@agentclientprotocol/sdk";
 
-import { AgentProviderRequestError, type AgentProvider, type AgentProviderEvents,
+import { AgentProviderRequestError, type AgentProvider, type AgentProviderEvents, type AgentHostServices,
   type AgentProviderCapabilities, type AgentCreateSessionRequest, type AgentCreateSessionResult,
   type AgentSessionListOptions, type AgentSessionLogOptions, type AgentSessionSnapshot, type AgentSubmitInputRequest,
   type AgentSubmitInputResult, type AgentPendingAction, type AgentSessionResumeOptions,
@@ -104,6 +104,9 @@ export class AcpAgentProvider extends EventEmitter<AgentProviderEvents> implemen
   private readonly providerId: string;
   private readonly command: string;
   private readonly executable?: string;
+  private hostServices?: AgentHostServices;
+
+  attachHostServices(services: AgentHostServices): void { this.hostServices = services; }
   private readonly args: string[];
   private readonly commandHash: string;
   private readonly stateDir: string;
@@ -403,7 +406,7 @@ export class AcpAgentProvider extends EventEmitter<AgentProviderEvents> implemen
       if (this.closed) throw new Error("ACP provider is closed");
       state.initialized = await this.requestWithTimeout(state, transport.connection.agent.request(methods.agent.initialize, {
         protocolVersion: PROTOCOL_VERSION, clientInfo: { name: "sidemesh", version: "1" },
-        clientCapabilities: { fs: { readTextFile: true, writeTextFile: true }, terminal: true,
+        clientCapabilities: { ...(this.executable && this.hostServices ? { auth: { terminal: true } } : {}), fs: { readTextFile: true, writeTextFile: true }, terminal: true,
           elicitation: { form: {}, url: {} }, session: { configOptions: { boolean: {} }, compaction: {} } },
       }));
       if (state.initialized.protocolVersion !== PROTOCOL_VERSION) throw new Error("Unsupported ACP protocol version");
@@ -589,9 +592,18 @@ export class AcpAgentProvider extends EventEmitter<AgentProviderEvents> implemen
     try { return await this.requestWithTimeout(state, operation()); }
     catch (error) {
       if (!(error instanceof RequestError) || error.code !== RequestError.authRequired().code) throw error;
-      const methodId = await state.host.selectAuthentication(state.initialized.authMethods ?? [], state.transport.connection.signal);
+      const methodId = await state.host.selectAuthentication(state.initialized.authMethods ?? [], state.transport.connection.signal, Boolean(this.executable && this.hostServices));
       if (!methodId) throw error;
-      await this.requestWithTimeout(state, state.transport.connection.agent.request(methods.agent.authenticate, { methodId }), this.timeoutMs);
+      const method = state.initialized.authMethods?.find((method) => method.id === methodId);
+      if (method && "type" in method && method.type === "terminal") {
+        if (!this.executable || !this.hostServices) throw error;
+        await state.host.authenticateInTerminal(this.hostServices.runAuthenticationTerminal, {
+          executable: this.executable, args: [...this.args, ...(method.args ?? [])], env: method.env,
+          signal: state.transport.connection.signal,
+        });
+      } else {
+        await this.requestWithTimeout(state, state.transport.connection.agent.request(methods.agent.authenticate, { methodId }), this.timeoutMs);
+      }
       return await this.requestWithTimeout(state, operation());
     }
   }

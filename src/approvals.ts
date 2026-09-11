@@ -178,6 +178,7 @@ export function toPublicPendingAction(action: PendingAction): PendingAction {
   return {
     id: action.id,
     sessionId: action.sessionId,
+    ...(action.terminalId === undefined ? {} : { terminalId: action.terminalId }),
     kind: action.kind,
     title: action.title,
     detail: action.detail,

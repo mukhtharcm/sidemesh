@@ -276,3 +276,20 @@ capabilities and translate SDK events into Sidemesh event types. The Copilot
 adapter uses `auto` as the Sidemesh default for
 app-started turns, so a costly persistent Copilot setting is not consumed by
 accident.
+
+### Interactive agent sign-in
+
+A provider can attach to `AgentHostServices.runAuthenticationTerminal` when host
+terminal access is enabled. The provider runtime scopes its session ID before
+passing the request to the host terminal registry. Workspace checks and terminal
+WebSocket authentication remain in force. Arguments and environment values are
+internal; the public pending action contains only the terminal ID and sign-in
+instructions. The registry removes replay output after exit or cancellation.
+
+ACP advertises terminal authentication only for an explicit executable and
+argument list. It appends the advertised authentication arguments, applies the
+provided environment values, and removes `SIDEMESH_TOKEN` before launch. A zero
+exit status completes sign-in. Terminal methods never call ACP `authenticate`.
+Legacy shell commands continue to support agent-managed authentication only.
+The session and inbox can open the exact sign-in terminal and cancel sign-in.
+An expired sign-in terminal cannot start or replace a normal shell.

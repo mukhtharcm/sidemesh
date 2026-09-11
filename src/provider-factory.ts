@@ -1,6 +1,6 @@
 import { EventEmitter } from "node:events";
 
-import { AgentProviderRequestError, type AgentProvider, type AgentProviderCapabilities, type AgentProviderLiveEvent } from "./agent-provider.js";
+import { AgentProviderRequestError, type AgentProvider, type AgentProviderCapabilities, type AgentProviderLiveEvent, type AgentHostServices } from "./agent-provider.js";
 import { capabilitiesForFakeProfile } from "./fake-provider.js";
 import type { SessionStore } from "./session-store.js";
 import { extendProviderOwnership, resolveSessionReference, wrapProviderScopedId, type ProviderOwnership, type SessionReference } from "./session-identity.js";
@@ -42,6 +42,7 @@ export class AgentProviderRuntime extends EventEmitter<ProviderRuntimeEvents> {
   private readonly stopping = new Map<string, Promise<void>>();
   private readonly restarting = new Set<string>();
   private store?: SessionStore;
+  private hostServices?: AgentHostServices;
   private ownership: ProviderOwnership;
   private closed = false;
   private closing?: Promise<void>;
@@ -74,6 +75,19 @@ export class AgentProviderRuntime extends EventEmitter<ProviderRuntimeEvents> {
     if (this.store || this.providers.some((entry) => entry.instance)) throw new Error("Provider storage is already in use");
     this.ownership = store.configureProviderOwnership(this.providers, this.defaultProviderId);
     this.store = store;
+  }
+
+  attachHostServices(services: AgentHostServices): void {
+    this.hostServices = services;
+    for (const entry of this.providers) if (entry.instance) this.attachProviderHostServices(entry, entry.instance);
+  }
+
+  private attachProviderHostServices(entry: AgentProviderRuntimeEntry, provider: AgentProvider): void {
+    if (this.hostServices) provider.attachHostServices?.({
+      runAuthenticationTerminal: (request) => this.hostServices!.runAuthenticationTerminal({
+        ...request, sessionId: wrapProviderScopedId(entry.id, request.sessionId),
+      }),
+    });
   }
 
   get sessionAliases(): ProviderOwnership { return structuredClone(this.ownership); }
@@ -125,6 +139,7 @@ export class AgentProviderRuntime extends EventEmitter<ProviderRuntimeEvents> {
       const provider = entry.create(this.store);
       entry.instance = provider;
       this.listen(entry, provider);
+      this.attachProviderHostServices(entry, provider);
       await provider.start();
       if (this.closed || entry.error !== null) throw new Error(entry.error ?? "Provider stopped during startup");
       entry.version = await provider.getVersion().catch(() => "unknown");

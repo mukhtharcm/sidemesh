@@ -526,6 +526,7 @@ class ProviderCapabilities {
 
 class HostTerminalInfo {
   const HostTerminalInfo({
+    this.purpose,
     required this.id,
     required this.title,
     required this.cwd,
@@ -543,6 +544,7 @@ class HostTerminalInfo {
     required this.clients,
   });
 
+  final String? purpose;
   final String id;
   final String title;
   final String cwd;
@@ -563,6 +565,7 @@ class HostTerminalInfo {
 
   factory HostTerminalInfo.fromJson(Map<String, dynamic> json) =>
       HostTerminalInfo(
+        purpose: _stringOrNull(json['purpose']),
         id: _stringValue(json['id']),
         title: _stringValue(json['title']),
         cwd: _stringValue(json['cwd']),
@@ -2770,6 +2773,7 @@ String? _semanticTargetPrimaryValue(SessionToolSemanticTarget target) {
 
 class PendingAction {
   const PendingAction({
+    this.terminalId,
     required this.id,
     required this.sessionId,
     required this.kind,
@@ -2786,6 +2790,7 @@ class PendingAction {
     this.elicitation,
   });
 
+  final String? terminalId;
   final String id;
   final String sessionId;
   final String kind;
@@ -2810,6 +2815,7 @@ class PendingAction {
   bool get isElicitation => kind == 'elicitation' && elicitation != null;
 
   factory PendingAction.fromJson(Map<String, dynamic> json) => PendingAction(
+    terminalId: _stringOrNull(json['terminalId']),
     id: _stringValue(json['id']),
     sessionId: _stringValue(json['sessionId']),
     kind: _stringValue(json['kind']),
@@ -2839,6 +2845,7 @@ class PendingAction {
   );
 
   Map<String, dynamic> toJson() => {
+    if (terminalId != null) 'terminalId': terminalId,
     'id': id,
     'sessionId': sessionId,
     'kind': kind,

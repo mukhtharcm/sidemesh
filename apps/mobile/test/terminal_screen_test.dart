@@ -19,6 +19,67 @@ class _UnavailableApi extends ApiClient {
 }
 
 void main() {
+  for (final platform in [TargetPlatform.macOS, TargetPlatform.iOS]) {
+    for (final dark in [false, true]) {
+      testWidgets('sign-in terminal uses its ID and cannot start a shell: $platform, dark=$dark', (tester) async {
+        final api = _LiveApi();
+        api.terminals = [
+          HostTerminalInfo.fromJson(_running),
+          HostTerminalInfo.fromJson({..._running, 'id': 'auth', 'sessionId': 'session', 'purpose': 'authentication'}),
+        ];
+        final palette = ThemeVariant.codexAmber;
+        await tester.pumpWidget(MaterialApp(
+          theme: dark ? buildDarkTheme(palette.dark, platform: platform) : buildLightTheme(palette.light, platform: platform),
+          home: TerminalScreen(
+            host: const HostProfile(id: 'auth-test', label: 'Test', baseUrl: 'http://localhost', token: 'test'),
+            api: api, cwd: '/', sessionId: 'session', terminalId: 'auth',
+          ),
+        ));
+        await tester.pump();
+        expect(api.opened, 'auth');
+        api.channel.emit(jsonEncode({'type': 'hello', 'terminal': {..._running, 'id': 'auth', 'sessionId': 'session', 'purpose': 'authentication'}}));
+        await tester.pump();
+        api.channel.emit(jsonEncode({'type': 'replace', 'seq': 1, 'replacement': _running}));
+        api.channel.emit(jsonEncode({'type': 'exit', 'seq': 2, 'exitCode': 0}));
+        await tester.pumpAndSettle();
+        expect(api.opened, 'auth');
+        expect(find.text('Terminal stopped'), findsOneWidget);
+        expect(find.text('Start terminal'), findsNothing);
+        expect(find.byTooltip('Start a new terminal'), findsNothing);
+        expect(api.created, 0);
+        await tester.pumpWidget(const SizedBox());
+        api.channel.dispose();
+      });
+    }
+  }
+
+  testWidgets('missing sign-in terminal never creates a shell', (tester) async {
+    final api = _LiveApi();
+    await tester.pumpWidget(MaterialApp(home: TerminalScreen(
+      host: const HostProfile(id: 'missing-auth', label: 'Test', baseUrl: 'http://localhost', token: 'test'),
+      api: api, cwd: '/', terminalId: 'missing',
+    )));
+    await tester.pumpAndSettle();
+    expect(api.created, 0);
+    expect(find.byTooltip('Start a new terminal'), findsNothing);
+    await tester.pumpWidget(const SizedBox());
+    api.channel.dispose();
+  });
+
+  testWidgets('normal terminal skips a sign-in terminal in the same workspace', (tester) async {
+    final api = _LiveApi();
+    api.terminals = [HostTerminalInfo.fromJson({..._running, 'purpose': 'authentication'})];
+    await tester.pumpWidget(MaterialApp(home: TerminalScreen(
+      host: const HostProfile(id: 'normal-terminal', label: 'Test', baseUrl: 'http://localhost', token: 'test'),
+      api: api, cwd: '/',
+    )));
+    await tester.pump();
+    expect(api.opened, isNull);
+    expect(api.created, 1);
+    await tester.pumpWidget(const SizedBox());
+    api.channel.dispose();
+  });
+
   testWidgets('connection waits for hello and stop is in menu', (tester) async {
     final api = _LiveApi();
     await tester.pumpWidget(
@@ -118,6 +179,9 @@ const _running = <String, Object?>{
 
 class _LiveApi extends ApiClient {
   bool replaced = false;
+  int created = 0;
+  String? opened;
+  List<HostTerminalInfo> terminals = [HostTerminalInfo.fromJson(_running)];
   @override
   Future<HostTerminalInfo> createTerminal(
     HostProfile host, {
@@ -128,21 +192,23 @@ class _LiveApi extends ApiClient {
     int? rows,
     bool replaceExisting = false,
   }) {
+    created++;
     replaced = replaceExisting;
     return Completer<HostTerminalInfo>().future;
   }
 
   final channel = _ControllableWebSocketChannel();
   @override
-  Future<List<HostTerminalInfo>> fetchTerminals(HostProfile host) async => [
-    HostTerminalInfo.fromJson(_running),
-  ];
+  Future<List<HostTerminalInfo>> fetchTerminals(HostProfile host) async => terminals;
   @override
   WebSocketChannel openTerminalLive(
     HostProfile host,
     String terminalId, {
     int since = -1,
-  }) => channel;
+  }) {
+    opened = terminalId;
+    return channel;
+  }
 }
 
 class _ControllableWebSocketChannel extends StreamChannelMixin<dynamic>

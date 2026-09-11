@@ -37,6 +37,27 @@ describe("ACP host callbacks over the official SDK", () => {
     await rm(root, { recursive: true, force: true });
   });
 
+  it("cancels the sign-in terminal from its pending action and resolves it on host close", async () => {
+    for (const close of [false, true]) {
+      const actionPromise = nextAction();
+      const run = host.authenticateInTerminal(async (request) => {
+        request.onReady("sign-in-terminal");
+        await new Promise<void>((resolve) => request.signal.addEventListener("abort", () => resolve(), { once: true }));
+        request.signal.throwIfAborted();
+      }, { executable: "/agent", args: [], signal: connection.signal });
+      const rejected = assert.rejects(run, (error: Error) => error.name === "AbortError");
+      const action = await actionPromise;
+      assert.equal(action.terminalId, "sign-in-terminal");
+      if (close) await host.close();
+      else {
+        assert.equal(host.respond(action.id, { answer: "invented", wasFreeform: false }), false);
+        assert.equal(host.respond(action.id, { answer: "Cancel sign-in", wasFreeform: false }), true);
+      }
+      await rejected;
+      assert.equal(host.respond(action.id, { answer: "Cancel sign-in", wasFreeform: false }), false);
+    }
+  });
+
   it("preserves an exact option ID and does not widen automatic read approval", async () => {
     const pendingAction = nextAction();
     const permission = connection.client.request(methods.client.session.requestPermission, {
