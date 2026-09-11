@@ -93,7 +93,7 @@ class SessionRowCard extends StatelessWidget {
         [
           if (showHost) host.label,
           _workspaceLabel(session.cwd),
-          if (agentProviderDisplayLabel(session.provider)
+          if (agentProviderDisplayLabel(session.provider, providerId: session.providerId)
               case final String label)
             label,
         ].join(' · ');

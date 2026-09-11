@@ -57,7 +57,7 @@ class CreateSessionDraftSeed {
     final runtime = session.runtime;
     final runtimeServiceTier = _trimmedOrNull(runtime?.serviceTier);
     return CreateSessionDraftSeed(
-      provider: session.provider,
+      provider: session.providerReference,
       model: _trimmedOrNull(turnConfig.model) ?? _trimmedOrNull(runtime?.model),
       mode: _trimmedOrNull(turnConfig.mode) ?? _trimmedOrNull(runtime?.mode),
       reasoningEffort:
@@ -300,7 +300,7 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
   String? _profilesLoadedForCwd;
   String? _accessModesLoadedForCwd;
   String? _accessModesLoadedForProvider;
-  String? _selectedProviderKind;
+  String? _selectedProviderId;
   String? _inheritedModel;
   String? _accessMode;
 
@@ -319,7 +319,7 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
     _webSearch = defaults.webSearch;
     _networkAccess = seed?.networkAccess ?? false;
     _accessMode = _trimmedOrNull(seed?.accessMode);
-    _selectedProviderKind = _trimmedOrNull(seed?.provider);
+    _selectedProviderId = _trimmedOrNull(seed?.provider);
     _inheritedModel = _trimmedOrNull(seed?.model);
     _mode = _trimmedOrNull(seed?.mode);
     _reasoningEffort = _trimmedOrNull(seed?.reasoningEffort);
@@ -429,21 +429,21 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
     return node.supportedProviders;
   }
 
-  String get _selectedProviderKindOrDefault =>
-      _selectedProviderKind ?? _nodeInfo?.provider ?? '';
+  String get _selectedProviderIdOrDefault =>
+      _selectedProviderId ?? _nodeInfo?.providerId ?? '';
 
   ProviderDefinitionSummary get _selectedProviderSummary {
     final node = _nodeInfo;
     if (node == null) {
       return ProviderDefinitionSummary.empty;
     }
-    return node.providerSummary(_selectedProviderKindOrDefault);
+    return node.providerSummary(_selectedProviderIdOrDefault);
   }
 
   String get _providerName {
     final summary = _selectedProviderSummary;
     if (summary.displayName.isNotEmpty) {
-      return summary.displayName;
+      return summary.label;
     }
     return _nodeInfo?.providerDisplayName ?? 'agent';
   }
@@ -453,8 +453,8 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
     if (summary.kind.isNotEmpty) {
       final version = summary.version.trim();
       return version.isEmpty
-          ? summary.displayName
-          : '${summary.displayName} $version';
+          ? summary.label
+          : '${summary.label} $version';
     }
     final node = _nodeInfo;
     if (node != null) return node.providerPillLabel;
@@ -501,7 +501,7 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
     final node = _nodeInfo;
     if (node == null) return true;
     return node
-        .capabilitiesForProvider(_selectedProviderKindOrDefault)
+        .capabilitiesForProvider(_selectedProviderIdOrDefault)
         .supports(section, feature);
   }
 
@@ -510,7 +510,7 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
     if (node == null) {
       return ProviderDefinitionSummary.empty;
     }
-    return node.providerSummary(_selectedProviderKindOrDefault);
+    return node.providerSummary(_selectedProviderIdOrDefault);
   }
 
   List<ApprovalPolicy> get _approvalOptions {
@@ -766,7 +766,9 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
       if (!mounted) return;
       setState(() {
         _nodeInfo = node;
-        _selectedProviderKind ??= node.provider;
+        final requested = _selectedProviderId ?? node.providerId;
+        final resolved = node.providerSummary(requested);
+        _selectedProviderId = resolved.id.isEmpty ? requested : resolved.id;
         _loadingNode = false;
         _nodeError = null;
         _coerceForProviderCapabilities();
@@ -901,10 +903,10 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
   Future<void> _loadAccessModes({bool force = false}) async {
     if (!_supportsAccessModes || _loadingAccessModes) return;
     final cwd = _currentCwd;
-    final providerKind = _selectedProviderKindOrDefault;
+    final providerId = _selectedProviderIdOrDefault;
     if (!force &&
         _accessModesLoadedForCwd == cwd &&
-        _accessModesLoadedForProvider == providerKind &&
+        _accessModesLoadedForProvider == providerId &&
         _accessModesError == null) {
       return;
     }
@@ -916,11 +918,11 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
       final catalog = await widget.api.fetchAccessModes(
         widget.host,
         cwd: cwd,
-        agentProvider: providerKind,
+        agentProvider: providerId,
       );
       if (!mounted) return;
       if (cwd != _currentCwd ||
-          providerKind != _selectedProviderKindOrDefault) {
+          providerId != _selectedProviderIdOrDefault) {
         setState(() => _loadingAccessModes = false);
         unawaited(_loadAccessModes(force: true));
         return;
@@ -929,7 +931,7 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
         _accessModeCatalog = catalog;
         _loadingAccessModes = false;
         _accessModesLoadedForCwd = cwd;
-        _accessModesLoadedForProvider = providerKind;
+        _accessModesLoadedForProvider = providerId;
         _accessMode = resolveEnabledProviderAccessModeId(
           catalog,
           preferred: _accessMode,
@@ -938,7 +940,7 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
     } catch (error) {
       if (!mounted) return;
       if (cwd != _currentCwd ||
-          providerKind != _selectedProviderKindOrDefault) {
+          providerId != _selectedProviderIdOrDefault) {
         setState(() => _loadingAccessModes = false);
         unawaited(_loadAccessModes(force: true));
         return;
@@ -950,12 +952,12 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
     }
   }
 
-  void _selectProvider(String? providerKind) {
-    final normalized = _trimmedOrNull(providerKind);
-    if (_selectedProviderKind == normalized) {
+  void _selectProvider(String? providerId) {
+    final normalized = _trimmedOrNull(providerId);
+    if (_selectedProviderId == normalized) {
       return;
     }
-    _selectedProviderKind = normalized;
+    _selectedProviderId = normalized;
     _inheritedModel = null;
     _selectProfile(null);
     _selectedModel = null;
@@ -1053,17 +1055,17 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
         _providerModes = const <ProviderModeSummary>[];
         _providerModesError = null;
         _providerModesLoadedForCwd = _currentCwd;
-        _providerModesLoadedForProvider = _selectedProviderKindOrDefault;
+        _providerModesLoadedForProvider = _selectedProviderIdOrDefault;
         _providerModesUseFallback = false;
       });
       return;
     }
     final cwd = _currentCwd;
-    final providerKind = _selectedProviderKindOrDefault;
+    final providerId = _selectedProviderIdOrDefault;
     if (_loadingProviderModes) return;
     if (!force &&
         _providerModesLoadedForCwd == cwd &&
-        _providerModesLoadedForProvider == providerKind &&
+        _providerModesLoadedForProvider == providerId &&
         _providerModesError == null) {
       return;
     }
@@ -1076,14 +1078,14 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
       final catalog = await widget.api.fetchModes(
         widget.host,
         cwd: cwd,
-        agentProvider: providerKind,
+        agentProvider: providerId,
       );
       if (!mounted) return;
       setState(() {
         _providerModes = catalog.modes;
         _providerModesError = null;
         _providerModesLoadedForCwd = cwd;
-        _providerModesLoadedForProvider = providerKind;
+        _providerModesLoadedForProvider = providerId;
         _providerModesUseFallback = false;
         _loadingProviderModes = false;
       });
@@ -1092,7 +1094,7 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
       setState(() {
         _loadingProviderModes = false;
         _providerModesLoadedForCwd = cwd;
-        _providerModesLoadedForProvider = providerKind;
+        _providerModesLoadedForProvider = providerId;
         if (_shouldUseModeFallback(error)) {
           _providerModes = kDefaultProviderModes;
           _providerModesError = null;
@@ -1141,7 +1143,7 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
           widget.host,
           cwd: cwd,
           profile: profile,
-          agentProvider: _selectedProviderKindOrDefault,
+          agentProvider: _selectedProviderIdOrDefault,
         ),
       ];
       models.sort(_compareModelEntries);
@@ -1224,7 +1226,7 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
       final catalog = await widget.api.fetchProfiles(
         widget.host,
         cwd: cwd,
-        agentProvider: _selectedProviderKindOrDefault,
+        agentProvider: _selectedProviderIdOrDefault,
       );
       if (!mounted) return;
       setState(() {
@@ -1370,7 +1372,7 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
       isScrollControlled: true,
       builder: (context) => _ProviderPickerSheet(
         providers: _availableProviders,
-        selectedProvider: _selectedProviderKindOrDefault,
+        selectedProvider: _selectedProviderIdOrDefault,
       ),
     );
     if (!mounted || result == null) {
@@ -1784,7 +1786,7 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
           ),
           if (prompt.isNotEmpty) SessionInputItem.text(prompt),
         ],
-        provider: _selectedProviderKindOrDefault,
+        provider: _selectedProviderIdOrDefault,
         model: _supportsModelOverride
             ? _selectedModel?.model ?? _inheritedModel
             : null,
@@ -2246,11 +2248,11 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
           subtitle: desktop ? null : _providerName,
           trailing: desktop
               ? choice<String>(
-                  _selectedProviderKindOrDefault,
-                  _availableProviders.map((provider) => provider.kind).toList(),
+                  _selectedProviderIdOrDefault,
+                  _availableProviders.map((provider) => provider.id).toList(),
                   (kind) => _availableProviders
-                      .firstWhere((provider) => provider.kind == kind)
-                      .displayName,
+                      .firstWhere((provider) => provider.id == kind)
+                      .label,
                   _applyProviderChoice,
                 )
               : const Icon(Icons.chevron_right_rounded),
@@ -3570,9 +3572,9 @@ class _ProviderPickerSheet extends StatelessWidget {
           children: [
             for (final provider in providers)
               _ProviderPickerTile(
-                key: ValueKey('provider-picker-${provider.kind}'),
+                key: ValueKey('provider-picker-${provider.id}'),
                 provider: provider,
-                selected: provider.kind == selectedProvider,
+                selected: provider.id == selectedProvider,
               ),
           ],
         ),
@@ -3601,6 +3603,7 @@ class _ProviderPickerTile extends StatelessWidget {
   List<String> get _badges {
     return [
       if (provider.isDefault) 'default',
+      if (provider.state == 'unavailable') 'unavailable',
       if (provider.capabilities.supports('configuration', 'models'))
         'model choices',
       if (provider.capabilities.supports('input', 'localImage')) 'images',
@@ -3609,20 +3612,17 @@ class _ProviderPickerTile extends StatelessWidget {
     ];
   }
 
-  String get _displayName {
-    final name = provider.displayName.trim();
-    return name.isEmpty ? provider.kind : name;
-  }
+  String get _displayName => provider.label;
 
   @override
   Widget build(BuildContext context) {
     final meta = provider.version.trim();
     return AppChoiceRow(
       title: _displayName,
-      subtitle: meta.isEmpty ? 'Starts with $_command' : '$meta · $_command',
+      subtitle: provider.error ?? (meta.isEmpty ? 'Starts with $_command' : '$meta · $_command'),
       icon: Icons.smart_toy_rounded,
       selected: selected,
-      onTap: () => Navigator.of(context).pop(provider.kind),
+      onTap: () => Navigator.of(context).pop(provider.id),
       footer: _badges.isEmpty
           ? null
           : Wrap(

@@ -9,17 +9,19 @@ class AgentProviderBadge extends StatelessWidget {
   const AgentProviderBadge({
     super.key,
     required this.providerKind,
+    this.providerId,
     this.nodeInfo,
     this.compact = false,
   });
 
   final String? providerKind;
+  final String? providerId;
   final NodeInfo? nodeInfo;
   final bool compact;
 
   @override
   Widget build(BuildContext context) {
-    final label = agentProviderDisplayLabel(providerKind, nodeInfo: nodeInfo);
+    final label = agentProviderDisplayLabel(providerKind, providerId: providerId, nodeInfo: nodeInfo);
     if (label == null) {
       return const SizedBox.shrink();
     }

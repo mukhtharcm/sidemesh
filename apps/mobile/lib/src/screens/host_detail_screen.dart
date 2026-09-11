@@ -554,10 +554,12 @@ class _MachineAgents extends StatelessWidget {
     final names = providers.isEmpty
         ? ['${node.providerDisplayName} (default)']
         : providers.map((provider) {
-            final name = provider.displayName.isEmpty
-                ? provider.kind
-                : provider.displayName;
-            return provider.isDefault ? '$name (default)' : name;
+            final details = [
+              if (provider.isDefault) 'default',
+              if (provider.state == 'unavailable') 'unavailable',
+              if (provider.error != null) provider.error!,
+            ];
+            return details.isEmpty ? provider.label : '${provider.label} (${details.join(', ')})';
           });
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: AppSpacing.md),
@@ -754,7 +756,7 @@ class _HostManagementCardState extends State<_HostManagementCard> {
     if (_restartingProvider) return;
     setState(() => _restartingProvider = true);
     try {
-      await widget.api.restartProvider(widget.host, widget.node.provider);
+      await widget.api.restartProvider(widget.host, widget.node.providerId);
       if (!mounted) return;
       showAppSnackBar(context, 'Restarting $_providerDisplayName…');
     } catch (e) {

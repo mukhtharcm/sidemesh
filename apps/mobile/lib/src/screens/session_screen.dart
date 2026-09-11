@@ -841,7 +841,7 @@ class _SessionScreenState extends State<SessionScreen>
     final node = _nodeInfo;
     if (node == null) return true;
     return node
-        .capabilitiesForProvider(widget.session.provider)
+        .capabilitiesForProvider((_session ?? widget.session).providerReference)
         .supports(section, feature);
   }
 
@@ -1308,7 +1308,7 @@ class _SessionScreenState extends State<SessionScreen>
             host: widget.host,
             api: widget.api,
             root: session.cwd,
-            agentProvider: session.provider,
+            agentProvider: session.providerReference,
             sessionId: session.id,
           ),
         );
@@ -1724,7 +1724,7 @@ class _SessionScreenState extends State<SessionScreen>
         widget.host,
         cwd: (_session ?? widget.session).cwd,
         forceReload: forceReload,
-        agentProvider: (_session ?? widget.session).provider,
+        agentProvider: (_session ?? widget.session).providerReference,
       );
       if (!mounted || requestId != _skillsRequestId) {
         return;
@@ -2251,10 +2251,10 @@ class _SessionScreenState extends State<SessionScreen>
 
   Future<void> _restartProvider() async {
     if (!_supportsProviderRestart) return;
-    final providerKind = widget.session.provider;
-    if (providerKind == null || providerKind.isEmpty) return;
+    final providerId = (_session ?? widget.session).providerReference;
+    if (providerId == null || providerId.isEmpty) return;
     try {
-      await widget.api.restartProvider(widget.host, providerKind);
+      await widget.api.restartProvider(widget.host, providerId);
       if (!mounted) return;
       showAppSnackBar(context, 'Provider restarting…');
       await Future<void>.delayed(const Duration(seconds: 2));
@@ -3605,6 +3605,7 @@ class _SessionScreenState extends State<SessionScreen>
         runtime: session.runtime,
         nodeInfo: _nodeInfo,
         providerKind: session.provider,
+        providerId: session.providerId,
       );
       await widget.api.sendInput(
         widget.host,
@@ -3771,6 +3772,7 @@ class _SessionScreenState extends State<SessionScreen>
       runtime: session.runtime,
       nodeInfo: _nodeInfo,
       providerKind: session.provider,
+      providerId: session.providerId,
     );
     final retrySignature = _buildSendRetrySignature(
       inputItems: inputItems,
@@ -4509,6 +4511,7 @@ class _SessionScreenState extends State<SessionScreen>
     }
     final provider = agentProviderDisplayLabel(
       session.provider,
+      providerId: session.providerId,
       nodeInfo: _nodeInfo,
     );
     return provider ?? 'Model';
@@ -4522,7 +4525,7 @@ class _SessionScreenState extends State<SessionScreen>
     if (_cleanComposerLabel(session.runtime?.model) != null) {
       return 'Current model';
     }
-    if (agentProviderDisplayLabel(session.provider, nodeInfo: _nodeInfo) !=
+    if (agentProviderDisplayLabel(session.provider, providerId: session.providerId, nodeInfo: _nodeInfo) !=
         null) {
       return 'Agent default';
     }
@@ -4575,7 +4578,7 @@ class _SessionScreenState extends State<SessionScreen>
         // unavailable. Capability checks are best-effort here.
       }
     }
-    return node?.capabilitiesForProvider(session.provider);
+    return node?.capabilitiesForProvider(session.providerReference);
   }
 
   Future<List<ModelCatalogEntry>?> _fetchComposerModels(
@@ -4586,7 +4589,7 @@ class _SessionScreenState extends State<SessionScreen>
         ...await widget.api.fetchModels(
           widget.host,
           cwd: session.cwd,
-          agentProvider: session.provider,
+          agentProvider: session.providerReference,
           provider: _composerRuntimeModelProvider(session),
         ),
       ];
@@ -5133,7 +5136,7 @@ class _SessionScreenState extends State<SessionScreen>
       final metadata = await widget.api.fetchMetadata(
         widget.host,
         path,
-        agentProvider: session.provider,
+        agentProvider: session.providerReference,
         sessionId: session.id,
       );
       if (!mounted || _disposed) return;
@@ -5351,7 +5354,7 @@ class _SessionScreenState extends State<SessionScreen>
           host: widget.host,
           api: widget.api,
           root: session.cwd,
-          agentProvider: session.provider,
+          agentProvider: session.providerReference,
           sessionId: session.id,
           selectedPath: path,
         ),
@@ -5364,7 +5367,7 @@ class _SessionScreenState extends State<SessionScreen>
           host: widget.host,
           api: widget.api,
           path: path,
-          agentProvider: session.provider,
+          agentProvider: session.providerReference,
           sessionId: session.id,
         ),
       ),
@@ -5386,7 +5389,7 @@ class _SessionScreenState extends State<SessionScreen>
           host: widget.host,
           api: widget.api,
           root: browserRoot,
-          agentProvider: session.provider,
+          agentProvider: session.providerReference,
           sessionId: session.id,
         ),
       );
@@ -5398,7 +5401,7 @@ class _SessionScreenState extends State<SessionScreen>
           host: widget.host,
           api: widget.api,
           root: browserRoot,
-          agentProvider: session.provider,
+          agentProvider: session.providerReference,
           sessionId: session.id,
         ),
       ),

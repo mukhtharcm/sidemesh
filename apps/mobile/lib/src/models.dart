@@ -1,3 +1,5 @@
+import 'session_identity.dart';
+
 class HostProfile {
   const HostProfile({
     required this.id,
@@ -53,6 +55,8 @@ class NodeInfo {
     required this.platform,
     this.homeDirectory,
     required this.provider,
+    String? providerId,
+    this.sessionAliases,
     required this.providerName,
     required this.providerVersion,
     required this.providerConfig,
@@ -69,13 +73,15 @@ class NodeInfo {
     this.updateSupported = false,
     this.recommendedMobileClientVersion,
     this.minimumMobileClientVersion,
-  });
+  }) : providerId = providerId ?? provider;
 
   final String label;
   final String hostname;
   final String platform;
   final String? homeDirectory;
   final String provider;
+  final String providerId;
+  final SessionAliases? sessionAliases;
   final String providerName;
   final String providerVersion;
   final ProviderConfigSummary providerConfig;
@@ -119,6 +125,8 @@ class NodeInfo {
       platform: platform,
       homeDirectory: homeDirectory,
       provider: provider,
+      providerId: providerId,
+      sessionAliases: sessionAliases,
       providerName: providerName,
       providerVersion: providerVersion,
       providerConfig: providerConfig,
@@ -190,25 +198,20 @@ class NodeInfo {
     return hostCapabilities.supports(section, feature);
   }
 
-  ProviderDefinitionSummary providerSummary(String? kind) {
-    if ((kind ?? '').isEmpty) {
-      return supportedProviders.firstWhere(
-        (provider) => provider.kind == providerConfig.kind,
-        orElse: () => ProviderDefinitionSummary.empty,
-      );
-    }
-    return supportedProviders.firstWhere(
-      (provider) => provider.kind == kind,
-      orElse: () => ProviderDefinitionSummary.empty,
-    );
+  ProviderDefinitionSummary providerSummary(String? reference) {
+    final requested = (reference ?? '').isEmpty ? providerId : reference!;
+    final resolved = sessionAliases?.aliases[requested] ?? requested;
+    final exact = supportedProviders.where((entry) => entry.id == resolved);
+    if (exact.isNotEmpty) return exact.first;
+    if (sessionAliases != null) return ProviderDefinitionSummary.empty;
+    final byKind = supportedProviders.where((entry) => entry.kind == requested);
+    return byKind.length == 1 ? byKind.single : ProviderDefinitionSummary.empty;
   }
 
-  ProviderCapabilities capabilitiesForProvider(String? kind) {
-    final summary = providerSummary(kind);
-    if (!summary.capabilities.isEmpty) {
-      return summary.capabilities;
-    }
-    if ((kind ?? '').isEmpty || kind == provider) {
+  ProviderCapabilities capabilitiesForProvider(String? reference) {
+    final summary = providerSummary(reference);
+    if (summary.id.isNotEmpty) return summary.capabilities;
+    if ((reference ?? '').isEmpty || reference == providerId) {
       return defaultProviderCapabilities;
     }
     return ProviderCapabilities.empty;
@@ -224,6 +227,8 @@ class NodeInfo {
       platform: _stringValue(json['platform']),
       homeDirectory: _stringOrNull(json['homeDirectory']),
       provider: _stringOrNull(json['provider']) ?? 'codex',
+      providerId: _stringOrNull(json['providerId']),
+      sessionAliases: SessionAliases.fromJson(json['sessionAliases']),
       providerName: _stringOrNull(json['providerName']) ?? 'Codex',
       providerVersion: _stringValue(json['providerVersion']),
       providerConfig: ProviderConfigSummary.fromJson(json['providerConfig']),
@@ -375,15 +380,21 @@ class UpdateOperation {
 class ProviderMetadata {
   const ProviderMetadata({
     required this.currentProvider,
+    String? currentProviderId,
+    this.sessionAliases,
     required this.providers,
-  });
+  }) : currentProviderId = currentProviderId ?? currentProvider;
 
   final String currentProvider;
+  final String currentProviderId;
+  final SessionAliases? sessionAliases;
   final List<ProviderDefinitionSummary> providers;
 
   factory ProviderMetadata.fromJson(Map<String, dynamic> json) =>
       ProviderMetadata(
         currentProvider: _stringValue(json['currentProvider']),
+        currentProviderId: _stringOrNull(json['currentProviderId']),
+        sessionAliases: SessionAliases.fromJson(json['sessionAliases']),
         providers: ProviderDefinitionSummary.listFromJson(json['providers']),
       );
 }
@@ -391,6 +402,9 @@ class ProviderMetadata {
 class ProviderDefinitionSummary {
   const ProviderDefinitionSummary({
     required this.kind,
+    String? id,
+    this.state = 'unknown',
+    this.error,
     required this.displayName,
     required this.defaultCommand,
     required this.commandEnvironmentVariables,
@@ -399,7 +413,7 @@ class ProviderDefinitionSummary {
     required this.config,
     required this.version,
     required this.isDefault,
-  });
+  }) : id = id ?? kind;
 
   static const empty = ProviderDefinitionSummary(
     kind: '',
@@ -414,6 +428,9 @@ class ProviderDefinitionSummary {
   );
 
   final String kind;
+  final String id;
+  final String state;
+  final String? error;
   final String displayName;
   final String defaultCommand;
   final List<String> commandEnvironmentVariables;
@@ -423,10 +440,18 @@ class ProviderDefinitionSummary {
   final String version;
   final bool isDefault;
 
+  String get label {
+    final name = displayName.isEmpty ? kind : displayName;
+    return id == kind ? name : '$name · $id';
+  }
+
   factory ProviderDefinitionSummary.fromJson(Object? json) {
     if (json is! Map) return empty;
     return ProviderDefinitionSummary(
       kind: _stringValue(json['kind']),
+      id: _stringOrNull(json['id']),
+      state: _stringOrNull(json['state']) ?? 'unknown',
+      error: _stringOrNull(json['error']),
       displayName: _stringValue(json['displayName']),
       defaultCommand: _stringValue(json['defaultCommand']),
       commandEnvironmentVariables:
@@ -766,6 +791,8 @@ class SessionSummary {
     required this.updatedAt,
     required this.source,
     required this.provider,
+    this.providerId,
+    this.canonicalSessionId,
     required this.status,
     required this.runtime,
     required this.gitInfo,
@@ -783,6 +810,10 @@ class SessionSummary {
   final DateTime updatedAt;
   final String source;
   final String? provider;
+  final String? providerId;
+  final String? canonicalSessionId;
+
+  String? get providerReference => providerId ?? provider;
   final String status;
   final SessionRuntimeSummary? runtime;
   final GitInfoSummary? gitInfo;
@@ -798,6 +829,9 @@ class SessionSummary {
       status == 'waiting_for_approval';
 
   SessionSummary copyWith({
+    String? id,
+    String? providerId,
+    String? canonicalSessionId,
     String? title,
     String? preview,
     String? cwd,
@@ -823,7 +857,9 @@ class SessionSummary {
             ? true
             : (clearSubAgent ? false : this.isSubAgent));
     return SessionSummary(
-      id: id,
+      id: id ?? this.id,
+      providerId: providerId ?? this.providerId,
+      canonicalSessionId: canonicalSessionId ?? this.canonicalSessionId,
       title: title ?? this.title,
       preview: preview ?? this.preview,
       cwd: cwd ?? this.cwd,
@@ -854,6 +890,8 @@ class SessionSummary {
       updatedAt: _dateValue(json['updatedAt']),
       source: _stringValue(json['source']),
       provider: _stringOrNull(json['provider']),
+      providerId: _stringOrNull(json['providerId']),
+      canonicalSessionId: _stringOrNull(json['canonicalSessionId']),
       status: _stringValue(json['status']),
       runtime: json['runtime'] is Map<String, dynamic>
           ? SessionRuntimeSummary.fromJson(
@@ -881,6 +919,8 @@ class SessionSummary {
     'updatedAt': updatedAt.millisecondsSinceEpoch,
     'source': source,
     'provider': provider,
+    'providerId': providerId,
+    'canonicalSessionId': canonicalSessionId,
     'status': status,
     'runtime': runtime?.toJson(),
     'gitInfo': gitInfo?.toJson(),
@@ -901,6 +941,7 @@ class AgentRunSummary {
     required this.createdAt,
     required this.updatedAt,
     required this.provider,
+    this.providerId,
     required this.status,
     this.agentName,
     this.agentDisplayName,
@@ -917,6 +958,7 @@ class AgentRunSummary {
   final DateTime createdAt;
   final DateTime updatedAt;
   final String? provider;
+  final String? providerId;
   final String status;
   final String? agentName;
   final String? agentDisplayName;
@@ -954,6 +996,7 @@ class AgentRunSummary {
         createdAt: _dateValue(json['createdAt']),
         updatedAt: _dateValue(json['updatedAt']),
         provider: _stringOrNull(json['provider']),
+        providerId: _stringOrNull(json['providerId']),
         status: _stringValue(json['status']),
         agentName: _stringOrNull(json['agentName']),
         agentDisplayName: _stringOrNull(json['agentDisplayName']),
