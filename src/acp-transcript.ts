@@ -13,7 +13,7 @@ export class AcpTranscript {
   private turnId: string | undefined;
 
   constructor(private readonly sessionId: string, private nextSeq: number,
-    private readonly read: (id: string) => StoredSessionItem | null,
+    private readonly read: (kind: StoredSessionItem["kind"], id: string) => StoredSessionItem | null,
     private readonly write: (item: StoredSessionItem) => void,
     private readonly emit?: (event: AgentProviderLiveEvent) => void) {}
 
@@ -33,17 +33,17 @@ export class AcpTranscript {
         if (role === "user" && this.submittedUserId) {
           // The first user notification in this prompt is the agent's echo.
           // Bind its native ID to the submitted input; do not add the text twice.
-          const submitted = this.read(this.submittedUserId);
+          const submitted = this.read("message", this.submittedUserId);
           if (submitted && update.messageId) this.write({ ...submitted, nativeId: update.messageId });
           return;
         }
         this.submittedUserId = null;
-        const current = this.currentMessageId ? this.read(this.currentMessageId) : null;
+        const current = this.currentMessageId ? this.read("message", this.currentMessageId) : null;
         const id = update.messageId ? `acp-message-${update.messageId}`
           : current?.kind === "message" && current.value.role === role ? current.value.id : `acp-message-${randomUUID()}`;
         if (id !== this.currentMessageId) this.finish("commentary");
         this.currentMessageId = id;
-        const previous = this.read(id);
+        const previous = this.read("message", id);
         const message: SessionMessage = previous?.kind === "message" ? previous.value : {
           id, role, text: "", content: [], attachments: [], createdAt: Date.now(), seq: this.nextSeq++,
         };
@@ -65,7 +65,7 @@ export class AcpTranscript {
         this.submittedUserId = null;
         this.finish("commentary");
         const id = `acp-tool-${update.toolCallId}`;
-        const saved = this.read(id);
+        const saved = this.read("activity", id);
         const previous = saved?.kind === "activity" && saved.value.type === "tool" ? saved.value : null;
         const title = update.title ?? previous?.title ?? update.name ?? "Tool";
         const args = update.rawInput ?? previous?.args ?? null;
@@ -87,7 +87,7 @@ export class AcpTranscript {
       case "compaction_update": {
         this.finish("commentary");
         const id = `acp-compaction-${update.compactionId}`;
-        const previous = this.read(id);
+        const previous = this.read("activity", id);
         const value = { id, type: "context_compaction" as const, turnId: this.turnId ?? null,
           status: update.status === "completed" ? "completed" as const : update.status === "failed" ? "failed" as const : "in_progress" as const,
           seq: previous?.value.seq ?? this.nextSeq++, createdAt: previous?.value.createdAt ?? Date.now() };
@@ -102,7 +102,7 @@ export class AcpTranscript {
   }
 
   finish(phase: SessionMessage["phase"] = "final_answer"): void {
-    const current = this.currentMessageId ? this.read(this.currentMessageId) : null;
+    const current = this.currentMessageId ? this.read("message", this.currentMessageId) : null;
     this.currentMessageId = null;
     if (current?.kind !== "message" || current.value.role !== "assistant") return;
     const value = { ...current.value, phase };

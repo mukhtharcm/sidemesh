@@ -429,7 +429,7 @@ describe("PiAgentProvider", () => {
       assert.notEqual(a.created.thread.id, b.created.thread.id);
       assert.equal(db.getProviderSession("pi-a", a.created.thread.id)?.nativeId, "native-session");
       assert.equal(db.getProviderSession("pi-b", b.created.thread.id)?.nativeId, "native-session");
-      assert.equal(db.getSessionItem("pi-b", b.created.thread.id, "a-user"), null);
+      assert.equal(db.getSessionItem("pi-b", b.created.thread.id, "message", "a-user"), null);
       await Promise.all([a.provider.close(), b.provider.close()]);
     } finally { db.close(); }
   });

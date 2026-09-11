@@ -5,7 +5,8 @@ import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { it } from "node:test";
 
-import { SessionStore } from "./session-store.js";
+import { SessionStore, type StoredSessionItem } from "./session-store.js";
+import { reconcileSessionHistory } from "./session-history.js";
 
 const payload = {
   input: [{ type: "text" as const, text: "Keep this request", text_elements: [] }],
@@ -16,6 +17,54 @@ const payload = {
   },
 };
 const receipt = { mode: "turn" as const, turnId: "turn-1", messageId: "input-1" };
+
+it("migrates item keys and retains a message and tool with the same ID", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "sidemesh-item-identity-"));
+  let store = await SessionStore.open(dir);
+  try {
+    store.saveProviderSession("provider", { id: "session", nativeId: "session", cwd: dir,
+      name: null, preview: "", createdAt: 1, updatedAt: 1, archived: false, metadata: {} });
+    const message: StoredSessionItem = { kind: "message", nativeId: "native-message", authority: "recovery",
+      value: { id: "shared-id", role: "user", text: "Keep me", content: [], attachments: [], seq: 1, createdAt: 1 } };
+    const activity: StoredSessionItem = { kind: "activity", nativeId: "native-tool", authority: "recovery",
+      value: { id: "shared-id", type: "context_compaction", status: "completed", turnId: null, seq: 2, createdAt: 2 } };
+    store.putSessionItem("provider", "session", message);
+    store.putRecovery("session", message);
+    store.close();
+    const db = new DatabaseSync(join(dir, "sessions-v1.db"));
+    db.exec(`
+      ALTER TABLE session_items RENAME TO current_items;
+      CREATE TABLE session_items (
+        provider_id TEXT NOT NULL, session_id TEXT NOT NULL, id TEXT NOT NULL,
+        kind TEXT NOT NULL, native_id TEXT, authority TEXT NOT NULL,
+        position INTEGER NOT NULL, value TEXT NOT NULL, anchor_id TEXT,
+        client_input_id TEXT, native_input_timestamp INTEGER,
+        PRIMARY KEY(provider_id, session_id, id)
+      );
+      INSERT INTO session_items SELECT * FROM current_items;
+      DROP TABLE current_items;
+      ALTER TABLE session_recovery RENAME TO current_recovery;
+      CREATE TABLE session_recovery (session_id TEXT NOT NULL, id TEXT NOT NULL, value TEXT NOT NULL, PRIMARY KEY(session_id, id));
+      INSERT INTO session_recovery SELECT session_id, id, value FROM current_recovery;
+      DROP TABLE current_recovery;
+      DELETE FROM migrations WHERE name = 'item-kind-keys-v1';
+    `);
+    db.close();
+    store = await SessionStore.open(dir);
+    store.putSessionItem("provider", "session", activity);
+    store.putRecovery("session", activity);
+    assert.deepEqual(store.readSessionItems("provider", "session"), [message, activity]);
+    assert.deepEqual(store.readRecovery("session"), [message, activity]);
+    assert.deepEqual(reconcileSessionHistory([message, activity], [{ ...message, authority: "cache" }]),
+      [{ ...message, authority: "cache", value: { ...message.value, seq: 0 } }, { ...activity, value: { ...activity.value, seq: 1 } }]);
+    store.deleteRecovery("session", "message", message.value.id);
+    assert.deepEqual(store.readRecovery("session"), [activity]);
+    store.close();
+    store = await SessionStore.open(dir);
+    assert.deepEqual(store.getSessionItem("provider", "session", "message", "shared-id"), message);
+    assert.deepEqual(store.getSessionItem("provider", "session", "activity", "shared-id"), activity);
+  } finally { store.close(); await rm(dir, { recursive: true, force: true }); }
+});
 
 it("retains input and acceptance across restarts without resending uncertain work", async () => {
   const dir = await mkdtemp(join(tmpdir(), "sidemesh-session-store-"));

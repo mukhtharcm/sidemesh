@@ -78,7 +78,7 @@ describe("Copilot provider", () => {
       await provider.submitInput({ sessionId: created.thread.id, clientMessageId: "client-input-1", activeTurnId: null,
         input: [{ type: "text", text: "repeat me", text_elements: [] }], overrides: emptyOverrides() });
       await completed;
-      assert.equal(store.getSessionItem("copilot", created.thread.id, "client-input-1")?.nativeId, "message-1");
+      assert.equal(store.getSessionItem("copilot", created.thread.id, "message", "client-input-1")?.nativeId, "message-1");
       const native = await sdk.created[0]!.session.getEvents();
       native.push(event("user.message", { content: "repeat me" }, "message-1"),
         event("assistant.message", { messageId: "assistant-1", content: "copilot says: repeat me" }));
@@ -88,7 +88,7 @@ describe("Copilot provider", () => {
       assert.equal(first.activeTurnId, null);
       assert.equal(first.messages.length, 2);
       assert.equal(first.messages[0]?.id, "client-input-1");
-      assert.equal(store.getSessionItem("copilot", created.thread.id, "client-input-1")?.authority, "cache");
+      assert.equal(store.getSessionItem("copilot", created.thread.id, "message", "client-input-1")?.authority, "cache");
       native.push(event("user.message", { content: "repeat me" }, "message-2"),
         event("assistant.message", { messageId: "assistant-2", content: "second answer" }));
       const next = await provider.readSessionLog(created.thread);
@@ -113,7 +113,7 @@ describe("Copilot provider", () => {
       provider.on("liveEvent", (event) => events.push(event));
       await assert.rejects(provider.submitInput({ sessionId: created.thread.id, clientMessageId: "uncertain-input", activeTurnId: null,
         input: [{ type: "text", text: "preserve this input", text_elements: [] }], overrides: emptyOverrides() }), /connection lost after send/);
-      const item = store.getSessionItem("copilot", created.thread.id, "uncertain-input");
+      const item = store.getSessionItem("copilot", created.thread.id, "message", "uncertain-input");
       assert.equal(item?.authority, "recovery");
       assert.equal(item?.nativeId, null);
       assert.ok(item?.kind === "message" && item.value.text === "preserve this input");

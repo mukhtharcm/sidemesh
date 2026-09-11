@@ -4,25 +4,25 @@ import type { SessionMessage } from "./types.js";
 
 /** Replace a completed replay, retaining local content that the native history did not confirm. */
 export function reconcileSessionHistory(local: StoredSessionItem[], replay: StoredSessionItem[], matchTimestamps = false): StoredSessionItem[] {
-  const confirmed = new Set<string>();
+  const confirmed = new Set<StoredSessionItem>();
   let prefixMatches = true;
   const result = replay.map((item, index): StoredSessionItem => {
     const sameId = item.nativeId ? local.find((saved) => saved.kind === item.kind && saved.nativeId === item.nativeId) : undefined;
-    const sameTime = matchTimestamps ? local.find((saved) => !confirmed.has(saved.value.id)
+    const sameTime = matchTimestamps ? local.find((saved) => !confirmed.has(saved)
       && (!saved.clientInputId || saved.nativeInputTimestamp === item.value.createdAt)
       && saved.kind === item.kind && saved.value.createdAt === item.value.createdAt && sameContent(saved, item)) : undefined;
     const candidate = sameId ?? sameTime ?? (prefixMatches && !local[index]?.clientInputId ? local[index] : undefined);
     const matches = candidate && sameContent(candidate, item);
     prefixMatches = Boolean(prefixMatches && matches && candidate === local[index]);
     if (matches) {
-      confirmed.add(candidate.value.id);
+      confirmed.add(candidate);
       return { ...withItemMetadata(item, { id: candidate.value.id, createdAt: candidate.value.createdAt }), authority: item.authority,
         ...(candidate.clientInputId ? { clientInputId: candidate.clientInputId, nativeInputTimestamp: candidate.nativeInputTimestamp } : {}) };
     }
     return { ...item, authority: item.authority };
   });
   for (const item of local) {
-    if (item.authority !== "cache" && !confirmed.has(item.value.id)) {
+    if (item.authority !== "cache" && !confirmed.has(item)) {
       // Prefer the complete local record when the replay contains an older version of the same native item.
       const index = result.findIndex((candidate) => candidate.kind === item.kind && item.nativeId && candidate.nativeId === item.nativeId);
       if (index >= 0) result[index] = item;

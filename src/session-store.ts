@@ -141,6 +141,34 @@ export class SessionStore {
             INSERT INTO migrations VALUES ('input-bindings-v1')`);
         });
       }
+      if (!store.hasMigration("item-kind-keys-v1")) {
+        store.transaction(() => {
+          db.exec(`
+            ALTER TABLE session_items RENAME TO session_items_legacy;
+            CREATE TABLE session_items (
+              provider_id TEXT NOT NULL, session_id TEXT NOT NULL, id TEXT NOT NULL,
+              kind TEXT NOT NULL CHECK(kind IN ('message', 'activity')), native_id TEXT,
+              authority TEXT NOT NULL CHECK(authority IN ('primary', 'recovery', 'cache')),
+              position INTEGER NOT NULL, value TEXT NOT NULL, anchor_id TEXT,
+              client_input_id TEXT, native_input_timestamp INTEGER,
+              PRIMARY KEY(provider_id, session_id, kind, id),
+              FOREIGN KEY(provider_id, session_id) REFERENCES provider_sessions(provider_id, id)
+            );
+            INSERT INTO session_items SELECT * FROM session_items_legacy;
+            DROP TABLE session_items_legacy;
+            CREATE INDEX session_items_order ON session_items(provider_id, session_id, position);
+            ALTER TABLE session_recovery RENAME TO session_recovery_legacy;
+            CREATE TABLE session_recovery (
+              session_id TEXT NOT NULL, id TEXT NOT NULL, value TEXT NOT NULL,
+              kind TEXT NOT NULL CHECK(kind IN ('message', 'activity')),
+              PRIMARY KEY(session_id, kind, id)
+            );
+            INSERT INTO session_recovery SELECT session_id, id, value, json_extract(value, '$.kind') FROM session_recovery_legacy;
+            DROP TABLE session_recovery_legacy;
+            INSERT INTO migrations VALUES ('item-kind-keys-v1');
+          `);
+        });
+      }
       await store.importLegacy(stateDir);
       // The provider can have accepted a request before the daemon stopped.
       // Never dispatch these rows again without an explicit recovery decision.
@@ -161,13 +189,13 @@ export class SessionStore {
   }
 
   putRecovery(sessionId: string, item: SessionRecoveryItem): void {
-    this.db.prepare(`INSERT INTO session_recovery VALUES (?, ?, ?)
-      ON CONFLICT(session_id, id) DO UPDATE SET value = excluded.value`)
-      .run(sessionId, item.value.id, JSON.stringify(item));
+    this.db.prepare(`INSERT INTO session_recovery VALUES (?, ?, ?, ?)
+      ON CONFLICT(session_id, kind, id) DO UPDATE SET value = excluded.value`)
+      .run(sessionId, item.value.id, JSON.stringify(item), item.kind);
   }
 
-  deleteRecovery(sessionId: string, id: string): void {
-    this.db.prepare("DELETE FROM session_recovery WHERE session_id = ? AND id = ?").run(sessionId, id);
+  deleteRecovery(sessionId: string, kind: StoredSessionItem["kind"], id: string): void {
+    this.db.prepare("DELETE FROM session_recovery WHERE session_id = ? AND kind = ? AND id = ?").run(sessionId, kind, id);
   }
 
   getProviderSession(providerId: string, id: string): StoredProviderSession | null {
@@ -190,9 +218,9 @@ export class SessionStore {
         session.createdAt, session.updatedAt, Number(session.archived), JSON.stringify(session.metadata));
   }
 
-  getSessionItem(providerId: string, sessionId: string, id: string): StoredSessionItem | null {
-    const row = this.db.prepare("SELECT * FROM session_items WHERE provider_id = ? AND session_id = ? AND id = ?")
-      .get(providerId, sessionId, id) as SessionItemRow | undefined;
+  getSessionItem(providerId: string, sessionId: string, kind: StoredSessionItem["kind"], id: string): StoredSessionItem | null {
+    const row = this.db.prepare("SELECT * FROM session_items WHERE provider_id = ? AND session_id = ? AND kind = ? AND id = ?")
+      .get(providerId, sessionId, kind, id) as SessionItemRow | undefined;
     return row ? sessionItemFromRow(row) : null;
   }
 
@@ -208,7 +236,7 @@ export class SessionStore {
 
   putSessionItem(providerId: string, sessionId: string, item: StoredSessionItem): void {
     this.db.prepare(`INSERT INTO session_items VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      ON CONFLICT(provider_id, session_id, id) DO UPDATE SET kind = excluded.kind, native_id = excluded.native_id,
+      ON CONFLICT(provider_id, session_id, kind, id) DO UPDATE SET native_id = excluded.native_id,
       authority = excluded.authority, position = excluded.position, value = excluded.value, anchor_id = excluded.anchor_id,
       client_input_id = excluded.client_input_id, native_input_timestamp = excluded.native_input_timestamp`)
       .run(providerId, sessionId, item.value.id, item.kind, item.nativeId, item.authority,
