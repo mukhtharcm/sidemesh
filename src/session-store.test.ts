@@ -136,6 +136,9 @@ it("retains input and acceptance across restarts without resending uncertain wor
     assert.equal(store.getInput("session:unknown")?.state, "uncertain");
     assert.deepEqual(store.getInput("session:unknown")?.payload, payload);
     assert.deepEqual(store.getInput("session:accepted")?.receipt, receipt);
+    // The reattach check uses the client-facing id space, not a provider-native one.
+    assert.equal(store.hasUncertainInputs("session"), true);
+    assert.equal(store.hasUncertainInputs(wrapProviderScopedId("acpx", "session")), false);
     assert.throws(() => store.dispatchInput("session:unknown"), /not ready/);
     assert.throws(() => store.prepareInput({
       key: "session:accepted", sessionId: "session", signatureHash: "other", payload,

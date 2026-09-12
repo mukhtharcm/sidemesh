@@ -24,6 +24,7 @@ function harness() {
     { id: "auto", type: "boolean", name: "Automatic", currentValue: false },
   ];
   const result = { history, sessions, connects: 0, prompts: [] as string[], promptBlocks: [] as ContentBlock[][], images: false, audio: false, resources: false, loadFails: false, loadCalls: 0,
+    rejectDuplicateLoad: false, noUserEcho: false, echoAfterAgentOutput: false,
     onPrompt: null as (() => void) | null, deleteSupported: true, deleteFails: false, deleted: [] as string[],
     authMethods: [{ id: "first", name: "First account" }, { id: "second", name: "Second account" }] as AuthMethod[],
     terminalAuthAdvertised: false, authenticateCalls: 0, logoutSupported: false, logoutCalls: 0, holdReady: false,
@@ -32,6 +33,8 @@ function harness() {
     connect: async (app: ClientApp, cwd: string) => {
       result.connects++;
       const held = new Map<string, () => void>();
+      // Agents that keep sessions in memory refuse to load a session this connection created.
+      const created = new Set<string>();
       const server = agent()
         .onRequest(methods.agent.initialize, ({ params }) => {
           result.terminalAuthAdvertised = params.clientCapabilities?.auth?.terminal === true;
@@ -47,6 +50,7 @@ function harness() {
         .onRequest(methods.agent.session.new, () => {
           if (result.requireAuth && !result.authenticated) throw RequestError.authRequired();
           const sessionId = `native-${++counter}`;
+          created.add(sessionId);
           history.set(sessionId, []);
           sessions.push({ sessionId, cwd, title: "Fixture session" });
           return { sessionId, _meta: { "fixture/session": 1 }, configOptions: controls, modes: {
@@ -55,6 +59,7 @@ function harness() {
         })
         .onRequest(methods.agent.session.load, async ({ params, client }) => {
           result.loadCalls++;
+          if (result.rejectDuplicateLoad && created.has(params.sessionId)) throw RequestError.invalidParams(undefined, "Session is already loaded");
           for (const [index, update] of (history.get(params.sessionId) ?? []).entries()) {
             await client.notify(methods.client.session.update, { sessionId: params.sessionId, update });
             if (result.loadFails && index === 0) throw RequestError.internalError(undefined, "Replay interrupted");
@@ -95,7 +100,15 @@ function harness() {
             history.get(params.sessionId)!.push(update);
             await client.notify(methods.client.session.update, { sessionId: params.sessionId, update });
           };
-          for (const content of params.prompt) await send({ sessionUpdate: "user_message_chunk", messageId: `user-${index}`, content });
+          // Agents differ on how they report the submitted prompt: some echo it live, some only
+          // keep it in native history, and some echo it once the turn is already answering.
+          const echo = async (live: boolean) => {
+            for (const content of params.prompt) {
+              const update: SessionUpdate = { sessionUpdate: "user_message_chunk", messageId: `user-${index}`, content };
+              if (live) await send(update); else history.get(params.sessionId)!.push(update);
+            }
+          };
+          if (!result.echoAfterAgentOutput) await echo(!result.noUserEcho);
           if (text === "hold") {
             await new Promise<void>((resolve) => {
               held.set(params.sessionId, resolve);
@@ -112,6 +125,7 @@ function harness() {
           await send({ sessionUpdate: "agent_thought_chunk", messageId: `answer-${index}`, content: { type: "text", text: "Check the result." } });
           await send({ sessionUpdate: "agent_message_chunk", messageId: `answer-${index}`, content: { type: "text", text: `Reply to ${text}` } });
           await send({ sessionUpdate: "agent_message_chunk", messageId: `answer-${index}`, content: { type: "image", data: png, mimeType: "image/png" } });
+          if (result.echoAfterAgentOutput) await echo(!result.noUserEcho);
           await send({ sessionUpdate: "plan", entries: [{ content: "Read the file", priority: "medium", status: "completed" }] });
           await send({ sessionUpdate: "available_commands_update", availableCommands: [{ name: "help", description: "Show help", input: { hint: "topic" } }] });
           return { stopReason: "end_turn" };
@@ -385,6 +399,35 @@ describe("AcpAgentProvider", () => {
     assert.equal(log.messages.length, 4);
   });
 
+  it("reattaches an interrupted session so native history can confirm its input", async () => {
+    const created = await provider.createSession({ cwd: directory, input: [], overrides });
+    const submitted = await provider.submitInput({ sessionId: created.thread.id, input: textInput("repair me"), activeTurnId: null, overrides,
+      clientMessageId: "client-uncertain" });
+    // The agent ran the prompt, but the daemon died before the acceptance was durable.
+    const key = `${created.thread.id}:client-uncertain`;
+    const turnId = submitted.turnId!;
+    store.prepareInput({ key, sessionId: created.thread.id, signatureHash: "signature", payload: { input: textInput("repair me"), overrides } });
+    store.dispatchInput(key);
+    store.acceptInput(key, { mode: "turn", turnId, messageId: "client-uncertain" });
+    store.clearInterruptedInputs(new Map([[created.thread.id, turnId]]));
+    assert.equal(store.getInput(key)?.state, "uncertain");
+    await provider.close();
+    provider = createProvider();
+    await provider.start();
+    // A restart alone does not reconnect, and a cached read cannot confirm the input.
+    const cached = await provider.readSessionSnapshot(created.thread.id);
+    assert.equal(wire.connects, 1);
+    assert.deepEqual(cached.confirmedInputIds, []);
+    assert.equal(store.getInput(key)?.state, "uncertain");
+    // Native verification reattaches and settles the input from the agent's own history.
+    const snapshot = await provider.readSessionSnapshot(created.thread.id, { requireNativeHistory: true });
+    assert.equal(wire.connects, 2);
+    assert.deepEqual(snapshot.confirmedInputIds, ["client-uncertain"]);
+    store.confirmInputs(created.thread.id, snapshot.confirmedInputIds!);
+    assert.equal(store.getInput(key)?.state, "confirmed");
+    assert.equal(store.getInput(key)?.payload, null);
+  });
+
   it("keeps local output omitted by a native replay", async () => {
     const done = completion(provider);
     const created = await provider.createSession({ cwd: directory, input: textInput("keep output"), overrides });
@@ -395,6 +438,54 @@ describe("AcpAgentProvider", () => {
     assert.equal(log.messages.at(-1)!.text, "Reply to keep output");
     assert.equal(log.activities.length, 1);
     assert.ok(events.some((event) => event.type === "provider_warning" && event.code === "acp_history_unconfirmed"));
+  });
+
+  it("keeps a session readable when the agent refuses to reload one it already has", async () => {
+    wire.rejectDuplicateLoad = true;
+    const done = completion(provider);
+    const created = await provider.createSession({ cwd: directory, input: textInput("loaded once"), overrides });
+    assert.equal((await done).status, "completed");
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const log = await provider.readSessionLog(created.thread);
+      assert.equal(log.messages.length, 2);
+      assert.equal(log.messages[1]!.text, "Reply to loaded once");
+    }
+    // The agent rejected the redundant replay once; later reads reuse the live transcript.
+    assert.equal(wire.loadCalls, 1);
+    assert.equal(wire.connects, 1);
+  });
+
+  it("binds a late native echo to its input and agrees with the live turn phases", async () => {
+    wire.echoAfterAgentOutput = true;
+    let done = completion(provider);
+    const created = await provider.createSession({ cwd: directory, input: textInput("first"), overrides });
+    await done;
+    done = completion(provider);
+    await provider.submitInput({ sessionId: created.thread.id, input: textInput("second"), activeTurnId: null, overrides, clientMessageId: "client-late-echo" });
+    await done;
+    const log = await provider.readSessionLog(created.thread);
+    assert.equal(log.messages.length, 4);
+    assert.equal(log.messages.filter((message) => message.role === "user").length, 2);
+    assert.ok(log.messages.some((message) => message.id === "client-late-echo"));
+    assert.deepEqual(log.messages.filter((message) => message.role === "assistant").map((message) => message.phase), ["final_answer", "final_answer"]);
+    assert.deepEqual((await provider.readSessionSnapshot(created.thread.id)).confirmedInputIds, ["client-late-echo"]);
+    assert.ok(store.readSessionItems("acpx", created.thread.id).every((item) => item.authority === "cache"));
+  });
+
+  it("replays history written without a live prompt echo and keeps one turn per message", async () => {
+    wire.noUserEcho = true;
+    let done = completion(provider);
+    const created = await provider.createSession({ cwd: directory, input: textInput("first"), overrides });
+    await done;
+    done = completion(provider);
+    await provider.submitInput({ sessionId: created.thread.id, input: textInput("second"), activeTurnId: null, overrides, clientMessageId: "client-silent-echo" });
+    await done;
+    const log = await provider.readSessionLog(created.thread);
+    assert.deepEqual(log.messages.map((message) => `${message.role}:${message.text}`),
+      ["user:first", "assistant:Reply to first", "user:second", "assistant:Reply to second"]);
+    assert.equal(log.messages.filter((message) => message.role === "assistant").every((message) => message.phase === "final_answer"), true);
+    assert.equal(events.some((event) => event.type === "provider_warning" && event.code === "acp_history_unconfirmed"), false);
+    assert.ok(store.readSessionItems("acpx", created.thread.id).every((item) => item.authority === "cache"));
   });
 
   it("applies exact configuration values and stops before prompt dispatch when a control fails", async () => {

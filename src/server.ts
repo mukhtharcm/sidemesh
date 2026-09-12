@@ -217,7 +217,7 @@ export async function startServer(
       const resolved = providerRuntime.resolveSession(id);
       const provider = await providerRuntime.ensure(resolved.entry);
       const snapshot = await requireProviderMethod(provider, "readSessionSnapshot", "session snapshot")
-        .call(provider, resolved.rawId, options);
+        .call(provider, resolved.rawId, { ...options, requireNativeHistory: sessionStore.hasUncertainInputs(id) });
       return { ...snapshot, latestPlanUpdate: snapshot.latestPlanUpdate ? { ...snapshot.latestPlanUpdate, sessionId: resolved.sessionId } : null,
         thread: providerRuntime.wrapThread(resolved.entry, snapshot.thread) };
     },

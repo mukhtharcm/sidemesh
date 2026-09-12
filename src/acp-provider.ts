@@ -22,7 +22,7 @@ import { AcpHost } from "./acp-host.js";
 import { acpInputPreview, prepareAcpInput } from "./acp-input.js";
 import { importAcpxHistory } from "./acp-history.js";
 import { AcpTranscript, acpMetadata } from "./acp-transcript.js";
-import { reconcileSessionHistory } from "./session-history.js";
+import { confirmedSessionInputIds, reconcileSessionHistory } from "./session-history.js";
 import { SessionStore, type StoredProviderSession, type StoredSessionItem } from "./session-store.js";
 import { terminatePipeProcess } from "./terminal.js";
 import type { AcpxPermissionMode, ThreadRecord, SessionLogSnapshot, SessionRuntimeSummary,
@@ -79,6 +79,10 @@ interface ConnectedSession {
   requestsInFlight: number;
   idleTimer?: NodeJS.Timeout;
   transcript: AcpTranscript;
+  /** Native history was replayed on this connection, so it must not be loaded a second time. */
+  historyLoaded?: boolean;
+  /** This connection created the native session, so its live transcript is already complete. */
+  createdSession?: boolean;
   active?: { turnId: string; clientInputId?: string; done: Promise<void>; interrupted: boolean };
   loading?: Promise<void>;
   disconnecting?: Promise<void>;
@@ -216,15 +220,34 @@ export class AcpAgentProvider extends EventEmitter<AgentProviderEvents> implemen
   }
   async readSessionSnapshot(id: string, options: AgentSessionLogOptions = {}): Promise<AgentSessionSnapshot> {
     await this.start();
-    const state = this.sessions.get(id) ?? (this.record(id).nativeId && this.db.nextSessionSequence(this.providerId, id) === 0
-      ? await this.ensureConnection(id) : undefined);
-    if (state && !state.active) await this.refreshHistory(id, state);
     const record = this.record(id);
+    // Native history is the only evidence that can settle an unknown send result, so reattach when
+    // an interrupted dispatch still waits for it. Otherwise reuse the connection that owns the view.
+    let state = this.sessions.get(id);
+    if (!state && record.nativeId && (options.requireNativeHistory || this.db.nextSessionSequence(this.providerId, id) === 0)) {
+      try { state = await this.ensureConnection(id); }
+      catch (error) {
+        // Cached history is still worth serving when the agent cannot reload the session.
+        this.emit("liveEvent", { type: "provider_warning", sessionId: id, level: "warning",
+          code: "acp_history_refresh_failed", message: errorMessage(error), source: "acp" });
+      }
+    }
+    if (state && !state.active && !state.historyLoaded) {
+      try { await this.refreshHistory(id, state); }
+      catch (error) {
+        // An agent may keep the session this connection created in memory and reject loading it
+        // again (Copilot returns -32602 "already loaded"). That live transcript is the same native
+        // state, so stop reloading it instead of failing every read.
+        if (!state.createdSession || !(error instanceof RequestError && error.code === -32602)) throw error;
+        state.historyLoaded = true;
+      }
+    }
     const items = this.db.readSessionItems(this.providerId, id);
     const messages = items.flatMap((item) => item.kind === "message" ? [item.value] : []);
     const activities = items.flatMap((item) => item.kind === "activity" ? [item.value] : []);
     return { thread: this.thread(record, true), busy: Boolean(state?.active), activeTurnId: state?.active?.turnId ?? null, messages: tail(messages, options.messageLimit), activities: tail(activities, options.activityLimit),
       totalMessages: messages.length, totalActivities: activities.length, nextSeq: this.db.nextSessionSequence(this.providerId, id),
+      confirmedInputIds: confirmedSessionInputIds(items),
       runtime: this.metadata(record).runtime ?? null, latestPlanUpdate: this.metadata(record).latestPlanUpdate };
   }
   async readSessionRuntime(thread: ThreadRecord): Promise<SessionRuntimeSummary | null> {
@@ -321,7 +344,8 @@ export class AcpAgentProvider extends EventEmitter<AgentProviderEvents> implemen
     const active = { turnId, clientInputId: request.clientMessageId, interrupted: false, done: Promise.resolve() };
     state.active = active;
     state.transcript.beginTurn(turnId, { id: request.clientMessageId || `acp-user-${randomUUID()}`,
-      role: "user", text: prepared.text, content: [{ type: "text", text: prepared.text }], attachments: prepared.attachments, createdAt: Date.now() });
+      role: "user", text: prepared.text, content: [{ type: "text", text: prepared.text }], attachments: prepared.attachments, createdAt: Date.now() },
+      request.clientMessageId || undefined);
     active.done = this.finishPrompt(request.sessionId, state, active,
       this.requestWithTimeout(state, state.transport.connection.agent.request(methods.agent.session.prompt, {
         sessionId: state.host.nativeSessionId!, prompt: prepared.prompt,
@@ -452,6 +476,9 @@ export class AcpAgentProvider extends EventEmitter<AgentProviderEvents> implemen
             { sessionId: record.nativeId!, cwd: record.cwd, mcpServers: [] }));
           this.applySessionOptions(id, response);
         } else throw new Error("This agent cannot resume the saved session; its display history is still available");
+        // This agent rejects loading a session it already has in memory, so a connection loads its
+        // history exactly once and later reads reuse the result.
+        state.historyLoaded = true;
       } else {
         const response = await this.authenticated(state, () => transport.connection.agent.request(methods.agent.session.new,
           { cwd: record.cwd, mcpServers: [] }));
@@ -460,6 +487,7 @@ export class AcpAgentProvider extends EventEmitter<AgentProviderEvents> implemen
         this.applySessionOptions(id, response);
         for (const early of state.earlyUpdates) if (early.sessionId === response.sessionId) this.handleUpdate(id, state, early.update);
         state.earlyUpdates = [];
+        state.createdSession = true;
       }
       return state;
     } catch (error) { await this.disconnect(state); throw error; }
@@ -578,7 +606,7 @@ export class AcpAgentProvider extends EventEmitter<AgentProviderEvents> implemen
       if (status === "failed") this.emit("liveEvent", { type: "provider_warning", sessionId: id, level: "error",
         code: "acp_turn_failed", message: errorMessage(error), source: "acp" });
     } finally {
-      state.transcript.finish();
+      state.transcript.endTurn();
       if (state.active === active) state.active = undefined;
       state.host.cancelPending();
       this.updateRuntime(id, { turnId: undefined });

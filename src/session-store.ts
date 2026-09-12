@@ -406,6 +406,12 @@ export class SessionStore {
       .all() as { session_id: string }[]).map((row) => row.session_id);
   }
 
+  /** True while an unknown send result waits for evidence that only native history can provide.
+   * `sessionId` is the client-facing (provider-scoped) id, the same space `prepareInput` uses. */
+  hasUncertainInputs(sessionId: string): boolean {
+    return Boolean(this.db.prepare("SELECT 1 FROM inputs WHERE session_id = ? AND state = 'uncertain' LIMIT 1").get(sessionId));
+  }
+
   cancelQueuedInputs(sessionId: string): void {
     this.db.prepare(`UPDATE inputs SET state = 'cancelled', updated_at = ?
       WHERE session_id = ? AND state IN ('prepared', 'queued')`).run(Date.now(), sessionId);

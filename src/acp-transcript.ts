@@ -11,6 +11,7 @@ import type { SessionMessage, SessionMessageContentBlock, ToolActivity } from ".
 export class AcpTranscript {
   private currentMessageId: string | null = null;
   private submittedUserId: string | null = null;
+  private submittedInputId: string | undefined;
   private turnId: string | undefined;
 
   constructor(private readonly sessionId: string, private nextSeq: number,
@@ -18,10 +19,11 @@ export class AcpTranscript {
     private readonly write: (item: StoredSessionItem) => void,
     private readonly emit?: (event: AgentProviderLiveEvent) => void) {}
 
-  beginTurn(turnId: string, message: Omit<SessionMessage, "seq">): void {
+  beginTurn(turnId: string, message: Omit<SessionMessage, "seq">, clientInputId?: string): void {
     this.finish();
     this.turnId = turnId;
     this.submittedUserId = message.id;
+    this.submittedInputId = clientInputId;
     this.write({ kind: "message", authority: "recovery", nativeId: null, value: { ...message, seq: this.nextSeq++ } });
   }
 
@@ -32,18 +34,26 @@ export class AcpTranscript {
       case "agent_thought_chunk": {
         const role = update.sessionUpdate === "user_message_chunk" ? "user" : "assistant";
         if (role === "user" && this.submittedUserId) {
-          // The first user notification in this prompt is the agent's echo.
-          // Bind its native ID to the submitted input; do not add the text twice.
+          // The agent may stream output before it echoes the submitted prompt, so the binding
+          // survives intermediate updates. Bind the echo to the input that produced it (native ID
+          // and, when it has one, the client identity) instead of writing the text twice.
           const submitted = this.read("message", this.submittedUserId);
-          if (submitted?.kind === "message") this.write({ ...submitted, nativeId: update.messageId ?? submitted.nativeId,
-            value: { ...submitted.value, ...metadataField(update, submitted.value.providerMetadata) } });
-          return;
+          if (submitted?.kind === "message") {
+            const nativeId = update.messageId ?? submitted.nativeId;
+            this.write({ ...submitted, nativeId,
+              clientInputId: nativeId ? submitted.clientInputId ?? this.submittedInputId : submitted.clientInputId,
+              value: { ...submitted.value, ...metadataField(update, submitted.value.providerMetadata) } });
+            return;
+          }
         }
-        this.submittedUserId = null;
+        if (role === "user") this.submittedUserId = null;
         const current = this.currentMessageId ? this.read("message", this.currentMessageId) : null;
         const id = update.messageId ? `acp-message-${update.messageId}`
           : current?.kind === "message" && current.value.role === role ? current.value.id : `acp-message-${randomUUID()}`;
-        if (id !== this.currentMessageId) this.finish("commentary");
+        // A user message ends the previous assistant turn, so that assistant message is a final
+        // answer. Live streaming records this when the turn completes while native replay only sees
+        // the transcript; both must agree or reconciliation drops the turn.
+        if (id !== this.currentMessageId) this.finish(role === "user" ? "final_answer" : "commentary");
         this.currentMessageId = id;
         const previous = this.read("message", id);
         const message: SessionMessage = previous?.kind === "message" ? previous.value : {
@@ -66,7 +76,7 @@ export class AcpTranscript {
       }
       case "tool_call":
       case "tool_call_update": {
-        this.submittedUserId = null;
+        // A tool call does not end the prompt: the agent may echo the submitted message after it.
         this.finish("commentary");
         const id = `acp-tool-${update.toolCallId}`;
         const saved = this.read("activity", id);
@@ -103,6 +113,13 @@ export class AcpTranscript {
         this.update({ sessionUpdate: "agent_thought_chunk", messageId: `compaction-${update.compactionId}`, content: update.content, _meta: update._meta });
         return;
     }
+  }
+
+  /** End a host-dispatched turn: the last assistant message is final and no echo is pending. */
+  endTurn(): void {
+    this.finish();
+    this.submittedUserId = null;
+    this.submittedInputId = undefined;
   }
 
   finish(phase: SessionMessage["phase"] = "final_answer"): void {
