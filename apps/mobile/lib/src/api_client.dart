@@ -8,6 +8,7 @@ import 'package:web_socket_channel/io.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
 
 import 'models.dart';
+import 'session_local_store.dart';
 import 'fs_models.dart';
 import 'usage_models.dart';
 
@@ -45,7 +46,11 @@ class ApiClient {
       timeout: _quickReadTimeout,
       operation: 'reach ${host.label}',
     );
-    return NodeInfo.fromJson(_decodeObject(response));
+    final node = NodeInfo.fromJson(_decodeObject(response));
+    if (node.sessionAliases != null) {
+      await SessionLocalStore.instance.adoptSessionAliases(host, node.sessionAliases!);
+    }
+    return node;
   }
 
   Future<ProviderMetadata> fetchProviders(HostProfile host) async {
@@ -277,13 +282,22 @@ class ApiClient {
 
   // -------------------------- Admin diagnostics --------------------------
 
-  Future<void> restartProvider(HostProfile host, String kind) async {
+  Future<void> restartProvider(HostProfile host, String providerId) async {
     await _post(
       host,
-      '/api/admin/provider/$kind/restart',
+      '/api/admin/provider/$providerId/restart',
       body: const {},
       timeout: const Duration(seconds: 15),
       operation: 'restart provider',
+    );
+  }
+
+  Future<void> logoutProvider(HostProfile host, String providerId) async {
+    await _post(
+      host,
+      '/api/admin/provider/${Uri.encodeComponent(providerId)}/logout',
+      body: const {},
+      operation: 'sign out of agent',
     );
   }
 
@@ -477,6 +491,22 @@ class ApiClient {
       operation: 'close browser tab',
     );
     _throwIfBadStatus(response);
+  }
+
+  Future<SessionRuntimeSummary> fetchSessionConfiguration(HostProfile host, String sessionId) async {
+    final response = await _get(host, '/api/sessions/$sessionId/configuration',
+      timeout: _transcriptReadTimeout, operation: 'load session settings');
+    final value = _decodeObject(response)['runtime'];
+    return SessionRuntimeSummary.fromJson(value is Map<String, dynamic> ? value : {});
+  }
+
+  Future<SessionRuntimeSummary> setSessionConfiguration(HostProfile host, String sessionId,
+      String optionId, Object value) async {
+    if (value is! String && value is! bool) throw ArgumentError.value(value, 'value');
+    final response = await _post(host, '/api/sessions/$sessionId/configuration',
+      body: {'optionId': optionId, 'value': value}, operation: 'apply session setting');
+    final runtime = _decodeObject(response)['runtime'];
+    return SessionRuntimeSummary.fromJson(runtime is Map<String, dynamic> ? runtime : {});
   }
 
   Future<SessionLog> fetchLog(
@@ -717,6 +747,12 @@ class ApiClient {
       body: const {},
       operation: 'unarchive session',
     );
+  }
+
+  Future<void> deleteSession(HostProfile host, String sessionId) async {
+    final response = await _delete(host, '/api/sessions/$sessionId',
+      operation: 'delete session');
+    _throwIfBadStatus(response);
   }
 
   Future<void> respondToAction(

@@ -1,5 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
+import type { SessionSummary } from "./types.js";
+import { wrapProviderScopedId, unwrapProviderScopedId } from "./session-identity.js";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { EventEmitter } from "node:events";
@@ -15,6 +17,7 @@ import {
 import { tmpdir } from "node:os";
 import nodePath from "node:path";
 import http from "node:http";
+import { DatabaseSync } from "node:sqlite";
 import { createServer as createNetServer } from "node:net";
 
 import { WebSocket } from "ws";
@@ -32,12 +35,11 @@ import {
   FakeAgentProvider,
   type FakeAgentProviderOptions,
 } from "./fake-provider.js";
-import { MultiAgentProvider } from "./multi-provider.js";
 import {
   listAgentProviderDefinitionSummaries,
   summarizeAgentProviderConfig,
 } from "./provider-registry.js";
-import type { AgentProviderRuntime, AgentProviderRuntimeEntry } from "./provider-factory.js";
+import { createAgentProviderRuntime, AgentProviderRuntime } from "./provider-factory.js";
 import { AgentProviderRequestError } from "./agent-provider.js";
 import type {
   AgentCreateSessionRequest,
@@ -205,86 +207,19 @@ function makeMultiProviderRuntime(fakeOptions: FakeAgentProviderOptions, seconda
   // underlying provider is FakeAgentProvider so no external binary is needed.
   const codexConfig = { kind: "codex" as const, bin: "codex" };
 
-  const fakeEntry: AgentProviderRuntimeEntry = {
-    kind: "fake",
-    provider: defaultProvider,
-    configSummary: summarizeAgentProviderConfig(fakeConfig),
-    definitionSummary: fakeDef,
-  };
-  const secondaryEntry: AgentProviderRuntimeEntry = {
-    kind: "codex",
-    provider: secondaryProvider,
-    configSummary: summarizeAgentProviderConfig(codexConfig),
-    definitionSummary: codexDef,
-  };
-
-  const multiProvider = new MultiAgentProvider(
-    [
-      { kind: "fake", config: fakeConfig, provider: defaultProvider },
-      { kind: "codex", config: codexConfig, provider: secondaryProvider },
-    ],
-    "fake",
-  );
-
-  const providersByKind = new Map<string, AgentProviderRuntimeEntry>([
-    ["fake", fakeEntry],
-    ["codex", secondaryEntry],
-  ]);
-
-  return {
-    provider: multiProvider,
-    providers: [fakeEntry, secondaryEntry],
-    defaultProviderKind: "fake",
-    defaultProvider: fakeEntry,
-    providerForKind(kind) {
-      if (kind === null || kind === undefined) return fakeEntry;
-      const trimmed = kind.trim();
-      if (!trimmed) return null;
-      return providersByKind.get(trimmed) ?? null;
-    },
-    providerForSessionId(sessionId) {
-      try {
-        const resolved = multiProvider.resolveSessionProvider(sessionId);
-        return providersByKind.get(resolved.kind) ?? null;
-      } catch {
-        return fakeEntry;
-      }
-    },
-  };
+  return new AgentProviderRuntime([
+    { id: "fake", kind: "fake", create: () => defaultProvider,
+      configSummary: summarizeAgentProviderConfig(fakeConfig), definitionSummary: { ...fakeDef, capabilities: defaultProvider.capabilities } },
+    { id: "codex", kind: "codex", create: () => secondaryProvider,
+      configSummary: summarizeAgentProviderConfig(codexConfig), definitionSummary: { ...codexDef, capabilities: secondaryProvider.capabilities } },
+  ], "fake");
 }
 
 function makeCustomSingleProviderRuntime(provider: AgentProvider): AgentProviderRuntime {
-  const definitionSummary = listAgentProviderDefinitionSummaries().find(
-    (summary) => summary.kind === "fake",
-  );
-  if (!definitionSummary) {
-    throw new Error("Missing fake provider definition");
-  }
-  const configSummary = summarizeAgentProviderConfig({
-    kind: "fake",
-    latencyMs: 0,
-    seedSessions: false,
-    workspaceRoot: null,
-    capabilityProfile: "full",
-  });
-  const entry: AgentProviderRuntimeEntry = {
-    kind: "fake",
-    provider,
-    configSummary,
-    definitionSummary,
-  };
-  return {
-    provider,
-    providers: [entry],
-    defaultProviderKind: "fake",
-    defaultProvider: entry,
-    providerForKind(kind) {
-      return kind == null || kind.trim() === "fake" ? entry : null;
-    },
-    providerForSessionId() {
-      return entry;
-    },
-  };
+  const definitionSummary = listAgentProviderDefinitionSummaries().find((summary) => summary.kind === "fake")!;
+  const configSummary = summarizeAgentProviderConfig({ kind: "fake", latencyMs: 0, seedSessions: false, workspaceRoot: null, capabilityProfile: "full" });
+  return new AgentProviderRuntime([{ id: "fake", kind: "fake", create: () => provider,
+    configSummary, definitionSummary: { ...definitionSummary, capabilities: provider.capabilities } }], "fake");
 }
 
 class ModeCatalogOnlyProvider
@@ -379,8 +314,18 @@ const RESTARTABLE_FAKE_CAPABILITIES: AgentProviderCapabilities = {
   },
 };
 
+class SnapshotFixtureProvider extends EventEmitter {
+  async readSessionSnapshot(this: AgentProvider, id: string, options?: AgentSessionLogOptions) {
+    const thread = await this.readSessionThread!(id, true);
+    const log = await this.readSessionLog!(thread, options);
+    const busy = ["active", "running", "waiting_for_input", "waiting_for_approval"].includes(thread.status.phase ?? thread.status.type);
+    return { ...log, thread, busy,
+      activeTurnId: busy ? [...(thread.turns ?? [])].reverse().find((turn) => ["inProgress", "in_progress"].includes(turn.status))?.id ?? null : null };
+  }
+}
+
 class RestartableFakeProvider
-  extends EventEmitter
+  extends SnapshotFixtureProvider
   implements AgentProvider
 {
   public readonly kind = "fake";
@@ -413,7 +358,7 @@ class RestartableFakeProvider
 
   public async start(): Promise<void> {}
 
-  public async close(): Promise<void> {}
+  public async close(): Promise<void> { await this.restart(); }
 
   public async restart(): Promise<void> {
     this.restarted = true;
@@ -610,7 +555,7 @@ class SlowReadFakeProvider extends RestartableFakeProvider {
   }
 }
 
-class ImmediateCompletionProvider extends EventEmitter implements AgentProvider {
+class ImmediateCompletionProvider extends SnapshotFixtureProvider implements AgentProvider {
   public readonly kind = "fake";
   public readonly displayName = "Immediate Completion Provider";
   public readonly capabilities = FAKE_PROVIDER_CAPABILITIES;
@@ -713,7 +658,7 @@ class ImmediateCompletionProvider extends EventEmitter implements AgentProvider 
     this.lastTurnId = turnId;
     this.emit("liveEvent", {
       type: "turn_completed",
-      sessionId: this.sessionId,
+      sessionId: nativeSessionId(this.sessionId),
       turnId,
       status: "completed",
     });
@@ -747,121 +692,8 @@ class ImmediateCompletionProvider extends EventEmitter implements AgentProvider 
   }
 }
 
-class StaleIdleSubmitProvider extends EventEmitter implements AgentProvider {
-  public readonly kind = "fake";
-  public readonly displayName = "Stale Idle Submit Provider";
-  public readonly capabilities = FAKE_PROVIDER_CAPABILITIES;
 
-  private readonly sessionId = "fake-stale-idle-session";
-  private cwd = "/tmp";
-  private created = false;
-  private currentTurnId: string | null = null;
-  private submitCount = 0;
-
-  public async start(): Promise<void> {}
-
-  public async close(): Promise<void> {}
-
-  public async getVersion(): Promise<string> {
-    return "stale-idle-submit-test";
-  }
-
-  public async createSession(
-    request: AgentCreateSessionRequest,
-  ): Promise<AgentCreateSessionResult> {
-    this.created = true;
-    this.cwd = request.cwd;
-    return {
-      thread: this.buildThread(false),
-      activeTurnId: null,
-      runtime: null,
-    };
-  }
-
-  public async submitInput(
-    request: AgentSubmitInputRequest,
-  ): Promise<AgentSubmitInputResult> {
-    assert.equal(request.sessionId, this.sessionId);
-    this.submitCount += 1;
-    this.currentTurnId = `fake-stale-submit-turn-${this.submitCount}`;
-    return {
-      mode: "turn",
-      turnId: this.currentTurnId,
-    };
-  }
-
-  public async listSessionThreads(
-    options: AgentSessionListOptions,
-  ): Promise<ThreadRecord[]> {
-    if (!this.created || options.archived) {
-      return [];
-    }
-    return [this.buildThread(false)].slice(0, options.limit);
-  }
-
-  public async readSessionThread(
-    threadId: string,
-    includeTurns: boolean,
-  ): Promise<ThreadRecord> {
-    assert.equal(threadId, this.sessionId);
-    return this.buildThread(includeTurns);
-  }
-
-  public async listRecentUnindexedSessionThreads(
-    limit: number,
-  ): Promise<ThreadRecord[]> {
-    if (!this.created) {
-      return [];
-    }
-    return [this.buildThread(false)].slice(0, limit);
-  }
-
-  public async readSessionLog(): Promise<SessionLogSnapshot> {
-    return {
-      messages: [],
-      activities: [],
-      runtime: null,
-      totalMessages: 0,
-      totalActivities: 0,
-      nextSeq: 1,
-    };
-  }
-
-  public async readSessionRuntime(): Promise<null> {
-    return null;
-  }
-
-  private buildThread(includeTurns: boolean): ThreadRecord {
-    const running = this.currentTurnId !== null;
-    return {
-      id: this.sessionId,
-      name: "Stale idle session",
-      preview: "Stale idle session",
-      createdAt: 1,
-      updatedAt: running ? 2 : 1,
-      cwd: this.cwd,
-      source: "fake",
-      path: null,
-      status: running
-        ? { type: "running", activeFlags: ["inProgress"] }
-        : { type: "idle" },
-      ...(includeTurns && this.currentTurnId
-        ? {
-            turns: [
-              {
-                id: this.currentTurnId,
-                status: "in_progress",
-                startedAt: 2,
-                completedAt: null,
-              },
-            ],
-          }
-        : {}),
-    };
-  }
-}
-
-class SplitFreshnessRecentProvider extends EventEmitter implements AgentProvider {
+class SplitFreshnessRecentProvider extends SnapshotFixtureProvider implements AgentProvider {
   public readonly kind = "fake";
   public readonly displayName = "Split Freshness Recent Provider";
   public readonly capabilities = FAKE_PROVIDER_CAPABILITIES;
@@ -936,409 +768,8 @@ class SplitFreshnessRecentProvider extends EventEmitter implements AgentProvider
   }
 }
 
-class LaggingCreateTurnProvider extends EventEmitter implements AgentProvider {
-  public readonly kind = "fake";
-  public readonly displayName = "Lagging Create Turn Provider";
-  public readonly capabilities = FAKE_PROVIDER_CAPABILITIES;
 
-  private readonly sessionId = "fake-lagging-create-session";
-  private readonly createTurnId = "fake-lagging-create-turn";
-  private cwd = "/tmp";
-  private created = false;
-
-  public async start(): Promise<void> {}
-
-  public async close(): Promise<void> {}
-
-  public async getVersion(): Promise<string> {
-    return "lagging-create-turn-test";
-  }
-
-  public async createSession(
-    request: AgentCreateSessionRequest,
-  ): Promise<AgentCreateSessionResult> {
-    this.created = true;
-    this.cwd = request.cwd;
-    return {
-      thread: this.buildThread(false),
-      activeTurnId: request.input.length > 0 ? this.createTurnId : null,
-      runtime: null,
-    };
-  }
-
-  public async listSessionThreads(
-    options: AgentSessionListOptions,
-  ): Promise<ThreadRecord[]> {
-    if (!this.created || options.archived) {
-      return [];
-    }
-    return [this.buildThread(false)].slice(0, options.limit);
-  }
-
-  public async readSessionThread(
-    threadId: string,
-    includeTurns: boolean,
-  ): Promise<ThreadRecord> {
-    assert.equal(threadId, this.sessionId);
-    return this.buildThread(includeTurns);
-  }
-
-  public async listRecentUnindexedSessionThreads(
-    limit: number,
-  ): Promise<ThreadRecord[]> {
-    if (!this.created) {
-      return [];
-    }
-    return [this.buildThread(false)].slice(0, limit);
-  }
-
-  public async readSessionLog(): Promise<SessionLogSnapshot> {
-    return {
-      messages: [],
-      activities: [],
-      runtime: null,
-      totalMessages: 0,
-      totalActivities: 0,
-      nextSeq: 1,
-    };
-  }
-
-  public async readSessionRuntime(): Promise<null> {
-    return null;
-  }
-
-  private buildThread(includeTurns: boolean): ThreadRecord {
-    return {
-      id: this.sessionId,
-      name: "Lagging create turn session",
-      preview: "Lagging create turn session",
-      createdAt: 1,
-      updatedAt: 1,
-      cwd: this.cwd,
-      source: "fake",
-      path: null,
-      status: { type: "idle" },
-      ...(includeTurns ? { turns: [] } : {}),
-    };
-  }
-}
-
-class TransientUnreadableCreateTurnProvider
-  extends EventEmitter
-  implements AgentProvider
-{
-  public readonly kind = "fake";
-  public readonly displayName = "Transient Unreadable Create Turn Provider";
-  public readonly capabilities = FAKE_PROVIDER_CAPABILITIES;
-
-  private readonly sessionId = "fake-transient-create-session";
-  private readonly createTurnId = "fake-transient-create-turn";
-  private cwd = "/tmp";
-  private created = false;
-
-  public async start(): Promise<void> {}
-
-  public async close(): Promise<void> {}
-
-  public async getVersion(): Promise<string> {
-    return "transient-unreadable-create-turn-test";
-  }
-
-  public async createSession(
-    request: AgentCreateSessionRequest,
-  ): Promise<AgentCreateSessionResult> {
-    this.created = true;
-    this.cwd = request.cwd;
-    return {
-      thread: this.buildThread(),
-      activeTurnId: request.input.length > 0 ? this.createTurnId : null,
-      runtime: null,
-    };
-  }
-
-  public async listSessionThreads(
-    options: AgentSessionListOptions,
-  ): Promise<ThreadRecord[]> {
-    if (!this.created || options.archived) {
-      return [];
-    }
-    return [this.buildThread()].slice(0, options.limit);
-  }
-
-  public async readSessionThread(
-    threadId: string,
-    includeTurns: boolean,
-  ): Promise<ThreadRecord> {
-    assert.equal(threadId, this.sessionId);
-    if (includeTurns) {
-      throw new Error(
-        `failed to read thread ${threadId}: rollout /tmp/${threadId}.jsonl is empty`,
-      );
-    }
-    return this.buildThread();
-  }
-
-  public async listRecentUnindexedSessionThreads(
-    limit: number,
-  ): Promise<ThreadRecord[]> {
-    if (!this.created) {
-      return [];
-    }
-    return [this.buildThread()].slice(0, limit);
-  }
-
-  public async readSessionLog(): Promise<SessionLogSnapshot> {
-    return {
-      messages: [],
-      activities: [],
-      runtime: null,
-      totalMessages: 0,
-      totalActivities: 0,
-      nextSeq: 1,
-    };
-  }
-
-  public async readSessionRuntime(): Promise<null> {
-    return null;
-  }
-
-  private buildThread(): ThreadRecord {
-    return {
-      id: this.sessionId,
-      name: "Transient unreadable create session",
-      preview: "Transient unreadable create session",
-      createdAt: 1,
-      updatedAt: 1,
-      cwd: this.cwd,
-      source: "fake",
-      path: null,
-      status: { type: "idle" },
-    };
-  }
-}
-
-class RecoveringCreateTurnProvider extends EventEmitter implements AgentProvider {
-  public readonly kind = "fake";
-  public readonly displayName = "Recovering Create Turn Provider";
-  public readonly capabilities = FAKE_PROVIDER_CAPABILITIES;
-
-  private cwd = "/tmp";
-  private created = false;
-  private recoveredIncludeTurnRead: (() => void | Promise<void>) | null = null;
-
-  public constructor(
-    private readonly sessionId: string,
-    private readonly createTurnId: string,
-    private includeTurnFailuresRemaining: number,
-    private readonly recoveredTurnStatus: string | null,
-  ) {
-    super();
-  }
-
-  public async start(): Promise<void> {}
-
-  public async close(): Promise<void> {}
-
-  public async getVersion(): Promise<string> {
-    return "recovering-create-turn-test";
-  }
-
-  public async createSession(
-    request: AgentCreateSessionRequest,
-  ): Promise<AgentCreateSessionResult> {
-    this.created = true;
-    this.cwd = request.cwd;
-    return {
-      thread: this.buildThread(false),
-      activeTurnId: request.input.length > 0 ? this.createTurnId : null,
-      runtime: null,
-    };
-  }
-
-  public async listSessionThreads(
-    options: AgentSessionListOptions,
-  ): Promise<ThreadRecord[]> {
-    if (!this.created || options.archived) {
-      return [];
-    }
-    return [this.buildThread(false)].slice(0, options.limit);
-  }
-
-  public async readSessionThread(
-    threadId: string,
-    includeTurns: boolean,
-  ): Promise<ThreadRecord> {
-    assert.equal(threadId, this.sessionId);
-    if (includeTurns && this.includeTurnFailuresRemaining > 0) {
-      this.includeTurnFailuresRemaining -= 1;
-      throw new Error(
-        `failed to read thread ${threadId}: rollout /tmp/${threadId}.jsonl is empty`,
-      );
-    }
-    if (includeTurns && this.recoveredIncludeTurnRead) {
-      const recoveredIncludeTurnRead = this.recoveredIncludeTurnRead;
-      this.recoveredIncludeTurnRead = null;
-      await recoveredIncludeTurnRead();
-    }
-    return this.buildThread(includeTurns);
-  }
-
-  public onRecoveredIncludeTurnRead(
-    recoveredIncludeTurnRead: () => void | Promise<void>,
-  ): void {
-    this.recoveredIncludeTurnRead = recoveredIncludeTurnRead;
-  }
-
-  public async listRecentUnindexedSessionThreads(
-    limit: number,
-  ): Promise<ThreadRecord[]> {
-    if (!this.created) {
-      return [];
-    }
-    return [this.buildThread(false)].slice(0, limit);
-  }
-
-  public async readSessionLog(): Promise<SessionLogSnapshot> {
-    return {
-      messages: [],
-      activities: [],
-      runtime: null,
-      totalMessages: 0,
-      totalActivities: 0,
-      nextSeq: 1,
-    };
-  }
-
-  public async readSessionRuntime(): Promise<null> {
-    return null;
-  }
-
-  private buildThread(includeTurns: boolean): ThreadRecord {
-    return {
-      id: this.sessionId,
-      name: "Recovering create turn session",
-      preview: "Recovering create turn session",
-      createdAt: 1,
-      updatedAt: 1,
-      cwd: this.cwd,
-      source: "fake",
-      path: null,
-      status: { type: "idle" },
-      ...(includeTurns
-        ? {
-            turns: this.recoveredTurnStatus
-              ? [
-                  {
-                    id: this.createTurnId,
-                    status: this.recoveredTurnStatus,
-                    startedAt: 1,
-                    completedAt: 2,
-                  },
-                ]
-              : [],
-          }
-        : {}),
-    };
-  }
-}
-
-class TransientUnreadableCreateStatusProvider
-  extends EventEmitter
-  implements AgentProvider
-{
-  public readonly kind = "fake";
-  public readonly displayName = "Transient Unreadable Create Status Provider";
-  public readonly capabilities = FAKE_PROVIDER_CAPABILITIES;
-
-  private readonly sessionId = "fake-transient-create-status-session";
-  private readonly createTurnId = "fake-transient-create-status-turn";
-  private cwd = "/tmp";
-  private created = false;
-  private unreadable = true;
-
-  public async start(): Promise<void> {}
-
-  public async close(): Promise<void> {}
-
-  public async getVersion(): Promise<string> {
-    return "transient-unreadable-create-status-test";
-  }
-
-  public async createSession(
-    request: AgentCreateSessionRequest,
-  ): Promise<AgentCreateSessionResult> {
-    this.created = true;
-    this.cwd = request.cwd;
-    return {
-      thread: this.buildThread(),
-      activeTurnId: request.input.length > 0 ? this.createTurnId : null,
-      runtime: null,
-    };
-  }
-
-  public async listSessionThreads(
-    options: AgentSessionListOptions,
-  ): Promise<ThreadRecord[]> {
-    if (!this.created || options.archived) {
-      return [];
-    }
-    return [this.buildThread()].slice(0, options.limit);
-  }
-
-  public async readSessionThread(
-    threadId: string,
-    _includeTurns: boolean,
-  ): Promise<ThreadRecord> {
-    assert.equal(threadId, this.sessionId);
-    if (this.unreadable) {
-      this.unreadable = false;
-      throw new Error(
-        `failed to read thread ${threadId}: rollout file not found`,
-      );
-    }
-    return this.buildThread();
-  }
-
-  public async listRecentUnindexedSessionThreads(
-    limit: number,
-  ): Promise<ThreadRecord[]> {
-    if (!this.created) {
-      return [];
-    }
-    return [this.buildThread()].slice(0, limit);
-  }
-
-  public async readSessionLog(): Promise<SessionLogSnapshot> {
-    return {
-      messages: [],
-      activities: [],
-      runtime: null,
-      totalMessages: 0,
-      totalActivities: 0,
-      nextSeq: 1,
-    };
-  }
-
-  public async readSessionRuntime(): Promise<null> {
-    return null;
-  }
-
-  private buildThread(): ThreadRecord {
-    return {
-      id: this.sessionId,
-      name: "Transient unreadable create status session",
-      preview: "Transient unreadable create status session",
-      createdAt: 1,
-      updatedAt: 1,
-      cwd: this.cwd,
-      source: "fake",
-      path: null,
-      status: { type: "idle" },
-    };
-  }
-}
-
-class SearchFixtureProvider extends EventEmitter implements AgentProvider {
+class SearchFixtureProvider extends SnapshotFixtureProvider implements AgentProvider {
   public readonly kind = "fake";
   public readonly displayName = "Search Fixture Provider";
   public readonly capabilities = FAKE_PROVIDER_CAPABILITIES;
@@ -1447,7 +878,7 @@ class SearchFixtureProvider extends EventEmitter implements AgentProvider {
   }
 }
 
-class ActivityReplayFixtureProvider extends EventEmitter implements AgentProvider {
+class ActivityReplayFixtureProvider extends SnapshotFixtureProvider implements AgentProvider {
   public readonly kind = "fake";
   public readonly displayName = "Activity Replay Fixture Provider";
   public readonly capabilities = FAKE_PROVIDER_CAPABILITIES;
@@ -1583,34 +1014,8 @@ function makeSingleProviderRuntime(
     workspaceRoot: fakeOptions.workspaceRoot ?? null,
     capabilityProfile: fakeOptions.capabilityProfile ?? "full",
   };
-  const entry: AgentProviderRuntimeEntry = {
-    kind: "fake",
-    provider,
-    configSummary: summarizeAgentProviderConfig(fakeConfig),
-    definitionSummary: fakeDef,
-  };
-  return {
-    provider,
-    runtime: {
-      provider,
-      providers: [entry],
-      defaultProviderKind: "fake",
-      defaultProvider: entry,
-      providerForKind(kind) {
-        if (kind === null || kind === undefined) {
-          return entry;
-        }
-        const trimmed = kind.trim();
-        if (!trimmed || trimmed === "fake") {
-          return entry;
-        }
-        return null;
-      },
-      providerForSessionId() {
-        return entry;
-      },
-    },
-  };
+  return { provider, runtime: new AgentProviderRuntime([{ id: "fake", kind: "fake", create: () => provider,
+    configSummary: summarizeAgentProviderConfig(fakeConfig), definitionSummary: { ...fakeDef, capabilities: provider.capabilities } }], "fake") };
 }
 
 async function openSessionLiveSocket(
@@ -1687,6 +1092,43 @@ async function waitFor<T>(
   throw new Error(`Timed out waiting for ${label}`);
 }
 
+it("gates session deletion and clears host data only after native success", async () => {
+  const stateDir = await mkdtemp(nodePath.join(tmpdir(), "sidemesh-delete-test-"));
+  const { runtime, provider } = makeSingleProviderRuntime({ latencyMs: 0, seedSessions: false, workspaceRoot: stateDir });
+  let deleted: string | null = null;
+  let fail = true;
+  Object.assign(provider, { deleteSession: async (id: string) => {
+    if (fail) throw new AgentProviderRequestError("Deletion failed", 409);
+    deleted = id;
+  } });
+  try {
+    await withServerRuntime(makeConfig(stateDir), runtime, async (server, config) => {
+      await runtime.ensure(runtime.defaultProvider);
+      const created = await provider.createSession({ cwd: stateDir, input: [], overrides: EMPTY_OVERRIDES });
+      const nativeId = created.thread.id;
+      const id = wrapProviderScopedId("fake", nativeId);
+      provider.emit("liveEvent", { type: "assistant_message_completed", sessionId: nativeId,
+        message: { id: "saved-answer", text: "Keep this until success" } });
+      provider.emit("liveEvent", { type: "plan_updated", sessionId: nativeId, plan: [{ step: "Saved", status: "pending" }] });
+      const send = () => request({ hostname: "127.0.0.1", port: server.port,
+        path: `/api/sessions/${encodeURIComponent(id)}`, method: "DELETE", headers: { Authorization: `Bearer ${config.token}` } });
+      assert.equal((await send()).statusCode, 501);
+      provider.capabilities.sessions.delete = true;
+      assert.equal((await send()).statusCode, 409);
+      const db = new DatabaseSync(nodePath.join(stateDir, "sessions-v1.db"));
+      try {
+        assert.ok(db.prepare("SELECT 1 FROM plans WHERE session_id = ?").get(id));
+        assert.ok(db.prepare("SELECT 1 FROM session_recovery WHERE session_id = ?").get(id));
+        fail = false;
+        assert.equal((await send()).statusCode, 200);
+        assert.equal(deleted, nativeId);
+        assert.equal(db.prepare("SELECT 1 FROM plans WHERE session_id = ?").get(id), undefined);
+        assert.equal(db.prepare("SELECT 1 FROM session_recovery WHERE session_id = ?").get(id), undefined);
+      } finally { db.close(); }
+    });
+  } finally { await rm(stateDir, { recursive: true, force: true }); }
+});
+
 describe("/healthz", () => {
   it("returns 200 when provider is healthy", async () => {
     const stateDir = await mkdtemp(nodePath.join(tmpdir(), "sidemesh-server-test-"));
@@ -1697,51 +1139,51 @@ describe("/healthz", () => {
     });
   });
 
-  it("returns 503 when provider getVersion throws", async () => {
-    const original = FakeAgentProvider.prototype.getVersion;
-    FakeAgentProvider.prototype.getVersion = async function () {
-      throw new Error("simulated provider failure");
-    };
-    const stateDir = await mkdtemp(nodePath.join(tmpdir(), "sidemesh-server-test-"));
-    try {
-      await withServer(makeConfig(stateDir), async (server) => {
-        const res = await request({ hostname: "127.0.0.1", port: server.port, path: "/healthz", method: "GET" });
-        assert.equal(res.statusCode, 503);
-        assert.equal((res.body as any).ok, false);
-        assert.equal((res.body as any).error, "provider unreachable");
-      });
-    } finally {
-      FakeAgentProvider.prototype.getVersion = original;
-    }
+  it("keeps host controls available when one provider cannot start", async () => {
+    const stateDir = await mkdtemp(nodePath.join(tmpdir(), "sidemesh-provider-failure-"));
+    const config = makeConfig(stateDir);
+    config.terminal.enabled = true;
+    const bad = new FakeAgentProvider({ seedSessions: false });
+    bad.start = async () => { throw new Error("Missing executable"); };
+    const good = new FakeAgentProvider({ seedSessions: false });
+    const base = makeCustomSingleProviderRuntime(bad).defaultProvider;
+    const runtime = new AgentProviderRuntime([
+      { ...base, id: "broken", create: () => bad },
+      { ...base, id: "working", create: () => good },
+    ], "broken");
+    await withServerRuntime(config, runtime, async (server) => {
+      const headers = { Authorization: `Bearer ${config.token}`, "content-type": "application/json" };
+      assert.ok(runtime.providers.every((entry) => entry.state === "idle"));
+      const failed = await request({ hostname: "127.0.0.1", port: server.port, path: "/api/sessions/create", method: "POST", headers,
+        body: JSON.stringify({ provider: "broken", cwd: stateDir, input: [] }) });
+      assert.equal(failed.statusCode, 503);
+      const created = await request({ hostname: "127.0.0.1", port: server.port, path: "/api/sessions/create", method: "POST", headers,
+        body: JSON.stringify({ provider: "working", cwd: stateDir, input: [] }) });
+      assert.equal(created.statusCode, 201);
+      const health = await request({ hostname: "127.0.0.1", port: server.port, path: "/healthz" });
+      assert.equal(health.statusCode, 200);
+      const terminals = await request({ hostname: "127.0.0.1", port: server.port, path: "/api/terminals", headers });
+      assert.equal(terminals.statusCode, 200);
+      const node = await request({ hostname: "127.0.0.1", port: server.port, path: "/api/node", headers });
+      assert.deepEqual((node.body as any).supportedProviders.map((entry: any) => entry.state), ["unavailable", "ready"]);
+      await server.close();
+      await server.close();
+    });
   });
 
-  it("returns 503 when an explicit provider health probe rejects", async () => {
-    const prototype = FakeAgentProvider.prototype as unknown as {
-      health?: () => Promise<boolean>;
-    };
-    const original = prototype.health;
-    prototype.health = async () => {
-      throw new Error("simulated health rejection");
-    };
-    const stateDir = await mkdtemp(nodePath.join(tmpdir(), "sidemesh-server-test-"));
-    try {
-      await withServer(makeConfig(stateDir), async (server) => {
-        const res = await request({
-          hostname: "127.0.0.1",
-          port: server.port,
-          path: "/healthz",
-          method: "GET",
-        });
-        assert.equal(res.statusCode, 503);
-        assert.equal((res.body as any).ok, false);
-      });
-    } finally {
-      if (original) {
-        prototype.health = original;
-      } else {
-        delete prototype.health;
-      }
-    }
+  it("keeps host health independent of a rejected provider health probe", async () => {
+    const stateDir = await mkdtemp(nodePath.join(tmpdir(), "sidemesh-provider-health-"));
+    const provider = new FakeAgentProvider({ seedSessions: false });
+    const runtime = makeCustomSingleProviderRuntime(provider);
+    Object.assign(provider, { health: async () => { throw new Error("Connection failed"); } });
+    await withServerRuntime(makeConfig(stateDir), runtime, async (server) => {
+      await runtime.ensure(runtime.defaultProvider);
+      await runtime.checkHealth();
+      assert.equal(runtime.defaultProvider.state, "unavailable");
+      const res = await request({ hostname: "127.0.0.1", port: server.port, path: "/healthz" });
+      assert.equal(res.statusCode, 200);
+      assert.equal((res.body as any).ok, true);
+    });
   });
 
 });
@@ -1868,6 +1310,39 @@ describe("browser CORS", () => {
 });
 
 describe("session input item parsing", () => {
+  it("saves initial input before dispatch and returns the session when its reply is lost", async () => {
+    const stateDir = await mkdtemp(nodePath.join(tmpdir(), "sidemesh-initial-input-"));
+    const provider = new RestartableFakeProvider();
+    let sends = 0;
+    provider.submitInput = async (input) => {
+      sends++;
+      assert.deepEqual(provider.lastCreateInput, []);
+      const db = new DatabaseSync(nodePath.join(stateDir, "sessions-v1.db"), { readOnly: true });
+      try {
+        const row = db.prepare("SELECT state, payload FROM inputs WHERE key = ?").get(`${input.sessionId}:first:one`) as { state: string; payload: string };
+        assert.equal(row.state, "dispatching");
+        assert.deepEqual(JSON.parse(row.payload).input, input.input);
+      } finally { db.close(); }
+      throw new Error("Initial reply lost");
+    };
+    await withServerRuntime(makeConfig(stateDir), makeCustomSingleProviderRuntime(provider), async (server, config) => {
+      const headers = { Authorization: "Bearer " + config.token, "content-type": "application/json" };
+      const body = { clientMessageId: "first:one", input: [{ type: "text", text: "first input" }] };
+      const created = await request({ hostname: "127.0.0.1", port: server.port, path: "/api/sessions/create",
+        method: "POST", headers, body: JSON.stringify({ ...body, cwd: stateDir }) });
+      assert.equal(created.statusCode, 502);
+      const result = created.body as { session: { id: string }; code: string; clientMessageId: string };
+      assert.equal(result.session.id, wrapProviderScopedId("fake", "fake-restart-session"));
+      assert.equal(result.code, "initial_input_failed");
+      assert.equal(result.clientMessageId, body.clientMessageId);
+      const retry = await request({ hostname: "127.0.0.1", port: server.port,
+        path: `/api/sessions/${result.session.id}/input`, method: "POST", headers, body: JSON.stringify(body) });
+      assert.equal(retry.statusCode, 409);
+      assert.equal((retry.body as { code: string }).code, "input_delivery_uncertain");
+      assert.equal(sends, 1);
+    });
+  });
+
   async function prepareFileInputWorkspace(stateDir: string): Promise<string> {
     const cwd = nodePath.join(stateDir, "workspace");
     await mkdir(nodePath.join(cwd, "src"), { recursive: true });
@@ -1930,7 +1405,7 @@ describe("session input item parsing", () => {
         }),
       });
       assert.equal(created.statusCode, 201);
-      assert.deepEqual(provider.lastCreateInput, [
+      assert.deepEqual(provider.lastSubmitInput, [
         { type: "file", path: nodePath.join(cwd, "README.md") },
         { type: "file", path: nodePath.join(cwd, "src"), isDirectory: true },
         { type: "text", text: "inspect these files", text_elements: [] },
@@ -1985,7 +1460,7 @@ describe("session input item parsing", () => {
         }),
       });
       assert.equal(res.statusCode, 201);
-      assert.deepEqual(provider.lastCreateInput, [
+      assert.deepEqual(provider.lastSubmitInput, [
         { type: "file", path: nodePath.join(cwd, "README.md") },
         { type: "file", path: nodePath.join(cwd, "src"), isDirectory: true },
       ]);
@@ -2035,7 +1510,7 @@ describe("session input item parsing", () => {
       });
       assert.equal(first.statusCode, 200);
       assert.equal((first.body as any).replayed, false);
-      assert.equal(provider.submittedInputs, 1);
+      assert.equal(provider.submittedInputs, 2);
 
       await rm(nodePath.join(cwd, "package.json"));
       const retry = await request({
@@ -2052,11 +1527,125 @@ describe("session input item parsing", () => {
       assert.equal(retry.statusCode, 200);
       assert.equal((retry.body as any).replayed, true);
       assert.equal((retry.body as any).messageId, (first.body as any).messageId);
-      assert.equal(provider.submittedInputs, 1);
+      assert.equal(provider.submittedInputs, 2);
     });
   });
 
 
+  it("recovers queued input after restart and cancels the next queued input before stop", async () => {
+    class QueueProvider extends RestartableFakeProvider {
+      override readonly capabilities = { ...RESTARTABLE_FAKE_CAPABILITIES,
+        input: { ...RESTARTABLE_FAKE_CAPABILITIES.input, steer: false } };
+      async interruptTurn(sessionId: string, turnId: string): Promise<void> {
+        await this.restart();
+        this.emit("liveEvent", { type: "turn_completed", sessionId: nativeSessionId(sessionId), turnId, status: "interrupted" });
+      }
+    }
+    const stateDir = await mkdtemp(nodePath.join(tmpdir(), "sidemesh-server-queue-"));
+    const config = makeConfig(stateDir);
+    const provider = new QueueProvider();
+    let server: RunningServer | null = null;
+    let sessionId = "";
+    const send = (id: string) => request({ hostname: "127.0.0.1", port: server!.port,
+      path: `/api/sessions/${sessionId}/input`, method: "POST",
+      headers: { Authorization: "Bearer " + config.token, "content-type": "application/json" },
+      body: JSON.stringify({ clientMessageId: id, input: [{ type: "text", text: id }] }),
+    });
+    try {
+      server = await startServer(config, makeCustomSingleProviderRuntime(provider));
+      const created = await provider.createSession({ cwd: stateDir, input: [], overrides: EMPTY_OVERRIDES });
+      sessionId = created.thread.id;
+      const queued = await send("queue-one");
+      assert.equal(queued.statusCode, 200);
+      assert.equal((queued.body as { mode: string }).mode, "queued");
+      assert.equal(provider.submittedInputs, 0);
+      await server.close();
+      server = null;
+      await provider.restart();
+      server = await startServer(config, makeCustomSingleProviderRuntime(provider));
+      await waitFor(() => provider.submittedInputs === 1 ? true : null, "queued input after daemon restart");
+      assert.deepEqual(provider.lastSubmitInput, [{ type: "text", text: "queue-one", text_elements: [] }]);
+      const repeated = await send("queue-one");
+      assert.equal(repeated.statusCode, 200, JSON.stringify(repeated));
+      assert.equal((await send("queue-two")).statusCode, 200);
+      const stopped = await request({ hostname: "127.0.0.1", port: server.port,
+        path: `/api/sessions/${sessionId}/stop`, method: "POST",
+        headers: { Authorization: "Bearer " + config.token },
+      });
+      assert.equal(stopped.statusCode, 200);
+      const cancelled = await send("queue-two");
+      assert.equal(cancelled.statusCode, 409);
+      assert.equal((cancelled.body as { code: string }).code, "input_cancelled");
+      assert.equal(provider.submittedInputs, 1);
+    } finally { await server?.close(); await rm(stateDir, { recursive: true, force: true }); }
+  });
+
+  it("closes the provider before waiting for an input request with a lost reply", async () => {
+    const stateDir = await mkdtemp(nodePath.join(tmpdir(), "sidemesh-close-input-"));
+    const provider = new RestartableFakeProvider();
+    const config = makeConfig(stateDir);
+    let started!: () => void;
+    let rejectSend!: (error: Error) => void;
+    const sending = new Promise<void>((resolve) => { started = resolve; });
+    provider.submitInput = async () => new Promise((_, reject) => { rejectSend = reject; started(); });
+    provider.close = async () => { rejectSend?.(new Error("Provider closed before reply")); };
+    const server = await startServer(config, makeCustomSingleProviderRuntime(provider));
+    let closed = false;
+    try {
+      const created = await provider.createSession({ cwd: stateDir, input: [], overrides: EMPTY_OVERRIDES });
+      const result = request({ hostname: "127.0.0.1", port: server.port,
+        path: `/api/sessions/${created.thread.id}/input`, method: "POST",
+        headers: { Authorization: "Bearer " + config.token, "content-type": "application/json" },
+        body: JSON.stringify({ clientMessageId: "close-input", input: [{ type: "text", text: "saved input" }] }) });
+      await sending;
+      await server.close();
+      closed = true;
+      assert.equal((await result).statusCode, 500);
+      const db = new DatabaseSync(nodePath.join(stateDir, "sessions-v1.db"), { readOnly: true });
+      try {
+        const row = db.prepare("SELECT state, payload FROM inputs WHERE key = ?").get(`${wrapProviderScopedId("fake", created.thread.id)}:close-input`) as { state: string; payload: string };
+        assert.equal(row.state, "uncertain");
+        assert.equal(JSON.parse(row.payload).input[0].text, "saved input");
+      } finally { db.close(); }
+    } finally { if (!closed) { await provider.close(); await server.close(); } await rm(stateDir, { recursive: true, force: true }); }
+  });
+
+  it("blocks retries after an uncertain provider send, including after daemon restart", async () => {
+    const stateDir = await mkdtemp(nodePath.join(tmpdir(), "sidemesh-server-test-"));
+    const provider = new RestartableFakeProvider();
+    const config = makeConfig(stateDir);
+    const runtime = makeCustomSingleProviderRuntime(provider);
+    let sessionId = "";
+    let sends = 0;
+    provider.submitInput = async () => {
+      sends += 1;
+      throw new Error("Connection lost after send");
+    };
+    const send = (server: RunningServer) => request({
+      hostname: "127.0.0.1", port: server.port,
+      path: `/api/sessions/${encodeURIComponent(sessionId)}/input`, method: "POST",
+      headers: { Authorization: "Bearer " + config.token, "content-type": "application/json" },
+      body: JSON.stringify({ clientMessageId: "uncertain-1", input: [{ type: "text", text: "send once" }] }),
+    });
+    let server: RunningServer | null = null;
+    try {
+      server = await startServer(config, runtime);
+      const created = await provider.createSession({ cwd: stateDir, input: [], overrides: EMPTY_OVERRIDES });
+      sessionId = created.thread.id;
+      assert.equal((await send(server)).statusCode, 500);
+      const retry = await send(server);
+      assert.equal(retry.statusCode, 409);
+      assert.equal((retry.body as { code: string }).code, "input_delivery_uncertain");
+      await server.close();
+      server = null;
+      server = await startServer(config, makeCustomSingleProviderRuntime(provider));
+      assert.equal((await send(server)).statusCode, 409);
+      assert.equal(sends, 1);
+    } finally {
+      await server?.close();
+      await rm(stateDir, { recursive: true, force: true });
+    }
+  });
 
   it("deduplicates concurrent file input retries before file resolution", async () => {
     const stateDir = await mkdtemp(nodePath.join(tmpdir(), "sidemesh-server-test-"));
@@ -2108,7 +1697,7 @@ describe("session input item parsing", () => {
         [false, true],
       );
       assert.equal((first.body as any).messageId, (second.body as any).messageId);
-      assert.equal(provider.submittedInputs, 1);
+      assert.equal(provider.submittedInputs, 2);
     });
   });
 
@@ -2165,6 +1754,27 @@ describe("session input item parsing", () => {
     } finally {
       await closeSocket();
     }
+  });
+
+  it("rejects unsupported or malformed content without replacing it with fallback text", async () => {
+    const stateDir = await mkdtemp(nodePath.join(tmpdir(), "sidemesh-server-test-"));
+    const cwd = await prepareFileInputWorkspace(stateDir);
+    const provider = new NoFileMentionProvider();
+    await withServerRuntime(makeConfig(stateDir), makeCustomSingleProviderRuntime(provider), async (server, config) => {
+      for (const [input, status] of [
+        [{ type: "audio", mimeType: "audio/wav", data: "UklGRg==" }, 501],
+        [{ type: "resource", uri: "attachment:///note", text: "content" }, 501],
+        [{ type: "resourceLink", uri: "https://example.com", name: "Reference" }, 501],
+        [{ type: "audio", mimeType: "audio/wav", data: "invalid" }, 400],
+        [{ type: "resource", uri: "javascript:alert(1)", text: "content" }, 400],
+      ] as const) {
+        const response = await request({ hostname: "127.0.0.1", port: server.port, path: "/api/sessions/create", method: "POST",
+          headers: { Authorization: "Bearer " + config.token, "content-type": "application/json" },
+          body: JSON.stringify({ cwd, prompt: "fallback", input: [input] }) });
+        assert.equal(response.statusCode, status);
+      }
+      assert.equal(provider.lastCreateInput, null);
+    });
   });
 
   it("rejects file inputs when the selected provider lacks file mention support", async () => {
@@ -2254,6 +1864,29 @@ describe("session input item parsing", () => {
   });
 });
 
+describe("POST /api/admin/provider/:kind/logout", () => {
+  it("requires authentication and declared support before calling the selected agent", async () => {
+    const stateDir = await mkdtemp(nodePath.join(tmpdir(), "sidemesh-server-test-"));
+    class LogoutProvider extends RestartableFakeProvider {
+      override readonly capabilities = structuredClone(FAKE_PROVIDER_CAPABILITIES);
+      logouts = 0;
+      async logout(): Promise<void> { this.logouts++; }
+    }
+    const provider = new LogoutProvider();
+    await withServerRuntime(makeConfig(stateDir), makeCustomSingleProviderRuntime(provider), async (server, config) => {
+      const send = (authenticated: boolean) => request({ hostname: "127.0.0.1", port: server.port,
+        path: "/api/admin/provider/fake/logout", method: "POST",
+        headers: authenticated ? { Authorization: "Bearer " + config.token } : {} });
+      assert.equal((await send(false)).statusCode, 401);
+      assert.notEqual((await send(true)).statusCode, 200);
+      assert.equal(provider.logouts, 0);
+      provider.capabilities.lifecycle.logout = true;
+      assert.equal((await send(true)).statusCode, 200);
+      assert.equal(provider.logouts, 1);
+    });
+  });
+});
+
 describe("POST /api/admin/provider/:kind/restart", () => {
   it("returns 400 for unknown provider kind", async () => {
     const stateDir = await mkdtemp(nodePath.join(tmpdir(), "sidemesh-server-test-"));
@@ -2270,7 +1903,7 @@ describe("POST /api/admin/provider/:kind/restart", () => {
     });
   });
 
-  it("returns 501 when provider does not support restart", async () => {
+  it("can recreate a configured provider without a native restart method", async () => {
     const stateDir = await mkdtemp(nodePath.join(tmpdir(), "sidemesh-server-test-"));
     await withServer(makeConfig(stateDir), async (server, config) => {
       const res = await request({
@@ -2280,8 +1913,7 @@ describe("POST /api/admin/provider/:kind/restart", () => {
         method: "POST",
         headers: { Authorization: "Bearer " + config.token },
       });
-      assert.equal(res.statusCode, 501);
-      assert.equal((res.body as any).error, "provider does not support restart");
+      assert.equal(res.statusCode, 200);
     });
   });
 
@@ -2317,7 +1949,7 @@ describe("POST /api/admin/provider/:kind/restart", () => {
       });
       assert.equal(beforeStatus.statusCode, 200);
       assert.equal((beforeStatus.body as any).isRunning, true);
-      assert.equal((beforeStatus.body as any).pendingAction.id, "fake-restart-action");
+      assert.equal((beforeStatus.body as any).pendingAction.id, wrapProviderScopedId("fake", "fake-restart-action"));
 
       const beforeActions = await request({
         hostname: "127.0.0.1",
@@ -2337,7 +1969,7 @@ describe("POST /api/admin/provider/:kind/restart", () => {
         );
         provider.emit("liveEvent", {
           type: "provider_warning",
-          sessionId,
+          sessionId: nativeSessionId(sessionId),
           level: "warning",
           code: "restart-seed",
           message: "seed session seq",
@@ -2367,31 +1999,17 @@ describe("POST /api/admin/provider/:kind/restart", () => {
             sessionLive.events.find(
               (event) =>
                 event.type === "action_resolved" &&
-                event.actionId === "fake-restart-action",
+                event.actionId === wrapProviderScopedId("fake", "fake-restart-action"),
             ),
           "restart action resolved live event",
         );
-        const turnCompleted = await waitFor(
-          () =>
-            sessionLive.events.find(
-              (event) =>
-                event.type === "turn_completed" &&
-                event.turnId === "fake-restart-turn",
-            ),
-          "restart turn completed live event",
+        const invalidated = await waitFor(
+          () => sessionLive.events.find((event) => event.type === "history_invalidated"),
+          "restart snapshot invalidation",
         );
-        const idleStatus = await waitFor(
-          () =>
-            sessionLive.events.find(
-              (event) =>
-                event.type === "thread_status_changed" && event.status === "idle",
-            ),
-          "restart idle status live event",
-        );
-        assert.equal(turnCompleted.status, "interrupted");
-        assert.equal(turnCompleted.seq, seeded.seq + 1);
-        assert.equal(actionResolved.seq, turnCompleted.seq + 1);
-        assert.equal(idleStatus.seq, actionResolved.seq + 1);
+        assert.equal(actionResolved.seq, seeded.seq + 1);
+        assert.equal(invalidated.seq, actionResolved.seq + 1);
+        assert.equal(sessionLive.events.some((event) => event.type === "turn_completed"), false);
       } finally {
         await closeSessionLiveSocket(sessionLive.socket);
       }
@@ -2419,7 +2037,7 @@ describe("POST /api/admin/provider/:kind/restart", () => {
     });
   });
 
-  it("clears interrupted input dedupe receipts after provider restart", async () => {
+  it("retains interrupted input and blocks an uncertain resend after provider restart", async () => {
     const stateDir = await mkdtemp(nodePath.join(tmpdir(), "sidemesh-server-test-"));
     const provider = new RestartableFakeProvider();
     const runtime = makeCustomSingleProviderRuntime(provider);
@@ -2457,7 +2075,7 @@ describe("POST /api/admin/provider/:kind/restart", () => {
       });
       assert.equal(firstSend.statusCode, 200);
       assert.equal((firstSend.body as any).replayed, false);
-      assert.equal(provider.submittedInputs, 1);
+      assert.equal(provider.submittedInputs, 2);
 
       const duplicateBeforeRestart = await request({
         hostname: "127.0.0.1",
@@ -2475,7 +2093,7 @@ describe("POST /api/admin/provider/:kind/restart", () => {
       });
       assert.equal(duplicateBeforeRestart.statusCode, 200);
       assert.equal((duplicateBeforeRestart.body as any).replayed, true);
-      assert.equal(provider.submittedInputs, 1);
+      assert.equal(provider.submittedInputs, 2);
 
       const restart = await request({
         hostname: "127.0.0.1",
@@ -2500,8 +2118,8 @@ describe("POST /api/admin/provider/:kind/restart", () => {
           clientMessageId: "local-1",
         }),
       });
-      assert.equal(retryAfterRestart.statusCode, 200);
-      assert.equal((retryAfterRestart.body as any).replayed, false);
+      assert.equal(retryAfterRestart.statusCode, 409);
+      assert.equal((retryAfterRestart.body as { code: string }).code, "input_delivery_uncertain");
       assert.equal(provider.submittedInputs, 2);
     });
   });
@@ -2531,6 +2149,34 @@ describe("GET /api/node", () => {
       assert.equal(body.supportedProviders[0].capabilities.sessions.create, true);
       assert.equal(body.updateChannel, "stable");
       assert.equal(body.latestCommitSha, null);
+    });
+  });
+
+  it("exposes and selects each configured instance of the same provider kind", async () => {
+    const stateDir = await mkdtemp(nodePath.join(tmpdir(), "sidemesh-server-test-"));
+    const config = makeConfig(stateDir);
+    config.providers = [{ ...config.provider, id: "fake" }, { ...config.provider, id: "reviewer" }];
+    config.defaultProviderId = "reviewer";
+    await withServerRuntime(config, createAgentProviderRuntime(config), async (server) => {
+      const headers = { Authorization: "Bearer " + config.token, "content-type": "application/json" };
+      const node = await request({ hostname: "127.0.0.1", port: server.port, path: "/api/node", headers });
+      const metadata = node.body as { providerId: string; supportedProviders: Array<{ id: string; kind: string; isDefault: boolean }> };
+      assert.equal(metadata.providerId, "reviewer");
+      assert.deepEqual(metadata.supportedProviders.map(({ id, kind, isDefault }) => ({ id, kind, isDefault })), [
+        { id: "fake", kind: "fake", isDefault: false },
+        { id: "reviewer", kind: "fake", isDefault: true },
+      ]);
+      for (const id of ["fake", "reviewer"]) {
+        const created = await request({ hostname: "127.0.0.1", port: server.port,
+          path: "/api/sessions/create", method: "POST", headers,
+          body: JSON.stringify({ provider: id, cwd: stateDir, input: [] }),
+        });
+        assert.equal(created.statusCode, 201);
+        const session = (created.body as { session: { id: string; provider: string; providerId: string } }).session;
+        assert.ok(session.id.startsWith(`${id}:`));
+        assert.equal(session.providerId, id);
+        assert.equal(session.provider, "fake");
+      }
     });
   });
 
@@ -3125,7 +2771,7 @@ describe("session live rich events", () => {
 
         provider.emit("liveEvent", {
           type: "provider_warning",
-          sessionId: primary.thread.id,
+          sessionId: nativeSessionId(primary.thread.id),
           level: "warning",
           code: "warn-1",
           message: "Heads up",
@@ -3133,13 +2779,13 @@ describe("session live rich events", () => {
         });
         provider.emit("liveEvent", {
           type: "thread_status_changed",
-          sessionId: primary.thread.id,
+          sessionId: nativeSessionId(primary.thread.id),
           status: "running",
           message: "Working",
         });
         provider.emit("liveEvent", {
           type: "plan_updated",
-          sessionId: primary.thread.id,
+          sessionId: nativeSessionId(primary.thread.id),
           turnId: "turn-1",
           explanation: "Follow the envelope plan.",
           plan: [
@@ -3149,7 +2795,7 @@ describe("session live rich events", () => {
         });
         provider.emit("liveEvent", {
           type: "reasoning_delta",
-          sessionId: primary.thread.id,
+          sessionId: nativeSessionId(primary.thread.id),
           turnId: "turn-1",
           itemId: "item-1",
           reasoningId: "reason-1",
@@ -3158,7 +2804,7 @@ describe("session live rich events", () => {
         });
         provider.emit("liveEvent", {
           type: "queue_updated",
-          sessionId: primary.thread.id,
+          sessionId: nativeSessionId(primary.thread.id),
           steeringCount: 1,
           followUpCount: 2,
           steeringPreview: ["Keep it provider-neutral"],
@@ -3166,7 +2812,7 @@ describe("session live rich events", () => {
         });
         provider.emit("liveEvent", {
           type: "auto_retry_updated",
-          sessionId: primary.thread.id,
+          sessionId: nativeSessionId(primary.thread.id),
           phase: "started",
           attempt: 2,
           maxAttempts: 3,
@@ -3247,7 +2893,7 @@ describe("session live rich events", () => {
 
       provider.emit("liveEvent", {
         type: "plan_updated",
-        sessionId,
+        sessionId: nativeSessionId(sessionId),
         turnId: "turn-1",
         explanation: "First plan.",
         plan: [{ step: "Inspect the daemon path", status: "completed" }],
@@ -3272,7 +2918,7 @@ describe("session live rich events", () => {
 
       provider.emit("liveEvent", {
         type: "plan_updated",
-        sessionId,
+        sessionId: nativeSessionId(sessionId),
         turnId: "turn-2",
         explanation: "Second plan.",
         plan: [{ step: "Return the freshest plan", status: "in_progress" }],
@@ -3305,6 +2951,7 @@ describe("session live rich events", () => {
       workspaceRoot: stateDir,
     });
     await withServerRuntime(makeConfig(stateDir), runtime, async (server, config) => {
+      await runtime.ensure(runtime.defaultProvider);
       const created = await provider.createSession({
         cwd: stateDir,
         input: [],
@@ -3314,7 +2961,7 @@ describe("session live rich events", () => {
 
       provider.emit("liveEvent", {
         type: "plan_updated",
-        sessionId,
+        sessionId: nativeSessionId(sessionId),
         turnId: "turn-1",
         explanation: "Catch up on reconnect.",
         plan: [{ step: "Replay the latest plan", status: "in_progress" }],
@@ -3355,6 +3002,7 @@ describe("session live rich events", () => {
       workspaceRoot: stateDir,
     });
     await withServerRuntime(makeConfig(stateDir), runtime, async (server, config) => {
+      await runtime.ensure(runtime.defaultProvider);
       const created = await provider.createSession({
         cwd: stateDir,
         input: [],
@@ -3364,7 +3012,7 @@ describe("session live rich events", () => {
 
       provider.emit("liveEvent", {
         type: "plan_updated",
-        sessionId,
+        sessionId: nativeSessionId(sessionId),
         turnId: "turn-1",
         explanation: "Create the plan card.",
         plan: [{ step: "Show the plan", status: "in_progress" }],
@@ -3385,7 +3033,7 @@ describe("session live rich events", () => {
 
       provider.emit("liveEvent", {
         type: "plan_updated",
-        sessionId,
+        sessionId: nativeSessionId(sessionId),
         turnId: "turn-1",
         plan: [],
       });
@@ -3432,7 +3080,7 @@ describe("session live rich events", () => {
 
       provider.emit("liveEvent", {
         type: "activity_updated",
-        sessionId: provider.sessionId,
+        sessionId: nativeSessionId(provider.sessionId),
         turnId: "turn-1",
         activity: {
           id: "cmd-1",
@@ -3480,9 +3128,10 @@ describe("session live rich events", () => {
   it("releases provider listeners and timers when the server closes", async () => {
     const stateDir = await mkdtemp(nodePath.join(tmpdir(), "sidemesh-server-close-"));
     const provider = new ActivityReplayFixtureProvider();
-    await withServerRuntime(makeConfig(stateDir), makeCustomSingleProviderRuntime(provider), async () => {
+    await withServerRuntime(makeConfig(stateDir), makeCustomSingleProviderRuntime(provider), async (server, config) => {
+      await request({ hostname: "127.0.0.1", port: server.port, path: `/api/sessions/${provider.sessionId}/log`, headers: { Authorization: `Bearer ${config.token}` } });
       assert.equal(provider.listenerCount("liveEvent"), 1);
-      provider.emit("liveEvent", { type: "runtime_updated", sessionId: provider.sessionId, runtime: { model: "last model" } });
+      provider.emit("liveEvent", { type: "runtime_updated", sessionId: nativeSessionId(provider.sessionId), runtime: { model: "last model" } });
     });
     assert.equal(provider.listenerCount("liveEvent"), 0);
     assert.equal(provider.listenerCount("stderr"), 0);
@@ -3497,10 +3146,12 @@ describe("session live rich events", () => {
       const entered = new Promise<void>((resolve) => { enter = resolve; });
       const reading = new Promise<void>((resolve) => { release = resolve; });
       const readLog = provider.readSessionLog.bind(provider);
-      provider.readSessionLog = async (thread, options) => {
-        const log = await readLog(thread, options);
-        if (options?.messageLimit === 13) { enter(); await reading; }
-        return log;
+      const readSnapshot = provider.readSessionSnapshot.bind(provider);
+      let block = true;
+      provider.readSessionSnapshot = async (id, options) => {
+        const snapshot = await readSnapshot(id, options);
+        if (block) { block = false; enter(); await reading; }
+        return snapshot;
       };
       const snapshot = request({
         hostname: "127.0.0.1", port: server.port,
@@ -3508,15 +3159,15 @@ describe("session live rich events", () => {
         headers: { Authorization: `Bearer ${config.token}` },
       });
       await entered;
-      provider.emit("liveEvent", { type: "turn_started", sessionId: provider.sessionId, turnId: "turn-live" });
-      provider.emit("liveEvent", { type: "assistant_delta", sessionId: provider.sessionId, delta: "Still writing" });
-      provider.emit("liveEvent", { type: "reasoning_delta", sessionId: provider.sessionId, delta: "Checking", summary: false });
-      provider.emit("liveEvent", { type: "runtime_updated", sessionId: provider.sessionId, runtime: { model: "live-model" } });
+      provider.emit("liveEvent", { type: "turn_started", sessionId: nativeSessionId(provider.sessionId), turnId: "turn-live" });
+      provider.emit("liveEvent", { type: "assistant_delta", sessionId: nativeSessionId(provider.sessionId), delta: "Still writing" });
+      provider.emit("liveEvent", { type: "reasoning_delta", sessionId: nativeSessionId(provider.sessionId), delta: "Checking", summary: false });
+      provider.emit("liveEvent", { type: "runtime_updated", sessionId: nativeSessionId(provider.sessionId), runtime: { model: "live-model" } });
       provider.emit("liveEvent", {
-        type: "activity_updated", sessionId: provider.sessionId,
+        type: "activity_updated", sessionId: nativeSessionId(provider.sessionId),
         activity: { ...((await readLog({ id: provider.sessionId } as ThreadRecord)).activities[0]), output: "fresh output" },
       });
-      provider.emit("liveEvent", { type: "plan_updated", sessionId: provider.sessionId, plan: [{ step: "Fresh plan", status: "in_progress" }] });
+      provider.emit("liveEvent", { type: "plan_updated", sessionId: nativeSessionId(provider.sessionId), plan: [{ step: "Fresh plan", status: "in_progress" }] });
       release();
       const result = await snapshot;
       assert.equal(result.statusCode, 200);
@@ -3539,10 +3190,12 @@ describe("session live rich events", () => {
       const entered = new Promise<void>((resolve) => { enter = resolve; });
       const reading = new Promise<void>((resolve) => { release = resolve; });
       const readLog = provider.readSessionLog.bind(provider);
-      provider.readSessionLog = async (thread, options) => {
-        const log = await readLog(thread, options);
-        if (options?.messageLimit === 13) { enter(); await reading; }
-        return log;
+      const readSnapshot = provider.readSessionSnapshot.bind(provider);
+      let block = true;
+      provider.readSessionSnapshot = async (id, options) => {
+        const snapshot = await readSnapshot(id, options);
+        if (block) { block = false; enter(); await reading; }
+        return snapshot;
       };
       const snapshot = request({
         hostname: "127.0.0.1", port: server.port,
@@ -3550,16 +3203,16 @@ describe("session live rich events", () => {
         headers: { Authorization: `Bearer ${config.token}` },
       });
       await entered;
-      provider.emit("liveEvent", { type: "turn_started", sessionId: provider.sessionId, turnId: "turn-live" });
-      provider.emit("liveEvent", { type: "assistant_delta", sessionId: provider.sessionId, delta: "Still writing" });
-      provider.emit("liveEvent", { type: "reasoning_delta", sessionId: provider.sessionId, delta: "Checking", summary: false });
-      provider.emit("liveEvent", { type: "runtime_updated", sessionId: provider.sessionId, runtime: { model: "live-model" } });
+      provider.emit("liveEvent", { type: "turn_started", sessionId: nativeSessionId(provider.sessionId), turnId: "turn-live" });
+      provider.emit("liveEvent", { type: "assistant_delta", sessionId: nativeSessionId(provider.sessionId), delta: "Still writing" });
+      provider.emit("liveEvent", { type: "reasoning_delta", sessionId: nativeSessionId(provider.sessionId), delta: "Checking", summary: false });
+      provider.emit("liveEvent", { type: "runtime_updated", sessionId: nativeSessionId(provider.sessionId), runtime: { model: "live-model" } });
       provider.emit("liveEvent", {
-        type: "activity_updated", sessionId: provider.sessionId,
+        type: "activity_updated", sessionId: nativeSessionId(provider.sessionId),
         activity: { ...((await readLog({ id: provider.sessionId } as ThreadRecord)).activities[0]), output: "fresh output" },
       });
-      provider.emit("liveEvent", { type: "plan_updated", sessionId: provider.sessionId, plan: [{ step: "Fresh plan", status: "in_progress" }] });
-      provider.emit("liveEvent", { type: "turn_completed", sessionId: provider.sessionId, turnId: "turn-live", status: "completed" });
+      provider.emit("liveEvent", { type: "plan_updated", sessionId: nativeSessionId(provider.sessionId), plan: [{ step: "Fresh plan", status: "in_progress" }] });
+      provider.emit("liveEvent", { type: "turn_completed", sessionId: nativeSessionId(provider.sessionId), turnId: "turn-live", status: "completed" });
       release();
       const result = await snapshot;
       assert.equal(result.statusCode, 200);
@@ -3711,6 +3364,7 @@ describe("session live rich events", () => {
     let secondServer: RunningServer | null = null;
     try {
       firstServer = await startServer(config, runtime);
+      await runtime.ensure(runtime.defaultProvider);
       const created = await provider.createSession({
         cwd: stateDir,
         input: [],
@@ -3720,7 +3374,7 @@ describe("session live rich events", () => {
 
       provider.emit("liveEvent", {
         type: "plan_updated",
-        sessionId,
+        sessionId: nativeSessionId(sessionId),
         turnId: "turn-1",
         explanation: "Persist this plan.",
         plan: [{ step: "Reload after restart", status: "completed" }],
@@ -3729,7 +3383,7 @@ describe("session live rich events", () => {
       await firstServer.close();
       firstServer = null;
 
-      secondServer = await startServer(config, runtime);
+      secondServer = await startServer(config, makeCustomSingleProviderRuntime(provider));
       const restored = await request({
         hostname: "127.0.0.1",
         port: secondServer.port,
@@ -3888,7 +3542,7 @@ describe("session live rich events", () => {
         );
         provider.emit("liveEvent", {
           type: "queue_updated",
-          sessionId: primary.thread.id,
+          sessionId: nativeSessionId(primary.thread.id),
           steeringCount: 1,
           followUpCount: 0,
           steeringPreview: ["Still alive"],
@@ -4052,6 +3706,42 @@ describe("provider-scoped catalog routes", () => {
     );
   });
 
+  it("routes session configuration to the owning provider and preserves failures", async () => {
+    const stateDir = await mkdtemp(nodePath.join(tmpdir(), "sidemesh-server-test-"));
+    const config = makeConfig(stateDir);
+    const calls: unknown[] = [];
+    const provider = Object.assign(new FakeAgentProvider({ seedSessions: false }), {
+      async setSessionConfiguration(id: string, optionId: string, value: string | boolean) {
+        calls.push([id, optionId, value]);
+        if (optionId === "missing") throw new AgentProviderRequestError("Option is no longer available", 409);
+        return { configurationOptions: [{ id: optionId, label: "Setting", value }] };
+      },
+    });
+    provider.capabilities.configuration.sessionOptions = true;
+    const created = await provider.createSession({ cwd: stateDir, input: [], overrides: EMPTY_OVERRIDES });
+    await withServerRuntime(config, makeCustomSingleProviderRuntime(provider), async (server) => {
+      const requestOptions = { hostname: "127.0.0.1", port: server.port,
+        path: `/api/sessions/${wrapProviderScopedId("fake", created.thread.id)}/configuration`,
+        headers: { Authorization: "Bearer " + config.token, "Content-Type": "application/json" } };
+      assert.equal((await request({ ...requestOptions, method: "GET" })).statusCode, 200);
+      for (const value of [false, "choice"]) {
+        const response = await request({ ...requestOptions, method: "POST", body: JSON.stringify({ optionId: "setting", value }) });
+        assert.equal(response.statusCode, 200);
+        assert.deepEqual(calls.at(-1), [created.thread.id, "setting", value]);
+        assert.deepEqual(response.body, { runtime: { configurationOptions: [{ id: "setting", label: "Setting", value }] } });
+      }
+      const malformed = await request({ ...requestOptions, method: "POST", body: JSON.stringify({ optionId: "setting", value: 3 }) });
+      assert.equal(malformed.statusCode, 400);
+      assert.equal(calls.length, 2);
+      const rejected = await request({ ...requestOptions, method: "POST", body: JSON.stringify({ optionId: "missing", value: true }) });
+      assert.equal(rejected.statusCode, 409);
+      assert.deepEqual(rejected.body, { error: "Option is no longer available" });
+      provider.capabilities.configuration.sessionOptions = false;
+      assert.equal((await request({ ...requestOptions, method: "POST", body: JSON.stringify({ optionId: "setting", value: true }) })).statusCode, 501);
+      assert.equal(calls.length, 3);
+    });
+  });
+
   it("returns provider-defined mode catalogs when the provider exposes them", async () => {
     const stateDir = await mkdtemp(nodePath.join(tmpdir(), "sidemesh-server-test-"));
     const config = makeConfig(stateDir);
@@ -4115,7 +3805,6 @@ describe("provider-scoped catalog routes", () => {
     );
   });
 });
-
 
 
 describe("GET /api/sessions/:sessionId/status", () => {
@@ -4194,27 +3883,6 @@ describe("GET /api/sessions/:sessionId/status", () => {
     return (sessionsRes.body as any[]).find((item) => item.id === sessionId)?.status;
   }
 
-  async function createTransientStatusSession(
-    server: RunningServer,
-    config: NodeConfig,
-  ): Promise<any> {
-    const createRes = await request({
-      hostname: "127.0.0.1",
-      port: server.port,
-      path: "/api/sessions/create",
-      method: "POST",
-      headers: {
-        Authorization: "Bearer " + config.token,
-        "content-type": "application/json",
-      },
-      body: JSON.stringify({
-        cwd: "/tmp/transient-unreadable-create-status-test",
-        input: [{ type: "text", text: "start while thread read is temporarily unavailable", text_elements: [] }],
-      }),
-    });
-    assert.equal(createRes.statusCode, 201);
-    return createRes.body as any;
-  }
 
   it("reports running for inProgress turns", async () => {
     const stateDir = await mkdtemp(nodePath.join(tmpdir(), "sidemesh-server-status-test-"));
@@ -4244,54 +3912,6 @@ describe("GET /api/sessions/:sessionId/status", () => {
     });
   });
 
-  it("falls back to turn scan and reports running for in_progress turns", async () => {
-    const stateDir = await mkdtemp(nodePath.join(tmpdir(), "sidemesh-server-status-test-"));
-    await withServer(makeConfig(stateDir), async (server, config) => {
-      const createRes = await request({
-        hostname: "127.0.0.1",
-        port: server.port,
-        path: "/api/sessions/create",
-        method: "POST",
-        headers: { Authorization: "Bearer " + config.token, "Content-Type": "application/json" },
-        body: JSON.stringify({ cwd: "/tmp", input: [{ type: "text", text: "hello" }] }),
-      });
-      assert.equal(createRes.statusCode, 201);
-      const sessionId = (createRes.body as any).session.id;
-
-      const original = (FakeAgentProvider.prototype as any).readSessionThread;
-      (FakeAgentProvider.prototype as any).readSessionThread = async function (
-        sid: string,
-        includeTurns: boolean,
-      ) {
-        const result = await original.call(this, sid, includeTurns);
-        if (includeTurns && result.turns) {
-          for (const turn of result.turns) {
-            if (turn.status === "inProgress") {
-              turn.status = "in_progress";
-            }
-          }
-        }
-        result.status = { type: "idle" };
-        return result;
-      };
-
-      try {
-        const statusRes = await request({
-          hostname: "127.0.0.1",
-          port: server.port,
-          path: `/api/sessions/${sessionId}/status`,
-          method: "GET",
-          headers: { Authorization: "Bearer " + config.token },
-        });
-        assert.equal(statusRes.statusCode, 200);
-        assert.equal((statusRes.body as any).status, "running");
-        assert.equal((statusRes.body as any).isRunning, true);
-        assert.ok((statusRes.body as any).activeTurnId);
-      } finally {
-        (FakeAgentProvider.prototype as any).readSessionThread = original;
-      }
-    });
-  });
 
   it("surfaces live waiting status in both /status and recent session rows", async () => {
     const stateDir = await mkdtemp(nodePath.join(tmpdir(), "sidemesh-server-status-test-"));
@@ -4306,9 +3926,14 @@ describe("GET /api/sessions/:sessionId/status", () => {
         input: [],
         overrides: EMPTY_OVERRIDES,
       });
+      const originalSnapshot = provider.readSessionSnapshot.bind(provider);
+      provider.readSessionSnapshot = async (id, options) => {
+        const snapshot = await originalSnapshot(id, options);
+        return { ...snapshot, busy: true, thread: { ...snapshot.thread, status: { type: "waiting_for_approval" } } };
+      };
       provider.emit("liveEvent", {
         type: "thread_status_changed",
-        sessionId: session.thread.id,
+        sessionId: nativeSessionId(session.thread.id),
         status: "waiting_for_approval",
         pendingActionKind: "permissions",
       });
@@ -4333,7 +3958,7 @@ describe("GET /api/sessions/:sessionId/status", () => {
       });
       assert.equal(sessionsRes.statusCode, 200);
       const listed = (sessionsRes.body as any[]).find(
-        (item) => item.id === session.thread.id,
+        (item) => item.id === wrapProviderScopedId("fake", session.thread.id),
       );
       assert.ok(listed);
       assert.equal(listed.status, "waiting_for_approval");
@@ -4386,7 +4011,7 @@ describe("GET /api/sessions/:sessionId/status", () => {
       });
       assert.equal(sessionsRes.statusCode, 200);
       const listed = (sessionsRes.body as any[]).find(
-        (item) => item.id === "thread-child",
+        (item) => item.id === wrapProviderScopedId("fake", "thread-child"),
       );
       assert.equal(listed, undefined);
 
@@ -4399,14 +4024,15 @@ describe("GET /api/sessions/:sessionId/status", () => {
       });
       assert.equal(runsRes.statusCode, 200);
       assert.deepEqual(runsRes.body, [{
-        id: "thread-child",
+        id: wrapProviderScopedId("fake", "thread-child"),
         parentSessionId: "thread-parent",
         title: "Delegated explorer",
         preview: "Delegated explorer",
         cwd: "/repo",
         createdAt: 1000,
         updatedAt: 2000,
-        provider: null,
+        provider: "fake",
+        providerId: "fake",
         status: "idle",
         agentName: null,
         agentDisplayName: null,
@@ -4417,26 +4043,6 @@ describe("GET /api/sessions/:sessionId/status", () => {
     });
   });
 
-  it("does not let stale live idle status override an active turn", async () => {
-    const stateDir = await mkdtemp(nodePath.join(tmpdir(), "sidemesh-server-status-test-"));
-    const provider = new RestartableFakeProvider();
-    const runtime = makeCustomSingleProviderRuntime(provider);
-    await withServerRuntime(makeConfig(stateDir), runtime, async (server, config) => {
-      const sessionId = await createRestartableSession(server, config);
-      await resumeRestartableSession(server, config);
-
-      provider.emit("liveEvent", {
-        type: "thread_status_changed",
-        sessionId,
-        status: "idle",
-      });
-
-      const status = await readStatus(server, config, sessionId);
-      assert.equal(status.status, "running");
-      assert.equal(status.isRunning, true);
-      assert.equal(await readRecentStatus(server, config, sessionId), "running");
-    });
-  });
 
   it("preserves provider waiting status while an active turn is tracked", async () => {
     const stateDir = await mkdtemp(nodePath.join(tmpdir(), "sidemesh-server-status-test-"));
@@ -4446,9 +4052,15 @@ describe("GET /api/sessions/:sessionId/status", () => {
       const sessionId = await createRestartableSession(server, config);
       await resumeRestartableSession(server, config);
 
+      const originalSnapshot = provider.readSessionSnapshot.bind(provider);
+      provider.readSessionSnapshot = async (id, options) => {
+        const snapshot = await originalSnapshot(id, options);
+        return { ...snapshot, busy: true, activeTurnId: snapshot.activeTurnId,
+          thread: { ...snapshot.thread, status: { type: "waiting_for_input" } } };
+      };
       provider.emit("liveEvent", {
         type: "thread_status_changed",
-        sessionId,
+        sessionId: nativeSessionId(sessionId),
         status: "waiting_for_input",
       });
 
@@ -4467,9 +4079,15 @@ describe("GET /api/sessions/:sessionId/status", () => {
       const sessionId = await createRestartableSession(server, config);
       await resumeRestartableSession(server, config);
 
+      const originalSnapshot = provider.readSessionSnapshot.bind(provider);
+      provider.readSessionSnapshot = async (id, options) => {
+        const snapshot = await originalSnapshot(id, options);
+        return { ...snapshot, busy: false, activeTurnId: null,
+          thread: { ...snapshot.thread, status: { type: "errored" } } };
+      };
       provider.emit("liveEvent", {
         type: "thread_status_changed",
-        sessionId,
+        sessionId: nativeSessionId(sessionId),
         status: "errored",
       });
 
@@ -4481,183 +4099,6 @@ describe("GET /api/sessions/:sessionId/status", () => {
     });
   });
 
-  it("drops live activities after a terminal status closes the turn", async () => {
-    const stateDir = await mkdtemp(nodePath.join(tmpdir(), "sidemesh-server-status-test-"));
-    const provider = new RestartableFakeProvider();
-    const runtime = makeCustomSingleProviderRuntime(provider);
-    await withServerRuntime(makeConfig(stateDir), runtime, async (server, config) => {
-      const sessionId = await createRestartableSession(server, config);
-      await resumeRestartableSession(server, config);
-
-      provider.emit("liveEvent", {
-        type: "activity_updated",
-        sessionId,
-        turnId: "fake-restart-turn",
-        activity: {
-          id: "cmd-1",
-          type: "command",
-          turnId: "fake-restart-turn",
-          status: "in_progress",
-          command: "npm test",
-          cwd: "/tmp/restart-test",
-          output: "still streaming",
-          exitCode: null,
-          durationMs: null,
-          source: "agent",
-          processId: "proc-1",
-          commandActions: [],
-          terminalStatus: null,
-          terminalInput: null,
-        },
-      });
-
-      const liveLog = await request({
-        hostname: "127.0.0.1",
-        port: server.port,
-        path: `/api/sessions/${encodeURIComponent(sessionId)}/log`,
-        method: "GET",
-        headers: { Authorization: "Bearer " + config.token },
-      });
-      assert.equal(liveLog.statusCode, 200);
-      assert.equal((liveLog.body as any).activities[0]?.id, "cmd-1");
-
-      provider.emit("liveEvent", {
-        type: "thread_status_changed",
-        sessionId,
-        status: "errored",
-      });
-
-      const originalReadSessionThread = provider.readSessionThread.bind(provider);
-      provider.readSessionThread = async (threadId, includeTurns) => {
-        const thread = await originalReadSessionThread(threadId, includeTurns);
-        return {
-          ...thread,
-          status: { type: "errored" },
-          ...(includeTurns ? { turns: [] } : {}),
-        };
-      };
-
-      const clearedLog = await request({
-        hostname: "127.0.0.1",
-        port: server.port,
-        path: `/api/sessions/${encodeURIComponent(sessionId)}/log`,
-        method: "GET",
-        headers: { Authorization: "Bearer " + config.token },
-      });
-      assert.equal(clearedLog.statusCode, 200);
-      assert.deepEqual((clearedLog.body as any).activities, []);
-    });
-  });
-
-  it("clears stale terminal session state from events, resources, and actions after provider confirmation", async () => {
-    const stateDir = await mkdtemp(nodePath.join(tmpdir(), "sidemesh-server-status-test-"));
-    const provider = new RestartableFakeProvider();
-    const runtime = makeCustomSingleProviderRuntime(provider);
-    await withServerRuntime(makeConfig(stateDir), runtime, async (server, config) => {
-      const sessionId = await createRestartableSession(server, config);
-
-      provider.emit("liveEvent", {
-        type: "activity_updated",
-        sessionId,
-        turnId: "fake-restart-turn",
-        activity: {
-          id: "search-1",
-          type: "web_search",
-          turnId: "fake-restart-turn",
-          status: "completed",
-          query: "example",
-          queries: ["example"],
-          targetUrl: "https://example.com/docs",
-          pattern: null,
-        },
-      });
-
-      const liveResources = await request({
-        hostname: "127.0.0.1",
-        port: server.port,
-        path: `/api/sessions/${encodeURIComponent(sessionId)}/resources`,
-        method: "GET",
-        headers: { Authorization: "Bearer " + config.token },
-      });
-      assert.equal(liveResources.statusCode, 200);
-      assert.equal((liveResources.body as any).resources.length, 1);
-
-      provider.emit("liveEvent", {
-        type: "thread_status_changed",
-        sessionId,
-        status: "errored",
-      });
-
-      const originalReadSessionThread = provider.readSessionThread.bind(provider);
-      provider.readSessionThread = async (threadId, includeTurns) => {
-        const thread = await originalReadSessionThread(threadId, includeTurns);
-        return {
-          ...thread,
-          status: { type: "errored" },
-          ...(includeTurns ? { turns: [] } : {}),
-        };
-      };
-
-      const actionsRes = await request({
-        hostname: "127.0.0.1",
-        port: server.port,
-        path: "/api/actions",
-        method: "GET",
-        headers: { Authorization: "Bearer " + config.token },
-      });
-      assert.equal(actionsRes.statusCode, 200);
-      assert.deepEqual(actionsRes.body, []);
-
-      const eventsRes = await request({
-        hostname: "127.0.0.1",
-        port: server.port,
-        path: `/api/sessions/${encodeURIComponent(sessionId)}/log`,
-        method: "GET",
-        headers: { Authorization: "Bearer " + config.token },
-      });
-      assert.equal(eventsRes.statusCode, 200);
-      assert.deepEqual((eventsRes.body as any).activities, []);
-      assert.equal((eventsRes.body as any).pendingAction, null);
-      assert.equal((eventsRes.body as any).session.status, "errored");
-
-      const clearedResources = await request({
-        hostname: "127.0.0.1",
-        port: server.port,
-        path: `/api/sessions/${encodeURIComponent(sessionId)}/resources`,
-        method: "GET",
-        headers: { Authorization: "Bearer " + config.token },
-      });
-      assert.equal(clearedResources.statusCode, 200);
-      assert.deepEqual((clearedResources.body as any).resources, []);
-    });
-  });
-
-  it("reconciles stale terminal live status after a short grace window", async () => {
-    const stateDir = await mkdtemp(nodePath.join(tmpdir(), "sidemesh-server-status-test-"));
-    const provider = new RestartableFakeProvider();
-    const runtime = makeCustomSingleProviderRuntime(provider);
-    await withServerRuntime(makeConfig(stateDir), runtime, async (server, config) => {
-      const sessionId = await createRestartableSession(server, config);
-      await resumeRestartableSession(server, config);
-
-      provider.emit("liveEvent", {
-        type: "thread_status_changed",
-        sessionId,
-        status: "errored",
-      });
-
-      const terminalStatus = await readStatus(server, config, sessionId);
-      assert.equal(terminalStatus.status, "errored");
-
-      await new Promise((resolve) => setTimeout(resolve, 1_100));
-
-      assert.equal(await readRecentStatus(server, config, sessionId), "running");
-
-      const reconciledStatus = await readStatus(server, config, sessionId);
-      assert.equal(reconciledStatus.status, "running");
-      assert.equal(reconciledStatus.isRunning, true);
-    });
-  });
 
   it("reconciles recent rows from per-session status reads", async () => {
     const stateDir = await mkdtemp(nodePath.join(tmpdir(), "sidemesh-server-status-test-"));
@@ -4682,6 +4123,8 @@ describe("GET /api/sessions/:sessionId/status", () => {
       } as ThreadRecord;
       provider.listSessionThreads = async () => [listedThread];
       provider.readSessionThread = async () => readThread;
+      const originalSnapshot = provider.readSessionSnapshot.bind(provider);
+      provider.readSessionSnapshot = async (id, options) => ({ ...await originalSnapshot(id, options), thread: readThread });
 
       const initialSessionsRes = await request({
         hostname: "127.0.0.1",
@@ -4737,7 +4180,7 @@ describe("GET /api/sessions/:sessionId/status", () => {
       assert.equal(createRes.statusCode, 201);
       const sessionId = (createRes.body as any).session.id as string;
       assert.equal((createRes.body as any).session.status, "idle");
-      assert.equal((createRes.body as any).activeTurnId, "fake-immediate-create-turn");
+      assert.equal((createRes.body as any).activeTurnId, null);
 
       const createStatus = await request({
         hostname: "127.0.0.1",
@@ -4765,7 +4208,7 @@ describe("GET /api/sessions/:sessionId/status", () => {
         }),
       });
       assert.equal(inputRes.statusCode, 200);
-      assert.equal((inputRes.body as any).turnId, "fake-immediate-submit-turn-1");
+      assert.equal((inputRes.body as any).turnId, "fake-immediate-submit-turn-2");
 
       const inputStatus = await request({
         hostname: "127.0.0.1",
@@ -4781,506 +4224,6 @@ describe("GET /api/sessions/:sessionId/status", () => {
     });
   });
 
-  it("does not resurrect completed turns when the immediate status read is transiently unreadable", async () => {
-    const stateDir = await mkdtemp(nodePath.join(tmpdir(), "sidemesh-server-status-test-"));
-    const provider = new ImmediateCompletionProvider(1);
-    const runtime = makeCustomSingleProviderRuntime(provider);
-    await withServerRuntime(makeConfig(stateDir), runtime, async (server, config) => {
-      const createRes = await request({
-        hostname: "127.0.0.1",
-        port: server.port,
-        path: "/api/sessions/create",
-        method: "POST",
-        headers: {
-          Authorization: "Bearer " + config.token,
-          "content-type": "application/json",
-        },
-        body: JSON.stringify({
-          cwd: "/tmp/immediate-completion-transient-status-test",
-          input: [{ type: "text", text: "finish immediately while status read is unavailable", text_elements: [] }],
-        }),
-      });
-      assert.equal(createRes.statusCode, 201);
-      const sessionId = (createRes.body as any).session.id as string;
-      assert.equal((createRes.body as any).session.status, "idle");
-      assert.equal((createRes.body as any).activeTurnId, "fake-immediate-create-turn");
-
-      const statusRes = await request({
-        hostname: "127.0.0.1",
-        port: server.port,
-        path: `/api/sessions/${encodeURIComponent(sessionId)}/status`,
-        method: "GET",
-        headers: { Authorization: "Bearer " + config.token },
-      });
-      assert.equal(statusRes.statusCode, 200);
-      assert.equal((statusRes.body as any).status, "idle");
-      assert.equal((statusRes.body as any).isRunning, false);
-      assert.equal((statusRes.body as any).activeTurnId, null);
-    });
-  });
-
-  it("tracks returned turn ids when cached live status is terminal", async () => {
-    const stateDir = await mkdtemp(nodePath.join(tmpdir(), "sidemesh-server-status-test-"));
-    const provider = new StaleIdleSubmitProvider();
-    const runtime = makeCustomSingleProviderRuntime(provider);
-    await withServerRuntime(makeConfig(stateDir), runtime, async (server, config) => {
-      const createRes = await request({
-        hostname: "127.0.0.1",
-        port: server.port,
-        path: "/api/sessions/create",
-        method: "POST",
-        headers: {
-          Authorization: "Bearer " + config.token,
-          "content-type": "application/json",
-        },
-        body: JSON.stringify({
-          cwd: "/tmp/stale-idle-submit-test",
-        }),
-      });
-      assert.equal(createRes.statusCode, 201);
-      const sessionId = (createRes.body as any).session.id as string;
-      assert.equal((createRes.body as any).session.status, "idle");
-
-      provider.emit("liveEvent", {
-        type: "thread_status_changed",
-        sessionId,
-        status: "idle",
-      });
-
-      const inputRes = await request({
-        hostname: "127.0.0.1",
-        port: server.port,
-        path: `/api/sessions/${encodeURIComponent(sessionId)}/input`,
-        method: "POST",
-        headers: {
-          Authorization: "Bearer " + config.token,
-          "content-type": "application/json",
-        },
-        body: JSON.stringify({
-          input: [{ type: "text", text: "start after cached idle", text_elements: [] }],
-        }),
-      });
-      assert.equal(inputRes.statusCode, 200);
-      assert.equal((inputRes.body as any).turnId, "fake-stale-submit-turn-1");
-
-      const statusRes = await request({
-        hostname: "127.0.0.1",
-        port: server.port,
-        path: `/api/sessions/${encodeURIComponent(sessionId)}/status`,
-        method: "GET",
-        headers: { Authorization: "Bearer " + config.token },
-      });
-      assert.equal(statusRes.statusCode, 200);
-      assert.equal((statusRes.body as any).status, "running");
-      assert.equal((statusRes.body as any).isRunning, true);
-      assert.equal(
-        (statusRes.body as any).activeTurnId,
-        "fake-stale-submit-turn-1",
-      );
-    });
-  });
-
-  it("tracks returned turn ids while provider snapshots lag behind start", async () => {
-    const stateDir = await mkdtemp(nodePath.join(tmpdir(), "sidemesh-server-status-test-"));
-    const provider = new LaggingCreateTurnProvider();
-    const runtime = makeCustomSingleProviderRuntime(provider);
-    await withServerRuntime(makeConfig(stateDir), runtime, async (server, config) => {
-      const createRes = await request({
-        hostname: "127.0.0.1",
-        port: server.port,
-        path: "/api/sessions/create",
-        method: "POST",
-        headers: {
-          Authorization: "Bearer " + config.token,
-          "content-type": "application/json",
-        },
-        body: JSON.stringify({
-          cwd: "/tmp/lagging-create-turn-test",
-          input: [{ type: "text", text: "start while history lags", text_elements: [] }],
-        }),
-      });
-      assert.equal(createRes.statusCode, 201);
-      const sessionId = (createRes.body as any).session.id as string;
-      assert.equal(
-        (createRes.body as any).activeTurnId,
-        "fake-lagging-create-turn",
-      );
-      assert.equal((createRes.body as any).session.status, "running");
-
-      const statusRes = await request({
-        hostname: "127.0.0.1",
-        port: server.port,
-        path: `/api/sessions/${encodeURIComponent(sessionId)}/status`,
-        method: "GET",
-        headers: { Authorization: "Bearer " + config.token },
-      });
-      assert.equal(statusRes.statusCode, 200);
-      assert.equal((statusRes.body as any).status, "running");
-      assert.equal((statusRes.body as any).isRunning, true);
-      assert.equal(
-        (statusRes.body as any).activeTurnId,
-        "fake-lagging-create-turn",
-      );
-    });
-  });
-
-  it("tracks returned turn ids when turn snapshots are temporarily unreadable", async () => {
-    const stateDir = await mkdtemp(nodePath.join(tmpdir(), "sidemesh-server-status-test-"));
-    const provider = new TransientUnreadableCreateTurnProvider();
-    const runtime = makeCustomSingleProviderRuntime(provider);
-    await withServerRuntime(makeConfig(stateDir), runtime, async (server, config) => {
-      const createRes = await request({
-        hostname: "127.0.0.1",
-        port: server.port,
-        path: "/api/sessions/create",
-        method: "POST",
-        headers: {
-          Authorization: "Bearer " + config.token,
-          "content-type": "application/json",
-        },
-        body: JSON.stringify({
-          cwd: "/tmp/transient-unreadable-create-turn-test",
-          input: [{ type: "text", text: "start while rollout is still empty", text_elements: [] }],
-        }),
-      });
-      assert.equal(createRes.statusCode, 201);
-      const sessionId = (createRes.body as any).session.id as string;
-      assert.equal(
-        (createRes.body as any).activeTurnId,
-        "fake-transient-create-turn",
-      );
-      assert.equal((createRes.body as any).session.status, "running");
-
-      const statusRes = await request({
-        hostname: "127.0.0.1",
-        port: server.port,
-        path: `/api/sessions/${encodeURIComponent(sessionId)}/status`,
-        method: "GET",
-        headers: { Authorization: "Bearer " + config.token },
-      });
-      assert.equal(statusRes.statusCode, 200);
-      assert.equal((statusRes.body as any).status, "running");
-      assert.equal((statusRes.body as any).isRunning, true);
-      assert.equal(
-        (statusRes.body as any).activeTurnId,
-        "fake-transient-create-turn",
-      );
-    });
-  });
-
-  it("keeps unverified returned turns until a transient turn snapshot recovers", async () => {
-    const stateDir = await mkdtemp(nodePath.join(tmpdir(), "sidemesh-server-status-test-"));
-    const provider = new RecoveringCreateTurnProvider(
-      "fake-recovering-missing-session",
-      "fake-recovering-missing-turn",
-      2,
-      null,
-    );
-    const runtime = makeCustomSingleProviderRuntime(provider);
-    await withServerRuntime(makeConfig(stateDir), runtime, async (server, config) => {
-      const createRes = await request({
-        hostname: "127.0.0.1",
-        port: server.port,
-        path: "/api/sessions/create",
-        method: "POST",
-        headers: {
-          Authorization: "Bearer " + config.token,
-          "content-type": "application/json",
-        },
-        body: JSON.stringify({
-          cwd: "/tmp/recovering-missing-create-turn-test",
-          input: [{ type: "text", text: "start while turn snapshot is temporarily unavailable", text_elements: [] }],
-        }),
-      });
-      assert.equal(createRes.statusCode, 201);
-      const sessionId = (createRes.body as any).session.id as string;
-      assert.equal(sessionId, "fake-recovering-missing-session");
-      assert.equal((createRes.body as any).session.status, "running");
-
-      const statusRes = await request({
-        hostname: "127.0.0.1",
-        port: server.port,
-        path: `/api/sessions/${encodeURIComponent(sessionId)}/status`,
-        method: "GET",
-        headers: { Authorization: "Bearer " + config.token },
-      });
-      assert.equal(statusRes.statusCode, 200);
-      assert.equal((statusRes.body as any).status, "idle");
-      assert.equal((statusRes.body as any).isRunning, false);
-      assert.equal((statusRes.body as any).activeTurnId, null);
-    });
-  });
-
-  it("does not reconcile an old unverified turn after a newer turn starts", async () => {
-    const stateDir = await mkdtemp(nodePath.join(tmpdir(), "sidemesh-server-status-test-"));
-    const provider = new RecoveringCreateTurnProvider(
-      "fake-recovering-race-session",
-      "fake-recovering-race-turn",
-      2,
-      null,
-    );
-    const runtime = makeCustomSingleProviderRuntime(provider);
-    await withServerRuntime(makeConfig(stateDir), runtime, async (server, config) => {
-      const createRes = await request({
-        hostname: "127.0.0.1",
-        port: server.port,
-        path: "/api/sessions/create",
-        method: "POST",
-        headers: {
-          Authorization: "Bearer " + config.token,
-          "content-type": "application/json",
-        },
-        body: JSON.stringify({
-          cwd: "/tmp/recovering-race-create-turn-test",
-          input: [{ type: "text", text: "start while turn snapshot is temporarily unavailable", text_elements: [] }],
-        }),
-      });
-      assert.equal(createRes.statusCode, 201);
-      const sessionId = (createRes.body as any).session.id as string;
-      provider.onRecoveredIncludeTurnRead(() => {
-        provider.emit("liveEvent", {
-          type: "turn_started",
-          sessionId,
-          turnId: "fake-recovering-new-turn",
-        });
-      });
-
-      const statusRes = await request({
-        hostname: "127.0.0.1",
-        port: server.port,
-        path: `/api/sessions/${encodeURIComponent(sessionId)}/status`,
-        method: "GET",
-        headers: { Authorization: "Bearer " + config.token },
-      });
-      assert.equal(statusRes.statusCode, 200);
-      assert.equal((statusRes.body as any).status, "running");
-      assert.equal((statusRes.body as any).isRunning, true);
-      assert.equal((statusRes.body as any).activeTurnId, "fake-recovering-new-turn");
-    });
-  });
-
-  it("keeps live activities when recovery clears a transient active turn", async () => {
-    const stateDir = await mkdtemp(nodePath.join(tmpdir(), "sidemesh-server-status-test-"));
-    const provider = new RecoveringCreateTurnProvider(
-      "fake-recovering-live-activity-session",
-      "fake-recovering-live-activity-turn",
-      2,
-      null,
-    );
-    const runtime = makeCustomSingleProviderRuntime(provider);
-    await withServerRuntime(makeConfig(stateDir), runtime, async (server, config) => {
-      const createRes = await request({
-        hostname: "127.0.0.1",
-        port: server.port,
-        path: "/api/sessions/create",
-        method: "POST",
-        headers: {
-          Authorization: "Bearer " + config.token,
-          "content-type": "application/json",
-        },
-        body: JSON.stringify({
-          cwd: "/tmp/recovering-live-activity-create-turn-test",
-          input: [{ type: "text", text: "start while turn snapshot is temporarily unavailable", text_elements: [] }],
-        }),
-      });
-      assert.equal(createRes.statusCode, 201);
-      const sessionId = (createRes.body as any).session.id as string;
-      provider.emit("liveEvent", {
-        type: "activity_updated",
-        sessionId,
-        turnId: "fake-recovering-live-activity-turn",
-        activity: {
-          id: "cmd-live-tail",
-          type: "command",
-          turnId: "fake-recovering-live-activity-turn",
-          status: "in_progress",
-          command: "npm test",
-          cwd: "/tmp/recovering-live-activity-create-turn-test",
-          output: "streamed output not flushed yet",
-          exitCode: null,
-          durationMs: null,
-          source: "agent",
-          processId: "proc-live-tail",
-          commandActions: [],
-          terminalStatus: null,
-          terminalInput: null,
-        },
-      });
-
-      const statusRes = await request({
-        hostname: "127.0.0.1",
-        port: server.port,
-        path: `/api/sessions/${encodeURIComponent(sessionId)}/status`,
-        method: "GET",
-        headers: { Authorization: "Bearer " + config.token },
-      });
-      assert.equal(statusRes.statusCode, 200);
-      assert.equal((statusRes.body as any).status, "idle");
-
-      const logRes = await request({
-        hostname: "127.0.0.1",
-        port: server.port,
-        path: `/api/sessions/${encodeURIComponent(sessionId)}/log`,
-        method: "GET",
-        headers: { Authorization: "Bearer " + config.token },
-      });
-      assert.equal(logRes.statusCode, 200);
-      assert.equal((logRes.body as any).activities[0]?.id, "cmd-live-tail");
-    });
-  });
-
-  it("keeps recovered failed turn status after live terminal grace expires", async () => {
-    const stateDir = await mkdtemp(nodePath.join(tmpdir(), "sidemesh-server-status-test-"));
-    const provider = new RecoveringCreateTurnProvider(
-      "fake-recovering-failed-session",
-      "fake-recovering-failed-turn",
-      2,
-      "failed",
-    );
-    const runtime = makeCustomSingleProviderRuntime(provider);
-    await withServerRuntime(makeConfig(stateDir), runtime, async (server, config) => {
-      const createRes = await request({
-        hostname: "127.0.0.1",
-        port: server.port,
-        path: "/api/sessions/create",
-        method: "POST",
-        headers: {
-          Authorization: "Bearer " + config.token,
-          "content-type": "application/json",
-        },
-        body: JSON.stringify({
-          cwd: "/tmp/recovering-failed-create-turn-test",
-          input: [{ type: "text", text: "start while failed turn snapshot is temporarily unavailable", text_elements: [] }],
-        }),
-      });
-      assert.equal(createRes.statusCode, 201);
-      const sessionId = (createRes.body as any).session.id as string;
-      assert.equal(sessionId, "fake-recovering-failed-session");
-      assert.equal((createRes.body as any).session.status, "running");
-
-      const statusRes = await request({
-        hostname: "127.0.0.1",
-        port: server.port,
-        path: `/api/sessions/${encodeURIComponent(sessionId)}/status`,
-        method: "GET",
-        headers: { Authorization: "Bearer " + config.token },
-      });
-      assert.equal(statusRes.statusCode, 200);
-      assert.equal((statusRes.body as any).status, "errored");
-      assert.equal((statusRes.body as any).isRunning, false);
-      assert.equal((statusRes.body as any).activeTurnId, null);
-
-      await new Promise((resolve) => setTimeout(resolve, 1_100));
-
-      assert.equal(await readRecentStatus(server, config, sessionId), "errored");
-      const delayedStatus = await readStatus(server, config, sessionId);
-      assert.equal(delayedStatus.status, "errored");
-      assert.equal(delayedStatus.isRunning, false);
-    });
-  });
-
-  it("returns create success and clears unverified active turns from idle thread status", async () => {
-    const stateDir = await mkdtemp(nodePath.join(tmpdir(), "sidemesh-server-status-test-"));
-    const provider = new TransientUnreadableCreateStatusProvider();
-    const runtime = makeCustomSingleProviderRuntime(provider);
-    await withServerRuntime(makeConfig(stateDir), runtime, async (server, config) => {
-      const createBody = await createTransientStatusSession(server, config);
-      const sessionId = createBody.session.id as string;
-      assert.equal(sessionId, "fake-transient-create-status-session");
-      assert.equal(
-        createBody.activeTurnId,
-        "fake-transient-create-status-turn",
-      );
-      assert.equal(createBody.session.status, "running");
-
-      const sessionLive = await openSessionLiveSocket(
-        server.port,
-        config.token,
-        sessionId,
-      );
-      try {
-        await waitFor(
-          () => sessionLive.events.find((event) => event.type === "hello"),
-          "transient status hello",
-        );
-
-        const statusRes = await request({
-          hostname: "127.0.0.1",
-          port: server.port,
-          path: `/api/sessions/${encodeURIComponent(sessionId)}/status`,
-          method: "GET",
-          headers: { Authorization: "Bearer " + config.token },
-        });
-        assert.equal(statusRes.statusCode, 200);
-        assert.equal((statusRes.body as any).status, "idle");
-        assert.equal((statusRes.body as any).isRunning, false);
-        assert.equal((statusRes.body as any).activeTurnId, null);
-        await waitFor(
-          () =>
-            sessionLive.events.find(
-              (event) =>
-                event.type === "thread_status_changed" &&
-                event.status === "idle",
-            ),
-          "transient status idle live event",
-        );
-      } finally {
-        await closeSessionLiveSocket(sessionLive.socket);
-      }
-    });
-  });
-
-  it("clears unverified active turns from log snapshots", async () => {
-    const stateDir = await mkdtemp(nodePath.join(tmpdir(), "sidemesh-server-status-test-"));
-    const provider = new TransientUnreadableCreateStatusProvider();
-    const runtime = makeCustomSingleProviderRuntime(provider);
-    await withServerRuntime(makeConfig(stateDir), runtime, async (server, config) => {
-      const createBody = await createTransientStatusSession(server, config);
-      const sessionId = createBody.session.id as string;
-
-      const logRes = await request({
-        hostname: "127.0.0.1",
-        port: server.port,
-        path: `/api/sessions/${encodeURIComponent(sessionId)}/log`,
-        method: "GET",
-        headers: { Authorization: "Bearer " + config.token },
-      });
-      assert.equal(logRes.statusCode, 200);
-      assert.equal((logRes.body as any).session.status, "idle");
-    });
-  });
-
-  it("clears unverified active turns from repeated snapshots", async () => {
-    const stateDir = await mkdtemp(nodePath.join(tmpdir(), "sidemesh-server-status-test-"));
-    const provider = new TransientUnreadableCreateStatusProvider();
-    const runtime = makeCustomSingleProviderRuntime(provider);
-    await withServerRuntime(makeConfig(stateDir), runtime, async (server, config) => {
-      const createBody = await createTransientStatusSession(server, config);
-      const sessionId = createBody.session.id as string;
-
-      const eventsRes = await request({
-        hostname: "127.0.0.1",
-        port: server.port,
-        path: `/api/sessions/${encodeURIComponent(sessionId)}/log`,
-        method: "GET",
-        headers: { Authorization: "Bearer " + config.token },
-      });
-      assert.equal(eventsRes.statusCode, 200);
-      assert.equal((eventsRes.body as any).session.status, "idle");
-    });
-  });
-
-  it("clears unverified active turns from recent session snapshots", async () => {
-    const stateDir = await mkdtemp(nodePath.join(tmpdir(), "sidemesh-server-status-test-"));
-    const provider = new TransientUnreadableCreateStatusProvider();
-    const runtime = makeCustomSingleProviderRuntime(provider);
-    await withServerRuntime(makeConfig(stateDir), runtime, async (server, config) => {
-      const createBody = await createTransientStatusSession(server, config);
-      const sessionId = createBody.session.id as string;
-
-      assert.equal(await readRecentStatus(server, config, sessionId), "idle");
-    });
-  });
 
   it("clears synthetic waiting status after an action response resumes the turn", async () => {
     const stateDir = await mkdtemp(nodePath.join(tmpdir(), "sidemesh-server-status-test-"));
@@ -5306,7 +4249,7 @@ describe("GET /api/sessions/:sessionId/status", () => {
 
       provider.emit("liveEvent", {
         type: "thread_status_changed",
-        sessionId,
+        sessionId: nativeSessionId(sessionId),
         status: "waiting_for_approval",
         pendingActionKind: "user_input",
       });
@@ -5447,13 +4390,13 @@ describe("GET /api/sessions/:sessionId/status", () => {
           "recent session live snapshot",
         );
         const snapshotSession = (snapshot.sessions as Array<any>).find(
-          (session) => session.id === provider.sessionId,
+          (session) => session.id === wrapProviderScopedId("fake", provider.sessionId),
         );
         assert.equal(snapshotSession?.updatedAt, provider.freshUpdatedAt);
 
         provider.emit("liveEvent", {
           type: "thread_status_changed",
-          sessionId: provider.sessionId,
+          sessionId: nativeSessionId(provider.sessionId),
           status: "running",
         });
 
@@ -5462,7 +4405,7 @@ describe("GET /api/sessions/:sessionId/status", () => {
             recentLive.events.find(
               (event) =>
                 event.type === "upsert" &&
-                event.session?.id === provider.sessionId,
+                event.session?.id === wrapProviderScopedId("fake", provider.sessionId),
             ),
           "recent upsert after status change",
         );
@@ -5474,11 +4417,43 @@ describe("GET /api/sessions/:sessionId/status", () => {
     });
   });
 
+  it("discards a recent-session read invalidated while the native list was pending", async () => {
+    const stateDir = await mkdtemp(nodePath.join(tmpdir(), "sidemesh-recent-boundary-"));
+    const { runtime, provider } = makeSingleProviderRuntime({ latencyMs: 0, seedSessions: false, workspaceRoot: stateDir });
+    await withServerRuntime(makeConfig(stateDir), runtime, async (server, config) => {
+      const session = await provider.createSession({ cwd: stateDir, input: [], overrides: EMPTY_OVERRIDES });
+      const original = provider.listSessionThreads.bind(provider);
+      let started!: () => void;
+      let release!: () => void;
+      let reads = 0;
+      const reading = new Promise<void>((resolve) => { started = resolve; });
+      const blocked = new Promise<void>((resolve) => { release = resolve; });
+      provider.listSessionThreads = async (options) => {
+        const threads = await original(options);
+        if (options.limit === 10 && ++reads === 1) { started(); await blocked; }
+        return threads;
+      };
+      const result = request({ hostname: "127.0.0.1", port: server.port, path: "/api/sessions?limit=10",
+        headers: { Authorization: "Bearer " + config.token } });
+      try {
+        await reading;
+        await provider.setSessionName(session.thread.id, "Fresh title");
+        provider.emit("liveEvent", { type: "thread_status_changed", sessionId: nativeSessionId(session.thread.id), status: "idle" });
+        release();
+        const response = await result;
+        assert.equal(response.statusCode, 200);
+        assert.equal((response.body as Array<{ title: string }>)[0]?.title, "Fresh title");
+        assert.equal(reads, 2);
+      } finally { release(); await result; }
+    });
+  });
+
   it("keeps rename live upserts aligned with canonical recent session summaries", async () => {
     const stateDir = await mkdtemp(
       nodePath.join(tmpdir(), "sidemesh-server-recent-rename-test-"),
     );
-    await withServer(makeConfig(stateDir), async (server, config) => {
+    const { runtime, provider } = makeSingleProviderRuntime({ latencyMs: 0, seedSessions: false, workspaceRoot: stateDir });
+    await withServerRuntime(makeConfig(stateDir), runtime, async (server, config) => {
       const recentLive = await openRecentSessionsLiveSocket(
         server.port,
         config.token,
@@ -5489,6 +4464,12 @@ describe("GET /api/sessions/:sessionId/status", () => {
           "recent session live snapshot",
         );
 
+        const completed = new Promise<void>((resolve) => {
+          const onEvent = (event: import("./agent-provider.js").AgentProviderLiveEvent) => {
+            if (event.type === "turn_completed") { provider.off("liveEvent", onEvent); resolve(); }
+          };
+          provider.on("liveEvent", onEvent);
+        });
         const createRes = await request({
           hostname: "127.0.0.1",
           port: server.port,
@@ -5516,6 +4497,8 @@ describe("GET /api/sessions/:sessionId/status", () => {
           "recent create upsert",
         );
         assert.ok(createdUpsert.session?.runtime);
+
+        await completed;
 
         const renameRes = await request({
           hostname: "127.0.0.1",
@@ -5611,7 +4594,7 @@ describe("session-scoped filesystem routes", () => {
         assert.equal(listingResponse.statusCode, 200);
         assert.equal(
           (listingResponse.body as { path: string }).path,
-          secondarySession.cwd,
+          await realpath(secondarySession.cwd),
         );
       },
     );
@@ -5752,7 +4735,7 @@ describe("GET /api/sessions/search", () => {
     });
   });
 
-  it("returns archived provider sessions from startup backfill when requested", async () => {
+  it("returns archived provider sessions from search backfill when requested", async () => {
     const stateDir = await mkdtemp(nodePath.join(tmpdir(), "sidemesh-server-search-startup-archive-test-"));
     const provider = new SearchFixtureProvider([
       {
@@ -5792,11 +4775,11 @@ describe("GET /api/sessions/search", () => {
         assert.equal(searchRes.statusCode, 200);
         const results = searchRes.body as any[];
         assert.ok(
-          results.some((session) => session.id === "fixture-archived"),
-          "expected archived startup-backfilled session in archived search",
+          results.some((session) => session.id === wrapProviderScopedId("fake", "fixture-archived")),
+          "expected archived session from search backfill in archived search",
         );
         assert.ok(
-          !results.some((session) => session.id === "fixture-active"),
+          !results.some((session) => session.id === wrapProviderScopedId("fake", "fixture-active")),
           "expected active session excluded from archived-only search",
         );
       },
@@ -5835,9 +4818,19 @@ describe("GET /api/sessions/search", () => {
         assert.equal(includeRes.statusCode, 200);
         const included = includeRes.body as any[];
         assert.ok(
-          included.some((session) => session.id === "fixture-filter"),
+          included.some((session) => session.id === wrapProviderScopedId("fake", "fixture-filter")),
           "expected session newer than updatedAfter filter",
         );
+
+        let nativeReads = 0;
+        provider.readSessionThread = async () => { nativeReads += 1; throw new Error("Native reads unavailable"); };
+        provider.readSessionSnapshot = async () => { nativeReads += 1; throw new Error("Native snapshots unavailable"); };
+        const cached = await request({ hostname: "127.0.0.1", port: server.port,
+          headers: { Authorization: "Bearer " + config.token },
+          path: `/api/sessions/search?q=${encodeURIComponent("date filter fixture")}&providerId=fake`, method: "GET" });
+        assert.equal(cached.statusCode, 200);
+        assert.equal((cached.body as SessionSummary[])[0]?.id, wrapProviderScopedId("fake", "fixture-filter"));
+        assert.equal(nativeReads, 0, "search results must use the indexed summary");
 
         const excludeRes = await request({
           hostname: "127.0.0.1",
@@ -5849,12 +4842,85 @@ describe("GET /api/sessions/search", () => {
           method: "GET",
         });
         assert.equal(excludeRes.statusCode, 200);
+        assert.equal(nativeReads, 0);
         const excluded = excludeRes.body as any[];
         assert.ok(
-          !excluded.some((session) => session.id === "fixture-filter"),
+          !excluded.some((session) => session.id === wrapProviderScopedId("fake", "fixture-filter")),
           "expected session older than updatedAfter filter to be excluded",
         );
       },
     );
+  });
+});
+
+function nativeSessionId(id: string): string { return unwrapProviderScopedId(id)?.rawId ?? id; }
+
+describe("provider session identity", () => {
+  it("shares raw aliases with canonical input delivery and keeps owners after default changes", async () => {
+    const stateDir = await mkdtemp(nodePath.join(tmpdir(), "sidemesh-session-aliases-"));
+    const config = makeConfig(stateDir);
+    const writer = new RestartableFakeProvider();
+    const reviewer = new RestartableFakeProvider();
+    const definition = makeCustomSingleProviderRuntime(writer).defaultProvider;
+    const runtimeForDefault = (defaultId: string, includeWriter = true) => new AgentProviderRuntime([
+      ...(includeWriter ? [{ ...definition, id: "writer", create: () => writer }] : []),
+      { ...definition, id: "reviewer", create: () => reviewer },
+    ], defaultId);
+    let server = await startServer(config, runtimeForDefault("writer"));
+    const headers = { Authorization: `Bearer ${config.token}`, "content-type": "application/json" };
+    const call = (path: string, body?: unknown) => request({ hostname: "127.0.0.1", port: server.port, path,
+      method: body === undefined ? "GET" : "POST", headers, body: body === undefined ? undefined : JSON.stringify(body) });
+    const native = "fake-restart-session";
+    const writerId = wrapProviderScopedId("writer", native);
+    const reviewerId = wrapProviderScopedId("reviewer", native);
+    const input = { clientMessageId: "shared:input", input: [{ type: "text", text: "Keep each input once", text_elements: [] }] };
+    try {
+      for (const provider of ["writer", "reviewer"]) {
+        const created = await call("/api/sessions/create", { provider, cwd: `${stateDir}/${provider}`, input: [] });
+        assert.equal(created.statusCode, 201);
+        assert.equal((created.body as any).session.id, wrapProviderScopedId(provider, native));
+      }
+      const first = await call(`/api/sessions/${native}/input`, input);
+      const duplicate = await call(`/api/sessions/${encodeURIComponent(writerId)}/input`, input);
+      assert.equal(first.statusCode, 200);
+      assert.equal(duplicate.statusCode, 200);
+      assert.equal((first.body as any).messageId, (duplicate.body as any).messageId);
+      assert.equal(writer.submittedInputs, 1);
+      assert.equal(reviewer.submittedInputs, 0);
+      assert.equal((await call(`/api/sessions/${encodeURIComponent(reviewerId)}/input`, input)).statusCode, 200);
+      assert.equal(reviewer.submittedInputs, 1);
+      const rawLog = await call(`/api/sessions/${native}/log`);
+      assert.equal(rawLog.statusCode, 200);
+      assert.equal((rawLog.body as any).session.id, native);
+      assert.equal((rawLog.body as any).canonicalSessionId, writerId);
+      assert.equal((rawLog.body as any).session.cwd, `${stateDir}/writer`);
+      const otherLog = await call(`/api/sessions/${encodeURIComponent(reviewerId)}/log`);
+      assert.equal((otherLog.body as any).session.cwd, `${stateDir}/reviewer`);
+      const rawSocket = await openSessionLiveSocket(server.port, config.token, native);
+      const canonicalSocket = await openSessionLiveSocket(server.port, config.token, writerId);
+      try {
+        writer.emit("liveEvent", { type: "provider_warning", sessionId: native, level: "warning", code: "alias-check", message: "Same published event" });
+        const rawEvent = await waitFor(() => rawSocket.events.find((event) => event.code === "alias-check"), "raw alias event");
+        const canonicalEvent = await waitFor(() => canonicalSocket.events.find((event) => event.code === "alias-check"), "canonical event");
+        assert.equal(rawEvent.sessionId, native);
+        assert.equal(canonicalEvent.sessionId, writerId);
+        assert.equal(rawEvent.revision, canonicalEvent.revision);
+        assert.equal(rawEvent.seq, canonicalEvent.seq);
+      } finally { await closeSessionLiveSocket(rawSocket.socket); await closeSessionLiveSocket(canonicalSocket.socket); }
+      await server.close();
+      server = await startServer(config, runtimeForDefault("reviewer"));
+      const uncertain = await call(`/api/sessions/${native}/input`, input);
+      assert.equal(uncertain.statusCode, 409);
+      assert.equal(writer.submittedInputs, 1);
+      assert.equal(reviewer.submittedInputs, 1);
+      const next = await call(`/api/sessions/${native}/input`, { ...input, clientMessageId: "next:input" });
+      assert.equal(next.statusCode, 200);
+      assert.equal(writer.submittedInputs, 2);
+      assert.equal(reviewer.submittedInputs, 1);
+      await server.close();
+      server = await startServer(config, runtimeForDefault("reviewer", false));
+      assert.equal((await call(`/api/sessions/${native}/input`, { ...input, clientMessageId: "removed:owner" })).statusCode, 404);
+      assert.equal(reviewer.submittedInputs, 1);
+    } finally { await server.close(); await rm(stateDir, { recursive: true, force: true }); }
   });
 });

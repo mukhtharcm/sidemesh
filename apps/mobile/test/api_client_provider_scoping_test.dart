@@ -15,6 +15,19 @@ void main() {
     token: 'secret',
   );
 
+  test('session deletion keeps provider identity and reports HTTP errors', () async {
+    var status = 409;
+    final api = ApiClient(client: MockClient((request) async {
+      expect(request.method, 'DELETE');
+      expect(request.url.path, '/api/sessions/work:c2Vzc2lvbg');
+      expect(request.headers['Authorization'], 'Bearer secret');
+      return http.Response('{}', status);
+    }));
+    await expectLater(api.deleteSession(host, 'work:c2Vzc2lvbg'), throwsA(isA<ApiException>()));
+    status = 200;
+    await api.deleteSession(host, 'work:c2Vzc2lvbg');
+  });
+
   test(
     'ApiClient scopes skills, profiles, and modes requests by agent provider',
     () async {

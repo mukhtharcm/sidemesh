@@ -14,7 +14,6 @@ import type {
 import {
   MOBILE_CLIENT_VERSION_PATTERN,
   persistedConfigFromNodeConfig,
-  providerConfigByKind,
   readPersistedConfig,
   resolveConfigPath,
   type PersistedNodeConfig,
@@ -72,7 +71,7 @@ export async function loadConfig(
     env.SIDEMESH_PORT,
     persisted.value?.port ?? 8787,
   );
-  const { defaultProviderKind, providers } = await resolveProviderConfigs(
+  const { defaultProviderKind, defaultProviderId, providers } = await resolveProviderConfigs(
     persisted.value,
     env,
     stateDir,
@@ -94,7 +93,7 @@ export async function loadConfig(
     persisted.value?.minimumMobileClientVersion ?? null,
   );
   const provider =
-    providers.find((candidate) => candidate.kind === defaultProviderKind) ??
+    providers.find((candidate) => (candidate.id ?? candidate.kind) === defaultProviderId) ??
     providers[0];
   if (!provider) {
     throw new Error("No Sidemesh providers were configured.");
@@ -120,6 +119,7 @@ export async function loadConfig(
     provider,
     providers,
     defaultProviderKind,
+    defaultProviderId,
     updateChannel,
     recommendedMobileClientVersion,
     minimumMobileClientVersion,
@@ -239,6 +239,7 @@ async function resolveProviderConfigs(
   stateDir: string,
 ): Promise<{
   defaultProviderKind: AgentProviderKind;
+  defaultProviderId: string;
   providers: AgentProviderConfig[];
 }> {
   const explicitProviderKinds = parseProviderKinds(
@@ -258,11 +259,15 @@ async function resolveProviderConfigs(
     if (inferred.providers.length > 0 && inferred.defaultProviderKind) {
       return {
         defaultProviderKind: inferred.defaultProviderKind,
-        providers: inferred.providers,
+        defaultProviderId: inferred.defaultProviderKind,
+        providers: inferred.providers.map((provider) => resolveProviderStatePath(provider, stateDir)),
       };
     }
   }
   const persistedDefaultProviderKind =
+    (persisted?.defaultProviderId
+      ? persisted.providers.find((provider) => (provider.id ?? provider.kind) === persisted.defaultProviderId)?.kind
+      : null) ??
     persisted?.defaultProviderKind ?? null;
   const defaultProviderKind = env.SIDEMESH_PROVIDER?.trim()
     ? parseProviderKind(env.SIDEMESH_PROVIDER, env)
@@ -273,12 +278,19 @@ async function resolveProviderConfigs(
     defaultProviderKind,
     ...(configuredKinds.length > 0 ? configuredKinds : [defaultProviderKind]),
   ]);
-  return {
-    defaultProviderKind,
-    providers: kinds.map((kind) =>
-      resolveAgentProviderConfig(kind, env, providerConfigByKind(persisted, kind)),
-    ),
-  };
+  const providers = kinds.flatMap((kind) => {
+    const bases = persisted?.providers.filter((provider) => provider.kind === kind) ?? [];
+    return (bases.length > 0 ? bases : [null]).map((base) => resolveProviderStatePath({
+      ...resolveAgentProviderConfig(kind, env, base),
+      id: base?.id ?? kind,
+    }, stateDir));
+  });
+  const defaultProviderId = (!env.SIDEMESH_PROVIDER?.trim() && persisted?.defaultProviderId)
+    || providers.find((provider) => provider.kind === defaultProviderKind)?.id
+    || defaultProviderKind;
+  const selected = providers.find((provider) => provider.id === defaultProviderId);
+  if (!selected) throw new Error(`Default provider instance "${defaultProviderId}" was not configured.`);
+  return { defaultProviderKind: selected.kind, defaultProviderId, providers };
 }
 
 function parseProviderKind(
@@ -455,4 +467,18 @@ function parseBoundedInteger(
 ): number {
   const parsed = parseInteger(value, fallback);
   return Math.max(min, Math.min(max, parsed));
+}
+
+function resolveProviderStatePath(provider: AgentProviderConfig, stateDir: string): AgentProviderConfig {
+  const id = provider.id ?? provider.kind;
+  // OpenCode stateDir redirects native XDG data. It is not a Sidemesh recovery path.
+  if ((provider.kind === "pi" || provider.kind === "copilot" || provider.kind === "acpx") && !provider.stateDir) {
+    let directory = id === provider.kind ? `${provider.kind}-provider` : join("providers", id);
+    if (id === "acpx" && provider.kind === "acpx") {
+      const agent = provider.agent.trim().toLowerCase().replace(/[^a-z0-9._-]+/g, "-") || "agent";
+      directory = join(directory, agent === "." || agent === ".." ? "agent" : agent);
+    }
+    return { ...provider, id, stateDir: join(stateDir, directory) };
+  }
+  return { ...provider, id };
 }

@@ -1,6 +1,8 @@
 import 'dart:io';
 import 'dart:isolate';
 
+import 'package:flutter/foundation.dart';
+import 'package:sqflite_common_ffi_web/sqflite_ffi_web.dart';
 import 'package:path_provider_platform_interface/path_provider_platform_interface.dart';
 import 'package:plugin_platform_interface/plugin_platform_interface.dart';
 import 'package:sidemesh_mobile/src/db.dart';
@@ -28,6 +30,11 @@ class TestPathProvider extends PathProviderPlatform
 }
 
 Future<void> configureTestDatabaseFactory() async {
+  if (kIsWeb) {
+    databaseFactory = databaseFactoryFfiWeb;
+    SidemeshDb.useConfiguredFfiFactoryForTest(databaseDirectory: 'storage-test');
+    return;
+  }
   sqfliteFfiInit();
   databaseFactory = databaseFactoryFfiNoIsolate;
   await _testSupportDirectory.create(recursive: true);

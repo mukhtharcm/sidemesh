@@ -1,6 +1,6 @@
 # Dependency and runtime compatibility
 
-Last audited: 2026-07-21.
+Last architecture compatibility check: 2026-09-11.
 
 Sidemesh combines ordinary library dependencies with external agent runtimes.
 An `outdated` result is therefore an audit queue, not an instruction to update
@@ -12,10 +12,10 @@ daemon processes all need separate compatibility checks.
 | Surface | Audited version or policy | Status |
 |---|---|---|
 | Node.js | `>=22.19.0`; CI uses Node 24 | Current |
-| Codex CLI/app-server | `0.144.6` | Compatible; see `docs/codex-app-server-compatibility.md` |
-| OpenCode | `1.18.4` | Compatible; the real adapter passed health, session, model, mode, and skill smoke checks |
+| Codex CLI/app-server | `0.144.6` schema; native history also checked on `0.154.0` | Compatible; see `docs/codex-app-server-compatibility.md` |
+| OpenCode SDK/server | `1.18.4` / `1.18.4` | Official SDK requests and SSE; isolated native checks cover health, session history, model/mode/skill catalogs, archive, and shutdown |
 | GitHub Copilot CLI | `1.0.73` | Current; also enforced through the root npm override |
-| ACPx | `0.12.0` | Current |
+| ACP SDK | `1.4.0`, protocol 1 | Direct optional ACP adapter; see [support matrix](acp-support-matrix.md) |
 | Flutter | CI and release workflows use `3.44.7`; the app requires Flutter `>=3.44.0` and Dart `^3.12.0` | Current |
 
 Codex and OpenCode are host-installed executables rather than npm dependencies
@@ -26,28 +26,16 @@ Never restart the Sidemesh service from a session running inside that service.
 
 ## Intentional pins
 
-### Pi coding agent `0.80.3`
+### Pi coding agent `0.85.1`
 
-The current adapter depends on the Pi service surface exported by `0.80.3`.
-Pi `0.80.10` no longer exposes the `modelRegistry` shape used by Sidemesh, so a
-version-only bump does not compile. Upgrade Pi only together with an adapter
-migration and focused provider tests.
+Pi runs in its official RPC process. Sidemesh uses the exported RPC wire types
+and the documented JSONL protocol, including `agent_settled` and extension UI
+requests. The public SDK is loaded only for native history and catalog reads.
+Do not use private session queues or SDK execution internals.
 
-Pi also ships an npm shrinkwrap that pins vulnerable transitive versions.
-`scripts/patch-pi-transitives.mjs` replaces only the audited packages after
-install:
-
-- `brace-expansion` `5.0.9`
-- `protobufjs` `7.6.5`
-- `undici` `8.9.0`
-
-Keep those root dependencies exact, and keep their nested Pi lockfile entries in
-sync. Npm dependency updates may restore vulnerable entries from the upstream
-shrinkwrap. Verify a clean `npm ci`, the installed nested versions, and a separate
-`npm audit` after the postinstall remediation.
-
-`protobufjs` 8 is not a drop-in replacement
-for Pi's `^7.5.4` consumer constraint.
+The version is exact so protocol changes must pass the RPC boundary tests.
+This version contains the transitive dependency fixes that previously needed
+a Sidemesh install script. A clean install no longer copies packages into Pi.
 
 ### GitHub Copilot SDK `1.0.4`
 
@@ -59,6 +47,26 @@ or the adapter isolates the native feature.
 
 The Copilot CLI itself is independently held at the compatible `1.0.73` line by
 the root npm override.
+
+Copilot history reads use `getEvents()` on every full refresh. SQLite retains
+recovery items until native replay confirms them, including the native ID from
+`send()`. The old `sessions.json` is an import source only. The adapter uses
+`metadata.activity()` for native execution status and waits for `session.idle`,
+because `assistant.turn_end` can precede another tool cycle. Run
+`SIDEMESH_TEST_COPILOT=1 node --import tsx --test src/copilot-provider.test.ts`
+for the isolated SDK/CLI check. It creates an empty session with a temporary
+`COPILOT_HOME` and sends no model prompt.
+
+### OpenCode SDK `1.18.4`
+
+Use the official SDK and global event stream. OpenCode owns its native history;
+Sidemesh keeps recovery records in the host session database. `stateDir` still
+sets the native XDG roots. The owned server uses a temporary local password.
+Assistant completion does not end a tool cycle; wait for native idle status.
+On reconnect, refresh loaded sessions and pending requests. There is no idle
+history poller. Run the optional isolated native check with
+`SIDEMESH_TEST_OPENCODE_BIN=/path/to/opencode node --import tsx --test src/opencode-provider.test.ts`.
+It creates empty sessions and sends no model prompt.
 
 ### TypeScript 6
 

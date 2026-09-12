@@ -573,8 +573,8 @@ async function promptAcpxProvider(
   const current =
     existing?.providers.find((provider) => provider.kind === "acpx") ?? null;
   note(
-    "acpx bridges Sidemesh to ACP-compatible agents. Reads/searches may be auto-approved; writes and commands still go through Sidemesh approvals.",
-    "ACP via acpx",
+    "ACP connects agents that need this protocol. Use a native provider when one is available. File writes and commands require app approval.",
+    "ACP",
   );
   const agentOptions = [
     { value: "gemini", label: "Gemini CLI", hint: "gemini --acp" },
@@ -606,22 +606,47 @@ async function promptAcpxProvider(
         value.trim() ? undefined : "ACP agent id cannot be empty.",
     });
   }
-  const command = await promptText({
-    message: "ACP command override (leave blank for acpx built-in registry)",
+  const launchMode = await select<"executable" | "command">({
+    message: "ACP launch settings",
+    initialValue: current?.kind === "acpx" && current.executable ? "executable" : "command",
+    options: [
+      { value: "executable", label: "Executable and arguments" },
+      { value: "command", label: "Legacy shell command or agent default" },
+    ],
+  });
+  if (isCancel(launchMode)) throw new Error("Setup cancelled.");
+  const executable = launchMode === "executable" ? await promptText({
+    message: "ACP executable path or installed program name",
+    defaultValue: current?.kind === "acpx" ? current.executable ?? resolvedAgent : resolvedAgent,
+    validate: (value) => value.trim() && !value.includes("\0") ? undefined : "Enter an executable name without NUL.",
+  }) : undefined;
+  const args = executable ? JSON.parse(await promptText({
+    message: 'ACP arguments (JSON array, for example ["--acp"])',
+    defaultValue: JSON.stringify(current?.kind === "acpx" ? current.args ?? [] : []),
+    validate: (value) => {
+      try {
+        const parsed: unknown = JSON.parse(value);
+        if (Array.isArray(parsed) && parsed.every((arg) => typeof arg === "string" && !arg.includes("\0"))) return undefined;
+      } catch { /* Show the same input error for malformed JSON. */ }
+      return "Enter a JSON array of strings without NUL.";
+    },
+  })) as string[] : undefined;
+  const command = launchMode === "command" ? await promptText({
+    message: "ACP command override (leave blank for the default agent command)",
     defaultValue: current?.kind === "acpx" ? (current.command ?? "") : "",
     fallbackToDefaultOnEmpty: false,
-  });
+  }) : "";
   const acpxStateDir = await promptText({
-    message: "acpx state directory",
+    message: "Legacy ACP history directory",
     defaultValue:
       current?.kind === "acpx"
         ? (current.stateDir ?? nodePath.join(stateDir, "acpx-provider", resolvedAgent))
         : nodePath.join(stateDir, "acpx-provider", resolvedAgent),
     validate: (value) =>
-      value.trim() ? undefined : "acpx state directory cannot be empty.",
+      value.trim() ? undefined : "Legacy ACP history directory cannot be empty.",
   });
   const permissionMode = await select<"approve-reads" | "deny-all">({
-    message: "acpx permission mode",
+    message: "ACP permission mode",
     initialValue:
       current?.kind === "acpx" ? current.permissionMode : "approve-reads",
     options: [
@@ -644,6 +669,7 @@ async function promptAcpxProvider(
     kind: "acpx",
     agent: resolvedAgent.trim(),
     command: command.trim() || null,
+    ...(executable ? { executable: executable.trim(), args } : {}),
     stateDir: acpxStateDir.trim() || null,
     permissionMode,
   };

@@ -1,18 +1,21 @@
+import { createHash } from "node:crypto";
 import { access, chmod } from "node:fs/promises";
 import nodePath from "node:path";
-import { DatabaseSync } from "node:sqlite";
+import { DatabaseSync, type SQLInputValue } from "node:sqlite";
 
-import type { SessionActivity, SessionMessage } from "./types.js";
+import type { SessionActivity, SessionMessage, SessionSummary } from "./types.js";
 
-const SCHEMA_VERSION = 5;
+const SCHEMA_VERSION = 6;
 
 export interface SessionSearchResult {
   sessionId: string;
+  session: SessionSummary;
   rank: number;
   snippet: string | null;
 }
 
 export interface ProviderSearchIndexStats {
+  providerId: string;
   providerKind: string;
   indexedSessions: number;
   lastIndexedAt: number | null;
@@ -27,38 +30,29 @@ export interface SessionSearchIndexStats {
 }
 
 export interface SearchFilter {
-  /** Exact provider kind match */
   providerKind?: string;
-  /** Workspace directory prefix match */
+  providerId?: string;
+  /** Apply configured ownership before the result limit. */
+  providerIds?: string[];
   cwd?: string;
-  /** true = archived only, false = active only, undefined = all */
   archived?: boolean;
-  /** Epoch milliseconds */
   updatedAfter?: number;
-  /** Epoch milliseconds */
   updatedBefore?: number;
 }
 
 export interface SessionSearchDocument {
-  sessionKey: string;
-  providerKind: string;
-  title: string;
-  preview: string;
-  cwd: string;
-  createdAt: number;
-  updatedAt: number;
+  session: SessionSummary;
   archived?: boolean;
-  fingerprint: string;
   messages: SessionMessage[];
   activities: SessionActivity[];
 }
 
 function buildSearchableContent(doc: SessionSearchDocument): string {
   const parts: string[] = [];
-  parts.push(doc.title);
-  parts.push(doc.title);
-  parts.push(doc.preview);
-  parts.push(doc.cwd);
+  parts.push(doc.session.title);
+  parts.push(doc.session.title);
+  parts.push(doc.session.preview);
+  parts.push(doc.session.cwd);
 
   for (const message of doc.messages) {
     parts.push(message.text);
@@ -121,354 +115,134 @@ function buildFts5MatchQuery(query: string): string {
 
 export class SessionSearchIndex {
   private db: DatabaseSync | null = null;
-  private readonly dbPath: string;
   private backfillRunning = false;
 
-  constructor(dbPath: string) {
-    this.dbPath = dbPath;
-  }
+  constructor(private readonly dbPath: string) {}
 
   async open(): Promise<void> {
-    const parent = nodePath.dirname(this.dbPath);
-    await access(parent).catch(() => {
-      throw new Error(`State directory does not exist: ${parent}`);
-    });
-
+    await access(nodePath.dirname(this.dbPath));
     const db = new DatabaseSync(this.dbPath);
-    await chmod(this.dbPath, 0o600);
-
     try {
+      await chmod(this.dbPath, 0o600);
       db.exec("CREATE TABLE IF NOT EXISTS session_search_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)");
       const version = db.prepare("SELECT value FROM session_search_meta WHERE key = 'schema_version'").get() as { value: string } | undefined;
       if (version?.value !== String(SCHEMA_VERSION)) {
-        // Search is derived data. Rebuild instead of migrating historical layouts.
-        db.exec(`
-          DROP TABLE IF EXISTS session_fts;
+        // Search is derived data. Never put input receipts or recovery records here.
+        db.exec(`DROP TABLE IF EXISTS session_fts;
           DROP TABLE IF EXISTS session_search_documents;
           DROP TABLE IF EXISTS session_manifest;
           DROP TABLE IF EXISTS manifest;
-        `);
+          DELETE FROM session_search_meta;`);
       }
-      // Do not expose the database to request handlers until the complete
-      // schema exists. Startup intentionally opens the index in the
-      // background, so assigning this.db earlier creates a narrow race where
-      // getStats() can query tables that have not been created yet.
-      db.exec(`
-        CREATE TABLE IF NOT EXISTS session_search_meta (
-          key TEXT PRIMARY KEY,
-          value TEXT NOT NULL
+      db.exec(`CREATE TABLE IF NOT EXISTS session_search_documents (
+          session_id TEXT PRIMARY KEY, provider_id TEXT NOT NULL, provider_kind TEXT NOT NULL,
+          cwd TEXT NOT NULL, updated_at INTEGER NOT NULL, archived INTEGER NOT NULL,
+          summary TEXT NOT NULL, fingerprint TEXT NOT NULL, indexed_at INTEGER NOT NULL
         );
-        CREATE TABLE IF NOT EXISTS session_search_documents (
-          session_id TEXT PRIMARY KEY,
-          provider_kind TEXT,
-          title TEXT,
-          preview TEXT,
-          cwd TEXT,
-          created_at INTEGER,
-          updated_at INTEGER,
-          archived INTEGER NOT NULL DEFAULT 0,
-          fingerprint TEXT NOT NULL,
-          indexed_at INTEGER NOT NULL
-        );
-        CREATE INDEX IF NOT EXISTS idx_search_documents_provider ON session_search_documents(provider_kind);
-        CREATE INDEX IF NOT EXISTS idx_search_documents_archived ON session_search_documents(archived);
-        CREATE INDEX IF NOT EXISTS idx_search_documents_updated_at ON session_search_documents(updated_at);
-        CREATE VIRTUAL TABLE IF NOT EXISTS session_fts USING fts5(
-          session_id UNINDEXED,
-          content,
-          tokenize = 'unicode61'
-        );
-      `);
-
+        CREATE INDEX IF NOT EXISTS search_provider ON session_search_documents(provider_id);
+        CREATE INDEX IF NOT EXISTS search_updated ON session_search_documents(updated_at);
+        CREATE VIRTUAL TABLE IF NOT EXISTS session_fts USING fts5(session_id UNINDEXED, content, tokenize = 'unicode61');`);
       db.prepare("INSERT OR REPLACE INTO session_search_meta (key, value) VALUES ('schema_version', ?)").run(String(SCHEMA_VERSION));
       this.db = db;
-
-    } catch (error) {
-      this.db = null;
-      db.close();
-      throw error;
-    }
+    } catch (error) { db.close(); throw error; }
   }
 
-  async close(): Promise<void> {
-    if (this.db) {
-      this.db.close();
-      this.db = null;
-    }
-  }
+  async close(): Promise<void> { this.db?.close(); this.db = null; }
 
   async indexDocument(doc: SessionSearchDocument): Promise<void> {
-    if (!this.db) {
-      throw new Error("Index not opened");
-    }
-
-    const indexed = this.db.prepare(
-      "SELECT fingerprint FROM session_search_documents WHERE session_id = ?",
-    ).get(doc.sessionKey) as { fingerprint: string } | undefined;
-    if (indexed?.fingerprint === doc.fingerprint) {
-      return;
-    }
-
+    const db = this.database();
+    const session = doc.session;
+    if (!session.providerId) throw new Error("Search sessions need a provider instance ID");
     const content = buildSearchableContent(doc);
-
-    this.db.exec("BEGIN");
+    const summary = JSON.stringify(session);
+    const fingerprint = createHash("sha256").update(JSON.stringify([summary, doc.archived ?? false, content])).digest("hex");
+    const existing = db.prepare("SELECT fingerprint FROM session_search_documents WHERE session_id = ?").get(session.id) as { fingerprint: string } | undefined;
+    if (existing?.fingerprint === fingerprint) return;
+    db.exec("BEGIN");
     try {
-      const deleteFts = this.db.prepare(
-        `DELETE FROM session_fts WHERE session_id = ?`,
-      );
-      deleteFts.run(doc.sessionKey);
-
-      const insertFts = this.db.prepare(
-        `INSERT INTO session_fts (session_id, content) VALUES (?, ?)`,
-      );
-      insertFts.run(doc.sessionKey, content);
-
-      const deleteDoc = this.db.prepare(
-        `DELETE FROM session_search_documents WHERE session_id = ?`,
-      );
-      deleteDoc.run(doc.sessionKey);
-
-      const insertDoc = this.db.prepare(
-        `INSERT INTO session_search_documents (
-          session_id, provider_kind, title, preview, cwd,
-          created_at, updated_at, archived, fingerprint, indexed_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      );
-      insertDoc.run(
-        doc.sessionKey,
-        doc.providerKind,
-        doc.title,
-        doc.preview,
-        doc.cwd,
-        doc.createdAt,
-        doc.updatedAt,
-        doc.archived ? 1 : 0,
-        doc.fingerprint,
-        Date.now(),
-      );
-
-
-      this.db.exec("COMMIT");
-    } catch {
-      this.db.exec("ROLLBACK");
-      throw new Error("Failed to index document");
-    }
+      db.prepare("DELETE FROM session_fts WHERE session_id = ?").run(session.id);
+      db.prepare("INSERT INTO session_fts (session_id, content) VALUES (?, ?)").run(session.id, content);
+      db.prepare(`INSERT OR REPLACE INTO session_search_documents
+        (session_id, provider_id, provider_kind, cwd, updated_at, archived, summary, fingerprint, indexed_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(session.id, session.providerId, session.provider ?? "unknown",
+          session.cwd, session.updatedAt, doc.archived ? 1 : 0, summary, fingerprint, Date.now());
+      db.exec("COMMIT");
+    } catch (error) { db.exec("ROLLBACK"); throw error; }
   }
 
-  async search(
-    query: string,
-    limit: number,
-    filter?: SearchFilter,
-  ): Promise<SessionSearchResult[]> {
-    if (!this.db) {
-      throw new Error("Index not opened");
+  async search(query: string, limit: number, filter?: SearchFilter): Promise<SessionSearchResult[]> {
+    const db = this.database();
+    const match = buildFts5MatchQuery(query);
+    if (!match && !filter) return [];
+    const conditions: string[] = [];
+    const params: SQLInputValue[] = [];
+    if (match) { conditions.push("fts.session_fts MATCH ?"); params.push(match); }
+    if (filter?.providerKind) { conditions.push("d.provider_kind = ?"); params.push(filter.providerKind); }
+    if (filter?.providerId) { conditions.push("d.provider_id = ?"); params.push(filter.providerId); }
+    if (filter?.providerIds) {
+      if (!filter.providerIds.length) return [];
+      conditions.push(`d.provider_id IN (${filter.providerIds.map(() => "?").join(",")})`);
+      params.push(...filter.providerIds);
     }
-
-    const matchExpr = buildFts5MatchQuery(query);
-
-    // Empty query with no filters → legacy no-op
-    if (!matchExpr && !filter) {
-      return [];
-    }
-
-    // Filtered browse without text query
-    if (!matchExpr && filter) {
-      const { sql, params } = this.buildBrowseQuery(filter, limit);
-      const stmt = this.db.prepare(sql);
-      const rows = stmt.all(...(params as any[])) as Array<{
-        session_id: string;
-        snippet: string | null;
-        rank: number;
-      }>;
-      return rows.map((row, index) => ({
-        sessionId: row.session_id,
-        rank: row.rank ?? index,
-        snippet: row.snippet,
-      }));
-    }
-
-    // Text search with optional filters
-    const { sql, params } = this.buildFtsQuery(matchExpr, limit, filter);
-    const stmt = this.db.prepare(sql);
-    const rows = stmt.all(...(params as any[])) as Array<{
-      session_id: string;
-      rank: number;
-      snippet: string | null;
-    }>;
-    return rows.map((row) => ({
-      sessionId: row.session_id,
-      rank: row.rank,
-      snippet: row.snippet,
-    }));
-  }
-
-  private buildBrowseQuery(
-    filter: SearchFilter,
-    limit: number,
-  ): { sql: string; params: unknown[] } {
-    const conditions: string[] = ["1 = 1"];
-    const params: unknown[] = [];
-
-    if (filter.providerKind) {
-      conditions.push("provider_kind = ?");
-      params.push(filter.providerKind);
-    }
-    if (filter.archived !== undefined) {
-      conditions.push("archived = ?");
-      params.push(filter.archived ? 1 : 0);
-    }
-    if (filter.cwd) {
-      conditions.push("cwd LIKE ? || '%'");
-      params.push(filter.cwd);
-    }
-    if (filter.updatedAfter) {
-      conditions.push("updated_at >= ?");
-      params.push(filter.updatedAfter);
-    }
-    if (filter.updatedBefore) {
-      conditions.push("updated_at <= ?");
-      params.push(filter.updatedBefore);
-    }
-
-    const where = conditions.join(" AND ");
-    return {
-      sql: `SELECT session_id, NULL as snippet, 0 as rank
-            FROM session_search_documents
-            WHERE ${where}
-            ORDER BY updated_at DESC
-            LIMIT ?`,
-      params: [...params, limit],
-    };
-  }
-
-  private buildFtsQuery(
-    matchExpr: string,
-    limit: number,
-    filter?: SearchFilter,
-  ): { sql: string; params: unknown[] } {
-    const conditions: string[] = ["fts.session_fts MATCH ?"];
-    const params: unknown[] = [matchExpr];
-
-    if (filter?.providerKind) {
-      conditions.push("(d.provider_kind = ?)");
-      params.push(filter.providerKind);
-    }
-    if (filter?.archived !== undefined) {
-      conditions.push("(d.archived = ?)");
-      params.push(filter.archived ? 1 : 0);
-    }
-    if (filter?.cwd) {
-      conditions.push("(d.cwd LIKE ? || '%')");
-      params.push(filter.cwd);
-    }
-    if (filter?.updatedAfter) {
-      conditions.push("(d.updated_at >= ?)");
-      params.push(filter.updatedAfter);
-    }
-    if (filter?.updatedBefore) {
-      conditions.push("(d.updated_at <= ?)");
-      params.push(filter.updatedBefore);
-    }
-
-    const where = conditions.join(" AND ");
-
-    const orderBy = filter ? "fts.rank, d.updated_at DESC" : "fts.rank";
-    const sql = `SELECT fts.session_id, fts.rank,
-      snippet(fts.session_fts, 1, '<<<', '>>>', '...', 48) AS snippet
-      FROM session_fts AS fts
-      ${filter ? "JOIN session_search_documents AS d ON fts.session_id = d.session_id" : ""}
-      WHERE ${where}
-      ORDER BY ${orderBy}
-      LIMIT ?`;
-
-    params.push(limit);
-    return { sql, params };
+    if (filter?.cwd) { conditions.push("substr(d.cwd, 1, length(?)) = ?"); params.push(filter.cwd, filter.cwd); }
+    if (filter?.archived != null) { conditions.push("d.archived = ?"); params.push(filter.archived ? 1 : 0); }
+    if (filter?.updatedAfter != null) { conditions.push("d.updated_at >= ?"); params.push(filter.updatedAfter); }
+    if (filter?.updatedBefore != null) { conditions.push("d.updated_at <= ?"); params.push(filter.updatedBefore); }
+    const rows = db.prepare(`SELECT d.session_id, d.summary,
+        ${match ? "fts.rank, snippet(fts.session_fts, 1, '<<<', '>>>', '...', 48)" : "0 AS rank, NULL"} AS snippet
+      FROM session_search_documents d
+      ${match ? "JOIN session_fts fts ON fts.session_id = d.session_id" : ""}
+      ${conditions.length ? `WHERE ${conditions.join(" AND ")}` : ""}
+      ORDER BY ${match ? "fts.rank," : ""} d.updated_at DESC, d.session_id
+      LIMIT ?`).all(...params, Math.max(1, limit)) as Array<{ session_id: string; summary: string; rank?: number; snippet: string | null }>;
+    return rows.map((row) => ({ sessionId: row.session_id, session: JSON.parse(row.summary) as SessionSummary,
+      rank: row.rank ?? 0, snippet: row.snippet }));
   }
 
   async remove(sessionId: string): Promise<void> {
-    if (!this.db) {
-      throw new Error("Index not opened");
-    }
-    const stmt = this.db.prepare(`DELETE FROM session_fts WHERE session_id = ?`);
-    stmt.run(sessionId);
-
-    const docStmt = this.db.prepare(
-      `DELETE FROM session_search_documents WHERE session_id = ?`,
-    );
-    docStmt.run(sessionId);
+    const db = this.database();
+    db.exec("BEGIN");
+    try {
+      db.prepare("DELETE FROM session_fts WHERE session_id = ?").run(sessionId);
+      db.prepare("DELETE FROM session_search_documents WHERE session_id = ?").run(sessionId);
+      db.exec("COMMIT");
+    } catch (error) { db.exec("ROLLBACK"); throw error; }
   }
 
-  setBackfillRunning(running: boolean): void {
-    this.backfillRunning = running;
-  }
+  setBackfillRunning(running: boolean): void { this.backfillRunning = running; }
 
   getStats(): SessionSearchIndexStats {
-    if (!this.db) {
-      return { indexedSessions: 0, indexSizeMB: 0, providers: [], backfillRunning: this.backfillRunning };
+    const db = this.db;
+    if (!db) return { indexedSessions: 0, indexSizeMB: 0, providers: [], backfillRunning: this.backfillRunning };
+    const { count } = db.prepare("SELECT COUNT(*) AS count FROM session_search_documents").get() as { count: number };
+    const { page_count } = db.prepare("PRAGMA page_count").get() as { page_count: number };
+    const { page_size } = db.prepare("PRAGMA page_size").get() as { page_size: number };
+    const rows = db.prepare(`SELECT provider_id, provider_kind, COUNT(*) AS count, MAX(indexed_at) AS last_indexed_at
+      FROM session_search_documents GROUP BY provider_id`).all() as Array<{ provider_id: string; provider_kind: string; count: number; last_indexed_at: number }>;
+    const providers = new Map<string, ProviderSearchIndexStats>(rows.map((row) => [row.provider_id, {
+      providerId: row.provider_id, providerKind: row.provider_kind, indexedSessions: row.count,
+      lastIndexedAt: row.last_indexed_at, lastError: null,
+    }]));
+    const errors = db.prepare("SELECT key, value FROM session_search_meta WHERE key LIKE 'backfill_error:%'").all() as Array<{ key: string; value: string }>;
+    for (const row of errors) {
+      const id = row.key.slice("backfill_error:".length);
+      const error = JSON.parse(row.value) as { kind: string; message: string };
+      const provider = providers.get(id) ?? { providerId: id, providerKind: error.kind, indexedSessions: 0, lastIndexedAt: null, lastError: null };
+      providers.set(id, { ...provider, lastError: error.message });
     }
-
-    const sessionCount = this.db.prepare(
-      `SELECT COUNT(DISTINCT session_id) AS count FROM session_fts`,
-    ) as { get: () => { count: number } | undefined };
-    const row = sessionCount.get();
-
-    const pageCount = this.db.prepare(`PRAGMA page_count`) as {
-      get: () => { page_count: number } | undefined;
-    };
-    const pageSize = this.db.prepare(`PRAGMA page_size`) as {
-      get: () => { page_size: number } | undefined;
-    };
-
-    const pageCountRow = pageCount.get();
-    const pageSizeRow = pageSize.get();
-    const bytes =
-      (pageCountRow?.page_count ?? 0) * (pageSizeRow?.page_size ?? 0);
-
-    const providerRows = this.db.prepare(
-      `SELECT provider_kind, COUNT(*) as count, MAX(indexed_at) as last_indexed_at
-       FROM session_search_documents
-       GROUP BY provider_kind`
-    );
-
-    const providers = (providerRows.all() as Array<{
-        provider_kind: string;
-        count: number;
-        last_indexed_at: number | null;
-      }
-    >).map((r) => {
-      const errMeta = this.db!.prepare(
-        `SELECT value FROM session_search_meta WHERE key = ?`
-      );
-      const errRow = errMeta.get(`backfill_error:${r.provider_kind}`) as { value: string } | undefined;
-      return {
-        providerKind: r.provider_kind ?? "unknown",
-        indexedSessions: r.count ?? 0,
-        lastIndexedAt: r.last_indexed_at ?? null,
-        lastError: errRow?.value ?? null,
-      };
-    });
-
-    return {
-      indexedSessions: row?.count ?? 0,
-      indexSizeMB: Math.round((bytes / 1024 / 1024) * 100) / 100,
-      providers,
-      backfillRunning: this.backfillRunning,
-    };
+    return { indexedSessions: count, indexSizeMB: Math.round(page_count * page_size / 1024 / 1024 * 100) / 100,
+      providers: [...providers.values()], backfillRunning: this.backfillRunning };
   }
 
-  setProviderError(providerKind: string, error: string | null): void {
+  setProviderError(providerId: string, error: string | null, providerKind = providerId): void {
     if (!this.db) return;
-    if (error) {
-      const stmt = this.db.prepare(
-        `INSERT OR REPLACE INTO session_search_meta (key, value) VALUES (?, ?)`
-      );
-      stmt.run(`backfill_error:${providerKind}`, error);
-    } else {
-      const stmt = this.db.prepare(
-        `DELETE FROM session_search_meta WHERE key = ?`
-      );
-      stmt.run(`backfill_error:${providerKind}`);
-    }
+    if (error) this.db.prepare("INSERT OR REPLACE INTO session_search_meta (key, value) VALUES (?, ?)")
+      .run(`backfill_error:${providerId}`, JSON.stringify({ kind: providerKind, message: error }));
+    else this.db.prepare("DELETE FROM session_search_meta WHERE key = ?").run(`backfill_error:${providerId}`);
   }
 
+  private database(): DatabaseSync {
+    if (!this.db) throw new Error("Index not opened");
+    return this.db;
+  }
 }

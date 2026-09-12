@@ -1,8 +1,78 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sidemesh_mobile/src/models.dart';
 import 'package:sidemesh_mobile/src/provider_labels.dart';
+import 'package:sidemesh_mobile/src/session_identity.dart';
 
 void main() {
+  test('audio and resource inputs preserve their payload and display metadata', () {
+    const items = [
+      SessionInputItem.audio('UklGRg==', 'audio/wav', name: 'clip.wav'),
+      SessionInputItem.resource('attachment:///empty.txt', text: ''),
+      SessionInputItem.resource('attachment:///raw.bin', blob: 'AP8='),
+      SessionInputItem.resourceLink('urn:example:record', 'Record'),
+    ];
+    for (final item in items) {
+      final restored = SessionInputItem.fromJson(item.toJson());
+      expect(restored.toJson(), item.toJson());
+      expect(SessionMessageAttachment.fromJson(restored.contentAttachment.toJson()).toJson(), item.contentAttachment.toJson());
+    }
+  });
+
+  test('instance identities keep capability lookup and legacy ownership separate', () {
+    final payload = <String, dynamic>{
+      'provider': 'copilot', 'providerId': 'second',
+      'defaultProviderCapabilities': {'input': {'imageUrl': true}},
+      'sessionAliases': {
+        'rawProviderId': 'first', 'kinds': {'first': 'copilot', 'second': 'copilot'},
+        'aliases': {'first': 'first', 'second': 'second', 'copilot': 'first'},
+      },
+      'supportedProviders': [
+        {'id': 'first', 'kind': 'copilot', 'displayName': 'Copilot',
+          'capabilities': {'input': {'imageUrl': false}}, 'state': 'unavailable', 'error': 'Not installed'},
+        {'id': 'second', 'kind': 'copilot', 'displayName': 'Copilot',
+          'capabilities': {'input': {'imageUrl': true}}, 'state': 'ready', 'isDefault': true},
+      ],
+    };
+    final node = NodeInfo.fromJson(payload);
+    expect(node.providerId, 'second');
+    expect(node.providerSummary(null).id, 'second');
+    expect(node.providerSummary('copilot').id, 'first');
+    expect(node.providerSummary('first').error, 'Not installed');
+    expect(node.capabilitiesForProvider('first').supports('input', 'imageUrl'), isFalse);
+    expect(node.capabilitiesForProvider('second').supports('input', 'imageUrl'), isTrue);
+    expect(agentProviderDisplayLabel('copilot', providerId: 'second', nodeInfo: node), 'Copilot · second');
+    final aliases = node.sessionAliases!;
+    expect(aliases.resolve('native-id')!.providerId, 'first');
+    expect(aliases.resolve(SessionAliases.wrap('copilot', 'native-id'))!.sessionId, SessionAliases.wrap('first', 'native-id'));
+    expect(aliases.resolve(SessionAliases.wrap('second', 'native:雪'))!.providerId, 'second');
+    expect(aliases.resolve(SessionAliases.wrap('unknown', 'native-id')), isNull);
+    final patched = node.copyWithUpdateInfo(UpdateInfo.fromJson({'ok': true}));
+    expect(patched.providerId, 'second');
+    expect(patched.sessionAliases!.resolve('native-id')!.providerId, 'first');
+    payload['supportedProviders'] = [(payload['supportedProviders'] as List).last];
+    final removed = NodeInfo.fromJson(payload);
+    expect(removed.providerSummary('copilot').id, isEmpty);
+    expect(removed.capabilitiesForProvider('copilot').supports('input', 'imageUrl'), isFalse);
+    expect(removed.sessionAliases!.resolve('native-id')!.providerId, 'first');
+    payload.remove('sessionAliases');
+    payload['supportedProviders'] = node.supportedProviders.map((entry) => {
+      'id': entry.id, 'kind': entry.kind, 'capabilities': entry.capabilities.values,
+    }).toList();
+    expect(NodeInfo.fromJson(payload).providerSummary('copilot').id, isEmpty);
+  });
+
+  test('session identity metadata survives copies and cache JSON', () {
+    final session = SessionSummary.fromJson({
+      'id': 'legacy-raw', 'canonicalSessionId': SessionAliases.wrap('work', 'legacy-raw'),
+      'provider': 'copilot', 'providerId': 'work',
+    });
+    final restored = SessionSummary.fromJson(session.copyWith(title: 'New title').toJson());
+    expect(restored.providerReference, 'work');
+    expect(restored.provider, 'copilot');
+    expect(restored.canonicalSessionId, SessionAliases.wrap('work', 'legacy-raw'));
+    expect(restored.copyWith(id: restored.canonicalSessionId).id, restored.canonicalSessionId);
+  });
+
   test('NodeInfo parses provider metadata from new daemons', () {
     final node = NodeInfo.fromJson({
       'label': 'Provider stack',

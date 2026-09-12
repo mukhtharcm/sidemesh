@@ -1,8 +1,9 @@
 import {
-  ACPX_PROVIDER_CAPABILITIES,
-  AcpxAgentProvider,
-  acpxProviderDefaultAgent,
-} from "./acpx-provider.js";
+  ACP_PROVIDER_CAPABILITIES,
+  AcpAgentProvider,
+  ACP_DEFAULT_AGENT,
+} from "./acp-provider.js";
+import type { SessionStore } from "./session-store.js";
 import {
   CODEX_PROVIDER_CAPABILITIES,
   CodexAgentProvider,
@@ -52,7 +53,7 @@ interface AgentProviderDefinition {
   readonly commandEnvironmentVariables: readonly string[];
   readonly supportedApprovalPolicies: readonly string[];
 
-  create(config: AgentProviderConfig): AgentProvider;
+  create(config: AgentProviderConfig, sessionStore?: SessionStore): AgentProvider;
   loadConfig(env: ProviderEnvironment): AgentProviderConfig;
   resolveConfig(
     env: ProviderEnvironment,
@@ -73,11 +74,11 @@ export interface AgentProviderDefinitionSummary {
 
 export const DEFAULT_AGENT_PROVIDER_KIND: AgentProviderKind = "codex";
 const CODEX_DEFAULT_COMMAND = "codex";
-const PI_DEFAULT_COMMAND = "sdk";
+const PI_DEFAULT_COMMAND = "rpc";
 const OPENCODE_DEFAULT_COMMAND = "opencode";
 const FAKE_DEFAULT_COMMAND = "builtin";
 const COPILOT_DEFAULT_COMMAND = "copilot";
-const ACPX_DEFAULT_AGENT = acpxProviderDefaultAgent();
+const ACPX_DEFAULT_AGENT = ACP_DEFAULT_AGENT;
 
 const CODEX_PROVIDER_DEFINITION: AgentProviderDefinition = {
   kind: "codex",
@@ -208,11 +209,13 @@ const PI_PROVIDER_DEFINITION: AgentProviderDefinition = {
   ],
   supportedApprovalPolicies: [],
 
-  create(config) {
+  create(config, sessionStore) {
     const pi = expectPiProviderConfig(config);
     return new PiAgentProvider({
       agentDir: pi.agentDir,
       stateDir: pi.stateDir,
+      providerId: pi.id ?? pi.kind,
+      sessionStore,
     });
   },
 
@@ -270,13 +273,15 @@ const COPILOT_PROVIDER_DEFINITION: AgentProviderDefinition = {
   ],
   supportedApprovalPolicies: ["on-request", "never"],
 
-  create(config) {
+  create(config, sessionStore) {
     const copilot = expectCopilotProviderConfig(config);
     return new CopilotAgentProvider({
       bin: copilot.bin,
       stateDir: copilot.stateDir,
       allowAll: copilot.allowAll,
       configuredModel: copilot.configuredModel,
+      providerId: copilot.id ?? copilot.kind,
+      sessionStore,
     });
   },
 
@@ -347,11 +352,13 @@ const OPENCODE_PROVIDER_DEFINITION: AgentProviderDefinition = {
   ],
   supportedApprovalPolicies: [],
 
-  create(config) {
+  create(config, sessionStore) {
     const opencode = expectOpenCodeProviderConfig(config);
     return new OpenCodeAgentProvider({
       bin: opencode.bin,
       stateDir: opencode.stateDir,
+      providerId: opencode.id ?? opencode.kind,
+      sessionStore,
     });
   },
 
@@ -393,10 +400,10 @@ const OPENCODE_PROVIDER_DEFINITION: AgentProviderDefinition = {
 
 const ACPX_PROVIDER_DEFINITION: AgentProviderDefinition = {
   kind: "acpx",
-  displayName: "ACP via acpx",
+  displayName: "ACP",
   setupAudience: "public",
   defaultCommand: ACPX_DEFAULT_AGENT,
-  capabilities: ACPX_PROVIDER_CAPABILITIES,
+  capabilities: ACP_PROVIDER_CAPABILITIES,
   commandEnvironmentVariables: [
     "SIDEMESH_ACPX_AGENT",
     "SIDEMESH_ACPX_COMMAND",
@@ -406,14 +413,17 @@ const ACPX_PROVIDER_DEFINITION: AgentProviderDefinition = {
   ],
   supportedApprovalPolicies: ["on-request", "never"],
 
-  create(config) {
+  create(config, sessionStore) {
     const acpx = expectAcpxProviderConfig(config);
-    return new AcpxAgentProvider({
+    return new AcpAgentProvider({
+      providerId: acpx.id ?? acpx.kind,
       agent: acpx.agent,
       command: acpx.command,
+      executable: acpx.executable,
+      args: acpx.args,
       stateDir: acpx.stateDir,
       permissionMode: acpx.permissionMode,
-    });
+    }, { sessionStore });
   },
 
   loadConfig(env) {
@@ -436,6 +446,8 @@ const ACPX_PROVIDER_DEFINITION: AgentProviderDefinition = {
     const acpx = base?.kind === "acpx" ? base : null;
     return {
       kind: "acpx",
+      ...(!env.SIDEMESH_ACPX_COMMAND?.trim() && !env.SIDEMESH_PROVIDER_COMMAND?.trim() && acpx?.executable
+        ? { executable: acpx.executable, args: acpx.args ?? [] } : {}),
       agent:
         env.SIDEMESH_ACPX_AGENT?.trim() ||
         acpx?.agent ||
@@ -463,7 +475,7 @@ const ACPX_PROVIDER_DEFINITION: AgentProviderDefinition = {
     const acpx = expectAcpxProviderConfig(config);
     return {
       kind: acpx.kind,
-      command: acpx.command ?? acpx.agent,
+      command: acpx.executable ?? acpx.command ?? acpx.agent,
     };
   },
 };
@@ -533,8 +545,9 @@ export function resolveAgentProviderConfig(
 
 export function createAgentProviderFromConfig(
   config: AgentProviderConfig,
+  sessionStore?: SessionStore,
 ): AgentProvider {
-  return getAgentProviderDefinition(config.kind).create(config);
+  return getAgentProviderDefinition(config.kind).create(config, sessionStore);
 }
 
 export function summarizeAgentProviderConfig(

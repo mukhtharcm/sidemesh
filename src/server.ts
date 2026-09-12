@@ -1,3 +1,4 @@
+import { parseContentInput, contentInputAttachment } from "./input-content.js";
 import { createServer } from "node:http";
 import type { Server } from "node:http";
 import { homedir, hostname, platform } from "node:os";
@@ -5,10 +6,7 @@ import { createHash, randomUUID, timingSafeEqual } from "node:crypto";
 import {
   chmod,
   mkdir,
-  readFile,
-  rename,
   stat,
-  writeFile,
 } from "node:fs/promises";
 import nodePath from "node:path";
 
@@ -24,7 +22,7 @@ import { secureHeaders } from "hono/secure-headers";
 import type { ContentfulStatusCode } from "hono/utils/http-status";
 import { WebSocketServer, type WebSocket } from "ws";
 
-import { SessionStateStore } from "./session-state.js";
+import { SessionCoordinator } from "./session-coordinator.js";
 import {
   AgentProviderRequestError,
   hasProviderMethod,
@@ -33,6 +31,7 @@ import {
   type AgentProvider,
   type AgentProviderMethodName,
   type AgentProviderLiveEvent,
+  type AgentSessionListOptions,
   type AgentSessionInputItem,
   type AgentSessionOverrides,
 } from "./agent-provider.js";
@@ -41,9 +40,7 @@ import type {
   ApprovalLiveEvent,
   GitInfoSummary,
   HostCapabilities,
-  LatestPlanUpdate,
   LiveEvent,
-  LivePlanStep,
   LiveThreadStatus,
   NodeConfig,
   PendingAction,
@@ -53,18 +50,13 @@ import type {
   SessionMessage,
   SessionResourcesResponse,
   SessionRuntimeSummary,
-  SessionResource,
   SessionSubAgentInfo,
   SessionSummary,
   ThreadRecord,
-  TurnRecord,
   UsageObservation,
   UsageSnapshotResponse,
   WorkspaceSummary,
 } from "./types.js";
-import {
-  mergeSessionActivities,
-} from "./activity.js";
 import {
   parsePendingActionResponseBody,
   toPublicPendingAction,
@@ -79,9 +71,10 @@ import {
 import {
   createAgentProviderRuntime,
   type AgentProviderRuntime,
+  type AgentProviderRuntimeEntry,
 } from "./provider-factory.js";
 import { isAgentProviderKind } from "./provider-registry.js";
-import { MultiAgentProvider, wrapProviderScopedId } from "./multi-provider.js";
+import { wrapProviderScopedId } from "./session-identity.js";
 import { buildSessionResources } from "./resources.js";
 import {
   FsWatchRegistry,
@@ -107,10 +100,8 @@ import {
   collectWorkspaceRoots,
   resolveWorkspacePath,
 } from "./workspace-scope.js";
-import {
-  SessionInputDedupeStore,
-  type StoredSessionInputDedupeEntry,
-} from "./session-input-dedupe-store.js";
+import { SessionStore } from "./session-store.js";
+import { SessionInputError } from "./session-input-coordinator.js";
 import { startupSummaryLines } from "./startup-summary.js";
 import { getCodexRpcAuditSnapshot } from "./codex-rpc-audit.js";
 import { SessionSearchIndex, type SearchFilter } from "./session-search-index.js";
@@ -122,26 +113,13 @@ import {
   UpdateAlreadyInProgressError,
 } from "./update-status.js";
 import { PushNotificationDispatcher } from "./push-notifications.js";
-import {
-  jsonRoute,
-  type HonoServerEnv,
-  type JsonRouteRequest,
-  type JsonRouteResponse,
-} from "./hono-route-adapter.js";
+import { jsonResponse, readJsonBody, readQuery, type HonoServerEnv } from "./server-http.js";
 
-const SESSION_INPUT_DEDUPE_LIMIT = 500;
-const SESSION_INPUT_DEDUPE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
-const SESSION_INPUT_DEDUPE_FILE = "session-input-dedupe-v1.json";
-const SESSION_RUNTIME_SIGNALS_LIMIT = 500;
-const SESSION_RUNTIME_SIGNALS_TTL_MS = 30 * 24 * 60 * 60 * 1000;
-const SESSION_RUNTIME_SIGNALS_FILE = "session-runtime-signals-v1.json";
 const CLIENT_MESSAGE_ID_MAX_LENGTH = 128;
 const CLIENT_MESSAGE_ID_PATTERN = /^[A-Za-z0-9._:-]+$/;
 const RECENT_UNINDEXED_SESSION_SCAN_LIMIT = 50;
 const RECENT_LIVE_LIMIT = 40;
 const RECENT_SESSIONS_CACHE_TTL_MS = 1_500;
-const TERMINAL_LIVE_STATUS_GRACE_MS = 1_000;
-const RECENT_SESSION_RUNTIME_CONCURRENCY = 4;
 const INSTALL_INFO_REFRESH_TTL_MS = 60_000;
 type SessionRuntimeListMode = "all" | "active" | "none";
 const HOST_CAPABILITIES: HostCapabilities = {
@@ -163,24 +141,6 @@ interface SessionHistorySummary {
   returnedMessages: number;
   totalActivities: number;
   returnedActivities: number;
-}
-
-interface SessionRuntimeSignalsEntry {
-  latestPlanUpdate: LatestPlanUpdate | null;
-  updatedAt: number;
-}
-
-interface SessionInputReceipt {
-  mode: "steer" | "turn";
-  turnId: string | null;
-  messageId: string;
-}
-
-interface SessionInputDedupeEntry {
-  signatureHash: string;
-  createdAt: number;
-  promise?: Promise<SessionInputReceipt>;
-  receipt?: SessionInputReceipt;
 }
 
 interface InstallInfoRefreshResult {
@@ -220,10 +180,15 @@ export async function startServer(
   await mkdir(config.stateDir, { recursive: true, mode: 0o700 });
   await chmod(config.stateDir, 0o700);
   let runtimeConfig = config;
-  const providerRuntime = prebuiltRuntime ?? createAgentProviderRuntime(config);
-  const provider = providerRuntime.provider;
-  await provider.start();
+  const sessionStore = await SessionStore.open(config.stateDir);
+  let providerRuntime: AgentProviderRuntime;
+  try { providerRuntime = prebuiltRuntime ?? createAgentProviderRuntime(config, sessionStore); }
+  catch (error) { sessionStore.close(); throw error; }
+  try { providerRuntime.attachStore(sessionStore); }
+  catch (error) { sessionStore.close(); throw error; }
   let runningServerRef: RunningServer | null = null;
+  let closing = false;
+  let closingPromise: Promise<void> | null = null;
   const hostCapabilities: HostCapabilities = {
     ...HOST_CAPABILITIES,
     workspace: {
@@ -236,6 +201,7 @@ export async function startServer(
   const app = new Hono<HonoServerEnv>();
   const server = createServer(getRequestListener(app.fetch));
   const socketsBySession = new Map<string, Set<WebSocket>>();
+  const sessionSocketAliases = new WeakMap<WebSocket, string>();
   const approvalSockets = new Set<WebSocket>();
   const recentSessionsSockets = new Set<WebSocket>();
   const recentSessionBroadcastTimers = new Map<string, NodeJS.Timeout>();
@@ -246,35 +212,42 @@ export async function startServer(
     promise?: Promise<SessionSummary[]>;
     value?: SessionSummary[];
   }>();
-  const sessionState = new SessionStateStore();
-  const pendingActions = new Map<string, AgentPendingAction>();
+  const sessionState = new SessionCoordinator(sessionStore, {
+    readSnapshot: async (id, options) => {
+      const resolved = providerRuntime.resolveSession(id);
+      const provider = await providerRuntime.ensure(resolved.entry);
+      const snapshot = await requireProviderMethod(provider, "readSessionSnapshot", "session snapshot")
+        .call(provider, resolved.rawId, { ...options, requireNativeHistory: sessionStore.hasUncertainInputs(id) });
+      return { ...snapshot, latestPlanUpdate: snapshot.latestPlanUpdate ? { ...snapshot.latestPlanUpdate, sessionId: resolved.sessionId } : null,
+        thread: providerRuntime.wrapThread(resolved.entry, snapshot.thread) };
+    },
+    publish: publishSessionEvent,
+    input: {
+      canSteer: (id) => providerEntryForSessionId(id)?.capabilities.input.steer !== false,
+      prepare: async (id, payload) => ({ ...payload,
+        input: await resolveFileInputItemsForSession(providerRuntime, id, payload.input) }),
+      dispatch: async (request) => {
+        const resolved = providerRuntime.resolveSession(request.sessionId);
+        const provider = await providerRuntime.ensure(resolved.entry);
+        return requireProviderMethod(provider, "submitInput", "session input").call(provider, { ...request, sessionId: resolved.rawId });
+      },
+      submitted: async (request, receipt) => {
+        broadcastLive(request.sessionId, { type: "user_message_submitted", sessionId: request.sessionId,
+          turnId: receipt.turnId ?? undefined,
+          messageItem: buildSubmittedUserMessage(request.input, receipt.messageId, allocSeq(request.sessionId)) });
+        scheduleRecentSessionUpsert(request.sessionId, 0);
+      },
+    },
+  });
+  const pendingActions = sessionState.pendingActions;
+  const inputs = sessionState.inputs;
   const searchIndex = new SessionSearchIndex(
     nodePath.join(config.stateDir, "search-index-v1.db"),
   );
-  const sessionRuntimeSignals = await loadSessionRuntimeSignalsState(
-    nodePath.join(config.stateDir, SESSION_RUNTIME_SIGNALS_FILE),
-  );
-  const sessionInputDedupe = new Map<string, SessionInputDedupeEntry>();
-  let sessionRuntimeSignalsSaveChain = Promise.resolve();
-  const sessionInputDedupeStore = await SessionInputDedupeStore.open(
-    nodePath.join(config.stateDir, SESSION_INPUT_DEDUPE_FILE),
-    {
-      ttlMs: SESSION_INPUT_DEDUPE_TTL_MS,
-      limit: SESSION_INPUT_DEDUPE_LIMIT,
-    },
-  );
+  await searchIndex.open();
   const pushNotifications = await PushNotificationDispatcher.open(
     config.stateDir,
   );
-  for (const entry of sessionInputDedupeStore.entries()) {
-    sessionInputDedupe.set(entry.key, {
-      signatureHash: entry.signatureHash,
-      createdAt: entry.createdAt,
-      receipt: entry.receipt,
-    });
-  }
-  let providerVersion = "unknown";
-  const providerVersions = new Map<string, string>();
   let installInfo = {
     packageVersion: "unknown",
     latestVersion: null as string | null,
@@ -365,12 +338,15 @@ export async function startServer(
     requirePty: config.terminal.requirePty,
     resolveCwd: (cwd, request) =>
       resolveTerminalCwd(
-        provider,
+        providerRuntime,
         sessionState,
         cwd,
         request.sessionId,
         config.workspaceRoots,
       ),
+  });
+  if (terminalRegistry.isEnabled()) providerRuntime.attachHostServices({
+    runAuthenticationTerminal: (request) => terminalRegistry.runAuthentication(request),
   });
   const browserPreviewRegistry = new BrowserPreviewRegistry({
     enabled: hostCapabilities.workspace.browserPreview,
@@ -382,470 +358,82 @@ export async function startServer(
     quality: config.browserPreview.quality,
   });
 
-  function allocSeq(sessionId: string): number {
-    const current = Math.max(
-      sessionState.get(sessionId).nextSeq ?? 0,
-      nextSeqForLatestPlanUpdate(0, latestPlanUpdateForSession(sessionId)),
-    );
-    sessionState.get(sessionId).nextSeq = current + 1;
-    return current;
-  }
-
-  function ensureSeqCursor(sessionId: string, minimum: number): void {
-    const current = sessionState.get(sessionId).nextSeq ?? 0;
-    if (minimum > current) {
-      sessionState.get(sessionId).nextSeq = minimum;
-    }
-  }
-
-  function latestPlanUpdateForSession(sessionId: string): LatestPlanUpdate | null {
-    return sessionRuntimeSignals.get(sessionId)?.latestPlanUpdate ?? null;
-  }
-
-  function latestThreadStatusForSession(sessionId: string): LiveThreadStatus | null {
-    return sessionState.get(sessionId).status ?? null;
-  }
-
-  function setLatestThreadStatusForSession(
-    sessionId: string,
-    status: LiveThreadStatus | null,
-  ): void {
-    if (status == null) {
-      sessionState.get(sessionId).status = null;
-      sessionState.get(sessionId).statusUpdatedAt = 0;
-      return;
-    }
-    sessionState.get(sessionId).status = status;
-    sessionState.get(sessionId).statusUpdatedAt = Date.now();
-  }
-
-  function sessionStatusOverrideForDisplay(
-    sessionId: string,
-  ): LiveThreadStatus | null {
-    const recoveredTerminalStatus = sessionState.get(sessionId).recoveredStatus;
-    if (recoveredTerminalStatus) {
-      return recoveredTerminalStatus;
-    }
-    const status = latestThreadStatusForSession(sessionId);
-    if (status == null) {
-      return null;
-    }
-    if (isRunningThreadStatus(status)) {
-      return status;
-    }
-    if (!isTerminalThreadStatus(status)) {
-      return null;
-    }
-    const updatedAt = sessionState.get(sessionId).statusUpdatedAt ?? 0;
-    return Date.now() - updatedAt <= TERMINAL_LIVE_STATUS_GRACE_MS ? status : null;
-  }
-
-  function clearConfirmedTerminalSessionState(sessionId: string): void {
-    sessionState.get(sessionId).activeTurn = null;
-    sessionState.get(sessionId).unverifiedTurn = false;
-    sessionState.get(sessionId).activities.clear();
-    sessionState.clearDraft(sessionId);
-
-    clearActionsForSession(
-      pendingActions,
-      sessionId,
-      broadcastLive,
-      broadcastApprovalLive,
-    );
-  }
-
-  function clearRecoveredTerminalSessionState(sessionId: string): void {
-    sessionState.get(sessionId).activeTurn = null;
-    sessionState.get(sessionId).unverifiedTurn = false;
-    clearActionsForSession(
-      pendingActions,
-      sessionId,
-      broadcastLive,
-      broadcastApprovalLive,
-    );
-  }
-
-  function reconcileObservedThreadStatus(
-    sessionId: string,
-    observedStatus: LiveThreadStatus,
-  ): void {
-    const nextStatus = reconciledThreadStatus(sessionId, observedStatus);
-    if (isTerminalThreadStatus(observedStatus)) {
-      sessionState.get(sessionId).recoveredStatus = null;
-      clearConfirmedTerminalSessionState(sessionId);
-    }
-    const previousStatus = latestThreadStatusForSession(sessionId);
-    if (previousStatus === nextStatus) {
-      return;
-    }
-    setLatestThreadStatusForSession(sessionId, nextStatus);
-    scheduleRecentSessionUpsert(sessionId, 0);
-  }
-
-  function reconciledThreadStatus(
-    sessionId: string,
-    observedStatus: LiveThreadStatus,
-  ): LiveThreadStatus {
-    if (isTerminalThreadStatus(observedStatus)) {
-      return observedStatus;
-    }
-    const terminalOverride = sessionStatusOverrideForDisplay(sessionId);
-    if (terminalOverride && isTerminalThreadStatus(terminalOverride)) {
-      return terminalOverride;
-    }
-    if (hasPendingActionForSession(pendingActions, sessionId)) {
-      return "waiting_for_approval";
-    }
-    if (isRunningThreadStatus(observedStatus)) {
-      return observedStatus;
-    }
-    if (observedStatus === "idle" && (sessionState.get(sessionId).activeTurn != null)) {
-      return "running";
-    }
-    return observedStatus;
-  }
-
-  async function shouldTrackProviderTurn(
-    agentProvider: AgentProvider,
-    sessionId: string,
-    turnId: string | null | undefined,
-  ): Promise<boolean> {
-    if (!turnId) {
-      return false;
-    }
-    const observedStatus = latestThreadStatusForSession(sessionId);
-    let state: Awaited<ReturnType<typeof loadFastRunState>>;
-    try {
-      state = await loadFastRunState(
-        agentProvider,
-        sessionId,
-        new SessionStateStore(),
-        isRunningThreadStatus(observedStatus) ? observedStatus : null,
-      );
-    } catch (error) {
-      if (isTransientTurnSnapshotReadError(error)) {
-        const turnState = await providerTurnState(
-          agentProvider,
-          sessionId,
-          turnId,
-        );
-        if (turnState.kind === "terminal") {
-          sessionState.get(sessionId).unverifiedTurn = false;
-          return false;
-        }
-        if (turnState.kind === "missing" || turnState.kind === "unknown") {
-          sessionState.get(sessionId).unverifiedTurn = true;
-        } else {
-          sessionState.get(sessionId).unverifiedTurn = false;
-        }
-        return true;
-      }
-      throw error;
-    }
-    if (state.isRunning) {
-      if (state.turnId == null) {
-        sessionState.get(sessionId).unverifiedTurn = true;
-      } else {
-        sessionState.get(sessionId).unverifiedTurn = false;
-      }
-      return state.turnId == null || state.turnId === turnId;
-    }
-    const turnState = await providerTurnState(agentProvider, sessionId, turnId);
-    if (turnState.kind === "terminal") {
-      sessionState.get(sessionId).unverifiedTurn = false;
-      return false;
-    }
-    if (turnState.kind === "unknown") {
-      sessionState.get(sessionId).unverifiedTurn = true;
-    } else {
-      sessionState.get(sessionId).unverifiedTurn = false;
-    }
-    return true;
-  }
-
-  async function reconcileUnverifiedActiveTurn(
-    sessionId: string,
-    agentProvider: AgentProvider,
-  ): Promise<LiveThreadStatus | null> {
-    if (!sessionState.get(sessionId).unverifiedTurn) {
-      return null;
-    }
-    const activeTurn = sessionState.get(sessionId).activeTurn;
-    if (!activeTurn) {
-      sessionState.get(sessionId).unverifiedTurn = false;
-      return null;
-    }
-    const turnState = await providerTurnState(
-      agentProvider,
-      sessionId,
-      activeTurn.turnId,
-    );
-    const currentActiveTurn = sessionState.get(sessionId).activeTurn;
-    if (
-      !sessionState.get(sessionId).unverifiedTurn ||
-      !currentActiveTurn ||
-      currentActiveTurn.turnId !== activeTurn.turnId ||
-      currentActiveTurn.startedAt !== activeTurn.startedAt
-    ) {
-      return null;
-    }
-    if (turnState.kind === "active") {
-      sessionState.get(sessionId).unverifiedTurn = false;
-      return null;
-    }
-    if (turnState.kind === "terminal") {
-      clearRecoveredTerminalSessionState(sessionId);
-      const status = turnState.status;
-      if (isTerminalThreadStatus(status)) {
-        sessionState.get(sessionId).recoveredStatus = status;
-      }
-      setLatestThreadStatusForSession(sessionId, status);
-      broadcastLive(sessionId, {
-        type: "thread_status_changed",
-        sessionId,
-        status,
-      });
-      scheduleRecentSessionUpsert(sessionId, 0);
-      return status;
-    }
-    if (
-      turnState.kind === "missing" &&
-      (turnState.threadStatus === "idle" ||
-        isTerminalThreadStatus(turnState.threadStatus))
-    ) {
-      clearRecoveredTerminalSessionState(sessionId);
-      const status: LiveThreadStatus =
-        isTerminalThreadStatus(turnState.threadStatus)
-          ? turnState.threadStatus
-          : "idle";
-      if (isTerminalThreadStatus(status)) {
-        sessionState.get(sessionId).recoveredStatus = status;
-      }
-      setLatestThreadStatusForSession(sessionId, status);
-      broadcastLive(sessionId, {
-        type: "thread_status_changed",
-        sessionId,
-        status,
-      });
-      scheduleRecentSessionUpsert(sessionId, 0);
-      return status;
-    }
-    return null;
-  }
-
-  async function sessionStatusOverrideForSnapshot(
-    sessionId: string,
-    agentProvider: AgentProvider = provider,
-  ): Promise<LiveThreadStatus | null> {
-    return (
-      (await reconcileUnverifiedActiveTurn(sessionId, agentProvider)) ??
-      sessionStatusOverrideForDisplay(sessionId)
-    );
-  }
-
-  function persistSessionRuntimeSignalsEventually(): void {
-    sessionRuntimeSignalsSaveChain = sessionRuntimeSignalsSaveChain
-      .catch(() => undefined)
-      .then(() =>
-        saveSessionRuntimeSignalsState(
-          nodePath.join(config.stateDir, SESSION_RUNTIME_SIGNALS_FILE),
-          sessionRuntimeSignals,
-        )
-      );
-    void sessionRuntimeSignalsSaveChain.catch((error: unknown) => {
-      console.error(
-        error instanceof Error
-          ? `Failed to persist session runtime signals: ${error.message}`
-          : "Failed to persist session runtime signals.",
-      );
-    });
-  }
-
-  function setLatestPlanUpdateForSession(
-    sessionId: string,
-    latestPlanUpdate: LatestPlanUpdate | null,
-  ): void {
-    const normalized = normalizeLatestPlanUpdate(latestPlanUpdate, sessionId);
-    if (normalized == null) {
-      sessionRuntimeSignals.delete(sessionId);
-    } else {
-      sessionRuntimeSignals.set(sessionId, {
-        latestPlanUpdate: normalized,
-        updatedAt: Date.now(),
-      });
-    }
-    persistSessionRuntimeSignalsEventually();
-  }
-
-  function sessionInputDedupeKey(
-    sessionId: string,
-    clientMessageId: string,
-  ): string {
-    return `${sessionId}:${clientMessageId}`;
-  }
-
-  function sessionInputDedupeKeyMatchesSession(
-    key: string,
-    sessionId: string,
-  ): boolean {
-    return key.startsWith(`${sessionId}:`);
-  }
+  function allocSeq(sessionId: string): number { return sessionState.allocSeq(sessionId); }
 
   async function clearInterruptedSessionInputDedupe(
     interruptedTurnIds: Map<string, string>,
   ): Promise<void> {
-    if (interruptedTurnIds.size === 0) {
-      return;
-    }
-    const keysToDelete: string[] = [];
-    for (const [key, entry] of sessionInputDedupe) {
-      for (const [sessionId, turnId] of interruptedTurnIds) {
-        if (!sessionInputDedupeKeyMatchesSession(key, sessionId)) {
-          continue;
-        }
-        if (entry.promise || entry.receipt?.turnId === turnId) {
-          keysToDelete.push(key);
-        }
-        break;
-      }
-    }
-    if (keysToDelete.length === 0) {
-      return;
-    }
-    for (const key of keysToDelete) {
-      sessionInputDedupe.delete(key);
-    }
-    await sessionInputDedupeStore.deleteMany(keysToDelete);
+    sessionStore.clearInterruptedInputs(interruptedTurnIds);
   }
 
-  function providerEntryForKind(kind: string | null | undefined) {
-    return providerRuntime.providerForKind(kind);
-  }
 
   function providerEntryForSessionId(sessionId: string) {
     return providerRuntime.providerForSessionId(sessionId);
   }
 
+  async function startedProviderForKind(id: string | null | undefined) {
+    const entry = providerRuntime.providerForKind(id);
+    return entry ? { ...entry, provider: await providerRuntime.ensure(entry) } : null;
+  }
+
+  async function startedSessionProvider(id: string) {
+    const resolved = providerRuntime.resolveSession(id);
+    return { ...resolved.entry, rawId: resolved.rawId, provider: await providerRuntime.ensure(resolved.entry) };
+  }
+
   async function clearProviderScopedRuntimeState(kind: string): Promise<void> {
-    const sessionIds = new Set<string>();
-    const sessionIdsNeedingIdleBroadcast = new Set<string>();
     const interruptedTurnIds = new Map<string, string>();
-    const isProviderSession = (sessionId: string): boolean =>
-      providerEntryForSessionId(sessionId)?.kind === kind;
-
     for (const sessionId of sessionState.keys()) {
-      if (!isProviderSession(sessionId)) continue;
-      sessionIds.add(sessionId);
-      const activeTurn = sessionState.get(sessionId).activeTurn;
-      if (activeTurn || hasPendingActionForSession(pendingActions, sessionId)) {
-        sessionIdsNeedingIdleBroadcast.add(sessionId);
-      }
-      if (activeTurn) interruptedTurnIds.set(sessionId, activeTurn.turnId);
-    }
-
-    await clearInterruptedSessionInputDedupe(interruptedTurnIds);
-    recentSessionsCache.clear();
-    for (const sessionId of sessionIds) {
-      const interruptedTurnId = interruptedTurnIds.get(sessionId);
-      if (interruptedTurnId) {
-        broadcastLive(sessionId, {
-          type: "turn_completed",
-          sessionId,
-          turnId: interruptedTurnId,
-          status: "interrupted",
-        });
-      }
-      sessionState.get(sessionId).activeTurn = null;
-      sessionState.get(sessionId).unverifiedTurn = false;
-      sessionState.get(sessionId).recoveredStatus = null;
-      sessionState.get(sessionId).activities.clear();
-      sessionState.clearDraft(sessionId);
-      sessionState.get(sessionId).runtime = null;
-
-      clearActionsForSession(
-        pendingActions,
-        sessionId,
-        broadcastLive,
-        broadcastApprovalLive,
-      );
-      if (sessionIdsNeedingIdleBroadcast.has(sessionId)) {
-        setLatestThreadStatusForSession(sessionId, "idle");
-        broadcastLive(sessionId, {
-          type: "thread_status_changed",
-          sessionId,
-          status: "idle",
-        });
-      }
+      const entry = providerEntryForSessionId(sessionId);
+      if ((entry?.id ?? entry?.kind) !== kind) continue;
+      const active = sessionState.get(sessionId).activeTurn;
+      if (active) interruptedTurnIds.set(sessionId, active.turnId);
+      sessionState.invalidate(sessionId);
       scheduleRecentSessionUpsert(sessionId, 0);
     }
+    await clearInterruptedSessionInputDedupe(interruptedTurnIds);
+    recentSessionsCache.clear();
   }
 
   async function getSessionCwd(sessionId: string): Promise<string | null> {
-    const sessionProvider = providerEntryForSessionId(sessionId);
+    const sessionProvider = await startedSessionProvider(sessionId);
     if (
       !sessionProvider ||
-      !hasProviderMethod(sessionProvider.provider, "readSessionThread")
+      !sessionProvider.provider.capabilities.sessions.history
     ) {
       return null;
     }
     const session = await readSession(
-      providerRuntime.provider,
+      providerRuntime,
       sessionId,
       false,
     ).catch(() => null);
     return session?.cwd || null;
   }
 
-  function mergeRuntimeSummary(
-    previous: SessionRuntimeSummary | null,
-    next: SessionRuntimeSummary | null,
-  ): SessionRuntimeSummary | null {
-    if (!previous) {
-      return next;
-    }
-    if (!next) {
-      return previous;
-    }
-    return {
-      ...previous,
-      ...next,
-      telemetry: {
-        ...(previous.telemetry ?? {}),
-        ...(next.telemetry ?? {}),
-      },
-    };
-  }
-
-  function pruneSessionInputDedupe(now = Date.now()): void {
-    for (const [key, entry] of sessionInputDedupe) {
-      if (
-        !entry.promise &&
-        now - entry.createdAt > SESSION_INPUT_DEDUPE_TTL_MS
-      ) {
-        sessionInputDedupe.delete(key);
-      }
-    }
-
-    if (sessionInputDedupe.size <= SESSION_INPUT_DEDUPE_LIMIT) {
-      return;
-    }
-    const stale = [...sessionInputDedupe.entries()]
-      .filter(([, entry]) => !entry.promise)
-      .sort((left, right) => left[1].createdAt - right[1].createdAt)
-      .slice(0, sessionInputDedupe.size - SESSION_INPUT_DEDUPE_LIMIT);
-    for (const [key] of stale) {
-      sessionInputDedupe.delete(key);
-    }
-  }
-
-  // Sequence values order transcript items, not reconnect recovery.
   function broadcastLive(sessionId: string, event: LiveEvent): LiveEvent {
-    const state = sessionState.get(sessionId);
-    const stamped: LiveEvent = {
-      ...event, seq: event.seq ?? allocSeq(sessionId), revision: ++state.revision,
-    };
-    broadcast(socketsBySession, sessionId, stamped);
-    return stamped;
+    return sessionState.publish({ ...event, sessionId });
+  }
+
+  function publishSessionEvent(event: LiveEvent): void {
+    if (closing) return;
+    broadcast(socketsBySession, event.sessionId, event, sessionSocketAliases);
+    if (event.type === "action_opened" && event.action) {
+      broadcastApprovalLive({ type: "action_opened", action: event.action });
+      void pushNotifications.enqueue({
+        kind: event.action.kind === "user_input" || event.action.kind === "elicitation" ? "input_required" : "approval_required",
+        sessionId: event.sessionId, actionId: event.action.id,
+      });
+    } else if (event.type === "action_resolved") {
+      broadcastApprovalLive({ type: "action_resolved", actionId: event.actionId });
+    } else if (event.type === "turn_completed") {
+      void pushNotifications.enqueue({ kind: /error|fail/i.test(event.status ?? "") ? "turn_failed" : "turn_completed",
+        sessionId: event.sessionId, turnId: event.turnId });
+      void indexSessionForSearch(searchIndex, sessionState, event.sessionId).catch(() => {});
+    }
+    if (!["assistant_delta", "reasoning_delta", "activity_updated", "plan_updated", "provider_warning"].includes(event.type)) {
+      scheduleRecentSessionUpsert(event.sessionId, 0);
+    }
   }
 
   function broadcastProviderWarning(event: {
@@ -867,6 +455,7 @@ export async function startServer(
       return;
     }
     for (const sessionId of socketsBySession.keys()) {
+      if (event.source && providerEntryForSessionId(sessionId)?.id !== event.source) continue;
       broadcastLive(sessionId, {
         type: "provider_warning",
         sessionId,
@@ -913,11 +502,10 @@ export async function startServer(
     }
 
     const promise = listSessions(
-      provider,
+      providerRuntime,
       sessionState,
       limit,
       runtimeMode,
-      sessionStatusOverrideForSnapshot,
     );
     recentSessionsCache.set(cacheKey, {
       limit,
@@ -927,6 +515,7 @@ export async function startServer(
     });
     try {
       const value = await promise;
+      if (recentSessionsCache.get(cacheKey)?.promise !== promise) return loadRecentSessions(limit, runtimeMode);
       recentSessionsCache.set(cacheKey, {
         limit,
         runtimeMode,
@@ -966,18 +555,12 @@ export async function startServer(
       broadcastRecentSessionsLive({ type: "remove", sessionId });
     } catch {
       try {
-        const thread = await readSession(provider, sessionId, false);
+        const thread = await readSession(providerRuntime, sessionId, false);
         if (sessionSubAgentForThread(thread)) {
           broadcastRecentSessionsLive({ type: "remove", sessionId });
           return;
         }
-        const session = await buildRecentSessionSummary(
-          provider,
-          sessionState,
-          thread,
-          "active",
-          sessionStatusOverrideForSnapshot,
-        );
+        const [session] = await buildRecentSessionSummaries(sessionState, [thread]);
         broadcastRecentSessionsLive({ type: "upsert", session });
       } catch {
         // The session may have been archived/removed before we could refresh it.
@@ -1017,280 +600,23 @@ export async function startServer(
   }
 
   const onProviderStderr = (line: string): void => { process.stderr.write(line); };
-  provider.on("stderr", onProviderStderr);
+  providerRuntime.on("stderr", onProviderStderr);
 
   const fsWatchRegistry = new FsWatchRegistry();
 
   const onProviderLiveEvent = (event: AgentProviderLiveEvent): void => {
-    switch (event.type) {
-      case "skills_changed":
-        broadcastSkillsChanged(socketsBySession);
-        return;
-      case "turn_started":
-        sessionState.get(event.sessionId).activities.clear();
-        sessionState.clearDraft(event.sessionId);
-        sessionState.get(event.sessionId).unverifiedTurn = false;
-        sessionState.get(event.sessionId).recoveredStatus = null;
-        sessionState.get(event.sessionId).activeTurn = {
-          turnId: event.turnId,
-          startedAt: Date.now(),
-        };
-        setLatestThreadStatusForSession(event.sessionId, "running");
-        broadcastLive(event.sessionId, {
-          type: "turn_started",
-          sessionId: event.sessionId,
-          turnId: event.turnId,
-        });
-        scheduleRecentSessionUpsert(event.sessionId, 0);
-        return;
-      case "assistant_delta":
-        sessionState.get(event.sessionId).assistantText += event.delta;
-        broadcastLive(event.sessionId, {
-          type: "assistant_delta",
-          sessionId: event.sessionId,
-          delta: event.delta,
-          turnId: event.turnId,
-          itemId: event.itemId,
-        });
-        return;
-      case "assistant_message_completed": {
-        sessionState.clearDraft(event.sessionId);
-        const seq = allocSeq(event.sessionId);
-        broadcastLive(event.sessionId, {
-          type: "assistant_message_completed",
-          sessionId: event.sessionId,
-          turnId: event.turnId,
-          seq,
-          messageItem: {
-            id: event.message.id,
-            role: "assistant",
-            text: event.message.text,
-            content: event.message.content ?? [],
-            attachments: [],
-            createdAt: Date.now(),
-            seq,
-            phase: event.message.phase,
-          },
-        });
-        scheduleRecentSessionUpsert(event.sessionId);
-        return;
-      }
-      case "activity_updated": {
-        const next = sessionState.updateActivity(event.sessionId, event.activity, () => allocSeq(event.sessionId));
-        broadcastLive(event.sessionId, {
-          type: "activity_updated",
-          sessionId: event.sessionId,
-          turnId: event.turnId,
-          activity: next,
-        });
-        return;
-      }
-      case "activity_output_delta": {
-        const next = sessionState.appendOutput(
-          event.sessionId,
-          event.activityId,
-          event.delta,
-        );
-        if (next) {
-          broadcastLive(event.sessionId, {
-            type: "activity_updated",
-            sessionId: event.sessionId,
-            turnId: event.turnId,
-            activity: next,
-          });
-        }
-        return;
-      }
-      case "activity_terminal_input": {
-        const next = sessionState.terminalInput(
-          event.sessionId,
-          event.activityId,
-          event.stdin,
-        );
-        if (next) {
-          broadcastLive(event.sessionId, {
-            type: "activity_updated",
-            sessionId: event.sessionId,
-            turnId: event.turnId,
-            activity: next,
-          });
-        }
-        return;
-      }
-      case "runtime_updated": {
-        const previousRuntime =
-          sessionState.get(event.sessionId).runtime?.runtime ??
-          null;
-        const runtime = mergeRuntimeSummary(previousRuntime, event.runtime);
-        sessionState.get(event.sessionId).runtime = {
-          threadUpdatedAt: Date.now() / 1000,
-          runtime,
-        };
-        broadcastLive(event.sessionId, {
-          type: "runtime_updated",
-          sessionId: event.sessionId,
-          runtime: runtime ?? undefined,
-        });
-        scheduleRecentSessionUpsert(event.sessionId, 0);
-        return;
-      }
-      case "provider_warning": {
-        broadcastProviderWarning(event);
-        return;
-      }
-      case "thread_status_changed": {
-        const status = reconciledThreadStatus(event.sessionId, event.status);
-        setLatestThreadStatusForSession(event.sessionId, status);
-        broadcastLive(event.sessionId, {
-          type: "thread_status_changed",
-          sessionId: event.sessionId,
-          status,
-          message: event.message,
-          pendingActionKind: event.pendingActionKind,
-        });
-        scheduleRecentSessionUpsert(event.sessionId, 0);
-        return;
-      }
-      case "plan_updated": {
-        const stamped = broadcastLive(event.sessionId, {
-          type: "plan_updated",
-          sessionId: event.sessionId,
-          turnId: event.turnId,
-          explanation: event.explanation,
-          plan: event.plan,
-        });
-        setLatestPlanUpdateForSession(
-          event.sessionId,
-          stamped.type === "plan_updated"
-            ? {
-                type: "plan_updated",
-                sessionId: event.sessionId,
-                seq: stamped.seq,
-                turnId: stamped.turnId,
-                explanation: stamped.explanation,
-                plan: stamped.plan ?? event.plan,
-              }
-            : null,
-        );
-        return;
-      }
-      case "reasoning_delta": {
-        sessionState.get(event.sessionId).assistantReasoning += event.delta;
-        broadcastLive(event.sessionId, {
-          type: "reasoning_delta",
-          sessionId: event.sessionId,
-          turnId: event.turnId,
-          itemId: event.itemId,
-          reasoningId: event.reasoningId,
-          delta: event.delta,
-          summary: event.summary,
-        });
-        return;
-      }
-      case "queue_updated": {
-        broadcastLive(event.sessionId, {
-          type: "queue_updated",
-          sessionId: event.sessionId,
-          steeringCount: event.steeringCount,
-          followUpCount: event.followUpCount,
-          steeringPreview: event.steeringPreview,
-          followUpPreview: event.followUpPreview,
-        });
-        return;
-      }
-      case "auto_retry_updated": {
-        broadcastLive(event.sessionId, {
-          type: "auto_retry_updated",
-          sessionId: event.sessionId,
-          phase: event.phase,
-          attempt: event.attempt,
-          maxAttempts: event.maxAttempts,
-          delayMs: event.delayMs,
-          errorMessage: event.errorMessage,
-          success: event.success,
-          finalError: event.finalError,
-        });
-        return;
-      }
-      case "turn_completed":
-        sessionState.clearDraft(event.sessionId);
-        // Broadcast the completion first so any concurrent snapshot reader
-        // sees both the provider-flushed history AND the live state still in
-        // memory. Clearing liveActivities before the broadcast can briefly
-        // leave both the snapshot and live stream blank for a second client.
-        broadcastLive(event.sessionId, {
-          type: "turn_completed",
-          sessionId: event.sessionId,
-          turnId: event.turnId,
-          status: event.status,
-        });
-        void pushNotifications.enqueue({
-          kind: /error|fail/i.test(event.status)
-            ? "turn_failed"
-            : "turn_completed",
-          sessionId: event.sessionId,
-          turnId: event.turnId,
-        });
-        clearActionsForSession(
-          pendingActions,
-          event.sessionId,
-          broadcastLive,
-          broadcastApprovalLive,
-        );
-        sessionState.get(event.sessionId).activeTurn = null;
-        sessionState.get(event.sessionId).unverifiedTurn = false;
-        sessionState.get(event.sessionId).recoveredStatus = null;
-        setLatestThreadStatusForSession(
-          event.sessionId,
-          event.status === "errored" ? "errored" : "idle",
-        );
-        // Keep the finished tool overlay until provider history catches up.
-        // A snapshot may have started reading just before this completion.
-
-        scheduleRecentSessionUpsert(event.sessionId, 0);
-        void indexSessionForSearch(searchIndex, providerRuntime, event.sessionId).catch(() => {});
-        // Transcript order remains stable across turns.
-        return;
-      case "action_opened":
-        pendingActions.set(event.action.id, event.action);
-        setLatestThreadStatusForSession(
-          event.action.sessionId,
-          "waiting_for_approval",
-        );
-        const publicAction = toPublicPendingAction(event.action);
-        broadcastLive(event.action.sessionId, {
-          type: "action_opened",
-          sessionId: event.action.sessionId,
-          action: publicAction,
-        });
-        broadcastApprovalLive({
-          type: "action_opened",
-          action: publicAction,
-        });
-        void pushNotifications.enqueue({
-          kind:
-            event.action.kind === "user_input" ||
-            event.action.kind === "elicitation"
-              ? "input_required"
-              : "approval_required",
-          sessionId: event.action.sessionId,
-          actionId: event.action.id,
-        });
-        scheduleRecentSessionUpsert(event.action.sessionId);
-        return;
-    }
+    if (event.type === "skills_changed") { broadcastSkillsChanged(socketsBySession); return; }
+    if (event.type === "provider_warning" && !event.sessionId) { broadcastProviderWarning(event); return; }
+    sessionState.handle(event);
   };
-  provider.on("liveEvent", onProviderLiveEvent);
+  providerRuntime.on("liveEvent", onProviderLiveEvent);
 
-  for (const entry of providerRuntime.providers) {
-    providerVersions.set(
-      entry.kind,
-      await entry.provider.getVersion().catch(() => "unknown"),
-    );
-  }
-  providerVersion =
-    providerVersions.get(providerRuntime.defaultProviderKind) ??
-    (await provider.getVersion().catch(() => "unknown"));
+  const onProviderState = (entry: AgentProviderRuntimeEntry): void => {
+    if (entry.state === "unavailable" || entry.state === "starting") void clearProviderScopedRuntimeState(entry.id);
+    if (entry.state === "unavailable") broadcastProviderWarning({ level: "error",
+      code: "provider_unavailable", message: `${entry.displayName}: ${entry.error}`, source: entry.id });
+  };
+  providerRuntime.on("state", onProviderState);
 
   try {
     const detected = await dependencies.detectInstallInfo({ config: runtimeConfig });
@@ -1340,18 +666,9 @@ export async function startServer(
     onError: (c) => c.json({ error: "payload too large" }, 413),
   }));
 
-  app.get("/healthz", jsonRoute(async (_request, response) => {
-    const providerHealthy = await probeProviderHealth(provider, 3_000);
-    if (providerHealthy) {
-      response.json({ ok: true, label: config.label });
-      return;
-    }
-    response.status(503).json({
-      ok: false,
-      label: config.label,
-      error: "provider unreachable",
-    });
-  }));
+  app.get("/healthz", (c) => {
+    return jsonResponse(c, { ok: true, label: config.label });
+  });
 
   const authMiddleware = createMiddleware<HonoServerEnv>(async (c, next) => {
     if (isHealthCheckPath(c.req.path)) {
@@ -1366,34 +683,51 @@ export async function startServer(
     await next();
   });
   app.use("*", authMiddleware);
+  app.use("/api/sessions/:sessionId/*", async (c, next) => {
+    if (c.req.path.split("/").length < 5) { await next(); return; }
+    const alias = c.req.param("sessionId");
+    const canonical = providerRuntime.resolveSession(alias).sessionId;
+    await next();
+    if (alias === canonical || !c.res.headers.get("content-type")?.includes("application/json")) return;
+    const body = JSON.stringify(withSessionAlias(await c.res.clone().json(), canonical, alias));
+    const headers = new Headers(c.res.headers);
+    headers.set("content-length", String(Buffer.byteLength(body)));
+    c.header("content-length", String(Buffer.byteLength(body)));
+    c.res = new Response(body, { status: c.res.status, statusText: c.res.statusText, headers });
+  });
   registerHostResourceRoutes(app);
 
-  app.get("/api/node", jsonRoute((_request, response) => {
+  app.get("/api/node", (c) => {
     const defaultProvider = providerRuntime.defaultProvider;
-    const defaultProviderCapabilities = defaultProvider.provider.capabilities;
+    const defaultProviderCapabilities = defaultProvider.capabilities;
     const supportedProviders = providerRuntime.providers.map((entry) => ({
       ...entry.definitionSummary,
+      id: entry.id ?? entry.kind,
       config: entry.configSummary,
-      capabilities: entry.provider.capabilities,
-      version: providerVersions.get(entry.kind) ?? "unknown",
-      isDefault: entry.kind === providerRuntime.defaultProviderKind,
+      capabilities: entry.capabilities,
+      version: entry.version ?? "unknown",
+      state: entry.state,
+      error: entry.error,
+      isDefault: entry === providerRuntime.defaultProvider,
     }));
-    response.json({
+    return jsonResponse(c, {
       label: config.label,
       hostname: hostname(),
       platform: platform(),
       homeDirectory: homedir(),
       provider: providerRuntime.defaultProviderKind,
+      providerId: providerRuntime.defaultProviderId ?? providerRuntime.defaultProviderKind,
       providerName:
         supportedProviders.find((item) => item.isDefault)?.displayName ??
-        defaultProvider.provider.displayName,
-      providerVersion,
+        defaultProvider.displayName,
+      providerVersion: defaultProvider.version ?? "unknown",
       providerConfig: defaultProvider.configSummary,
       defaultProviderCapabilities,
       hostCapabilities,
       searchSessions: hostCapabilities.sessions.search,
       searchIndexStats: searchIndex.getStats(),
       supportedProviders,
+      sessionAliases: providerRuntime.sessionAliases,
       startedAt: process.uptime(),
       tokenSource: config.tokenSource,
       packageVersion: installInfo.packageVersion,
@@ -1408,53 +742,58 @@ export async function startServer(
         config.recommendedMobileClientVersion ?? null,
       minimumMobileClientVersion: config.minimumMobileClientVersion ?? null,
     });
-  }));
+  });
 
   app.post(
     "/api/admin/update-check",
-    asyncRoute(async (_request, response) => {
+    async (c) => {
       const result = await refreshInstallInfo({ force: true });
-      response.json(updateInfoPayload(result));
-    }),
+      return jsonResponse(c, updateInfoPayload(result));
+    },
   );
 
   app.get(
     "/api/admin/update-status",
-    asyncRoute(async (_request, response) => {
-      response.json({
+    async (c) => {
+      return jsonResponse(c, {
         ok: true,
         update: await dependencies.readUpdateStatus(runtimeConfig.stateDir),
       });
-    }),
+    },
   );
 
-  app.get("/api/providers", jsonRoute((_request, response) => {
-    response.json({
+  app.get("/api/providers", (c) => {
+    return jsonResponse(c, {
       currentProvider: providerRuntime.defaultProviderKind,
+      currentProviderId: providerRuntime.defaultProviderId,
+      sessionAliases: providerRuntime.sessionAliases,
       providers: providerRuntime.providers.map((entry) => ({
         ...entry.definitionSummary,
+        id: entry.id ?? entry.kind,
         config: entry.configSummary,
-        capabilities: entry.provider.capabilities,
-        version: providerVersions.get(entry.kind) ?? "unknown",
-        isDefault: entry.kind === providerRuntime.defaultProviderKind,
+        capabilities: entry.capabilities,
+        version: entry.version ?? "unknown",
+      state: entry.state,
+      error: entry.error,
+        isDefault: entry === providerRuntime.defaultProvider,
       })),
     });
-  }));
+  });
 
-  app.get("/api/push/subscriptions", jsonRoute((_request, response) => {
-    response.json({ subscriptions: pushNotifications.listSubscriptions() });
-  }));
+  app.get("/api/push/subscriptions", (c) => {
+    return jsonResponse(c, { subscriptions: pushNotifications.listSubscriptions() });
+  });
 
   app.post(
     "/api/push/subscriptions",
-    asyncRoute(async (request, response) => {
-      const installationId = asString(request.body?.installationId);
-      const hostId = asString(request.body?.hostId);
-      const relayUrl = asString(request.body?.relayUrl);
-      const publishToken = asString(request.body?.publishToken);
+    async (c) => {
+      const body = await readJsonBody(c);
+      const installationId = asString(body?.installationId);
+      const hostId = asString(body?.hostId);
+      const relayUrl = asString(body?.relayUrl);
+      const publishToken = asString(body?.publishToken);
       if (!installationId || !hostId || !relayUrl || !publishToken) {
-        response.status(400).json({ error: "invalid push subscription" });
-        return;
+        return jsonResponse(c, { error: "invalid push subscription" }, 400);
       }
       try {
         const subscription = await pushNotifications.upsertSubscription({
@@ -1463,30 +802,30 @@ export async function startServer(
           relayUrl,
           publishToken,
         });
-        response.json({ ok: true, subscription });
+        return jsonResponse(c, { ok: true, subscription });
       } catch (error) {
-        response.status(400).json({
+        return jsonResponse(c, {
           error:
             error instanceof Error
               ? error.message
               : "invalid push subscription",
-        });
+        }, 400);
       }
-    }),
+    },
   );
 
   app.delete(
     "/api/push/subscriptions/:installationId",
-    asyncRoute(async (request, response) => {
-      const installationId = pathParam(request.params.installationId);
+    async (c) => {
+      const installationId = (c.req.param("installationId") ?? "");
       const removed = await pushNotifications.removeSubscription(installationId);
-      response.status(removed ? 200 : 404).json({ ok: removed });
-    }),
+      return jsonResponse(c, { ok: removed }, removed ? 200 : 404);
+    },
   );
 
   app.get(
     "/api/usage",
-    asyncRoute(async (_request, response) => {
+    async (c) => {
       const generatedAt = Date.now();
       const observations = await collectUsageObservations(
         providerRuntime,
@@ -1502,11 +841,11 @@ export async function startServer(
         },
         observations,
       };
-      response.json(payload);
-    }),
+      return jsonResponse(c, payload);
+    },
   );
 
-  app.get("/api/diagnostics", jsonRoute((_request, response) => {
+  app.get("/api/diagnostics", (c) => {
     let sessionLiveSockets = 0;
     for (const sockets of socketsBySession.values()) {
       sessionLiveSockets += sockets.size;
@@ -1516,12 +855,13 @@ export async function startServer(
       liveActivityItems += activities.size;
     }
 
-    response.json({
+    return jsonResponse(c, {
       label: config.label,
       hostname: hostname(),
       platform: platform(),
       uptimeSeconds: Math.round(process.uptime()),
       provider: providerRuntime.defaultProviderKind,
+      providerId: providerRuntime.defaultProviderId ?? providerRuntime.defaultProviderKind,
       memory: process.memoryUsage(),
       resourceUsage: process.resourceUsage(),
       caches: {
@@ -1531,7 +871,7 @@ export async function startServer(
         activeTurns: [...sessionState.values()].filter((state) => state.activeTurn).length,
         pendingActions: pendingActions.size,
         liveActivityItems,
-        inputDedupe: sessionInputDedupe.size,
+        inputDedupe: sessionStore.inputCount(),
       },
       sockets: {
         sessionRooms: socketsBySession.size,
@@ -1544,39 +884,39 @@ export async function startServer(
         browserPreviews: browserPreviewRegistry.list().length,
       },
     });
-  }));
+  });
 
-  app.get("/api/debug/codex-rpc-audit", jsonRoute((_request, response) => {
-    response.json(getCodexRpcAuditSnapshot());
-  }));
+  app.get("/api/debug/codex-rpc-audit", (c) => {
+    return jsonResponse(c, getCodexRpcAuditSnapshot());
+  });
 
   app.post(
     "/api/admin/provider/:kind/restart",
-    asyncRoute(async (request, response) => {
-      const kind = Array.isArray(request.params.kind) ? request.params.kind[0] : request.params.kind;
-      if (!isAgentProviderKind(kind)) {
-        response.status(400).json({ error: "unknown provider kind" });
-        return;
-      }
+    async (c) => {
+      const kind = c.req.param("kind");
       const selectedProvider = providerRuntime.providerForKind(kind);
-      if (
-        !selectedProvider ||
-        !selectedProvider.provider.capabilities.lifecycle.restart ||
-        !selectedProvider.provider.restart
-      ) {
-        response.status(501).json({ error: "provider does not support restart" });
-        return;
+      if (!selectedProvider) {
+        return jsonResponse(c, { error: "unknown provider kind" }, 400);
       }
-      await selectedProvider.provider.restart();
-      await clearProviderScopedRuntimeState(kind);
-      response.json({ ok: true, kind });
-    }),
+      await providerRuntime.restart(selectedProvider);
+      await clearProviderScopedRuntimeState(selectedProvider.id ?? selectedProvider.kind);
+      return jsonResponse(c, { ok: true, kind });
+    },
   );
+
+  app.post("/api/admin/provider/:kind/logout", async (c) => {
+    const selected = providerRuntime.providerForKind(c.req.param("kind"));
+    if (!selected) return jsonResponse(c, { error: "unknown provider kind" }, 400);
+    const provider = await providerRuntime.ensure(selected);
+    requireProviderCapability(provider, provider.capabilities.lifecycle.logout === true, "sign-out", "logout");
+    await requireProviderMethod(provider, "logout", "sign-out").call(provider);
+    return jsonResponse(c, { ok: true });
+  });
 
   app.post(
     "/api/admin/restart",
-    asyncRoute(async (_request, response) => {
-      response.json({ ok: true, message: "daemon is restarting" });
+    async (c) => {
+      const response = jsonResponse(c, { ok: true, message: "daemon is restarting" });
       setTimeout(async () => {
         try {
           await runningServerRef!.close();
@@ -1584,16 +924,17 @@ export async function startServer(
           dependencies.exitProcess(0);
         }
       }, 100);
-    }),
+      return response;
+    },
   );
 
   app.post(
     "/api/admin/update-channel",
-    asyncRoute(async (request, response) => {
-      const requestedChannel = parseUpdateChannel(request.body?.channel);
+    async (c) => {
+      const body = await readJsonBody(c);
+      const requestedChannel = parseUpdateChannel(body?.channel);
       if (requestedChannel === null) {
-        response.status(400).json({ error: "channel must be stable or bleeding-edge" });
-        return;
+        return jsonResponse(c, { error: "channel must be stable or bleeding-edge" }, 400);
       }
 
       const nextConfig: NodeConfig = {
@@ -1606,24 +947,24 @@ export async function startServer(
 
       const result = await refreshInstallInfo({ force: true });
 
-      response.json({
+      return jsonResponse(c, {
         ...updateInfoPayload(result),
         ok: true,
       });
-    }),
+    },
   );
 
   app.post(
     "/api/admin/update",
-    asyncRoute(async (request, response) => {
-      const requestedChannelRaw = request.body?.channel;
+    async (c) => {
+      const body = await readJsonBody(c);
+      const requestedChannelRaw = body?.channel;
       const requestedChannel =
         requestedChannelRaw === undefined
           ? null
           : parseUpdateChannel(requestedChannelRaw);
       if (requestedChannelRaw !== undefined && requestedChannel === null) {
-        response.status(400).json({ error: "channel must be stable or bleeding-edge" });
-        return;
+        return jsonResponse(c, { error: "channel must be stable or bleeding-edge" }, 400);
       }
 
       const effectiveConfig =
@@ -1641,8 +982,7 @@ export async function startServer(
       await refreshInstallInfo({ force: true });
       const info = installInfo;
       if (!info.updateSupported) {
-        response.status(501).json({ error: "update not supported for this install type" });
-        return;
+        return jsonResponse(c, { error: "update not supported for this install type" }, 501);
       }
 
       let update;
@@ -1652,79 +992,72 @@ export async function startServer(
         });
       } catch (error) {
         if (error instanceof UpdateAlreadyInProgressError) {
-          response.status(409).json({
+          return jsonResponse(c, {
             error: error.message,
             updateId: error.updateId,
-          });
-          return;
+          }, 409);
         }
         throw error;
       }
 
-      response.json({ ok: true, message: "daemon is updating", update });
-    }),
+      return jsonResponse(c, { ok: true, message: "daemon is updating", update });
+    },
   );
 
   app.get(
     "/api/sessions",
-    asyncRoute(async (_request, response) => {
-      if (
-        !requireProviderCapability(
-          response,
-          provider,
-          provider.capabilities.sessions.history,
-          "session history",
-          "listSessionThreads",
-        )
-      ) {
-        return;
+    async (c) => {
+      if (!providerRuntime.providers.some((entry) => entry.capabilities.sessions.history)) {
+        return jsonResponse(c, { error: "No provider supports session history" }, 501);
       }
       const requestedLimit = asInteger(
-        (_request.query as Record<string, unknown>)?.limit,
+        readQuery(c)?.limit,
       );
       const runtimeMode = parseSessionRuntimeListMode(
-        (_request.query as Record<string, unknown>)?.runtime,
+        readQuery(c)?.runtime,
       );
       const sessions = await loadRecentSessions(requestedLimit, runtimeMode);
-      response.json(sessions);
-    }),
+      return jsonResponse(c, sessions);
+    },
   );
 
   app.get(
     "/api/sessions/search",
-    asyncRoute(async (request, response) => {
+    async (c) => {
       if (!hostCapabilities.sessions.search) {
-        response.status(503).json({ error: "Session search is not available" });
-        return;
+        return jsonResponse(c, { error: "Session search is not available" }, 503);
       }
-      const rawQuery = asString((request.query as Record<string, unknown>)?.q);
+      const query = readQuery(c);
+      const rawQuery = asString(query.q);
       const normalizedQuery = rawQuery?.trim() ?? "";
-      const limit = Math.min(
-        asInteger((request.query as Record<string, unknown>)?.limit) ?? 20,
+      const limit = Math.max(1, Math.min(
+        asInteger(query.limit) ?? 20,
         100,
-      );
+      ));
       if (normalizedQuery.length < 2) {
         const hasFilters =
-          asString((request.query as Record<string, unknown>)?.provider) ||
-          asString((request.query as Record<string, unknown>)?.cwd) ||
-          (request.query as Record<string, unknown>)?.archived !== undefined ||
-          asString((request.query as Record<string, unknown>)?.updatedAfter) ||
-          asString((request.query as Record<string, unknown>)?.updatedBefore);
+          asString(query.providerId) ||
+          asString(query.provider) ||
+          asString(query.cwd) ||
+          query.archived !== undefined ||
+          asString(query.updatedAfter) ||
+          asString(query.updatedBefore);
         if (!hasFilters) {
-          response.status(400).json({ error: "Query must be at least 2 characters" });
-          return;
+          return jsonResponse(c, { error: "Query must be at least 2 characters" }, 400);
         }
       }
-      const filter: SearchFilter = {};
-      const providerFilter = asString((request.query as Record<string, unknown>)?.provider);
+      const filter: SearchFilter = { providerIds: providerRuntime.providers.map((entry) => entry.id) };
+      const providerId = asString(query.providerId);
+      if (providerId) filter.providerId = providerId;
+      const providerFilter = asString(query.provider);
       if (providerFilter) {
         filter.providerKind = providerFilter;
       }
-      const cwdFilter = asString((request.query as Record<string, unknown>)?.cwd);
+      const cwdFilter = asString(query.cwd);
       if (cwdFilter) {
         filter.cwd = cwdFilter;
       }
-      const archivedFilter = (request.query as Record<string, unknown>)?.archived;
+      const archivedFilter = query.archived;
       if (archivedFilter === "true") {
         filter.archived = true;
       } else if (archivedFilter === "false") {
@@ -1732,95 +1065,41 @@ export async function startServer(
       } else {
         filter.archived = false;
       }
-      const updatedAfter = parseTimestamp((request.query as Record<string, unknown>)?.updatedAfter);
+      const updatedAfter = parseTimestamp(query.updatedAfter);
       if (updatedAfter != null) {
         filter.updatedAfter = updatedAfter;
       }
-      const updatedBefore = parseTimestamp((request.query as Record<string, unknown>)?.updatedBefore);
+      const updatedBefore = parseTimestamp(query.updatedBefore);
       if (updatedBefore != null) {
         filter.updatedBefore = updatedBefore;
       }
-      const searchResults = await searchIndex.search(
-        normalizedQuery,
-        Math.min(limit * 3, 300),
-        filter,
-      );
-      const sessionsById = new Map<string, SessionSummary>();
-      await Promise.all(
-        searchResults.map(async (result) => {
-          if (!providerEntryForSessionId(result.sessionId)) {
-            return null;
-          }
-          const thread = await readSession(provider, result.sessionId, false).catch(() => null);
-          if (!thread) {
-            return null;
-          }
-          if (sessionSubAgentForThread(thread)) {
-            await searchIndex.remove(result.sessionId).catch(() => undefined);
-            return null;
-          }
-          const runtime = await loadCachedSessionRuntime(provider, thread, sessionState, "active");
-          const session = mapSession(
-            thread,
-            runtime,
-            await sessionStatusOverrideForSnapshot(thread.id),
-          );
-          const summary: SessionSummary = {
-            ...session,
-            matchSnippet: result.snippet ?? null,
-            matchRank: result.rank,
-          };
-          const existing = sessionsById.get(summary.id);
-          if (!existing || compareSessionSearchSummary(summary, existing) < 0) {
-            sessionsById.set(summary.id, summary);
-          }
-          return null;
-        }),
-      );
-      const sessions = [...sessionsById.values()]
-        .sort(compareSessionSearchSummary)
-        .slice(0, limit);
-      response.json(sessions);
-    }),
+      await ensureSearchBackfill();
+      const searchResults = await searchIndex.search(normalizedQuery, limit, filter);
+      const sessions = searchResults.map((result) => ({
+        ...sessionState.projectSummary(result.session), matchSnippet: result.snippet, matchRank: result.rank,
+      }));
+      return jsonResponse(c, sessions);
+    },
   );
 
   app.get(
     "/api/sessions/:sessionId/agent-runs",
-    asyncRoute(async (request, response) => {
-      const sessionId = pathParam(request.params.sessionId);
-      const sessionProvider = providerEntryForSessionId(sessionId);
+    async (c) => {
+      const sessionId = providerRuntime.resolveSession((c.req.param("sessionId") ?? "")).sessionId;
+      const sessionProvider = await startedSessionProvider(sessionId);
       if (!sessionProvider) {
-        response.status(400).json({ error: "unknown provider" });
-        return;
+        return jsonResponse(c, { error: "unknown provider" }, 400);
       }
-      if (
-        !requireProviderCapability(
-          response,
-          sessionProvider.provider,
-          sessionProvider.provider.capabilities.sessions.history,
-          "agent runs",
-          "listSessionThreads",
-        )
-      ) {
-        return;
-      }
+      requireProviderCapability(sessionProvider.provider, sessionProvider.provider.capabilities.sessions.history, "agent runs", "listSessionThreads");
       const requestedLimit = Math.max(
         1,
         Math.min(
-          asInteger((request.query as Record<string, unknown>)?.limit) ?? 100,
+          asInteger(readQuery(c)?.limit) ?? 100,
           200,
         ),
       );
-      const listThreads = requireProviderMethod(
-        provider,
-        "listSessionThreads",
-        "agent runs",
-      );
-      const threads = await listThreads.call(provider, {
-        limit: requestedLimit,
-        archived: false,
-        includeSubAgents: true,
-        subAgentParentId: sessionId,
+      const threads = await listProviderThreads(providerRuntime, {
+        limit: requestedLimit, archived: false, includeSubAgents: true, subAgentParentId: sessionId,
       });
       const runs = threads
         .map(mapAgentRun)
@@ -1830,37 +1109,28 @@ export async function startServer(
         )
         .sort((left, right) => right.updatedAt - left.updatedAt)
         .slice(0, requestedLimit);
-      response.json(runs);
-    }),
+      return jsonResponse(c, runs);
+    },
   );
 
   app.get(
     "/api/workspaces",
-    asyncRoute(async (_request, response) => {
-      if (
-        !requireProviderCapability(
-          response,
-          provider,
-          provider.capabilities.sessions.history,
-          "workspace history",
-          "listSessionThreads",
-        )
-      ) {
-        return;
+    async (c) => {
+      if (!providerRuntime.providers.some((entry) => entry.capabilities.sessions.history)) {
+        return jsonResponse(c, { error: "No provider supports workspace history" }, 501);
       }
       const sessions = await loadRecentSessions(null, "none");
-      response.json(buildWorkspaces(sessions));
-    }),
+      return jsonResponse(c, buildWorkspaces(sessions));
+    },
   );
 
   registerFsRoutes(app, {
     listSessions: () =>
       listSessions(
-        provider,
+        providerRuntime,
         sessionState,
         null,
         "none",
-        sessionStatusOverrideForDisplay,
       ),
     getSessionCwd,
     workspaceRoots: config.workspaceRoots,
@@ -1868,16 +1138,15 @@ export async function startServer(
   registerSessionArtifactRoutes(app, {
     stateDir: config.stateDir,
     isReferenced: async (sessionId, source) => {
-      const sessionProvider = providerEntryForSessionId(sessionId);
+      const sessionProvider = await startedSessionProvider(sessionId);
       if (
         !sessionProvider ||
-        !hasProviderMethod(sessionProvider.provider, "readSessionThread") ||
+        !sessionProvider.provider.capabilities.sessions.history ||
         !hasProviderMethod(sessionProvider.provider, "readSessionLog")
       ) {
         return false;
       }
       const resources = await readSessionResources(
-        provider,
         sessionId,
         sessionState,
       );
@@ -1891,450 +1160,236 @@ export async function startServer(
     },
   });
 
-  app.get("/api/terminals", jsonRoute((_request, response) => {
-    if (
-      !requireHostCapability(
-        response,
-        hostCapabilities.workspace.terminal,
-        "integrated terminal",
-      )
-    ) {
-      return;
-    }
-    response.json({ terminals: terminalRegistry.list() });
-  }));
+  app.get("/api/terminals", (c) => {
+    requireHostCapability(hostCapabilities.workspace.terminal, "integrated terminal");
+    return jsonResponse(c, { terminals: terminalRegistry.list() });
+  });
 
   app.post(
     "/api/terminals",
-    asyncRoute(async (request, response) => {
-      if (
-        !requireHostCapability(
-          response,
-          hostCapabilities.workspace.terminal,
-          "integrated terminal",
-        )
-      ) {
-        return;
-      }
-      const cwd = asString(request.body?.cwd);
+    async (c) => {
+      const body = await readJsonBody(c);
+      requireHostCapability(hostCapabilities.workspace.terminal, "integrated terminal");
+      const cwd = asString(body?.cwd);
       if (!cwd) {
-        response.status(400).json({ error: "cwd is required" });
-        return;
+        return jsonResponse(c, { error: "cwd is required" }, 400);
       }
       const terminal = await terminalRegistry.create({
         cwd,
-        title: asString(request.body?.title),
-        sessionId: asString(request.body?.sessionId),
-        cols: asInteger(request.body?.cols),
-        rows: asInteger(request.body?.rows),
-        replaceExisting: request.body?.replaceExisting === true,
+        title: asString(body?.title),
+        sessionId: asString(body?.sessionId),
+        cols: asInteger(body?.cols),
+        rows: asInteger(body?.rows),
+        replaceExisting: body?.replaceExisting === true,
       });
-      response.status(201).json(terminal);
-    }),
+      return jsonResponse(c, terminal, 201);
+    },
   );
 
   app.post(
     "/api/terminals/:terminalId/resize",
-    asyncRoute(async (request, response) => {
-      if (
-        !requireHostCapability(
-          response,
-          hostCapabilities.workspace.terminal,
-          "integrated terminal",
-        )
-      ) {
-        return;
-      }
-      const terminalId = pathParam(request.params.terminalId);
-      response.json(
-        terminalRegistry.resize(
+    async (c) => {
+      const body = await readJsonBody(c);
+      requireHostCapability(hostCapabilities.workspace.terminal, "integrated terminal");
+      const terminalId = (c.req.param("terminalId") ?? "");
+      return jsonResponse(c, terminalRegistry.resize(
           terminalId,
-          asInteger(request.body?.cols),
-          asInteger(request.body?.rows),
-        ),
-      );
-    }),
+          asInteger(body?.cols),
+          asInteger(body?.rows),
+        ));
+    },
   );
 
   app.post(
     "/api/terminals/:terminalId/kill",
-    asyncRoute(async (request, response) => {
-      if (
-        !requireHostCapability(
-          response,
-          hostCapabilities.workspace.terminal,
-          "integrated terminal",
-        )
-      ) {
-        return;
-      }
-      response.json(terminalRegistry.kill(pathParam(request.params.terminalId)));
-    }),
+    async (c) => {
+      requireHostCapability(hostCapabilities.workspace.terminal, "integrated terminal");
+      return jsonResponse(c, terminalRegistry.kill((c.req.param("terminalId") ?? "")));
+    },
   );
 
-  app.get("/api/browser-previews", jsonRoute((_request, response) => {
-    if (
-      !requireHostCapability(
-        response,
-        hostCapabilities.workspace.browserPreview,
-        "browser",
-      )
-    ) {
-      return;
-    }
-    response.json({ previews: browserPreviewRegistry.list() });
-  }));
+  app.get("/api/browser-previews", (c) => {
+    requireHostCapability(hostCapabilities.workspace.browserPreview, "browser");
+    return jsonResponse(c, { previews: browserPreviewRegistry.list() });
+  });
 
   app.post(
     "/api/browser-previews",
-    asyncRoute(async (request, response) => {
-      if (
-        !requireHostCapability(
-          response,
-          hostCapabilities.workspace.browserPreview,
-          "browser",
-        )
-      ) {
-        return;
-      }
+    async (c) => {
+      const body = await readJsonBody(c);
+      requireHostCapability(hostCapabilities.workspace.browserPreview, "browser");
       const preview = await browserPreviewRegistry.create({
-        targetPort: asInteger(request.body?.targetPort),
-        targetHost: asString(request.body?.targetHost),
-        targetUrl: asString(request.body?.targetUrl),
-        scheme: asString(request.body?.scheme),
-        label: asString(request.body?.label),
-        cwd: asString(request.body?.cwd),
-        sessionId: asString(request.body?.sessionId),
-        width: asInteger(request.body?.width),
-        height: asInteger(request.body?.height),
-        profileMode: asString(request.body?.profileMode),
-        reuseExisting: asBoolean(request.body?.reuseExisting),
+        targetPort: asInteger(body?.targetPort),
+        targetHost: asString(body?.targetHost),
+        targetUrl: asString(body?.targetUrl),
+        scheme: asString(body?.scheme),
+        label: asString(body?.label),
+        cwd: asString(body?.cwd),
+        sessionId: asString(body?.sessionId),
+        width: asInteger(body?.width),
+        height: asInteger(body?.height),
+        profileMode: asString(body?.profileMode),
+        reuseExisting: asBoolean(body?.reuseExisting),
       });
-      response.status(201).json(preview);
-    }),
+      return jsonResponse(c, preview, 201);
+    },
   );
 
   app.delete(
     "/api/browser-previews/:previewId",
-    asyncRoute(async (request, response) => {
-      if (
-        !requireHostCapability(
-          response,
-          hostCapabilities.workspace.browserPreview,
-          "browser",
-        )
-      ) {
-        return;
-      }
-      response.json(
-        await browserPreviewRegistry.stop(pathParam(request.params.previewId)),
-      );
-    }),
+    async (c) => {
+      requireHostCapability(hostCapabilities.workspace.browserPreview, "browser");
+      return jsonResponse(c, await browserPreviewRegistry.stop((c.req.param("previewId") ?? "")));
+    },
   );
 
   app.get(
     "/api/actions",
-    asyncRoute(async (_request, response) => {
-      response.json(
-        await listPendingActions(
-          provider,
+    async (c) => {
+      return jsonResponse(c, await listPendingActions(
+          providerRuntime,
           pendingActions,
-          reconcileObservedThreadStatus,
-        ),
-      );
-    }),
+        ));
+    },
   );
 
   app.get(
     "/api/sessions/:sessionId/log",
-    asyncRoute(async (request, response) => {
-      const sessionId = pathParam(request.params.sessionId);
-      const sessionProvider = providerEntryForSessionId(sessionId);
+    async (c) => {
+      const sessionId = providerRuntime.resolveSession((c.req.param("sessionId") ?? "")).sessionId;
+      const sessionProvider = await startedSessionProvider(sessionId);
       if (!sessionProvider) {
-        response.status(400).json({ error: "unknown provider" });
-        return;
+        return jsonResponse(c, { error: "unknown provider" }, 400);
       }
-      if (
-        !requireProviderCapability(
-          response,
-          sessionProvider.provider,
-          sessionProvider.provider.capabilities.sessions.history,
-          "session history",
-          "readSessionThread",
-        ) ||
-        !requireProviderCapability(
-          response,
-          sessionProvider.provider,
-          sessionProvider.provider.capabilities.sessions.history,
-          "session log",
-          "readSessionLog",
-        )
-      ) {
-        return;
-      }
-      const query = request.query as Record<string, unknown>;
+      requireProviderCapability(sessionProvider.provider, sessionProvider.provider.capabilities.sessions.history, "session history", "readSessionThread");
+      requireProviderCapability(sessionProvider.provider, sessionProvider.provider.capabilities.sessions.history, "session log", "readSessionLog");
+      const query = readQuery(c);
       const messageLimit = Math.max(1, asInteger(query.messageLimit) ?? 200);
       const activityLimit = Math.max(1, asInteger(query.activityLimit) ?? 200);
-      const runtimeBeforeRead = sessionState.get(sessionId).runtime;
-      const session = await readSession(provider, sessionId, false);
-      reconcileObservedThreadStatus(session.id, threadStatusPhase(session));
-      const log = await provider.readSessionLog!(session, {
-        messageLimit,
-        activityLimit,
-      });
-      // Finish provider reads before taking the live overlay and its revision.
-      // Otherwise events delivered during an await could be marked as included
-      // in a snapshot that was assembled before they arrived.
-      const statusOverride = await sessionStatusOverrideForSnapshot(session.id);
-      const state = sessionState.get(sessionId);
-      if (state.runtime === runtimeBeforeRead) {
-        state.runtime = { threadUpdatedAt: session.updatedAt, runtime: log.runtime };
-      }
-      const latestPlanUpdate = mergeLatestPlanUpdate(
-        sessionId, log.latestPlanUpdate ?? null, latestPlanUpdateForSession(sessionId),
-      );
-      ensureSeqCursor(sessionId, nextSeqForLatestPlanUpdate(log.nextSeq, latestPlanUpdate));
-      const mergedActivities = mergeSessionActivities(log.activities, [...state.activities.values()]);
-      const activities = mergedActivities.slice(-activityLimit);
-      sessionState.confirmActivities(sessionId, log.activities);
-      const history = buildSessionHistorySummary(
-        log.totalMessages, log.messages.length, Math.max(log.totalActivities, mergedActivities.length), activities.length,
-      );
-      response.json({
-        session: mapSession(session, state.runtime?.runtime ?? log.runtime, statusOverride),
-        revision: state.revision,
-        liveAssistantText: state.assistantText,
-        liveAssistantReasoning: state.assistantReasoning,
-        messages: log.messages,
-        activities,
+      const snapshot = await sessionState.snapshot(sessionId, { messageLimit, activityLimit });
+      return jsonResponse(c, {
+        session: mapSession(snapshot.thread, snapshot.runtime, snapshot.status),
+        revision: snapshot.revision,
+        liveAssistantText: snapshot.liveAssistantText,
+        liveAssistantReasoning: snapshot.liveAssistantReasoning,
+        messages: snapshot.messages,
+        activities: snapshot.activities,
         pendingAction: findPendingActionForSession(pendingActions, sessionId),
-        history,
-        latestPlanUpdate,
+        history: buildSessionHistorySummary(snapshot.totalMessages, snapshot.messages.length,
+          snapshot.totalActivities, snapshot.activities.length),
+        latestPlanUpdate: snapshot.latestPlanUpdate,
       });
-    }),
+    },
   );
 
   app.get(
     "/api/sessions/:sessionId/resources",
-    asyncRoute(async (request, response) => {
-      const sessionId = pathParam(request.params.sessionId);
-      const sessionProvider = providerEntryForSessionId(sessionId);
+    async (c) => {
+      const sessionId = providerRuntime.resolveSession((c.req.param("sessionId") ?? "")).sessionId;
+      const sessionProvider = await startedSessionProvider(sessionId);
       if (!sessionProvider) {
-        response.status(400).json({ error: "unknown provider" });
-        return;
+        return jsonResponse(c, { error: "unknown provider" }, 400);
       }
-      if (
-        !requireProviderCapability(
-          response,
-          sessionProvider.provider,
-          sessionProvider.provider.capabilities.sessions.history,
-          "session resources",
-          "readSessionThread",
-        ) ||
-        !requireProviderCapability(
-          response,
-          sessionProvider.provider,
-          sessionProvider.provider.capabilities.sessions.history,
-          "session resources",
-          "readSessionLog",
-        )
-      ) {
-        return;
-      }
-      response.json(
-        await readSessionResources(
-          provider,
+      requireProviderCapability(sessionProvider.provider, sessionProvider.provider.capabilities.sessions.history, "session resources", "readSessionThread");
+      requireProviderCapability(sessionProvider.provider, sessionProvider.provider.capabilities.sessions.history, "session resources", "readSessionLog");
+      return jsonResponse(c, await readSessionResources(
           sessionId,
           sessionState,
-          reconcileObservedThreadStatus,
-        ),
-      );
-    }),
+        ));
+    },
   );
 
   app.get(
     "/api/sessions/:sessionId/status",
-    asyncRoute(async (request, response) => {
-      const sessionId = pathParam(request.params.sessionId);
-      const sessionProvider = providerEntryForSessionId(sessionId);
+    async (c) => {
+      const sessionId = providerRuntime.resolveSession((c.req.param("sessionId") ?? "")).sessionId;
+      const sessionProvider = await startedSessionProvider(sessionId);
       if (!sessionProvider) {
-        response.status(400).json({ error: "unknown provider" });
-        return;
+        return jsonResponse(c, { error: "unknown provider" }, 400);
       }
-      if (
-        !requireProviderCapability(
-          response,
-          sessionProvider.provider,
-          sessionProvider.provider.capabilities.sessions.history,
-          "session status",
-          "readSessionThread",
-        )
-      ) {
-        return;
-      }
-      const reconciledStatus = await reconcileUnverifiedActiveTurn(sessionId, provider);
-      const statusOverride = reconciledStatus ?? sessionStatusOverrideForDisplay(sessionId);
-      const state = await loadFastRunState(
-        provider,
-        sessionId,
-        sessionState,
-        statusOverride,
-      );
-      if (!isTerminalThreadStatus(statusOverride)) {
-        reconcileObservedThreadStatus(sessionId, state.status);
-      }
-      response.json({
-        sessionId,
-        status: state.status,
-        isRunning: state.isRunning,
-        activeTurnId: state.turnId,
-        pendingAction: findPendingActionForSession(pendingActions, sessionId),
-      });
-    }),
+      requireProviderCapability(sessionProvider.provider, sessionProvider.provider.capabilities.sessions.history, "session status", "readSessionThread");
+      const snapshot = await sessionState.snapshot(sessionId, { messageLimit: 1, activityLimit: 1 });
+      return jsonResponse(c, { sessionId, status: snapshot.status, isRunning: snapshot.busy,
+        activeTurnId: snapshot.activeTurnId,
+        pendingAction: findPendingActionForSession(pendingActions, sessionId) });
+    },
   );
 
   app.get(
     "/api/sessions/:sessionId/git",
-    asyncRoute(async (request, response) => {
-      const sessionId = pathParam(request.params.sessionId);
-      const sessionProvider = providerEntryForSessionId(sessionId);
+    async (c) => {
+      const sessionId = providerRuntime.resolveSession((c.req.param("sessionId") ?? "")).sessionId;
+      const sessionProvider = await startedSessionProvider(sessionId);
       if (!sessionProvider) {
-        response.status(400).json({ error: "unknown provider" });
-        return;
+        return jsonResponse(c, { error: "unknown provider" }, 400);
       }
-      if (
-        !requireProviderCapability(
-          response,
-          sessionProvider.provider,
-          sessionProvider.provider.capabilities.sessions.history,
-          "session history",
-          "readSessionThread",
-        ) ||
-        !requireHostCapability(
-          response,
-          HOST_CAPABILITIES.workspace.gitStatus,
-          "git status",
-        )
-      ) {
-        return;
-      }
-      const session = await readSession(provider, sessionId, false);
-      response.json(
-        await readGitStatus(session.cwd, mapGitInfo(session.gitInfo)),
-      );
-    }),
+      requireProviderCapability(sessionProvider.provider, sessionProvider.provider.capabilities.sessions.history, "session history", "readSessionThread");
+      requireHostCapability(HOST_CAPABILITIES.workspace.gitStatus, "git status");
+      const session = await readSession(providerRuntime, sessionId, false);
+      return jsonResponse(c, await readGitStatus(session.cwd, mapGitInfo(session.gitInfo)));
+    },
   );
 
   app.get(
     "/api/sessions/:sessionId/git/diff",
-    asyncRoute(async (request, response) => {
-      const sessionId = pathParam(request.params.sessionId);
-      const sessionProvider = providerEntryForSessionId(sessionId);
+    async (c) => {
+      const sessionId = providerRuntime.resolveSession((c.req.param("sessionId") ?? "")).sessionId;
+      const sessionProvider = await startedSessionProvider(sessionId);
       if (!sessionProvider) {
-        response.status(400).json({ error: "unknown provider" });
-        return;
+        return jsonResponse(c, { error: "unknown provider" }, 400);
       }
       const kind = parseGitDiffKind(
-        (request.query as Record<string, unknown>).kind,
+        readQuery(c).kind,
       );
       if (!kind) {
-        response
-          .status(400)
-          .json({ error: "kind must be working, staged, unstaged, or remote" });
-        return;
+        return jsonResponse(c, { error: "kind must be working, staged, unstaged, or remote" }, 400);
       }
 
-      if (
-        !requireProviderCapability(
-          response,
-          sessionProvider.provider,
-          sessionProvider.provider.capabilities.sessions.history,
-          "session history",
-          "readSessionThread",
-        )
-      ) {
-        return;
-      }
-      const session = await readSession(provider, sessionId, false);
-      if (
-        !requireHostCapability(
-          response,
-          HOST_CAPABILITIES.workspace.gitDiff,
-          "git diff",
-        )
-      ) {
-        return;
-      }
-      response.json(await readGitDiff(session.cwd, kind));
-    }),
+      requireProviderCapability(sessionProvider.provider, sessionProvider.provider.capabilities.sessions.history, "session history", "readSessionThread");
+      const session = await readSession(providerRuntime, sessionId, false);
+      requireHostCapability(HOST_CAPABILITIES.workspace.gitDiff, "git diff");
+      return jsonResponse(c, await readGitDiff(session.cwd, kind));
+    },
   );
 
   app.get(
     "/api/skills",
-    asyncRoute(async (request, response) => {
-      const query = request.query as Record<string, unknown>;
+    async (c) => {
+      const query = readQuery(c);
       const agentProvider = asString(query.agentProvider) || null;
-      const selectedProvider = providerEntryForKind(agentProvider);
+      const selectedProvider = await startedProviderForKind(agentProvider);
       if (!selectedProvider) {
-        response.status(400).json({ error: "unknown provider" });
-        return;
+        return jsonResponse(c, { error: "unknown provider" }, 400);
       }
-      if (
-        !requireProviderCapability(
-          response,
-          selectedProvider.provider,
-          selectedProvider.provider.capabilities.configuration.skills,
-          "skill listing",
-          "listSkills",
-        )
-      ) {
-        return;
-      }
+      requireProviderCapability(selectedProvider.provider, selectedProvider.provider.capabilities.configuration.skills, "skill listing", "listSkills");
       const cwd = asString(query.cwd);
       if (!cwd) {
-        response.status(400).json({ error: "cwd is required" });
-        return;
+        return jsonResponse(c, { error: "cwd is required" }, 400);
       }
 
       const forceReload = parseQueryBool(query.forceReload);
-      response.json(
-        await selectedProvider.provider.listSkills!({ cwd, forceReload }),
-      );
-    }),
+      return jsonResponse(c, await selectedProvider.provider.listSkills!({ cwd, forceReload }));
+    },
   );
 
   app.post(
     "/api/skills/config/write",
-    asyncRoute(async (request, response) => {
-      const requestedProvider = asString(request.body?.agentProvider) || null;
-      const selectedProvider = providerEntryForKind(requestedProvider);
+    async (c) => {
+      const body = await readJsonBody(c);
+      const requestedProvider = asString(body?.agentProvider) || null;
+      const selectedProvider = await startedProviderForKind(requestedProvider);
       if (!selectedProvider) {
-        response.status(400).json({ error: "unknown provider" });
-        return;
+        return jsonResponse(c, { error: "unknown provider" }, 400);
       }
-      if (
-        !requireProviderCapability(
-          response,
-          selectedProvider.provider,
-          selectedProvider.provider.capabilities.configuration.skillManagement,
-          "skill configuration",
-          "writeSkillConfig",
-        )
-      ) {
-        return;
-      }
-      const path = asString(request.body?.path);
-      const name = asString(request.body?.name);
-      const enabled = parseOptionalBool(request.body?.enabled);
+      requireProviderCapability(selectedProvider.provider, selectedProvider.provider.capabilities.configuration.skillManagement, "skill configuration", "writeSkillConfig");
+      const path = asString(body?.path);
+      const name = asString(body?.name);
+      const enabled = parseOptionalBool(body?.enabled);
       if (enabled === null) {
-        response.status(400).json({ error: "enabled is required" });
-        return;
+        return jsonResponse(c, { error: "enabled is required" }, 400);
       }
       if ((path && name) || (!path && !name)) {
-        response
-          .status(400)
-          .json({ error: "provide exactly one of path or name" });
-        return;
+        return jsonResponse(c, { error: "provide exactly one of path or name" }, 400);
       }
 
       const result = await selectedProvider.provider.writeSkillConfig!({
@@ -2342,160 +1397,101 @@ export async function startServer(
         name,
         enabled,
       });
-      response.json(result);
-    }),
+      return jsonResponse(c, result);
+    },
   );
 
   app.get(
     "/api/modes",
-    asyncRoute(async (request, response) => {
-      const query = request.query as Record<string, unknown>;
+    async (c) => {
+      const query = readQuery(c);
       const agentProvider = asString(query.agentProvider) || null;
-      const selectedProvider = providerEntryForKind(agentProvider);
+      const selectedProvider = await startedProviderForKind(agentProvider);
       if (!selectedProvider) {
-        response.status(400).json({ error: "unknown provider" });
-        return;
+        return jsonResponse(c, { error: "unknown provider" }, 400);
       }
-      if (
-        !requireProviderCapability(
-          response,
-          selectedProvider.provider,
-          selectedProvider.provider.capabilities.runtimeControls.mode,
-          "mode listing",
-          "listModes",
-        )
-      ) {
-        return;
-      }
+      requireProviderCapability(selectedProvider.provider, selectedProvider.provider.capabilities.runtimeControls.mode, "mode listing", "listModes");
       if (!hasProviderMethod(selectedProvider.provider, "listModes")) {
-        response.status(501).json({ error: "mode listing not supported" });
-        return;
+        return jsonResponse(c, { error: "mode listing not supported" }, 501);
       }
       const cwd = asString(query.cwd) || null;
-      response.json(await selectedProvider.provider.listModes({ cwd }));
-    }),
+      return jsonResponse(c, await selectedProvider.provider.listModes({ cwd }));
+    },
   );
 
   app.get(
     "/api/models",
-    asyncRoute(async (request, response) => {
-      const query = request.query as Record<string, unknown>;
+    async (c) => {
+      const query = readQuery(c);
       const agentProvider = asString(query.agentProvider) || null;
-      const selectedProvider = providerEntryForKind(agentProvider);
+      const selectedProvider = await startedProviderForKind(agentProvider);
       if (!selectedProvider) {
-        response.status(400).json({ error: "unknown provider" });
-        return;
+        return jsonResponse(c, { error: "unknown provider" }, 400);
       }
-      if (
-        !requireProviderCapability(
-          response,
-          selectedProvider.provider,
-          selectedProvider.provider.capabilities.configuration.models,
-          "model listing",
-          "listModels",
-        )
-      ) {
-        return;
-      }
+      requireProviderCapability(selectedProvider.provider, selectedProvider.provider.capabilities.configuration.models, "model listing", "listModels");
       const cwd = asString(query.cwd) || null;
       const profile = asString(query.profile) || null;
       const modelProvider = asString(query.provider) || null;
-      response.json(
-        await selectedProvider.provider.listModels!({
+      return jsonResponse(c, await selectedProvider.provider.listModels!({
           cwd,
           profile,
           provider: modelProvider,
-        }),
-      );
-    }),
+        }));
+    },
   );
 
   app.get(
     "/api/profiles",
-    asyncRoute(async (request, response) => {
-      const query = request.query as Record<string, unknown>;
+    async (c) => {
+      const query = readQuery(c);
       const agentProvider = asString(query.agentProvider) || null;
-      const selectedProvider = providerEntryForKind(agentProvider);
+      const selectedProvider = await startedProviderForKind(agentProvider);
       if (!selectedProvider) {
-        response.status(400).json({ error: "unknown provider" });
-        return;
+        return jsonResponse(c, { error: "unknown provider" }, 400);
       }
-      if (
-        !requireProviderCapability(
-          response,
-          selectedProvider.provider,
-          selectedProvider.provider.capabilities.configuration.profiles,
-          "profile listing",
-          "listProfiles",
-        )
-      ) {
-        return;
-      }
+      requireProviderCapability(selectedProvider.provider, selectedProvider.provider.capabilities.configuration.profiles, "profile listing", "listProfiles");
       const cwd = asString(query.cwd) || null;
-      response.json(await selectedProvider.provider.listProfiles!({ cwd }));
-    }),
+      return jsonResponse(c, await selectedProvider.provider.listProfiles!({ cwd }));
+    },
   );
 
   app.get(
     "/api/access-modes",
-    asyncRoute(async (request, response) => {
-      const query = request.query as Record<string, unknown>;
+    async (c) => {
+      const query = readQuery(c);
       const agentProvider = asString(query.agentProvider) || null;
-      const selectedProvider = providerEntryForKind(agentProvider);
+      const selectedProvider = await startedProviderForKind(agentProvider);
       if (!selectedProvider) {
-        response.status(400).json({ error: "unknown provider" });
-        return;
+        return jsonResponse(c, { error: "unknown provider" }, 400);
       }
-      if (
-        !requireProviderCapability(
-          response,
-          selectedProvider.provider,
-          selectedProvider.provider.capabilities.configuration.accessModes,
-          "access mode listing",
-          "listAccessModes",
-        )
-      ) {
-        return;
-      }
+      requireProviderCapability(selectedProvider.provider, selectedProvider.provider.capabilities.configuration.accessModes, "access mode listing", "listAccessModes");
       const cwd = asString(query.cwd) || null;
-      response.json(await selectedProvider.provider.listAccessModes!({ cwd }));
-    }),
+      return jsonResponse(c, await selectedProvider.provider.listAccessModes!({ cwd }));
+    },
   );
 
   app.post(
     "/api/sessions/create",
-    asyncRoute(async (request, response) => {
-      const requestedProvider = asString(request.body?.provider) || null;
-      const selectedProvider = providerEntryForKind(requestedProvider);
+    async (c) => {
+      const body = await readJsonBody(c);
+      const requestedProvider = asString(body?.provider) || null;
+      const selectedProvider = await startedProviderForKind(requestedProvider);
       if (!selectedProvider) {
-        response.status(400).json({ error: "unknown provider" });
-        return;
+        return jsonResponse(c, { error: "unknown provider" }, 400);
       }
-      if (
-        !requireProviderCapability(
-          response,
-          selectedProvider.provider,
-          selectedProvider.provider.capabilities.sessions.create,
-          "session creation",
-          "createSession",
-        )
-      ) {
-        return;
-      }
-      const cwd = asString(request.body?.cwd);
-      const input = parseInputItems(request.body?.input);
-      const overrides = parseCreateSessionOverrides(request.body);
+      requireProviderCapability(selectedProvider.provider, selectedProvider.provider.capabilities.sessions.create, "session creation", "createSession");
+      const cwd = asString(body?.cwd);
+      const input = parseInputItems(body?.input);
+      const overrides = parseCreateSessionOverrides(body);
       if (!cwd) {
-        response.status(400).json({ error: "cwd is required" });
-        return;
+        return jsonResponse(c, { error: "cwd is required" }, 400);
       }
       const unsupportedOverride = unsupportedOverrideCapability(
         selectedProvider.provider,
         overrides,
       );
       if (unsupportedOverride) {
-        response.status(501).json({ error: unsupportedOverride });
-        return;
+        return jsonResponse(c, { error: unsupportedOverride }, 501);
       }
 
       const unsupportedInput = unsupportedInputCapability(
@@ -2503,466 +1499,275 @@ export async function startServer(
         input,
       );
       if (unsupportedInput) {
-        response.status(501).json({ error: unsupportedInput });
-        return;
+        return jsonResponse(c, { error: unsupportedInput }, 501);
       }
       const scopedInput = await resolveFileInputItemsForCwd(
         input,
         cwd,
       );
-      const started = await provider.createSession!({
-        cwd,
-        input: scopedInput,
-        overrides,
-        provider: selectedProvider.kind,
-      });
-      if (
-        await shouldTrackProviderTurn(
-          provider,
-          started.thread.id,
-          started.activeTurnId,
-        )
-      ) {
-        sessionState.get(started.thread.id).activeTurn = {
-          turnId: started.activeTurnId!,
-          startedAt: Date.now(),
-        };
-        sessionState.get(started.thread.id).recoveredStatus = null;
-        setLatestThreadStatusForSession(
-          started.thread.id,
-          hasPendingActionForSession(pendingActions, started.thread.id)
-            ? "waiting_for_approval"
-            : "running",
-        );
+      const clientMessageId = asString(body?.clientMessageId) || randomUUID();
+      if (!isValidClientMessageId(clientMessageId)) {
+        return jsonResponse(c, { error: "clientMessageId must be 1-128 URL-safe characters" }, 400);
       }
-
-      const session = mapSession(
-        started.thread,
-        started.runtime,
-        sessionStatusOverrideForDisplay(started.thread.id),
-      );
-      response.status(201).json({
-        session,
-        activeTurnId: started.activeTurnId,
-      });
+      const native = await selectedProvider.provider.createSession!({ cwd, input: [], overrides });
+      const started = { ...native, thread: providerRuntime.wrapThread(selectedProvider, native.thread) };
+      const inputOverrides = parseTurnOverrides(body);
+      let receipt = null;
+      try {
+        if (scopedInput.length) receipt = await inputs.submit({
+          key: `${started.thread.id}:${clientMessageId}`, sessionId: started.thread.id,
+          signatureHash: hashSessionInputSignature(input, inputOverrides),
+          payload: { input: scopedInput, overrides: inputOverrides },
+        });
+      } catch (error) {
+        // Creation succeeded even when dispatch did not. Keep the recoverable session visible.
+        return jsonResponse(c, {
+          error: error instanceof Error ? error.message : String(error),
+          session: mapSession(started.thread, started.runtime), clientMessageId,
+          code: error instanceof SessionInputError ? error.code : "initial_input_failed",
+        }, (error instanceof AgentProviderRequestError ? error.status : 502) as ContentfulStatusCode);
+      }
+      const response = jsonResponse(c, {
+        session: sessionState.projectSummary(mapSession(started.thread, started.runtime)),
+        activeTurnId: sessionState.get(started.thread.id).activeTurn?.turnId ?? null,
+        input: receipt,
+      }, 201);
       scheduleRecentSessionUpsert(started.thread.id, 0);
-      void indexSessionForSearch(searchIndex, providerRuntime, started.thread.id).catch(() => {});
-    }),
+      void indexSessionForSearch(searchIndex, sessionState, started.thread.id).catch(() => {});
+      return response;
+    },
   );
 
   app.post(
     "/api/sessions/:sessionId/input",
-    asyncRoute(async (request, response) => {
-      const sessionId = pathParam(request.params.sessionId);
-      const sessionProvider = providerEntryForSessionId(sessionId);
+    async (c) => {
+      const body = await readJsonBody(c);
+      const sessionId = providerRuntime.resolveSession((c.req.param("sessionId") ?? "")).sessionId;
+      const sessionProvider = await startedSessionProvider(sessionId);
       if (!sessionProvider) {
-        response.status(400).json({ error: "unknown provider" });
-        return;
+        return jsonResponse(c, { error: "unknown provider" }, 400);
       }
-      if (
-        !requireProviderCapability(
-          response,
-          sessionProvider.provider,
-          true,
-          "session input submission",
-          "submitInput",
-        )
-      ) {
-        return;
-      }
-      const input = parseInputItems(request.body?.input);
-      const clientMessageId = asString(request.body?.clientMessageId);
+      requireProviderCapability(sessionProvider.provider, true, "session input submission", "submitInput");
+      const input = parseInputItems(body?.input);
+      const clientMessageId = asString(body?.clientMessageId);
       if (clientMessageId && !isValidClientMessageId(clientMessageId)) {
-        response.status(400).json({
+        return jsonResponse(c, {
           error: "clientMessageId must be 1-128 URL-safe characters",
-        });
-        return;
+        }, 400);
       }
       if (input.length === 0) {
-        response.status(400).json({ error: "input is required" });
-        return;
+        return jsonResponse(c, { error: "input is required" }, 400);
       }
       const unsupportedInput = unsupportedInputCapability(
         sessionProvider.provider,
         input,
       );
       if (unsupportedInput) {
-        response.status(501).json({ error: unsupportedInput });
-        return;
+        return jsonResponse(c, { error: unsupportedInput }, 501);
       }
 
-      const turnOverrides = parseTurnOverrides(request.body);
+      const turnOverrides = parseTurnOverrides(body);
       const unsupportedOverride = unsupportedOverrideCapability(
         sessionProvider.provider,
         turnOverrides,
       );
       if (unsupportedOverride) {
-        response.status(501).json({ error: unsupportedOverride });
-        return;
+        return jsonResponse(c, { error: unsupportedOverride }, 501);
       }
       const inputSignatureHash = hashSessionInputSignature(
         input,
         turnOverrides,
       );
-      const dedupeKey = clientMessageId
-        ? sessionInputDedupeKey(sessionId, clientMessageId)
-        : null;
-      if (dedupeKey) {
-        pruneSessionInputDedupe();
-        const existing = sessionInputDedupe.get(dedupeKey);
-        if (existing) {
-          if (existing.signatureHash !== inputSignatureHash) {
-            response.status(409).json({
-              error: "clientMessageId was already used with different input",
-            });
-            return;
-          }
-          const receipt = existing.receipt ?? (await existing.promise);
-          if (receipt) {
-            response.json({ ...receipt, replayed: true });
-            return;
-          }
-        }
-      }
-
-      const submit = async (): Promise<SessionInputReceipt> => {
-        const inputForSubmit = await resolveFileInputItemsForSession(
-          provider, sessionId, input,
-        );
-        const submittedMessage = buildSubmittedUserMessage(
-          inputForSubmit,
-          clientMessageId,
-          allocSeq(sessionId),
-        );
-        const state = await loadRunState(provider, sessionId, sessionState);
-        const submitted = await provider.submitInput!({
-          sessionId,
-          input: inputForSubmit,
-          activeTurnId: state.turnId,
-          overrides: turnOverrides,
-        });
-        if (
-          await shouldTrackProviderTurn(
-            provider,
-            sessionId,
-            submitted.turnId,
-          )
-        ) {
-          const previousStartedAt = state.turnId
-            ? sessionState.get(sessionId).activeTurn?.startedAt
-            : undefined;
-          sessionState.get(sessionId).activeTurn = {
-            turnId: submitted.turnId!,
-            startedAt: previousStartedAt ?? Date.now(),
-          };
-          sessionState.get(sessionId).recoveredStatus = null;
-          setLatestThreadStatusForSession(
-            sessionId,
-            hasPendingActionForSession(pendingActions, sessionId)
-              ? "waiting_for_approval"
-              : "running",
-          );
-        }
-        broadcastLive(sessionId, {
-          type: "user_message_submitted",
-          sessionId,
-          turnId: submitted.turnId || undefined,
-          messageItem: submittedMessage,
-        });
-        return {
-          mode: submitted.mode,
-          turnId: submitted.turnId,
-          messageId: submittedMessage.id,
-        };
-      };
-
-      const promise = submit();
-      if (dedupeKey) {
-        sessionInputDedupe.set(dedupeKey, {
-          signatureHash: inputSignatureHash,
-          createdAt: Date.now(),
-          promise,
-        });
-        pruneSessionInputDedupe();
-      }
-
-      try {
-        const receipt = await promise;
-        if (dedupeKey) {
-          const createdAt =
-            sessionInputDedupe.get(dedupeKey)?.createdAt ?? Date.now();
-          sessionInputDedupe.set(dedupeKey, {
-            signatureHash: inputSignatureHash,
-            createdAt,
-            receipt,
-          });
-          await persistSessionInputDedupeReceipt(
-            sessionInputDedupeStore,
-            dedupeKey,
-            inputSignatureHash,
-            createdAt,
-            receipt,
-          );
-          pruneSessionInputDedupe();
-        }
-        response.json({ ...receipt, replayed: false });
-        scheduleRecentSessionUpsert(sessionId, 0);
-      } catch (error) {
-        if (dedupeKey) {
-          const current = sessionInputDedupe.get(dedupeKey);
-          if (current?.promise === promise) {
-            sessionInputDedupe.delete(dedupeKey);
-          }
-        }
-        throw error;
-      }
-    }),
+      const dedupeKey = `${sessionId}:${clientMessageId || randomUUID()}`;
+      return jsonResponse(c, await inputs.submit({
+        key: dedupeKey, sessionId, signatureHash: inputSignatureHash,
+        payload: { input, overrides: turnOverrides },
+      }));
+    },
   );
+
+  app.get("/api/sessions/:sessionId/configuration", async (c) => {
+    const sessionId = providerRuntime.resolveSession(c.req.param("sessionId")).sessionId;
+    const selected = await startedSessionProvider(sessionId);
+    requireProviderCapability(selected.provider, selected.provider.capabilities.configuration.sessionOptions === true,
+      "session configuration", "setSessionConfiguration");
+    const snapshot = await sessionState.snapshot(sessionId, { messageLimit: 1, activityLimit: 1 });
+    return jsonResponse(c, { runtime: snapshot.runtime });
+  });
+
+  app.post("/api/sessions/:sessionId/configuration", async (c) => {
+    const sessionId = providerRuntime.resolveSession(c.req.param("sessionId")).sessionId;
+    const selected = await startedSessionProvider(sessionId);
+    requireProviderCapability(selected.provider, selected.provider.capabilities.configuration.sessionOptions === true,
+      "session configuration", "setSessionConfiguration");
+    const body = await readJsonBody(c);
+    const optionId = asString(body?.optionId);
+    const value = body?.value;
+    if (!optionId || (typeof value !== "string" && typeof value !== "boolean")) {
+      return jsonResponse(c, { error: "optionId and a string or boolean value are required" }, 400);
+    }
+    const runtime = await selected.provider.setSessionConfiguration!(selected.rawId, optionId, value);
+    scheduleRecentSessionUpsert(sessionId, 0);
+    return jsonResponse(c, { runtime });
+  });
 
   app.post(
     "/api/sessions/:sessionId/stop",
-    asyncRoute(async (request, response) => {
-      const sessionId = pathParam(request.params.sessionId);
-      const sessionProvider = providerEntryForSessionId(sessionId);
+    async (c) => {
+      const sessionId = providerRuntime.resolveSession((c.req.param("sessionId") ?? "")).sessionId;
+      const sessionProvider = await startedSessionProvider(sessionId);
       if (!sessionProvider) {
-        response.status(400).json({ error: "unknown provider" });
-        return;
+        return jsonResponse(c, { error: "unknown provider" }, 400);
       }
-      if (
-        !requireProviderCapability(
-          response,
-          sessionProvider.provider,
-          sessionProvider.provider.capabilities.sessions.interrupt,
-          "session interruption",
-          "interruptTurn",
-        )
-      ) {
-        return;
-      }
-      const state = await loadRunState(provider, sessionId, sessionState);
-      if (!state.turnId) {
-        response.json({ stopped: false });
-        return;
-      }
-      await provider.interruptTurn!(sessionId, state.turnId);
-      sessionState.get(sessionId).activeTurn = null;
-      sessionState.get(sessionId).unverifiedTurn = false;
-      sessionState.get(sessionId).recoveredStatus = null;
-      response.json({ stopped: true, turnId: state.turnId });
-    }),
+      requireProviderCapability(sessionProvider.provider, sessionProvider.provider.capabilities.sessions.interrupt, "session interruption", "interruptTurn");
+      let turnId: string | null = null;
+      let stopped = false;
+      await inputs.stop(sessionId, async () => {
+        const state = await sessionState.snapshot(sessionId, { messageLimit: 1, activityLimit: 1 });
+        turnId = state.activeTurnId;
+        if (state.busy) {
+          const result = await sessionProvider.provider.interruptTurn!(sessionProvider.rawId, turnId);
+          stopped = !(result && typeof result === "object" && "interrupted" in result && result.interrupted === false);
+        }
+      });
+      return jsonResponse(c, { stopped, turnId });
+    },
   );
 
   app.post(
     "/api/sessions/:sessionId/compact",
-    asyncRoute(async (request, response) => {
-      const sessionId = pathParam(request.params.sessionId);
-      const sessionProvider = providerEntryForSessionId(sessionId);
+    async (c) => {
+      const sessionId = providerRuntime.resolveSession((c.req.param("sessionId") ?? "")).sessionId;
+      const sessionProvider = await startedSessionProvider(sessionId);
       if (!sessionProvider) {
-        response.status(400).json({ error: "unknown provider" });
-        return;
+        return jsonResponse(c, { error: "unknown provider" }, 400);
       }
-      if (
-        !requireProviderCapability(
-          response,
-          sessionProvider.provider,
-          sessionProvider.provider.capabilities.sessions.compact,
-          "session compaction",
-          "compactSession",
-        )
-      ) {
-        return;
-      }
-      const state = await loadRunState(provider, sessionId, sessionState);
-      if (state.turnId) {
-        response.status(409).json({
+      requireProviderCapability(sessionProvider.provider, sessionProvider.provider.capabilities.sessions.compact, "session compaction", "compactSession");
+      const state = await sessionState.snapshot(sessionId, { messageLimit: 1, activityLimit: 1 });
+      if (state.busy) {
+        return jsonResponse(c, {
           error: "Cannot compact while a turn is running",
-          turnId: state.turnId,
-        });
-        return;
+          turnId: state.activeTurnId,
+        }, 409);
       }
-      const result = await provider.compactSession!(sessionId);
+      const result = await sessionProvider.provider.compactSession!(sessionProvider.rawId);
 
-      response.json({ compacted: true, result: result ?? null });
+      const response = jsonResponse(c, { compacted: true, result: result ?? null });
       scheduleRecentSessionUpsert(sessionId, 0);
-    }),
+      return response;
+    },
   );
 
   app.post(
     "/api/sessions/:sessionId/name",
-    asyncRoute(async (request, response) => {
-      const sessionId = pathParam(request.params.sessionId);
-      const sessionProvider = providerEntryForSessionId(sessionId);
+    async (c) => {
+      const body = await readJsonBody(c);
+      const sessionId = providerRuntime.resolveSession((c.req.param("sessionId") ?? "")).sessionId;
+      const sessionProvider = await startedSessionProvider(sessionId);
       if (!sessionProvider) {
-        response.status(400).json({ error: "unknown provider" });
-        return;
+        return jsonResponse(c, { error: "unknown provider" }, 400);
       }
-      if (
-        !requireProviderCapability(
-          response,
-          sessionProvider.provider,
-          sessionProvider.provider.capabilities.sessions.rename,
-          "session renaming",
-          "setSessionName",
-        ) ||
-        !requireProviderCapability(
-          response,
-          sessionProvider.provider,
-          sessionProvider.provider.capabilities.sessions.history,
-          "session history",
-          "readSessionThread",
-        )
-      ) {
-        return;
-      }
-      const name = asString(request.body?.name);
+      requireProviderCapability(sessionProvider.provider, sessionProvider.provider.capabilities.sessions.rename, "session renaming", "setSessionName");
+      requireProviderCapability(sessionProvider.provider, sessionProvider.provider.capabilities.sessions.history, "session history", "readSessionThread");
+      const name = asString(body?.name);
       if (!name) {
-        response.status(400).json({ error: "name is required" });
-        return;
+        return jsonResponse(c, { error: "name is required" }, 400);
       }
       if (
-        hasProviderMethod(provider, "listLoadedSessionIds") &&
-        !(await isThreadLoaded(provider, sessionId))
+        hasProviderMethod(sessionProvider.provider, "listLoadedSessionIds") &&
+        !(await isThreadLoaded(sessionProvider.provider, sessionProvider.rawId))
       ) {
-        if (
-          !requireProviderCapability(
-            response,
-            sessionProvider.provider,
-            sessionProvider.provider.capabilities.sessions.resume,
-            "session resume",
-            "resumeSessionThread",
-          )
-        ) {
-          return;
-        }
-        await provider.resumeSessionThread!(sessionId, {
+        requireProviderCapability(sessionProvider.provider, sessionProvider.provider.capabilities.sessions.resume, "session resume", "resumeSessionThread");
+        await sessionProvider.provider.resumeSessionThread!(sessionProvider.rawId, {
           persistExtendedHistory: true,
         });
       }
-      await provider.setSessionName!(sessionId, name);
-      const thread = await readSession(provider, sessionId, false);
-      const session = mapSession(
-        thread,
-        null,
-        await sessionStatusOverrideForSnapshot(thread.id),
-      );
-      response.json({ session });
+      await sessionProvider.provider.setSessionName!(sessionProvider.rawId, name);
+      const thread = await readSession(providerRuntime, sessionId, false);
+      const session = sessionState.projectSummary(mapSession(thread, thread.runtime ?? null));
+      const response = jsonResponse(c, { session });
       scheduleRecentSessionUpsert(sessionId, 0);
-      void indexSessionForSearch(searchIndex, providerRuntime, sessionId).catch(() => {});
-    }),
+      void indexSessionForSearch(searchIndex, sessionState, sessionId).catch(() => {});
+      return response;
+    },
   );
 
   app.post(
     "/api/sessions/:sessionId/archive",
-    asyncRoute(async (request, response) => {
-      const sessionId = pathParam(request.params.sessionId);
-      const sessionProvider = providerEntryForSessionId(sessionId);
+    async (c) => {
+      const sessionId = providerRuntime.resolveSession((c.req.param("sessionId") ?? "")).sessionId;
+      const sessionProvider = await startedSessionProvider(sessionId);
       if (!sessionProvider) {
-        response.status(400).json({ error: "unknown provider" });
-        return;
+        return jsonResponse(c, { error: "unknown provider" }, 400);
       }
-      if (
-        !requireProviderCapability(
-          response,
-          sessionProvider.provider,
-          sessionProvider.provider.capabilities.sessions.archive,
-          "session archiving",
-          "archiveSession",
-        )
-      ) {
-        return;
-      }
-      await provider.archiveSession!(sessionId);
-      sessionState.get(sessionId).activeTurn = null;
-      sessionState.get(sessionId).unverifiedTurn = false;
-      sessionState.get(sessionId).recoveredStatus = null;
-      sessionState.get(sessionId).status = null;
-      sessionState.get(sessionId).activities.clear();
-      sessionState.clearDraft(sessionId);
-
-      sessionState.get(sessionId).nextSeq = 0;
-      response.json({ archived: true });
+      requireProviderCapability(sessionProvider.provider, sessionProvider.provider.capabilities.sessions.archive, "session archiving", "archiveSession");
+      await inputs.stop(sessionId, async () => { await sessionProvider.provider.archiveSession!(sessionProvider.rawId); });
+      sessionState.invalidate(sessionId);
       broadcastRecentSessionRemove(sessionId);
-      void indexSessionForSearch(searchIndex, providerRuntime, sessionId, true).catch(() => {});
-    }),
+      void indexSessionForSearch(searchIndex, sessionState, sessionId, true).catch(() => {});
+      return c.body(null, 200);
+    },
   );
 
   app.post(
     "/api/sessions/:sessionId/unarchive",
-    asyncRoute(async (request, response) => {
-      const sessionId = pathParam(request.params.sessionId);
-      const sessionProvider = providerEntryForSessionId(sessionId);
+    async (c) => {
+      const sessionId = providerRuntime.resolveSession((c.req.param("sessionId") ?? "")).sessionId;
+      const sessionProvider = await startedSessionProvider(sessionId);
       if (!sessionProvider) {
-        response.status(400).json({ error: "unknown provider" });
-        return;
+        return jsonResponse(c, { error: "unknown provider" }, 400);
       }
-      if (
-        !requireProviderCapability(
-          response,
-          sessionProvider.provider,
-          sessionProvider.provider.capabilities.sessions.archive,
-          "session unarchiving",
-          "unarchiveSession",
-        )
-      ) {
-        return;
-      }
-      await provider.unarchiveSession!(sessionId);
-      response.json({ unarchived: true });
+      requireProviderCapability(sessionProvider.provider, sessionProvider.provider.capabilities.sessions.archive, "session unarchiving", "unarchiveSession");
+      await sessionProvider.provider.unarchiveSession!(sessionProvider.rawId);
+      const response = jsonResponse(c, { unarchived: true });
       scheduleRecentSessionUpsert(sessionId, 0);
-      void indexSessionForSearch(searchIndex, providerRuntime, sessionId, false).catch(() => {});
-    }),
+      void indexSessionForSearch(searchIndex, sessionState, sessionId, false).catch(() => {});
+      return response;
+    },
   );
+
+  app.delete("/api/sessions/:sessionId", async (c) => {
+    const sessionId = providerRuntime.resolveSession(c.req.param("sessionId")).sessionId;
+    const sessionProvider = await startedSessionProvider(sessionId);
+    if (!sessionProvider) return jsonResponse(c, { error: "unknown provider" }, 400);
+    requireProviderCapability(sessionProvider.provider, sessionProvider.provider.capabilities.sessions.delete === true,
+      "session deletion", "deleteSession");
+    await inputs.stop(sessionId, async () => {
+      await sessionProvider.provider.deleteSession!(sessionProvider.rawId);
+      await sessionState.deleteSessionView(sessionId);
+      await searchIndex.remove(sessionId);
+    });
+    broadcastRecentSessionRemove(sessionId);
+    return jsonResponse(c, { deleted: true });
+  });
 
   app.post(
     "/api/actions/:actionId/respond",
-    asyncRoute(async (request, response) => {
-      const actionId = pathParam(request.params.actionId);
+    async (c) => {
+      const body = await readJsonBody(c);
+      const actionId = providerRuntime.resolveSession((c.req.param("actionId") ?? "")).sessionId;
       const action = pendingActions.get(actionId);
       if (!action) {
-        response.status(404).json({ error: "action not found" });
-        return;
+        return jsonResponse(c, { error: "action not found" }, 404);
       }
-      const decision = parsePendingActionResponseBody(request.body, action);
+      const decision = parsePendingActionResponseBody(body, action);
       if (!decision) {
-        response.status(400).json({ error: "invalid action response" });
-        return;
+        return jsonResponse(c, { error: "invalid action response" }, 400);
       }
 
-      if (
-        !requireProviderCapability(
-          response,
-          provider,
-          true,
-          "pending action responses",
-          "respondToPendingAction",
-        )
-      ) {
-        return;
-      }
-      const handled = provider.respondToPendingAction!(action, decision);
+      const resolved = providerRuntime.resolveSession(action.sessionId);
+      const actionReference = providerRuntime.resolveSession(action.id);
+      if (actionReference.providerId !== resolved.providerId) throw new AgentProviderRequestError("Action owner does not match session owner", 409);
+      const provider = await providerRuntime.ensure(resolved.entry);
+      const handled = requireProviderMethod(provider, "respondToPendingAction", "pending action responses").call(provider,
+        { ...action, id: actionReference.rawId, sessionId: resolved.rawId }, decision);
       if (!handled) {
-        response.status(400).json({ error: "unsupported decision" });
-        return;
+        return jsonResponse(c, { error: "unsupported decision" }, 400);
       }
 
-      pendingActions.delete(actionId);
-      setLatestThreadStatusForSession(
-        action.sessionId,
-        (sessionState.get(action.sessionId).activeTurn != null) ? "running" : null,
-      );
-      scheduleRecentSessionUpsert(action.sessionId, 0);
-      broadcastLive(action.sessionId, {
-        type: "action_resolved",
-        sessionId: action.sessionId,
-        actionId,
-      });
-      broadcastApprovalLive({
-        type: "action_resolved",
-        actionId,
-      });
-      scheduleRecentSessionUpsert(action.sessionId);
-      response.json({ ok: true });
-    }),
+      sessionState.handle({ type: "action_resolved", sessionId: action.sessionId, actionId });
+      return jsonResponse(c, { ok: true });
+    },
   );
 
   const wsServer = new WebSocketServer({
@@ -3038,11 +1843,10 @@ export async function startServer(
         attachFsLiveSocket(ws, fsWatchRegistry, {
           listSessions: () =>
             listSessions(
-              provider,
+              providerRuntime,
               sessionState,
               null,
               "none",
-              sessionStatusOverrideForDisplay,
             ),
           getSessionCwd,
           sessionId: params.get("sessionId"),
@@ -3056,7 +1860,7 @@ export async function startServer(
       wsServer.handleUpgrade(request, socket, head, (ws) => {
         approvalSockets.add(ws);
         sendEvent(ws, { type: "hello" });
-        void listPendingActions(provider, pendingActions)
+        void listPendingActions(providerRuntime, pendingActions)
           .then((actions) => {
             sendEvent(ws, { type: "snapshot", actions });
           })
@@ -3077,7 +1881,7 @@ export async function startServer(
     }
 
     if (pathOnly === "/api/sessions/live") {
-      if (!provider.capabilities.sessions.history) {
+      if (!providerRuntime.providers.some((entry) => entry.capabilities.sessions.history)) {
         socket.destroy();
         return;
       }
@@ -3101,19 +1905,24 @@ export async function startServer(
     }
 
       const params = new URLSearchParams(queryString || "");
-      const sessionId = params.get("sessionId");
-      if (!sessionId || sessionId.length > 1024) {
+      const alias = params.get("sessionId");
+      if (!alias || alias.length > 1024) {
       socket.destroy();
       return;
     }
+      let sessionId: string;
+      try { sessionId = providerRuntime.resolveSession(alias).sessionId; }
+      catch { socket.destroy(); return; }
 
       wsServer.handleUpgrade(request, socket, head, (ws) => {
+        sessionSocketAliases.set(ws, alias);
         const set = socketsBySession.get(sessionId) || new Set<WebSocket>();
         set.add(ws);
         socketsBySession.set(sessionId, set);
+        void providerRuntime.ensure(providerRuntime.resolveSession(sessionId).entry).catch(() => undefined);
         sendEvent(ws, {
           type: "hello",
-          sessionId,
+          sessionId: alias,
         });
         ws.on("close", () => {
           const current = socketsBySession.get(sessionId);
@@ -3134,6 +1943,9 @@ export async function startServer(
     if (error instanceof HTTPException) {
       return c.json({ error: message }, error.status as ContentfulStatusCode);
     }
+    if (error instanceof SessionInputError) {
+      return c.json({ error: message, code: error.code }, error.status as ContentfulStatusCode);
+    }
     if (
       error instanceof AgentProviderRequestError ||
       error instanceof TerminalError ||
@@ -3147,174 +1959,80 @@ export async function startServer(
   });
 
   await listen(server, config.port);
+  inputs.recover();
 
-  // Open search index and warm all provider indexes in the background
-  const searchIndexBackfill = searchIndex.open().then(async () => {
-    searchIndex.setBackfillRunning(true);
-    let totalIndexed = 0;
-    let totalRemoved = 0;
-
-    for (const entry of providerRuntime.providers) {
-      const provider = entry.provider;
-      const providerKind = entry.kind;
-      if (
-        !hasProviderMethod(provider, "listSessionThreads") ||
-        !hasProviderMethod(provider, "readSessionLog")
-      ) {
-        continue;
-      }
-      searchIndex.setProviderError(providerKind, null);
+  let searchIndexBackfill: Promise<void> | null = null;
+  function ensureSearchBackfill(): Promise<void> {
+    searchIndexBackfill ??= (async () => {
+      searchIndex.setBackfillRunning(true);
       try {
-        const batchSize = 50;
-        for (const archived of [false, true]) {
-          const threads = await provider.listSessionThreads!({
-            limit: 200,
-            archived,
-            includeSubAgents: false,
-          });
-          const batches = chunkArray(threads, batchSize);
-          for (const batch of batches) {
-            for (const thread of batch) {
-              try {
-                if (sessionSubAgentForThread(thread)) {
-                  const staleSessionKey = indexedSessionIdForProvider(
-                    providerRuntime,
-                    providerKind,
-                    thread.id,
-                  );
-                  await searchIndex.remove(staleSessionKey);
-                  totalRemoved++;
-                  continue;
-                }
-                const log = await provider.readSessionLog!(thread, {
-                  messageLimit: 200,
-                  activityLimit: 200,
-                });
-                const createdAt = threadTimestampMillis(thread.createdAt);
-                const updatedAt = threadTimestampMillis(thread.updatedAt);
-                const sessionKey = indexedSessionIdForProvider(
-                  providerRuntime,
-                  providerKind,
-                  thread.id,
-                );
-                await searchIndex.indexDocument({
-                  sessionKey,
-                  providerKind,
-                  title: thread.name || thread.preview,
-                  preview: thread.preview,
-                  cwd: thread.cwd,
-                  createdAt,
-                  updatedAt,
-                  archived,
-                  fingerprint: `${providerKind}|${thread.name || ""}|${thread.preview}|${thread.cwd}|${createdAt}|${updatedAt}|${archived}|${log.nextSeq}`,
-                  messages: log.messages,
-                  activities: log.activities,
-                });
-                if (sessionKey !== thread.id) {
-                  await searchIndex.remove(thread.id);
-                }
-                totalIndexed++;
-              } catch {
-                // Ignore per-session indexing errors during catch-up
+        for (const entry of providerRuntime.providers) {
+          if (closing) break;
+          if (!entry.capabilities.sessions.history) continue;
+          searchIndex.setProviderError(entry.id, null);
+          try {
+            const provider = await providerRuntime.ensure(entry);
+            if (!hasProviderMethod(provider, "listSessionThreads") || !hasProviderMethod(provider, "readSessionSnapshot")) continue;
+            for (const archived of [false, true]) {
+              const threads = await provider.listSessionThreads({ limit: 200, archived, includeSubAgents: false });
+              for (const thread of threads) {
+                if (closing) break;
+                const sessionId = wrapProviderScopedId(entry.id, thread.id);
+                if (sessionSubAgentForThread(thread)) { await searchIndex.remove(sessionId); continue; }
+                await indexSessionForSearch(searchIndex, sessionState, sessionId, archived);
               }
             }
-            // yield so startup remains responsive
-            await new Promise((resolve) => setImmediate(resolve));
+          } catch (error) {
+            searchIndex.setProviderError(entry.id, error instanceof Error ? error.message : String(error), entry.kind);
           }
         }
-      } catch (error: unknown) {
-        const message =
-          error instanceof Error ? error.message : String(error);
-        searchIndex.setProviderError(providerKind, message);
-      }
-    }
-
-    searchIndex.setBackfillRunning(false);
-    return { indexed: totalIndexed, removed: totalRemoved };
-  });
-  void searchIndexBackfill.then((result) => {
-    if (result.indexed > 0 || result.removed > 0) {
-      console.log(`Search index caught up: ${result.indexed} indexed, ${result.removed} removed`);
-    }
-  }).catch((error: unknown) => {
-    console.error(
-      "Failed to open search index:",
-      error instanceof Error ? error.message : error,
-    );
-  });
+      } finally { searchIndex.setBackfillRunning(false); }
+    })();
+    return searchIndexBackfill;
+  }
 
   for (const line of startupSummaryLines({
     config,
-    providerDisplayName: provider.displayName,
+    providerDisplayName: providerRuntime.defaultProvider.displayName,
     providerKinds: providerRuntime.providers.map((entry) => entry.kind),
   })) {
     console.log(line);
   }
 
-  // Health monitor: exit if provider is unhealthy so systemd can restart.
-  const HEALTH_MONITOR_INTERVAL_MS = 30_000;
-  const HEALTH_MONITOR_MAX_FAILURES = 3;
-  let healthFailures = 0;
   let healthMonitor: NodeJS.Timeout | null = null;
   let healthMonitorStopped = false;
   const runHealthMonitor = async (): Promise<void> => {
-    const healthy = await probeProviderHealth(provider, 5_000);
-    if (healthy) {
-      healthFailures = 0;
-    } else {
-      healthFailures++;
-      console.error(
-        `Health monitor: provider unhealthy (${healthFailures}/${HEALTH_MONITOR_MAX_FAILURES})`,
-      );
-      if (healthFailures >= HEALTH_MONITOR_MAX_FAILURES) {
-        console.error("Health monitor: exiting due to persistent provider failure");
-        await runningServerRef!.close();
-        dependencies.exitProcess(1);
-        return;
-      }
-    }
-    if (!healthMonitorStopped) {
-      healthMonitor = setTimeout(
-        () => void runHealthMonitor(),
-        HEALTH_MONITOR_INTERVAL_MS,
-      );
-    }
+    await providerRuntime.checkHealth();
+    if (!healthMonitorStopped) healthMonitor = setTimeout(() => void runHealthMonitor(), 30_000);
   };
-  healthMonitor = setTimeout(
-    () => void runHealthMonitor(),
-    HEALTH_MONITOR_INTERVAL_MS,
-  );
+  healthMonitor = setTimeout(() => void runHealthMonitor(), 30_000);
 
   const boundAddress = server.address();
   const boundPort = typeof boundAddress === "string" ? 0 : (boundAddress?.port ?? 0);
 
   runningServerRef = {
     port: boundPort,
-    close: async () => {
+    close: () => closingPromise ??= (async () => {
+      closing = true;
+      inputs.close();
+      const httpClosing = closeHttpServer(server);
+      void httpClosing.catch(() => {});
       healthMonitorStopped = true;
       if (healthMonitor) clearTimeout(healthMonitor);
       terminalRegistry.dispose();
-      await browserPreviewRegistry.dispose();
-      for (const socket of approvalSockets) socket.close();
-      for (const socket of recentSessionsSockets) socket.close();
-      for (const sockets of socketsBySession.values()) {
-        for (const socket of sockets) socket.close();
-      }
-      await closeWebSocketServer(wsServer);
-      await closeHttpServer(server);
-      provider.off("liveEvent", onProviderLiveEvent);
+      for (const socket of wsServer.clients) socket.close();
       for (const timer of recentSessionBroadcastTimers.values()) clearTimeout(timer);
       recentSessionBroadcastTimers.clear();
-      await searchIndexBackfill.catch(() => undefined);
-      await searchIndex.close();
-      await sessionRuntimeSignalsSaveChain.catch(() => undefined);
-      try {
-        await provider.close?.();
-      } finally {
-        provider.off("stderr", onProviderStderr);
-        await pushNotifications.close();
-      }
-    },
+      const stopped = await Promise.allSettled([providerRuntime.close(), browserPreviewRegistry.dispose(),
+        closeWebSocketServer(wsServer), httpClosing, inputs.drain(), searchIndexBackfill]);
+      providerRuntime.off("liveEvent", onProviderLiveEvent);
+      providerRuntime.off("stderr", onProviderStderr);
+      providerRuntime.off("state", onProviderState);
+      await sessionState.drain();
+      const flushed = await Promise.allSettled([searchIndex.close(), pushNotifications.close(), Promise.resolve().then(() => sessionStore.close())]);
+      const errors = [...stopped, ...flushed].flatMap((result) => result.status === "rejected" ? [result.reason] : []);
+      if (errors.length) throw new AggregateError(errors, "Host shutdown did not finish cleanly");
+    })(),
   };
   return runningServerRef;
 }
@@ -3343,29 +2061,6 @@ async function listen(server: Server, port: number): Promise<void> {
   });
 }
 
-async function probeProviderHealth(
-  provider: AgentProvider,
-  timeoutMs: number,
-): Promise<boolean> {
-  let timer: NodeJS.Timeout | null = null;
-  try {
-    const probe = Promise.resolve()
-      .then(() =>
-        provider.health
-          ? provider.health()
-          : provider.getVersion().then(() => true),
-      )
-      .catch(() => false);
-    return await Promise.race([
-      probe,
-      new Promise<boolean>((resolve) => {
-        timer = setTimeout(() => resolve(false), timeoutMs);
-      }),
-    ]);
-  } finally {
-    if (timer) clearTimeout(timer);
-  }
-}
 
 function secretsEqual(candidate: string, expected: string): boolean {
   const candidateDigest = createHash("sha256").update(candidate).digest();
@@ -3440,60 +2135,24 @@ async function closeWebSocketServer(server: WebSocketServer): Promise<void> {
 }
 
 
-function asyncRoute(
-  handler: (
-    request: JsonRouteRequest,
-    response: JsonRouteResponse,
-  ) => Promise<void>,
-): ReturnType<typeof jsonRoute> {
-  return jsonRoute(handler);
-}
-
-function pathParam(value: string | string[] | undefined): string {
-  if (Array.isArray(value)) {
-    return value[0] || "";
-  }
-  return value || "";
-}
-
 function isHealthCheckPath(path: string): boolean {
   return path === "/healthz";
 }
 
 function requireProviderCapability(
-  response: JsonRouteResponse,
   provider: AgentProvider,
   supported: boolean,
   feature: string,
   method?: AgentProviderMethodName,
-): boolean {
-  if (!supported) {
-    response.status(501).json({
-      error: `${provider.displayName} does not support ${feature}`,
-    });
-    return false;
-  }
+): void {
+  if (!supported) throw new HTTPException(501, { message: `${provider.displayName} does not support ${feature}` });
   if (method && !hasProviderMethod(provider, method)) {
-    response.status(501).json({
-      error: `${provider.displayName} does not implement ${feature}`,
-    });
-    return false;
+    throw new HTTPException(501, { message: `${provider.displayName} does not implement ${feature}` });
   }
-  return true;
 }
 
-function requireHostCapability(
-  response: JsonRouteResponse,
-  supported: boolean,
-  feature: string,
-): boolean {
-  if (!supported) {
-    response.status(501).json({
-      error: `Sidemesh host does not support ${feature}`,
-    });
-    return false;
-  }
-  return true;
+function requireHostCapability(supported: boolean, feature: string): void {
+  if (!supported) throw new HTTPException(501, { message: `Sidemesh host does not support ${feature}` });
 }
 
 function unsupportedInputCapability(
@@ -3502,6 +2161,13 @@ function unsupportedInputCapability(
 ): string | null {
   for (const item of input) {
     switch (item.type) {
+      case "audio":
+      case "resource":
+      case "resourceLink": {
+        const capability = item.type === "audio" ? "audio" : item.type === "resource" ? "embeddedResources" : "resourceLinks";
+        if (!provider.capabilities.input[capability]) return `${provider.displayName} does not support ${item.type} input`;
+        break;
+      }
       case "text":
         if (!provider.capabilities.input.text) {
           return `${provider.displayName} does not support text input`;
@@ -3585,15 +2251,15 @@ function unsupportedOverrideCapability(
 }
 
 async function resolveTerminalCwd(
-  provider: AgentProvider,
-  sessionState: SessionStateStore,
+  providerRuntime: AgentProviderRuntime,
+  sessionState: SessionCoordinator,
   cwd: string,
   sessionId: string | null | undefined,
   configuredRoots: string[],
 ): Promise<string> {
-  if (sessionId?.trim() && hasProviderMethod(provider, "readSessionThread")) {
+  if (sessionId?.trim()) {
     try {
-      const thread = await provider.readSessionThread(sessionId.trim(), false);
+      const thread = await readSession(providerRuntime, sessionId.trim(), false);
       if (thread.cwd) {
         return resolveWorkspacePath(cwd, [thread.cwd]);
       }
@@ -3605,7 +2271,7 @@ async function resolveTerminalCwd(
   return resolveWorkspacePath(
     cwd,
     await collectWorkspaceRoots(
-      () => listSessions(provider, sessionState, null, "none"),
+      () => listSessions(providerRuntime, sessionState, null, "none"),
       configuredRoots,
     ),
   );
@@ -3646,116 +2312,49 @@ async function enrichSessionsWithGitCommonDir(
 // Canonical recent-session projection used by /api/sessions and the recent
 // live socket so all delivery paths share the same runtime, status, and git
 // enrichment behavior.
-async function buildRecentSessionSummary(
-  provider: AgentProvider,
-  sessionState: SessionStateStore,
-  thread: ThreadRecord,
-  runtimeMode: SessionRuntimeListMode = "active",
-  statusOverrideForSession?: (
-    sessionId: string,
-  ) => LiveThreadStatus | null | Promise<LiveThreadStatus | null>,
-): Promise<SessionSummary> {
-  const [session] = await buildRecentSessionSummaries(
-    provider,
-    sessionState,
-    [thread],
-    runtimeMode,
-    statusOverrideForSession,
-  );
-  return session;
-}
-
 async function buildRecentSessionSummaries(
-  provider: AgentProvider,
-  sessionState: SessionStateStore,
+  coordinator: SessionCoordinator,
   threads: ThreadRecord[],
   runtimeMode: SessionRuntimeListMode = "active",
-  statusOverrideForSession?: (
-    sessionId: string,
-  ) => LiveThreadStatus | null | Promise<LiveThreadStatus | null>,
 ): Promise<SessionSummary[]> {
-  const topLevelThreads = threads.filter(
-    (thread) => sessionSubAgentForThread(thread) == null,
-  );
-  if (topLevelThreads.length === 0) {
-    return [];
-  }
-  const sessions = await mapWithConcurrency(
-    topLevelThreads,
-    RECENT_SESSION_RUNTIME_CONCURRENCY,
-    async (thread) =>
-      mapSession(
-        thread,
-        await loadCachedSessionRuntime(
-          provider,
-          thread,
-          sessionState,
-          runtimeMode,
-        ),
-        (await statusOverrideForSession?.(thread.id)) ?? null,
-      ),
-  );
+  const sessions = threads.filter((thread) => sessionSubAgentForThread(thread) == null).map((thread) => {
+    const summary = coordinator.projectSummary(mapSession(thread, thread.runtime ?? null));
+    return runtimeMode === "none" ? { ...summary, runtime: null } : summary;
+  });
   return enrichSessionsWithGitCommonDir(sessions);
 }
 
 async function listSessions(
-  provider: AgentProvider,
-  sessionState: SessionStateStore,
+  providerRuntime: AgentProviderRuntime,
+  coordinator: SessionCoordinator,
   limitOverride: number | null = null,
   runtimeMode: SessionRuntimeListMode = "active",
-  statusOverrideForSession?: (
-    sessionId: string,
-  ) => LiveThreadStatus | null | Promise<LiveThreadStatus | null>,
 ): Promise<SessionSummary[]> {
   const limit = normalizedSessionListLimit(limitOverride);
-  if (
-    canUseRecentSessionFallback(provider) &&
-    !hasProviderMethod(provider, "listSessionThreads")
-  ) {
-    const threads = await provider.listRecentUnindexedSessionThreads(
-      Math.max(limit, RECENT_UNINDEXED_SESSION_SCAN_LIMIT),
-    );
-    return buildRecentSessionSummaries(
-      provider,
-      sessionState,
-      threads,
-      runtimeMode,
-      statusOverrideForSession,
-    );
-  }
-  const listThreads = requireProviderMethod(
-    provider,
-    "listSessionThreads",
-    "session history",
-  );
-  const threads = await listThreads.call(provider, {
-    limit,
-    archived: false,
-    includeSubAgents: false,
-  });
-  const mergedThreads = await mergeRecentUnindexedThreads(
-    provider,
-    threads,
-    limit,
-  );
-  return buildRecentSessionSummaries(
-    provider,
-    sessionState,
-    mergedThreads,
-    runtimeMode,
-    statusOverrideForSession,
-  );
+  const threads = await listProviderThreads(providerRuntime, { limit, archived: false, includeSubAgents: false });
+  return buildRecentSessionSummaries(coordinator, threads, runtimeMode);
 }
 
-function canUseRecentSessionFallback(provider: AgentProvider): provider is AgentProvider & {
-  listRecentUnindexedSessionThreads: NonNullable<
-    AgentProvider["listRecentUnindexedSessionThreads"]
-  >;
-} {
-  return (
-    provider.capabilities.sessions.recentFallback &&
-    hasProviderMethod(provider, "listRecentUnindexedSessionThreads")
-  );
+async function listProviderThreads(
+  runtime: AgentProviderRuntime,
+  options: AgentSessionListOptions,
+): Promise<ThreadRecord[]> {
+  const parent = options.subAgentParentId ? runtime.resolveSession(options.subAgentParentId) : null;
+  const entries = parent ? [parent.entry] : runtime.providers.filter((entry) => entry.capabilities.sessions.history);
+  const groups = await Promise.allSettled(entries.map(async (entry) => {
+    const provider = await runtime.ensure(entry);
+    let threads: ThreadRecord[];
+    if (hasProviderMethod(provider, "listSessionThreads")) {
+      threads = await provider.listSessionThreads({ ...options, subAgentParentId: parent?.rawId });
+      if (!options.archived && !parent) threads = await mergeRecentUnindexedThreads(provider, threads, options.limit);
+    } else if (!options.archived && !parent && provider.capabilities.sessions.recentFallback && hasProviderMethod(provider, "listRecentUnindexedSessionThreads")) {
+      threads = await provider.listRecentUnindexedSessionThreads(options.limit);
+    } else throw new AgentProviderRequestError(`${entry.displayName} does not support session listing`, 501);
+    return threads.map((thread) => runtime.wrapThread(entry, thread));
+  }));
+  if (groups.length && groups.every((group) => group.status === "rejected")) throw (groups[0] as PromiseRejectedResult).reason;
+  return groups.flatMap((group) => group.status === "fulfilled" ? group.value : [])
+    .sort((a, b) => threadTimestampMillis(b.updatedAt) - threadTimestampMillis(a.updatedAt)).slice(0, options.limit);
 }
 
 function parseSessionRuntimeListMode(
@@ -3833,7 +2432,7 @@ function buildWorkspaces(sessions: SessionSummary[]): WorkspaceSummary[] {
 }
 
 async function listPendingActions(
-  provider: AgentProvider,
+  providerRuntime: AgentProviderRuntime,
   pendingActions: Map<string, AgentPendingAction>,
   reconcileStatus?: (
     sessionId: string,
@@ -3854,7 +2453,7 @@ async function listPendingActions(
 
       let sessionPromise = sessionsById.get(action.sessionId);
       if (!sessionPromise) {
-        sessionPromise = readSession(provider, action.sessionId, false).catch(
+        sessionPromise = readSession(providerRuntime, action.sessionId, false).catch(
           () => null,
         );
         sessionsById.set(action.sessionId, sessionPromise);
@@ -3882,45 +2481,16 @@ async function listPendingActions(
 
 async function indexSessionForSearch(
   searchIndex: SessionSearchIndex,
-  providerRuntime: AgentProviderRuntime,
+  coordinator: SessionCoordinator,
   sessionId: string,
   archived?: boolean,
 ): Promise<void> {
-  const provider = providerRuntime.provider;
-  const providerEntry = providerRuntime.providerForSessionId(sessionId);
-  if (!providerEntry) return;
-  if (!provider.capabilities.sessions.history) return;
-  if (!hasProviderMethod(provider, "readSessionThread") || !hasProviderMethod(provider, "readSessionLog")) {
-    return;
-  }
-  try {
-    const thread = await readSession(provider, sessionId, false);
-    if (sessionSubAgentForThread(thread)) {
-      await searchIndex.remove(sessionId);
-      return;
-    }
-    const log = await provider.readSessionLog!(thread, {
-      messageLimit: 200,
-      activityLimit: 200,
-    });
-    const createdAt = threadTimestampMillis(thread.createdAt);
-    const updatedAt = threadTimestampMillis(thread.updatedAt);
-    await searchIndex.indexDocument({
-      sessionKey: sessionId,
-      providerKind: providerEntry.kind,
-      title: thread.name || thread.preview,
-      preview: thread.preview,
-      cwd: thread.cwd,
-      createdAt,
-      updatedAt,
-      archived: archived ?? false,
-      fingerprint: `${providerEntry.kind}|${thread.name || ""}|${thread.preview}|${thread.cwd}|${createdAt}|${updatedAt}|${archived ?? false}|${log.nextSeq}`,
-      messages: log.messages,
-      activities: log.activities,
-    });
-  } catch {
-    // Ignore indexing errors
-  }
+  const snapshot = await coordinator.snapshot(sessionId);
+  if (sessionSubAgentForThread(snapshot.thread)) { await searchIndex.remove(sessionId); return; }
+  await searchIndex.indexDocument({
+    session: mapSession(snapshot.thread, snapshot.runtime, snapshot.status),
+    archived: archived ?? false, messages: snapshot.messages, activities: snapshot.activities,
+  });
 }
 
 async function collectUsageObservations(
@@ -3930,23 +2500,24 @@ async function collectUsageObservations(
 ): Promise<UsageObservation[]> {
   const groups = await Promise.all(
     providerRuntime.providers.map(async (entry) => {
-      if (!hasProviderMethod(entry.provider, "readUsageObservations")) {
+      if (!Object.values(entry.capabilities.usage).some(Boolean)) {
         return [
           buildUnsupportedUsageObservation(
             entry.kind,
-            entry.provider.displayName,
+            entry.displayName,
             hostLabel,
             generatedAt,
           ),
         ];
       }
       try {
-        const observations = await entry.provider.readUsageObservations();
+        const provider = await providerRuntime.ensure(entry);
+        const observations = hasProviderMethod(provider, "readUsageObservations") ? await provider.readUsageObservations() : [];
         if (observations.length === 0) {
           return [
             buildUnsupportedUsageObservation(
               entry.kind,
-              entry.provider.displayName,
+              entry.displayName,
               hostLabel,
               generatedAt,
             ),
@@ -3960,7 +2531,7 @@ async function collectUsageObservations(
             ...observation.provider,
             kind: observation.provider.kind || entry.kind,
             displayName:
-              observation.provider.displayName || entry.provider.displayName,
+              observation.provider.displayName || entry.displayName,
           },
         }));
       } catch (error) {
@@ -3968,7 +2539,7 @@ async function collectUsageObservations(
         return [
           buildUsageErrorObservation(
             entry.kind,
-            entry.provider.displayName,
+            entry.displayName,
             hostLabel,
             generatedAt,
             message,
@@ -4050,157 +2621,16 @@ function buildUsageErrorObservation(
 }
 
 async function readSession(
-  provider: AgentProvider,
+  providerRuntime: AgentProviderRuntime,
   sessionId: string,
   includeTurns: boolean,
 ): Promise<ThreadRecord> {
-  const readThread = requireProviderMethod(
-    provider,
-    "readSessionThread",
-    "session history",
-  );
-  return readThread.call(provider, sessionId, includeTurns);
+  const resolved = providerRuntime.resolveSession(sessionId);
+  const provider = await providerRuntime.ensure(resolved.entry);
+  const thread = await requireProviderMethod(provider, "readSessionThread", "session history").call(provider, resolved.rawId, includeTurns);
+  return providerRuntime.wrapThread(resolved.entry, thread);
 }
 
-function chunkArray<T>(array: T[], size: number): T[][] {
-  const chunks: T[][] = [];
-  for (let i = 0; i < array.length; i += size) {
-    chunks.push(array.slice(i, i + size));
-  }
-  return chunks;
-}
-
-async function loadRunState(
-  provider: AgentProvider,
-  sessionId: string,
-  sessionState: SessionStateStore,
-): Promise<{ turnId: string | null }> {
-  const known = sessionState.get(sessionId).activeTurn;
-  if (known) {
-    return { turnId: known.turnId };
-  }
-
-  let session: ThreadRecord;
-  try {
-    if (!hasProviderMethod(provider, "readSessionThread")) {
-      return { turnId: null };
-    }
-    session = await readSession(provider, sessionId, true);
-  } catch (error) {
-    if (isTransientTurnSnapshotReadError(error)) {
-      return { turnId: null };
-    }
-    throw error;
-  }
-  const turns = Array.isArray(session.turns) ? session.turns : [];
-  for (let index = turns.length - 1; index >= 0; index -= 1) {
-    const turn = turns[index] as TurnRecord;
-    if (isActiveTurnStatus(turn.status)) {
-      sessionState.get(sessionId).activeTurn = {
-        turnId: turn.id,
-        startedAt: Date.now(),
-      };
-      return { turnId: turn.id };
-    }
-  }
-
-  return { turnId: null };
-}
-
-async function loadFastRunState(
-  provider: AgentProvider,
-  sessionId: string,
-  sessionState: SessionStateStore,
-  liveStatusOverride: LiveThreadStatus | null = null,
-): Promise<{ status: LiveThreadStatus; isRunning: boolean; turnId: string | null }> {
-  if (liveStatusOverride != null) {
-    return {
-      status: liveStatusOverride,
-      isRunning: isRunningThreadStatus(liveStatusOverride),
-      turnId: isRunningThreadStatus(liveStatusOverride)
-        ? sessionState.get(sessionId).activeTurn?.turnId ?? null
-        : null,
-    };
-  }
-  const known = sessionState.get(sessionId).activeTurn;
-  if (known) {
-    return { status: "running", isRunning: true, turnId: known.turnId };
-  }
-  if (!hasProviderMethod(provider, "readSessionThread")) {
-    return { status: "unknown", isRunning: false, turnId: null };
-  }
-  const session = await readSession(provider, sessionId, false);
-  const status = threadStatusPhase(session);
-  if (isRunningThreadStatus(status)) {
-    return { status, isRunning: true, turnId: null };
-  }
-  try {
-    const sessionWithTurns = await readSession(provider, sessionId, true);
-    const turns = Array.isArray(sessionWithTurns.turns) ? sessionWithTurns.turns : [];
-    for (let index = turns.length - 1; index >= 0; index -= 1) {
-      const turn = turns[index] as TurnRecord;
-      if (isActiveTurnStatus(turn.status)) {
-        return { status: "running", isRunning: true, turnId: turn.id };
-      }
-    }
-  } catch (error) {
-    if (isTransientTurnSnapshotReadError(error)) {
-      return { status, isRunning: false, turnId: null };
-    }
-    throw error;
-  }
-  return { status, isRunning: false, turnId: null };
-}
-
-type ProviderTurnState =
-  | { kind: "active" }
-  | { kind: "terminal"; status: LiveThreadStatus }
-  | { kind: "missing"; threadStatus: LiveThreadStatus }
-  | { kind: "unknown" };
-
-async function providerTurnState(
-  provider: AgentProvider,
-  sessionId: string,
-  turnId: string,
-): Promise<ProviderTurnState> {
-  if (!hasProviderMethod(provider, "readSessionThread")) {
-    return { kind: "unknown" };
-  }
-  let session: ThreadRecord;
-  try {
-    session = await readSession(provider, sessionId, true);
-  } catch (error) {
-    if (isTransientTurnSnapshotReadError(error)) {
-      return { kind: "unknown" };
-    }
-    throw error;
-  }
-  const threadStatus = threadStatusPhase(session);
-  const turns = Array.isArray(session.turns) ? session.turns : [];
-  const turn = turns.find((candidate) => candidate.id === turnId);
-  if (!turn) {
-    return { kind: "missing", threadStatus };
-  }
-  if (turn.completedAt != null || isTerminalTurnStatus(turn.status)) {
-    return {
-      kind: "terminal",
-      status: terminalThreadStatusForTurn(turn.status, threadStatus),
-    };
-  }
-  return isActiveTurnStatus(turn.status)
-    ? { kind: "active" }
-    : { kind: "unknown" };
-}
-
-function terminalThreadStatusForTurn(
-  turnStatus: string | null | undefined,
-  threadStatus: LiveThreadStatus,
-): LiveThreadStatus {
-  if (isTerminalThreadStatus(threadStatus)) {
-    return threadStatus;
-  }
-  return isErroredTurnStatus(turnStatus) ? "errored" : "idle";
-}
 
 async function isThreadLoaded(
   provider: AgentProvider,
@@ -4229,6 +2659,7 @@ function mapSession(
     updatedAt: threadTimestampMillis(thread.updatedAt),
     source: sourceLabelForThread(thread, subAgent),
     provider,
+    providerId: thread.providerId,
     status: resolvedSessionStatus(thread, statusOverride),
     rolloutPath: thread.path,
     runtime,
@@ -4252,6 +2683,7 @@ function mapAgentRun(thread: ThreadRecord): AgentRunSummary | null {
     createdAt: threadTimestampMillis(thread.createdAt),
     updatedAt: threadTimestampMillis(thread.updatedAt),
     provider: providerKindForThread(thread),
+    providerId: thread.providerId,
     status: resolvedSessionStatus(thread, null),
     agentName: subAgent.agentName ?? null,
     agentDisplayName: subAgent.agentDisplayName ?? null,
@@ -4346,6 +2778,7 @@ function formatSubAgentSourceKind(kind: string): string {
 }
 
 function providerKindForThread(thread: ThreadRecord): string | null {
+  if (thread.providerKind) return thread.providerKind;
   const separator = thread.id.indexOf(":");
   if (separator > 0) {
     const prefix = thread.id.slice(0, separator);
@@ -4363,38 +2796,6 @@ function providerKindForThread(thread: ThreadRecord): string | null {
   return null;
 }
 
-function indexedSessionIdForProvider(
-  providerRuntime: AgentProviderRuntime,
-  providerKind: string,
-  sessionId: string,
-): string {
-  if (
-    providerRuntime.provider instanceof MultiAgentProvider &&
-    isAgentProviderKind(providerKind)
-  ) {
-    return wrapProviderScopedId(providerKind, sessionId);
-  }
-  return sessionId;
-}
-
-function compareSessionSearchSummary(
-  left: SessionSummary,
-  right: SessionSummary,
-): number {
-  const leftRank =
-    typeof left.matchRank === "number" ? left.matchRank : Number.POSITIVE_INFINITY;
-  const rightRank =
-    typeof right.matchRank === "number" ? right.matchRank : Number.POSITIVE_INFINITY;
-  const rankCompare = leftRank - rightRank;
-  if (rankCompare !== 0) {
-    return rankCompare;
-  }
-  const updatedCompare = right.updatedAt - left.updatedAt;
-  if (updatedCompare !== 0) {
-    return updatedCompare;
-  }
-  return left.id.localeCompare(right.id);
-}
 
 function mapGitInfo(raw: unknown): GitInfoSummary | null {
   if (!raw || typeof raw !== "object") {
@@ -4454,23 +2855,6 @@ function isValidClientMessageId(value: string): boolean {
   );
 }
 
-async function persistSessionInputDedupeReceipt(
-  store: SessionInputDedupeStore,
-  key: string,
-  signatureHash: string,
-  createdAt: number,
-  receipt: SessionInputReceipt,
-): Promise<void> {
-  const entry: StoredSessionInputDedupeEntry = {
-    key,
-    signatureHash,
-    createdAt,
-    updatedAt: Date.now(),
-    receipt,
-  };
-  await store.put(entry);
-}
-
 function asInteger(value: unknown): number | null {
   if (typeof value === "number" && Number.isFinite(value)) {
     return Math.trunc(value);
@@ -4524,73 +2908,7 @@ function buildSubmittedUserMessage(
   };
 }
 
-async function loadCachedSessionRuntime(
-  provider: AgentProvider,
-  thread: ThreadRecord,
-  sessionState: SessionStateStore,
-  runtimeMode: SessionRuntimeListMode,
-): Promise<SessionRuntimeSummary | null> {
-  if (runtimeMode === "none") {
-    return null;
-  }
-  const cached = sessionState.get(thread.id).runtime;
-  if (cached && cached.threadUpdatedAt === thread.updatedAt) {
-    if (cached.promise) {
-      return cached.promise;
-    }
-    return cached.runtime;
-  }
-  if (runtimeMode === "active" && !isActiveThread(thread)) {
-    return null;
-  }
 
-  const promise = hasProviderMethod(provider, "readSessionRuntime")
-    ? provider.readSessionRuntime(thread).catch(() => null)
-    : Promise.resolve(null);
-  sessionState.get(thread.id).runtime = {
-    threadUpdatedAt: thread.updatedAt,
-    runtime: null,
-    promise,
-  };
-  const runtime = await promise;
-  if (sessionState.get(thread.id).runtime?.promise === promise) {
-    sessionState.get(thread.id).runtime = { threadUpdatedAt: thread.updatedAt, runtime };
-  }
-  return runtime;
-}
-
-function isActiveTurnStatus(status: string | null | undefined): boolean {
-  return status === "inProgress" || status === "in_progress";
-}
-
-function isTransientTurnSnapshotReadError(error: unknown): boolean {
-  const message = error instanceof Error ? error.message.toLowerCase() : "";
-  return (
-    message.includes("includeturns is unavailable before first user message") ||
-    message.includes("rollout file not found") ||
-    (message.includes("rollout") && message.includes("is empty"))
-  );
-}
-
-function isTerminalTurnStatus(status: string | null | undefined): boolean {
-  return (
-    status === "completed" ||
-    status === "failed" ||
-    status === "interrupted" ||
-    status === "error" ||
-    status === "errored" ||
-    status === "cancelled" ||
-    status === "canceled"
-  );
-}
-
-function isErroredTurnStatus(status: string | null | undefined): boolean {
-  return status === "failed" || status === "error" || status === "errored";
-}
-
-function isActiveThread(thread: ThreadRecord): boolean {
-  return isRunningThreadStatus(threadStatusPhase(thread));
-}
 
 function resolvedSessionStatus(
   thread: ThreadRecord,
@@ -4611,9 +2929,6 @@ function isRunningThreadStatus(status: LiveThreadStatus | null | undefined): boo
   );
 }
 
-function isTerminalThreadStatus(status: LiveThreadStatus | null | undefined): boolean {
-  return status === "closed" || status === "errored";
-}
 
 function normalizeThreadStatusPhase(status: string | null | undefined): LiveThreadStatus {
   switch (status) {
@@ -4637,175 +2952,6 @@ function normalizeThreadStatusPhase(status: string | null | undefined): LiveThre
   }
 }
 
-async function mapWithConcurrency<T, R>(
-  items: T[],
-  concurrency: number,
-  mapper: (item: T) => Promise<R>,
-): Promise<R[]> {
-  const results = new Array<R>(items.length);
-  let nextIndex = 0;
-  const workerCount = Math.min(Math.max(1, concurrency), items.length);
-
-  await Promise.all(
-    Array.from({ length: workerCount }, async () => {
-      while (nextIndex < items.length) {
-        const index = nextIndex;
-        nextIndex += 1;
-        results[index] = await mapper(items[index]!);
-      }
-    }),
-  );
-
-  return results;
-}
-
-function normalizeLatestPlanUpdate(
-  latestPlanUpdate: LatestPlanUpdate | null | undefined,
-  sessionId?: string,
-): LatestPlanUpdate | null {
-  if (!latestPlanUpdate) {
-    return null;
-  }
-  const normalizedSessionId = latestPlanUpdate.sessionId.trim() || sessionId?.trim() || "";
-  if (!normalizedSessionId) {
-    return null;
-  }
-  const rawPlan = Array.isArray(latestPlanUpdate.plan)
-    ? latestPlanUpdate.plan
-    : [];
-  const plan = rawPlan.flatMap((step) => {
-    const typed = step && typeof step === "object"
-      ? (step as unknown as Record<string, unknown>)
-      : null;
-    const label = typeof typed?.step === "string" ? typed.step.trim() : "";
-    const status = typeof typed?.status === "string" ? typed.status.trim() : "";
-    return label && status ? [{ step: label, status } as LivePlanStep] : [];
-  });
-  return {
-    type: "plan_updated",
-    sessionId: normalizedSessionId,
-    seq: latestPlanUpdate.seq,
-    turnId: latestPlanUpdate.turnId?.trim() || undefined,
-    explanation: latestPlanUpdate.explanation?.trim() || undefined,
-    plan,
-  };
-}
-
-function mergeLatestPlanUpdate(
-  sessionId: string,
-  ...candidates: Array<LatestPlanUpdate | null | undefined>
-): LatestPlanUpdate | null {
-  let best: LatestPlanUpdate | null = null;
-  for (const candidate of candidates) {
-    const normalized = normalizeLatestPlanUpdate(candidate, sessionId);
-    if (normalized == null) {
-      continue;
-    }
-    if (best == null) {
-      best = normalized;
-      continue;
-    }
-    const bestSeq = best.seq ?? -1;
-    const nextSeq = normalized.seq ?? -1;
-    if (nextSeq > bestSeq) {
-      best = normalized;
-    }
-  }
-  return best;
-}
-
-function nextSeqForLatestPlanUpdate(
-  nextSeq: number,
-  latestPlanUpdate: LatestPlanUpdate | null,
-): number {
-  if (latestPlanUpdate?.seq == null) {
-    return nextSeq;
-  }
-  return Math.max(nextSeq, latestPlanUpdate.seq + 1);
-}
-
-async function loadSessionRuntimeSignalsState(
-  filePath: string,
-): Promise<Map<string, SessionRuntimeSignalsEntry>> {
-  try {
-    const raw = await readFile(filePath, "utf8");
-    const parsed = JSON.parse(raw) as {
-      sessions?: Array<{
-        sessionId?: string;
-        updatedAt?: number;
-        latestPlanUpdate?: LatestPlanUpdate | null;
-      }>;
-    };
-    const loaded = new Map<string, SessionRuntimeSignalsEntry>();
-    const now = Date.now();
-    for (const item of parsed.sessions ?? []) {
-      const sessionId = typeof item.sessionId === "string" ? item.sessionId.trim() : "";
-      const latestPlanUpdate = normalizeLatestPlanUpdate(
-        item.latestPlanUpdate ?? null,
-        sessionId,
-      );
-      const updatedAt = typeof item.updatedAt === "number" ? item.updatedAt : now;
-      if (!sessionId || latestPlanUpdate == null) {
-        continue;
-      }
-      if (now - updatedAt > SESSION_RUNTIME_SIGNALS_TTL_MS) {
-        continue;
-      }
-      loaded.set(sessionId, {
-        latestPlanUpdate,
-        updatedAt,
-      });
-    }
-    while (loaded.size > SESSION_RUNTIME_SIGNALS_LIMIT) {
-      const oldest = [...loaded.entries()].sort(
-        (left, right) => left[1].updatedAt - right[1].updatedAt,
-      )[0]?.[0];
-      if (!oldest) {
-        break;
-      }
-      loaded.delete(oldest);
-    }
-    return loaded;
-  } catch {
-    return new Map<string, SessionRuntimeSignalsEntry>();
-  }
-}
-
-async function saveSessionRuntimeSignalsState(
-  filePath: string,
-  sessionRuntimeSignals: Map<string, SessionRuntimeSignalsEntry>,
-): Promise<void> {
-  await mkdir(nodePath.dirname(filePath), { recursive: true, mode: 0o700 });
-  const now = Date.now();
-  const sessions = [...sessionRuntimeSignals.entries()]
-    .filter(([, entry]) => now - entry.updatedAt <= SESSION_RUNTIME_SIGNALS_TTL_MS)
-    .sort((left, right) => right[1].updatedAt - left[1].updatedAt)
-    .slice(0, SESSION_RUNTIME_SIGNALS_LIMIT)
-    .flatMap(([sessionId, entry]) => {
-      const latestPlanUpdate = normalizeLatestPlanUpdate(
-        entry.latestPlanUpdate,
-        sessionId,
-      );
-      if (latestPlanUpdate == null) {
-        return [];
-      }
-      return [{
-        sessionId,
-        updatedAt: entry.updatedAt,
-        latestPlanUpdate,
-      }];
-    });
-  const tmpPath = `${filePath}.${process.pid}.${Date.now()}.tmp`;
-  await writeFile(
-    tmpPath,
-    JSON.stringify({ sessions }, null, 2),
-    {
-      encoding: "utf8",
-      mode: 0o600,
-    },
-  );
-  await rename(tmpPath, filePath);
-}
 
 function buildSessionHistorySummary(
   totalMessages: number,
@@ -4824,70 +2970,12 @@ function buildSessionHistorySummary(
 }
 
 async function readSessionResources(
-  provider: AgentProvider,
   sessionId: string,
-  sessionState: SessionStateStore,
-  reconcileStatus?: (
-    sessionId: string,
-    observedStatus: LiveThreadStatus,
-  ) => void,
+  sessionState: SessionCoordinator,
 ): Promise<SessionResourcesResponse> {
-  const session = await readSession(provider, sessionId, false);
-  reconcileStatus?.(session.id, threadStatusPhase(session));
-  const readLog = requireProviderMethod(
-    provider,
-    "readSessionLog",
-    "session resources",
-  );
-  const log = await readLog.call(provider, session);
-  const activities = mergeSessionActivities(
-    log.activities,
-    [...sessionState.get(sessionId).activities.values()],
-  );
-  const resources: SessionResource[] = buildSessionResources(
-    log.messages,
-    activities,
-  );
-  return {
-    sessionId,
-    updatedAt: session.updatedAt,
-    resources,
-  };
-}
-
-function clearActionsForSession(
-  pendingActions: Map<string, AgentPendingAction>,
-  sessionId: string,
-  broadcastLive: (sessionId: string, event: LiveEvent) => void,
-  broadcastApprovalLive: (event: ApprovalLiveEvent) => void,
-): void {
-  const toDelete = [...pendingActions.values()].filter(
-    (action) => action.sessionId === sessionId,
-  );
-  for (const action of toDelete) {
-    pendingActions.delete(action.id);
-    broadcastLive(sessionId, {
-      type: "action_resolved",
-      sessionId,
-      actionId: action.id,
-    });
-    broadcastApprovalLive({
-      type: "action_resolved",
-      actionId: action.id,
-    });
-  }
-}
-
-function hasPendingActionForSession(
-  pendingActions: Map<string, AgentPendingAction>,
-  sessionId: string,
-): boolean {
-  for (const action of pendingActions.values()) {
-    if (action.sessionId === sessionId) {
-      return true;
-    }
-  }
-  return false;
+  const snapshot = await sessionState.snapshot(sessionId);
+  return { sessionId, updatedAt: snapshot.thread.updatedAt,
+    resources: buildSessionResources(snapshot.messages, snapshot.activities) };
 }
 
 function findPendingActionForSession(
@@ -4906,14 +2994,37 @@ function broadcast(
   socketsBySession: Map<string, Set<WebSocket>>,
   sessionId: string,
   event: LiveEvent,
+  aliases: WeakMap<WebSocket, string>,
 ): void {
   const sockets = socketsBySession.get(sessionId);
   if (!sockets) {
     return;
   }
   for (const socket of sockets) {
-    sendEvent(socket, event);
+    const alias = aliases.get(socket) ?? sessionId;
+    sendEvent(socket, alias === sessionId ? event : withSessionAlias(event, sessionId, alias));
   }
+}
+
+/** Old clients keep their requested ID; all host state uses the canonical identity. */
+function withSessionAlias(value: unknown, canonical: string, alias: string): unknown {
+  const owner = (item: unknown): unknown => {
+    if (!item || typeof item !== "object" || Array.isArray(item)) return item;
+    const mapped = { ...item } as Record<string, unknown>;
+    for (const key of ["sessionId", "parentSessionId"]) if (mapped[key] === canonical) mapped[key] = alias;
+    return mapped;
+  };
+  if (Array.isArray(value)) return value.map(owner);
+  const result = owner(value);
+  if (!result || typeof result !== "object") return result;
+  const payload = result as Record<string, unknown>;
+  for (const key of ["action", "pendingAction", "latestPlanUpdate"]) if (payload[key]) payload[key] = owner(payload[key]);
+  if (payload.session && typeof payload.session === "object") {
+    const session = { ...payload.session } as Record<string, unknown>;
+    if (session.id === canonical) session.id = alias;
+    payload.session = session;
+  }
+  return { ...payload, canonicalSessionId: canonical };
 }
 
 function broadcastSkillsChanged(
@@ -4956,6 +3067,11 @@ function parseInputItems(value: unknown): AgentSessionInputItem[] {
     }
     const typed = item as Record<string, unknown>;
     switch (typed.type) {
+      case "audio":
+      case "resource":
+      case "resourceLink":
+        items.push(parseContentInput(typed));
+        break;
       case "text": {
         const text = asString(typed.text);
         if (!text) {
@@ -5025,14 +3141,14 @@ function hasLocalPathInputItem(input: AgentSessionInputItem[]): boolean {
 }
 
 async function resolveFileInputItemsForSession(
-  provider: AgentProvider,
+  providerRuntime: AgentProviderRuntime,
   sessionId: string,
   input: AgentSessionInputItem[],
 ): Promise<AgentSessionInputItem[]> {
   if (!hasLocalPathInputItem(input)) {
     return input;
   }
-  const thread = await readSession(provider, sessionId, false);
+  const thread = await readSession(providerRuntime, sessionId, false);
   if (!thread.cwd) {
     throw new WorkspaceAccessError(
       "session cwd is required for file mentions",
@@ -5104,6 +3220,10 @@ function buildSubmittedUserMessageAttachments(
 ): SessionMessageAttachment[] {
   const attachments: SessionMessageAttachment[] = [];
   for (const item of input) {
+    if (item.type === "audio" || item.type === "resource" || item.type === "resourceLink") {
+      attachments.push(contentInputAttachment(item));
+      continue;
+    }
     if (item.type === "image") {
       attachments.push({ type: "image", url: item.url });
       continue;

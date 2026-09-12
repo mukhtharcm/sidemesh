@@ -45,6 +45,7 @@ import 'host_detail_screen.dart';
 import 'pair_scanner_sheet.dart';
 import 'settings_screen.dart';
 import 'session_screen.dart';
+import 'terminal_screen.dart';
 import 'usage_pane.dart';
 import '../theme/app_control_styles.dart';
 import '../theme/app_status_styles.dart';
@@ -2059,7 +2060,7 @@ class _RecentPaneState extends State<RecentPane> {
     final secondaryLabel = showBranchLabel
         ? [
             if (branch != null && branch.isNotEmpty) branch,
-            if (agentProviderDisplayLabel(entry.session.provider)
+            if (agentProviderDisplayLabel(entry.session.provider, providerId: entry.session.providerId)
                 case final String provider)
               provider,
           ].join(' · ')
@@ -2127,6 +2128,7 @@ class _InboxPaneState extends State<InboxPane> {
   final ApprovalInboxStore _store = ApprovalInboxStore.instance;
   final SessionSendOutboxStore _outbox = SessionSendOutboxStore.instance;
   List<PendingSessionSend> _pendingSends = const [];
+  bool _pendingSendsLoadFailed = false;
   Set<String> _retryingKeys = <String>{};
 
   @override
@@ -2176,18 +2178,23 @@ class _InboxPaneState extends State<InboxPane> {
   }
 
   Future<void> _loadPendingSends() async {
-    final pending = await _outbox.loadAll();
-    if (!mounted) {
-      return;
+    try {
+      final pending = await _outbox.loadAll();
+      if (!mounted) {
+        return;
+      }
+      pending.sort(_comparePendingSends);
+      setState(() {
+        _pendingSends = pending;
+        _pendingSendsLoadFailed = false;
+        _retryingKeys = _retryingKeys
+            .where((key) => pending.any((send) => send.key == key))
+            .toSet();
+      });
+      _emitCount();
+    } catch (_) {
+      if (mounted) setState(() => _pendingSendsLoadFailed = true);
     }
-    pending.sort(_comparePendingSends);
-    setState(() {
-      _pendingSends = pending;
-      _retryingKeys = _retryingKeys
-          .where((key) => pending.any((send) => send.key == key))
-          .toSet();
-    });
-    _emitCount();
   }
 
   Future<void> _refresh() async {
@@ -2415,7 +2422,6 @@ class _InboxPaneState extends State<InboxPane> {
       showAppSnackBar(context, 'The original host is no longer available.');
       return;
     }
-    await _outbox.remove(analysis.send);
     final rebound = analysis.send.copyWith(
       hostFingerprint: SessionSendOutboxStore.hostFingerprint(host),
       updatedAt: DateTime.now(),
@@ -2423,13 +2429,15 @@ class _InboxPaneState extends State<InboxPane> {
       lastError: 'Host configuration updated. Ready to retry.',
       blocked: false,
     );
-    await _outbox.upsert(rebound);
+    final saved = await _outbox.replaceIfPresent(analysis.send, rebound);
     if (!mounted) {
       return;
     }
     showAppSnackBar(
       context,
-      'Queued message is now bound to the current host configuration.',
+      saved
+          ? 'Queued message is now bound to the current host configuration.'
+          : 'Could not update the queued message. The original message is unchanged.',
     );
   }
 
@@ -2505,7 +2513,7 @@ class _InboxPaneState extends State<InboxPane> {
               })
               .toList(growable: false);
 
-    if (widget.allHosts.isEmpty && allPending.isEmpty) {
+    if (widget.allHosts.isEmpty && allPending.isEmpty && !_pendingSendsLoadFailed) {
       return MeshEmptyState(
         icon: widget.hasSavedHosts
             ? Icons.notifications_paused_rounded
@@ -2561,6 +2569,11 @@ class _InboxPaneState extends State<InboxPane> {
                 AppSpacing.xxl,
               ),
         children: [
+          if (_pendingSendsLoadFailed)
+            MaterialBanner(
+              content: const Text('Cannot load queued messages. Saved messages are still in local storage.'),
+              actions: [TextButton(onPressed: _loadPendingSends, child: const Text('Retry'))],
+            ),
           if (hasFailures)
             _RecentErrorBanner(
               hostLabels: _store.failedHostLabels,
@@ -2594,6 +2607,7 @@ class _InboxPaneState extends State<InboxPane> {
             for (var index = 0; index < entries.length; index += 1) ...[
               _InboxCard(
                 entry: entries[index],
+                api: widget.api,
                 dense: widget.dense,
                 onOpenSession: () => widget.onOpenSession(
                   entries[index].host,
@@ -3175,12 +3189,14 @@ String _hostEndpointLabel(String baseUrl) {
 class _InboxCard extends StatelessWidget {
   const _InboxCard({
     required this.entry,
+    required this.api,
     required this.onOpenSession,
     required this.onRespond,
     this.dense = false,
   });
 
   final PendingActionEntry entry;
+  final ApiClient api;
   final VoidCallback onOpenSession;
   final ValueChanged<PendingActionResponseDraft> onRespond;
   final bool dense;
@@ -3192,7 +3208,7 @@ class _InboxCard extends StatelessWidget {
     final hostMeta = action.sessionTitle == null || action.sessionTitle!.isEmpty
         ? entry.host.label
         : '${entry.host.label} · ${action.sessionTitle}';
-    if (dense) {
+    if (dense && !action.isUserInput) {
       // Compact row for the desktop sidebar — tap the row to open the
       // session; inline ✓/✕ buttons let the user resolve without leaving
       // the sidebar. Long-press on approve surfaces "approve for session".
@@ -3331,9 +3347,29 @@ class _InboxCard extends StatelessWidget {
             ),
           ],
           const SizedBox(height: AppSpacing.compact),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.end,
+          Wrap(
+            alignment: WrapAlignment.end,
+            spacing: AppSpacing.sm,
+            runSpacing: AppSpacing.sm,
             children: [
+              if (action.terminalId != null)
+                TextButton.icon(
+                  onPressed: () => Navigator.of(context).push(
+                    MaterialPageRoute<void>(builder: (_) => TerminalScreen(
+                      host: entry.host, api: api, cwd: action.cwd ?? '',
+                      sessionId: action.sessionId, terminalId: action.terminalId,
+                      title: 'Agent sign-in',
+                    )),
+                  ),
+                  icon: const Icon(Icons.terminal_rounded),
+                  label: const Text('Open sign-in terminal'),
+                ),
+              if (action.isUserInput)
+                for (final choice in action.userInput!.choices)
+                  TextButton(
+                    onPressed: () => onRespond(PendingActionResponseDraft.userInput(answer: choice, wasFreeform: false)),
+                    child: Text(choice),
+                  ),
               if (action.approval?.providerOptions.isNotEmpty ?? false)
                 for (final option in action.approval!.providerOptions) ...[
                   if (option != action.approval!.providerOptions.first)

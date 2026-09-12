@@ -19,7 +19,7 @@ import path from "node:path";
 import { Readable, type Duplex } from "node:stream";
 import { fileURLToPath } from "node:url";
 
-import type { Hono } from "hono";
+import { Hono } from "hono";
 import type { WebSocket, WebSocketServer } from "ws";
 
 import {
@@ -29,13 +29,8 @@ import {
 } from "./workspace-scope.js";
 import { clearFsSearchCache, searchFiles } from "./fs-search.js";
 import type { SessionSummary } from "./types.js";
-import {
-  buildJsonRouteRequest,
-  jsonRoute,
-  type HonoServerEnv,
-  type JsonRouteRequest,
-  type JsonRouteResponse,
-} from "./hono-route-adapter.js";
+import { jsonResponse, readJsonBody, readQuery, type HonoServerEnv } from "./server-http.js";
+import type { ContentfulStatusCode } from "hono/utils/http-status";
 
 const READ_SOFT_CAP_BYTES = 2 * 1024 * 1024; // 2 MiB — UX preview cap.
 const WRITE_SOFT_CAP_BYTES = 4 * 1024 * 1024; // 4 MiB — payload safety cap.
@@ -48,24 +43,29 @@ interface FsRoutesOptions {
 }
 
 export function registerFsRoutes(app: Hono<HonoServerEnv>, opts: FsRoutesOptions): void {
+  const routes = new Hono<HonoServerEnv>();
+  routes.onError((error, c) => {
+    if (error instanceof WorkspaceAccessError) return jsonResponse(c, { error: error.message }, error.status as ContentfulStatusCode);
+    throw error;
+  });
   const fallbackResolveRoots = createWorkspaceRootsResolver(
     opts.listSessions,
     opts.workspaceRoots,
   );
 
-  app.get(
+  routes.get(
     "/api/fs/list",
-    asyncRoute(async (request, response) => {
+    async (c) => {
       const resolveRoots = createRequestRootsResolver(
-        request,
+        asString(readQuery(c).sessionId),
         opts,
         fallbackResolveRoots,
       );
       const target = await resolveIncomingPath(
-        request.query.path,
+        readQuery(c).path,
         resolveRoots,
         {
-          basePath: asString(request.query.basePath),
+          basePath: asString(readQuery(c).basePath),
         },
       );
       const entries = (await readdir(target, { withFileTypes: true }))
@@ -79,54 +79,53 @@ export function registerFsRoutes(app: Hono<HonoServerEnv>, opts: FsRoutesOptions
           if (a.isDirectory !== b.isDirectory) return a.isDirectory ? -1 : 1;
           return a.name.localeCompare(b.name);
         });
-      response.json({ path: target, entries });
-    }),
+      return jsonResponse(c, { path: target, entries });
+    },
   );
 
-  app.get(
+  routes.get(
     "/api/fs/metadata",
-    asyncRoute(async (request, response) => {
+    async (c) => {
       const resolveRoots = createRequestRootsResolver(
-        request,
+        asString(readQuery(c).sessionId),
         opts,
         fallbackResolveRoots,
       );
       const target = await resolveIncomingPath(
-        request.query.path,
+        readQuery(c).path,
         resolveRoots,
         {
-          basePath: asString(request.query.basePath),
+          basePath: asString(readQuery(c).basePath),
         },
       );
-      response.json(await buildMetadata(target));
-    }),
+      return jsonResponse(c, await buildMetadata(target));
+    },
   );
 
-  app.get(
+  routes.get(
     "/api/fs/read",
-    asyncRoute(async (request, response) => {
+    async (c) => {
       const resolveRoots = createRequestRootsResolver(
-        request,
+        asString(readQuery(c).sessionId),
         opts,
         fallbackResolveRoots,
       );
       const target = await resolveIncomingPath(
-        request.query.path,
+        readQuery(c).path,
         resolveRoots,
         {
-          basePath: asString(request.query.basePath),
+          basePath: asString(readQuery(c).basePath),
         },
       );
       const meta = await buildMetadata(target);
       if (!meta.isFile) {
-        response.status(400).json({ error: "path is not a regular file" });
-        return;
+        return jsonResponse(c, { error: "path is not a regular file" }, 400);
       }
       const bytes = await readFilePreview(target, meta.size);
       const binary = isBinary(bytes);
       const truncated = meta.size > READ_SOFT_CAP_BYTES;
       if (binary) {
-        response.json({
+        return jsonResponse(c, {
           path: target,
           size: meta.size,
           binary: true,
@@ -136,12 +135,11 @@ export function registerFsRoutes(app: Hono<HonoServerEnv>, opts: FsRoutesOptions
           encoding: "none",
           contents: "",
         });
-        return;
       }
       const preview = truncated
         ? bytes.subarray(0, READ_SOFT_CAP_BYTES)
         : bytes;
-      response.json({
+      return jsonResponse(c, {
         path: target,
         size: meta.size,
         binary: false,
@@ -151,22 +149,21 @@ export function registerFsRoutes(app: Hono<HonoServerEnv>, opts: FsRoutesOptions
         encoding: "utf8",
         contents: preview.toString("utf8"),
       });
-    }),
+    },
   );
 
-  app.get("/api/fs/blob", async (c) => {
-    const request = await buildJsonRouteRequest(c);
+  routes.get("/api/fs/blob", async (c) => {
     const resolveRoots = createRequestRootsResolver(
-      request,
+      asString(readQuery(c).sessionId),
       opts,
       fallbackResolveRoots,
     );
     let target: string;
     try {
       target = await resolveIncomingBlobPath(
-        request.query.path,
+        readQuery(c).path,
         resolveRoots,
-        asString(request.query.basePath),
+        asString(readQuery(c).basePath),
       );
     } catch (error) {
       if (error instanceof WorkspaceAccessError) {
@@ -216,153 +213,154 @@ export function registerFsRoutes(app: Hono<HonoServerEnv>, opts: FsRoutesOptions
     );
   });
 
-  app.post(
+  routes.post(
     "/api/fs/write",
-    asyncRoute(async (request, response) => {
+    async (c) => {
+      const body = await readJsonBody(c);
       const resolveRoots = createRequestRootsResolver(
-        request,
+        asString(readQuery(c).sessionId) ?? asString(body?.sessionId),
         opts,
         fallbackResolveRoots,
       );
       const target = await resolveIncomingPath(
-        request.body?.path,
+        body?.path,
         resolveRoots,
         {
           allowMissing: true,
-          basePath: asString(request.body?.basePath),
+          basePath: asString(body?.basePath),
         },
       );
-      const contents = request.body?.contents;
+      const contents = body?.contents;
       if (typeof contents !== "string") {
-        response.status(400).json({ error: "contents must be a string" });
-        return;
+        return jsonResponse(c, { error: "contents must be a string" }, 400);
       }
       const buffer = Buffer.from(contents, "utf8");
       if (buffer.byteLength > WRITE_SOFT_CAP_BYTES) {
-        response.status(413).json({ error: "payload too large" });
-        return;
+        return jsonResponse(c, { error: "payload too large" }, 413);
       }
       await assertExpectedFileVersion(target, {
-        modifiedAtMs: asFiniteNumber(request.body?.expectedModifiedAtMs),
-        size: asFiniteNumber(request.body?.expectedSize),
+        modifiedAtMs: asFiniteNumber(body?.expectedModifiedAtMs),
+        size: asFiniteNumber(body?.expectedSize),
       });
       await writeFileAtomically(target, buffer);
       clearFsSearchCache();
-      response.json({
+      return jsonResponse(c, {
         path: target,
         bytes: buffer.byteLength,
         modifiedAtMs: (await stat(target)).mtimeMs,
       });
-    }),
+    },
   );
 
-  app.post(
+  routes.post(
     "/api/fs/createDir",
-    asyncRoute(async (request, response) => {
+    async (c) => {
+      const body = await readJsonBody(c);
       const resolveRoots = createRequestRootsResolver(
-        request,
+        asString(readQuery(c).sessionId) ?? asString(body?.sessionId),
         opts,
         fallbackResolveRoots,
       );
       const target = await resolveIncomingPath(
-        request.body?.path,
+        body?.path,
         resolveRoots,
         {
           allowMissing: true,
         },
       );
-      const recursive = request.body?.recursive !== false;
+      const recursive = body?.recursive !== false;
       await mkdir(target, { recursive });
       clearFsSearchCache();
-      response.json({ path: target });
-    }),
+      return jsonResponse(c, { path: target });
+    },
   );
 
-  app.post(
+  routes.post(
     "/api/fs/remove",
-    asyncRoute(async (request, response) => {
+    async (c) => {
+      const body = await readJsonBody(c);
       const resolveRoots = createRequestRootsResolver(
-        request,
+        asString(readQuery(c).sessionId) ?? asString(body?.sessionId),
         opts,
         fallbackResolveRoots,
       );
       const target = await resolveIncomingPath(
-        request.body?.path,
+        body?.path,
         resolveRoots,
       );
       await assertNotWorkspaceRoot(target, await resolveRoots());
-      const recursive = request.body?.recursive !== false;
-      const force = request.body?.force !== false;
+      const recursive = body?.recursive !== false;
+      const force = body?.force !== false;
       await rm(target, { recursive, force });
       clearFsSearchCache();
-      response.json({ path: target });
-    }),
+      return jsonResponse(c, { path: target });
+    },
   );
 
-  app.post(
+  routes.post(
     "/api/fs/copy",
-    asyncRoute(async (request, response) => {
+    async (c) => {
+      const body = await readJsonBody(c);
       const resolveRoots = createRequestRootsResolver(
-        request,
+        asString(readQuery(c).sessionId) ?? asString(body?.sessionId),
         opts,
         fallbackResolveRoots,
       );
       const source = await resolveIncomingPath(
-        request.body?.sourcePath,
+        body?.sourcePath,
         resolveRoots,
       );
       const destination = await resolveIncomingPath(
-        request.body?.destinationPath,
+        body?.destinationPath,
         resolveRoots,
         { allowMissing: true },
       );
-      const recursive = request.body?.recursive === true;
+      const recursive = body?.recursive === true;
       const sourceMeta = await buildMetadata(source);
       if (sourceMeta.isDirectory) {
         if (!recursive) {
-          response
-            .status(400)
-            .json({ error: "recursive must be true when copying a directory" });
-          return;
+          return jsonResponse(c, { error: "recursive must be true when copying a directory" }, 400);
         }
         await cp(source, destination, { recursive: true });
       } else {
         await copyFile(source, destination);
       }
       clearFsSearchCache();
-      response.json({ sourcePath: source, destinationPath: destination });
-    }),
+      return jsonResponse(c, { sourcePath: source, destinationPath: destination });
+    },
   );
 
-  app.post(
+  routes.post(
     "/api/fs/search",
-    asyncRoute(async (request, response) => {
+    async (c) => {
+      const body = await readJsonBody(c);
       const resolveRoots = createRequestRootsResolver(
-        request,
+        asString(readQuery(c).sessionId) ?? asString(body?.sessionId),
         opts,
         fallbackResolveRoots,
       );
       const roots = await resolveRoots();
-      const query = asString(request.body?.query) ?? "";
-      const limit = typeof request.body?.limit === "number"
-        ? Math.max(1, Math.min(200, request.body.limit))
+      const query = asString(body?.query) ?? "";
+      const limit = typeof body?.limit === "number"
+        ? Math.max(1, Math.min(200, body.limit))
         : undefined;
       const results = await searchFiles(query, roots, { limit });
-      response.json({ files: results });
-    }),
+      return jsonResponse(c, { files: results });
+    },
   );
 
-  app.get(
+  routes.get(
     "/api/fs/roots",
-    asyncRoute(async (request, response) => {
+    async (c) => {
       const resolveRoots = createRequestRootsResolver(
-        request,
+        asString(readQuery(c).sessionId),
         opts,
         fallbackResolveRoots,
       );
-      response.json({ roots: await resolveRoots() });
-    }),
+      return jsonResponse(c, { roots: await resolveRoots() });
+    },
   );
+  app.route("/", routes);
 }
 
 function parseByteRangeHeader(
@@ -549,7 +547,7 @@ async function assertNotWorkspaceRoot(
   }
 }
 
-async function writeFileAtomically(target: string, buffer: Buffer): Promise<void> {
+export async function writeFileAtomically(target: string, buffer: Buffer): Promise<void> {
   let existingMode: number | undefined;
   try {
     existingMode = (await stat(target)).mode & 0o777;
@@ -572,25 +570,6 @@ async function writeFileAtomically(target: string, buffer: Buffer): Promise<void
   } finally {
     await rm(tempPath, { force: true }).catch(() => {});
   }
-}
-
-function asyncRoute(
-  handler: (
-    request: JsonRouteRequest,
-    response: JsonRouteResponse,
-  ) => Promise<void>,
-): ReturnType<typeof jsonRoute> {
-  return jsonRoute(async (request, response) => {
-    try {
-      await handler(request, response);
-    } catch (error) {
-      if (error instanceof WorkspaceAccessError) {
-        response.status(error.status).json({ error: error.message });
-        return;
-      }
-      throw error;
-    }
-  });
 }
 
 function asString(value: unknown): string | null {
@@ -825,12 +804,12 @@ function createWorkspaceRootsResolver(
 }
 
 function createRequestRootsResolver(
-  request: JsonRouteRequest,
+  sessionId: string | null,
   opts: FsRoutesOptions,
   fallbackResolveRoots: () => Promise<string[]>,
 ): () => Promise<string[]> {
   return createSessionScopedRootsResolver(
-    sessionIdFromRequest(request),
+    sessionId,
     opts.getSessionCwd,
     fallbackResolveRoots,
   );
@@ -874,15 +853,6 @@ function createSessionScopedRootsResolver(
       });
     return promise;
   };
-}
-
-function sessionIdFromRequest(request: JsonRouteRequest): string | null {
-  const query = request.query as Record<string, unknown>;
-  const body =
-    request.body && typeof request.body === "object"
-      ? (request.body as Record<string, unknown>)
-      : {};
-  return asString(query.sessionId) ?? asString(body.sessionId);
 }
 
 function isBinary(bytes: Buffer): boolean {

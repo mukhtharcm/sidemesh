@@ -59,7 +59,7 @@ Use `sidemesh setup` when you want to customize providers, host features, or adv
 | **Codex** (default) | Install codex CLI: npm install -g @openai/codex |
 | **Pi** | Install Pi: npm install -g @earendil-works/pi-coding-agent, then pi /login |
 | **Copilot** | Install GitHub Copilot CLI and authenticate |
-| **ACP via acpx** | Install/authenticate the selected ACP agent (for example Gemini, Claude, Qwen, Cursor, or Kimi) |
+| **ACP** | Install/authenticate the selected ACP agent (for example Gemini, Claude, Qwen, Cursor, or Kimi) |
 | **Fake** | No extra setup; for testing only (--dev flag) |
 
 ## Start the Daemon
@@ -228,5 +228,5 @@ Pi has no authenticated providers. Run pi /login for your model provider
 
 - Read the provider adapter contract to understand how capabilities map to UI features
 - See Pi provider getting started for Pi-specific setup and capabilities
-- See ACP via acpx provider getting started for ACP-compatible agent setup
+- See ACP provider getting started for ACP-compatible agent setup
 - Check release-playbook.md for cutting preview builds

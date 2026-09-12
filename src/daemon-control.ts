@@ -3,7 +3,7 @@ import { fileURLToPath } from "node:url";
 import { closeSync, openSync, writeSync } from "node:fs";
 import { mkdir } from "node:fs/promises";
 import nodePath from "node:path";
-import { realpathSync } from "node:fs";
+import { createInterface } from "node:readline/promises";
 import { setTimeout as delay } from "node:timers/promises";
 
 import {
@@ -11,11 +11,13 @@ import {
   removeDaemonState,
   isPidAlive,
 } from "./daemon-lifecycle.js";
+import { buildPairInfo } from "./pair.js";
 import type { NodeConfig } from "./types.js";
 import type { RunningServer } from "./server.js";
 
 export interface StartDaemonOptions {
   configPath?: string | null;
+  showPairHint?: boolean;
 }
 
 export interface StopDaemonOptions {
@@ -79,6 +81,12 @@ export async function startDaemon(
     }
     console.log(`Started Sidemesh daemon on port ${config.port} (pid ${child.pid}).`);
     console.log(`Logs: ${logPath}`);
+    const pairInfo = buildPairInfo(config);
+    if (options.showPairHint !== false && pairInfo.preferredAddress) {
+      console.log(
+        `Pair: ${pairInfo.preferredAddress.url} (run \`sidemesh pair\` for the QR and token)`,
+      );
+    }
   } finally {
     closeSync(logFd);
   }
@@ -106,6 +114,10 @@ export async function stopDaemon(
   if (daemon.state.pid === process.pid) {
     throw new Error("Refusing to stop the current CLI process.");
   }
+  await confirmDanger(
+    `This will stop Sidemesh pid ${daemon.state.pid} on port ${daemon.state.port}. Active streams and integrated terminals will disconnect.`,
+    options.yes === true,
+  );
   try {
     process.kill(daemon.state.pid, "SIGTERM");
   } catch (error) {
@@ -137,7 +149,8 @@ export async function restartDaemon(
 }
 
 export function daemonInvocation(configPath: string): { command: string; args: string[] } {
-  const entry = fileURLToPath(import.meta.url);
+  const extension = import.meta.url.endsWith(".ts") ? "ts" : "js";
+  const entry = fileURLToPath(new URL(`./cli.${extension}`, import.meta.url));
   const args =
     entry.endsWith(".ts")
       ? ["--import", "tsx", entry, "daemon"]
@@ -228,10 +241,21 @@ async function closeWithDeadline(
   }
 }
 
-function realPathOrResolve(path: string): string {
+export async function confirmDanger(message: string, yes: boolean): Promise<void> {
+  if (yes) return;
+  if (!process.stdin.isTTY) {
+    throw new Error(`${message} Pass --yes to confirm in a non-interactive shell.`);
+  }
+  const readline = createInterface({
+    input: process.stdin,
+    output: process.stdout,
+  });
   try {
-    return realpathSync(path);
-  } catch {
-    return nodePath.resolve(path);
+    const answer = await readline.question(`${message}\nContinue? [y/N] `);
+    if (!["y", "yes"].includes(answer.trim().toLowerCase())) {
+      throw new Error("Cancelled.");
+    }
+  } finally {
+    readline.close();
   }
 }

@@ -15,11 +15,15 @@ export type AgentProviderConfig =
   | AcpxProviderConfig;
 
 export interface CodexProviderConfig {
+  /** Stable configured instance ID; old configurations use the provider kind. */
+  id?: string;
   kind: "codex";
   bin: string;
 }
 
 export interface FakeProviderConfig {
+  /** Stable configured instance ID; old configurations use the provider kind. */
+  id?: string;
   kind: "fake";
   latencyMs: number;
   seedSessions: boolean;
@@ -28,12 +32,16 @@ export interface FakeProviderConfig {
 }
 
 export interface PiProviderConfig {
+  /** Stable configured instance ID; old configurations use the provider kind. */
+  id?: string;
   kind: "pi";
   agentDir: string | null;
   stateDir: string | null;
 }
 
 export interface CopilotProviderConfig {
+  /** Stable configured instance ID; old configurations use the provider kind. */
+  id?: string;
   kind: "copilot";
   bin: string;
   stateDir: string | null;
@@ -42,6 +50,8 @@ export interface CopilotProviderConfig {
 }
 
 export interface OpenCodeProviderConfig {
+  /** Stable configured instance ID; old configurations use the provider kind. */
+  id?: string;
   kind: "opencode";
   bin: string;
   stateDir: string | null;
@@ -50,9 +60,13 @@ export interface OpenCodeProviderConfig {
 export type AcpxPermissionMode = "approve-reads" | "deny-all";
 
 export interface AcpxProviderConfig {
+  /** Stable configured instance ID; old configurations use the provider kind. */
+  id?: string;
   kind: "acpx";
   agent: string;
   command: string | null;
+  executable?: string;
+  args?: string[];
   stateDir: string | null;
   permissionMode: AcpxPermissionMode;
 }
@@ -66,6 +80,7 @@ export type FakeCapabilityProfile =
   | "minimal";
 
 export interface AgentProviderConfigSummary {
+  id?: string;
   kind: AgentProviderKind | string;
   command: string | null;
 }
@@ -218,6 +233,7 @@ export interface NodeConfig {
   provider: AgentProviderConfig;
   providers: AgentProviderConfig[];
   defaultProviderKind: AgentProviderKind;
+  defaultProviderId?: string;
   updateChannel: UpdateChannel;
   recommendedMobileClientVersion?: string | null;
   minimumMobileClientVersion?: string | null;
@@ -239,6 +255,7 @@ export interface SessionSummary {
   updatedAt: number;
   source: string;
   provider?: string | null;
+  providerId?: string;
   status: string;
   rolloutPath: string | null;
   runtime: SessionRuntimeSummary | null;
@@ -258,6 +275,7 @@ export interface AgentRunSummary {
   createdAt: number;
   updatedAt: number;
   provider?: string | null;
+  providerId?: string;
   status: string;
   agentName?: string | null;
   agentDisplayName?: string | null;
@@ -460,6 +478,8 @@ export function normalizeSessionMessageContent(
 }
 
 export interface SessionMessage {
+  /** Opaque provider metadata; never used to authorize host actions. */
+  providerMetadata?: Record<string, unknown>;
   id: string;
   role: "user" | "assistant" | "system";
   text: string;
@@ -471,7 +491,9 @@ export interface SessionMessage {
 }
 
 export interface SessionMessageAttachment {
-  type: "image" | "localImage" | "file";
+  type: "image" | "localImage" | "file" | "audio" | "resource" | "resourceLink";
+  name?: string;
+  mimeType?: string;
   url?: string;
   path?: string;
 }
@@ -509,6 +531,8 @@ export interface SessionActivityChange {
 }
 
 export interface SessionActivityBase {
+  /** Opaque provider metadata; never used to authorize host actions. */
+  providerMetadata?: Record<string, unknown>;
   id: string;
   type:
     | "command"
@@ -635,6 +659,7 @@ export interface ImageGenerationActivity extends SessionActivityBase {
 
 export interface ContextCompactionActivity extends SessionActivityBase {
   type: "context_compaction";
+  summary?: string;
 }
 
 export type SessionActivity =
@@ -683,6 +708,7 @@ export type LiveThreadStatus =
 export type LivePlanStepStatus = "pending" | "in_progress" | "completed";
 
 export interface LivePlanStep {
+  priority?: "high" | "medium" | "low";
   step: string;
   status: LivePlanStepStatus;
 }
@@ -851,6 +877,7 @@ export interface PendingActionElicitationRequest {
 }
 
 export interface PendingAction {
+  terminalId?: string;
   id: string;
   sessionId: string;
   kind: PendingActionKind;
@@ -886,6 +913,7 @@ export interface LiveEvent {
     | "action_opened"
     | "action_resolved"
     | "skills_changed"
+    | "history_invalidated"
     | "error";
   sessionId: string;
   seq?: number;
@@ -972,6 +1000,10 @@ export interface ThreadStatus {
 }
 
 export interface ThreadRecord {
+  /** Native runtime metadata already available without a separate per-session read. */
+  runtime?: SessionRuntimeSummary | null;
+  providerId?: string;
+  providerKind?: AgentProviderKind;
   id: string;
   name: string | null;
   preview: string;
@@ -1038,8 +1070,25 @@ export interface SessionRuntimeSummary {
   approvalsReviewer?: string;
   summaryMode?: string;
   personality?: string;
+  configurationOptions?: SessionConfigurationOption[];
+  commands?: SessionCommandSummary[];
   telemetry?: SessionTelemetrySummary;
   updatedAt?: number;
+}
+
+export interface SessionConfigurationOption {
+  id: string;
+  label: string;
+  description?: string;
+  category?: string;
+  value: string | boolean;
+  options?: Array<{ value: string; label: string; group?: string }>;
+}
+
+export interface SessionCommandSummary {
+  name: string;
+  description: string;
+  inputHint?: string;
 }
 
 export interface ProviderAccessModeConfirmation {

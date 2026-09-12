@@ -68,7 +68,7 @@ class SidemeshDb {
     final dbPath = await _resolveDbPath();
     return openDatabase(
       dbPath,
-      version: 2,
+      version: 4,
       onCreate: (db, version) async {
         await db.execute('''
           CREATE TABLE sessions (
@@ -78,6 +78,8 @@ class SidemeshDb {
             preview TEXT NOT NULL,
             cwd TEXT NOT NULL,
             provider TEXT,
+            provider_id TEXT,
+            canonical_session_id TEXT,
             status TEXT NOT NULL,
             created_at INTEGER NOT NULL,
             updated_at INTEGER NOT NULL,
@@ -100,6 +102,7 @@ class SidemeshDb {
         await db.execute(
           'CREATE INDEX idx_source ON sessions(source, host_id)',
         );
+        await _createClientStorageTables(db);
       },
       onUpgrade: (db, oldVersion, _) async {
         if (oldVersion < 2) {
@@ -110,8 +113,39 @@ class SidemeshDb {
             'ALTER TABLE sessions ADD COLUMN sub_agent_json TEXT',
           );
         }
+        if (oldVersion < 4) {
+          await db.execute('ALTER TABLE sessions ADD COLUMN provider_id TEXT');
+          await db.execute('ALTER TABLE sessions ADD COLUMN canonical_session_id TEXT');
+        }
+        if (oldVersion < 3) {
+          await _createClientStorageTables(db);
+        }
       },
     );
+  }
+
+  static Future<void> _createClientStorageTables(Database db) async {
+    await db.execute('CREATE TABLE client_migrations (name TEXT PRIMARY KEY)');
+    await db.execute('''
+      CREATE TABLE session_logs (
+        host_id TEXT NOT NULL,
+        session_id TEXT NOT NULL,
+        cached_at INTEGER NOT NULL,
+        last_used_at INTEGER NOT NULL,
+        payload TEXT NOT NULL,
+        PRIMARY KEY (host_id, session_id)
+      )
+    ''');
+    await db.execute('''
+      CREATE TABLE session_outbox (
+        host_id TEXT NOT NULL,
+        host_fingerprint TEXT NOT NULL,
+        session_id TEXT NOT NULL,
+        client_message_id TEXT NOT NULL,
+        payload TEXT NOT NULL,
+        PRIMARY KEY (host_id, host_fingerprint, session_id, client_message_id)
+      )
+    ''');
   }
 
   static Future<String> _resolveDbPath() async {

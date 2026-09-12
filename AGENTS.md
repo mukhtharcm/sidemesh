@@ -44,7 +44,7 @@ src/
   types.ts                     # Shared daemon types and provider configs
   provider-registry.ts         # Provider metadata + factory definitions
   provider-factory.ts          # Provider construction
-  multi-provider.ts            # Multi-provider facade with namespaced IDs
+  session-identity.ts          # Stable instance ownership and legacy session aliases
   codex-provider.ts            # Codex adapter
   copilot-provider.ts          # Copilot CLI adapter
   fake-provider.ts             # Deterministic test harness
@@ -58,9 +58,8 @@ src/
   daemon-lifecycle.ts          # Daemon PID/state management
   git.ts                       # Git operations
   workspace-scope.ts           # Workspace path resolution / sandboxing
-  session-input-dedupe-store.ts  # On-disk input deduplication ledger
-  session-state.ts             # Current session overlay and transcript ordering
-  state-writer.ts              # Coalesced durable snapshot writes
+  session-store.ts             # Durable SQLite input records and saved plans
+  session-coordinator.ts       # Published session view, native snapshots, durable input queue
 apps/mobile/lib/src/
   screens/                     # Flutter screens
   theme/                       # App theming
@@ -140,14 +139,25 @@ Every provider implements the interface in `src/agent-provider.ts`.
 - `setupAudience: "public" | "dev"` controls which providers appear in
   `sidemesh setup`. The fake provider is dev-only.
 
-### Multi-Provider Mode
+### Configured Provider Instances
 
-- When `config.providers.length > 1`, `provider-factory.ts` wraps them in
-  `MultiAgentProvider` automatically.
-- IDs are namespaced: `kind:base64url(rawId)`.
-- `MultiAgentProvider.capabilities` reflects the default provider only; use
-  `supportedProviders[].capabilities` from `/api/node` for per-provider truth.
-- `stderr` gets a `[kind] ` prefix for non-default providers.
+- `AgentProviderRuntime` holds a direct map of configured instances. It is not
+  an `AgentProvider`. Resolve an instance and its native session ID before a call.
+  Construction and startup are lazy. Host health and controls remain available
+  when a provider fails. `/api/node` and `/api/providers` report each instance's
+  state, error, and version; restart recreates only that instance.
+- Configured providers have stable `id` values. Old entries default to their kind.
+  Keep the old entry ID when adding another instance of that kind. Set
+  `defaultProviderId` to select an instance. IDs are namespaced as
+  `instanceId:base64url(rawId)`, including single-provider hosts. SQLite pins
+  legacy raw IDs and kind aliases to their original owner. A default change or
+  provider removal must never transfer that ownership. Reusing an instance ID
+  for another kind or a saved alias fails closed.
+- Inputs, plans, recovery, and locks use canonical IDs. Old HTTP and WebSocket
+  callers receive their requested session alias. Input alias conflicts abort
+  the migration transaction and preserve both original delivery records.
+- Use `supportedProviders[].capabilities` from `/api/node` for instance truth.
+- `stderr` gets an `[instanceId] ` prefix.
 - If the resolved provider lacks a capability, the call throws even if another
   provider has it.
 
@@ -205,6 +215,16 @@ specific agent provider.
 
 ## Specific Gotchas
 
+- **ACP integration**: use `src/acp-provider.ts` and the official ACP SDK.
+  The stored kind remains `acpx` for compatibility; the ACPx runtime is removed.
+  Keep exact permission option IDs. Boolean configuration requests need
+  `type: "boolean"`; the SDK's generic request overload can otherwise hide a
+  bad payload behind an `unknown` return type. A completed `session/load` ends
+  a staged replay; `session/resume` does not replay history. ACP display data
+  and local metadata use the host's `sessions-v1.db`. Preserve old JSON files
+  during the transactional import. Cold session lists and archive operations
+  must not launch the agent.
+
 - **Theme ownership**: run `python3 scripts/check_flutter_theme.py` before
   Flutter tests. Use `lib/src/theme/` for tokens and component style recipes.
   Do not restore local numeric typography, colors, padding, radii, button or
@@ -223,6 +243,10 @@ specific agent provider.
 
 - **Duplicate daemon guard**: `sidemesh start` checks `healthz` and refuses to
   start if occupied. Use `--allow-duplicate` to skip.
+- **Durable session state**: `sessions-v1.db` holds host input records and saved
+  plans. It imports the old input ledger and runtime signals transactionally;
+  keep the original JSON files. An input in `dispatching` becomes `uncertain`
+  after restart. Never resend it automatically or prune its recovery payload.
 - **Config persistence**: `sidemesh setup` writes to `~/.sidemesh/config.json`
   (or `SIDEMESH_CONFIG`). Atomic write-then-rename with `0o600` permissions.
   The daemon reads from `SIDEMESH_STATE_DIR` (defaults to `~/.sidemesh`).
@@ -292,16 +316,53 @@ specific agent provider.
   remote daemon URLs over HTTPS/WSS. Browser WebSocket authentication uses the
   `sidemesh.auth.<base64url-token>` subprotocol, while the server selects only
   the non-secret `sidemesh` protocol in its response.
+- **Client storage checks**: `bash scripts/test-flutter-web-storage.sh` runs the
+  existing migration and outbox tests in Chrome with the real SQLite worker.
+  It temporarily copies web runtime assets into the test server root and removes
+  them on exit. `FLUTTER_BIN` selects the pinned SDK. Do not commit those copies.
 - **Flutter web SQLite**: `apps/mobile/web/sqlite3.wasm` and
   `apps/mobile/web/sqflite_sw.js` are generated runtime assets. Regenerate them
   from `apps/mobile/` with
   `dart run sqflite_common_ffi_web:setup --force` after upgrading the package.
+- **Windows npm prepare**: `npm.cmd` cannot run through `spawnSync` without a
+  shell. The package prepare script uses the Windows shell only for its fixed
+  `npm run build` command; do not interpolate user arguments into that command.
 - **No formatter**: No Prettier, Biome, or ESLint. Follow file-local style.
+- **Pi RPC**: execution uses the official `rpc-entry` process. Use
+  `agent_settled` for completion; `agent_end` can precede automatic retries.
+  `get_entries` follows `leafId`, and its entries can precede native disk writes.
+  Confirm durable history against the native file before removing recovery
+  records. Use `parseSessionEntries` with a read-only file read;
+  `SessionManager.open` repairs partial files and must not be used for reads.
+  Load the public SDK only for file discovery/history and catalogs.
+  Extension UI requests can occur during startup; session reads must not wait
+  for startup questions to finish. Never use private SDK event queues.
 - **Codex history messages**: newer rollouts use `event_msg.item_completed`
   with `UserMessage` / `AgentMessage` items instead of `user_message` /
   `agent_message` events. Read both formats for transcripts and previews.
   Do not also promote `response_item.message`: it includes model context and
   copies of visible messages.
+  Transcript reads use app-server `thread/read`; retain the documented legacy
+  tool-output and runtime-settings supplements until upstream closes those
+  gaps. Codex `0.144.6` cannot read paginated histories. Native paginated test
+  fixtures on `0.154.0` need JSONL ordinals and native resume to build their
+  native projection. Never write that database directly.
+- **Copilot SDK types**: derive adapter method types from the installed SDK.
+  SDK 1.0.4 exposes history through `session.getEvents()` and manual compaction
+  through `session.rpc.history.compact()`. The wire method `session.getMessages`
+  is not a JavaScript method. Do not cast a client through `unknown` to a copied
+  interface; this hides missing methods in production while mocks still pass.
+  Refresh `getEvents()` for full snapshots. Keep native IDs from `send()` and
+  recovery content in the shared session database; `sessions.json` is only an
+  import source. Use `metadata.activity()` and `session.idle` for execution
+  state. `assistant.turn_end` ends a loop iteration, and child errors must not
+  complete the parent turn.
+- **OpenCode SDK events**: use the official SDK and subscribe before reading
+  session state. A completed assistant message can be followed by more tools;
+  only native idle ends the turn. Reconnect invalidates loaded history and
+  refreshes pending requests. Keep prompt recovery until native history
+  confirms it. `stateDir` controls native XDG paths; host recovery uses the
+  shared session database. Never log the owned server's temporary password.
 - **WebSocket `hello`**: The server sends `{"type":"hello"}` on every WS
   connection.
 - **Session freshness**: recover through `GET /api/sessions/:id/log` on open,
@@ -310,6 +371,14 @@ specific agent provider.
   Snapshot/live `revision` identifies events covered by the latest snapshot,
   including delayed WebSocket deliveries after the HTTP response. It resets
   with the daemon and must never skip a reconnect refresh.
+- **Input delivery**: `SessionInputCoordinator` owns input serialization and
+  the SQLite queue. Set `capabilities.input.steer = false` when an adapter
+  cannot accept input during a turn. A `queued` receipt means the host saved
+  the payload; it does not mean execution started. Native acceptance is also
+  not proof of durable completion. Keep unconfirmed payloads and block retries
+  with an uncertain delivery result. Only set `inputNotDispatched` on a provider
+  error when the prompt was never sent. Stop/archive cancel queued rows before
+  interruption, and shutdown retains queued rows without starting new work.
 - **Image-bearing tool results**: expose screenshots and other returned images
   through provider-neutral `ToolActivity.attachments`, not fabricated assistant
   messages. Shared normalization recognizes common OpenAI, MCP, and ACP content
@@ -317,8 +386,26 @@ specific agent provider.
 - **Spawned agent sessions**: child sessions are not peer rows in Recent or
   session search. Discover them through the parent-scoped agent-runs path.
   Provider adapters must filter before applying the requested limit, and
-  multi-provider wrapping must namespace `subAgent.parentSessionId` as well as
+  provider runtime routing must namespace `subAgent.parentSessionId` as well as
   the child thread id.
+- **Provider snapshots and input proof**: `readSessionSnapshot` returns native
+  history, runtime, thread data, busy state, and available turn identity after
+  all upstream reads. A busy agent can have no public turn ID. Input receipts
+  become confirmed only through explicit native identity or a completed protocol
+  operation; matching display IDs or repeated prompt text is not proof. Pi needs
+  an observed native timestamp and matching content in its durable entry file.
+- **Search summaries**: the disposable search database stores full session summaries
+  and provider instance IDs. Search results must not start native reads for each
+  result. Index from the coordinator snapshot; compare actual searchable content
+  and summary data, since existing messages can change without a new sequence or
+  timestamp. Apply configured provider IDs before the search result limit.
+- **Host session coordinator**: log, status, resource, and input-dispatch reads use
+  one complete `readSessionSnapshot`. An input receipt does not start a turn.
+  `busy` can be true without a native turn ID; providers own cancellation in
+  that case. Initial input uses the same durable queue as later input. The
+  coordinator stores unconfirmed messages, drafts, and tool updates in SQLite
+  `session_recovery`; native history must cover their content before removal.
+  Keep provider events attached through provider close so final output is saved.
 - **Snapshot/live boundary**: finish provider reads before capturing live state
   and its revision. The client buffers live events during a snapshot, discards
   covered additive text, and preserves newer events and informational warnings.
@@ -329,9 +416,20 @@ specific agent provider.
   Drain buffered events on errors.
   Keep finished tool overlays until provider history confirms their content;
   clearing at turn completion can lose updates from a snapshot already reading.
+- **Client session aliases**: `session_identity_store.dart` retains host ownership
+  for offline use. `SessionLocalStore.adoptSessionAliases` moves cache rows in a
+  transaction; new writes normalize IDs too. Keep the original IDs on pending
+  sends and resolve aliases for lookup/removal. Preference edits must remove
+  equivalent old keys, so clearing a choice cannot restore an older value.
 - **Cached session verification**: cached transcripts remain stale until a full
   snapshot succeeds. Provider timestamps may be coarse and existing rows can
   change without a new transcript sequence number.
+- **Client storage**: transcripts and pending sends use the existing SQLite
+  database. Import preferences and the import marker in one transaction; keep
+  the source preferences as a backup. Clearing data must keep the marker so
+  that old messages and favorites cannot return. Pending sends have no expiry
+  and must never be evicted to make space. Reject a save that exceeds capacity.
+  Match sent messages by client input identity, never by repeated text and time.
 - **Workspace sandboxing**: `resolveWorkspacePath` uses `realpath` and prefix
   match against workspace roots. `WorkspaceAccessError` extends `Error` with
   a `status` field (default 403) that HTTP handlers can throw directly. Roots
@@ -340,6 +438,13 @@ specific agent provider.
   the comma-separated `SIDEMESH_WORKSPACE_ROOTS` list.
 - **Terminal security**: `SIDEMESH_TOKEN` is deleted from env before spawning
   the shell; `SIDEMESH_TERMINAL_SESSION=1` is injected.
+- **ACP terminal sign-in**: advertise `auth.terminal` only with an explicit
+  executable/argument configuration and an enabled host terminal service. Run
+  the configured program separately, append the supplied auth arguments, and
+  never pass a terminal method ID to ACP `authenticate`. The host terminal ID
+  belongs in the pending action; arguments, environment values, and output
+  must stay out of transcripts. Open the exact terminal ID and remove its
+  replay output on exit. Do not replace it with a shell or reuse it by cwd.
 - **Termux / Android PTY support**: keep `node-pty` optional. Do not
   reintroduce eager top-level PTY imports or make `node-pty` a required npm
   dependency; Termux installs can lack a working native addon, so the daemon

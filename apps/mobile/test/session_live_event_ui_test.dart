@@ -11,6 +11,7 @@ import 'package:sidemesh_mobile/src/db.dart';
 import 'package:sidemesh_mobile/src/models.dart';
 import 'package:sidemesh_mobile/src/screens/session_screen.dart';
 import 'package:sidemesh_mobile/src/session_local_store.dart';
+import 'package:sidemesh_mobile/src/session_send_outbox_store.dart';
 import 'package:sidemesh_mobile/src/theme/app_palettes.dart';
 import 'package:sidemesh_mobile/src/theme/app_theme.dart';
 import 'package:stream_channel/stream_channel.dart';
@@ -27,7 +28,114 @@ void main() {
     SessionLocalStore.instance.resetMigrationState();
     final db = await SidemeshDb.instance;
     await db.delete('sessions');
+    await db.delete('session_logs');
+    await db.delete('session_outbox');
+    await db.delete('client_migrations');
     SharedPreferences.setMockInitialValues(<String, Object>{});
+  });
+
+  for (final mode in [ThemeMode.light, ThemeMode.dark]) {
+    testWidgets('advertised commands fill the draft and plan priorities remain visible ($mode)', (tester) async {
+      final session = _session('provider-commands').copyWith(runtime: const SessionRuntimeSummary(commands: [
+        SessionCommandSummary(name: 'review', description: 'Review a file', inputHint: 'File path'),
+      ]));
+      final api = _RichEventFakeApi(sessionSummary: session,
+        nodeInfo: NodeInfo.fromJson({'provider': 'codex', 'defaultProviderCapabilities': {
+          'configuration': {'commands': true}, 'sessions': {'history': true}, 'input': {'text': true},
+        }}), latestPlanUpdate: LiveEvent(type: 'plan_updated', sessionId: session.id, plan: const [
+          LiveEventPlanStep(step: 'Read the file', status: 'completed', priority: 'high'),
+          LiveEventPlanStep(step: 'Write the review', status: 'pending', priority: 'low'),
+        ]));
+      addTearDown(api.dispose);
+      await _pumpApp(tester, SessionScreen(host: _host(session.id), session: session, api: api, desktopMode: true),
+        size: const Size(1180, 900), themeMode: mode);
+      await _pumpFrames(tester);
+      await tester.tap(find.text('Plan update'));
+      await _pumpFrames(tester);
+      expect(find.text('Read the file'), findsOneWidget);
+      expect(find.text('Write the review'), findsOneWidget);
+      expect(find.text('Priority: high'), findsOneWidget);
+      expect(find.text('Priority: low'), findsOneWidget);
+      await tester.enterText(find.byType(TextField).first, 'README.md');
+      await tester.tap(find.text('Commands'));
+      await _pumpFrames(tester);
+      expect(find.textContaining('File path'), findsOneWidget);
+      await tester.tap(find.text('review'));
+      await _pumpFrames(tester);
+      expect(tester.widget<TextField>(find.byType(TextField).first).controller!.text, '/review README.md');
+      expect(api.sendInputCalls, 0);
+      api.emit({'type': 'runtime_updated', 'sessionId': session.id, 'runtime': {'commands': []}});
+      await _pumpFrames(tester);
+      expect(find.text('Commands'), findsNothing);
+    });
+  }
+
+  testWidgets('pending cleanup requires the same client identity for repeated text', (tester) async {
+    final session = _session('pending-identity');
+    final host = _host(session.id);
+    final now = DateTime.now();
+    final pending = PendingSessionSend(
+      hostId: host.id, hostFingerprint: SessionSendOutboxStore.hostFingerprint(host),
+      sessionId: session.id, clientMessageId: 'pending-client-id', text: 'Repeat this message',
+      inputItems: const [SessionInputItem.text('Repeat this message')],
+      message: SessionMessage(id: 'pending-client-id', role: 'user', text: 'Repeat this message',
+        attachments: const [], createdAt: now, seq: 2),
+      createdAt: now, updatedAt: now, nextAttemptAt: now, retryCount: 0, blocked: true,
+    );
+    final outbox = SessionSendOutboxStore.instance;
+    await outbox.upsert(pending);
+    final api = _RichEventFakeApi(sessionSummary: session, messages: [
+      SessionMessage(id: 'different-native-id', role: 'user', text: pending.text,
+        attachments: const [], createdAt: now, seq: 1),
+    ]);
+    addTearDown(api.dispose);
+    await _pumpApp(tester, SessionScreen(host: host, session: session, api: api, desktopMode: true),
+      size: const Size(1180, 900));
+    await _pumpFrames(tester);
+    api.emit({'type': 'hello', 'sessionId': session.id});
+    await _pumpFrames(tester);
+    expect(await outbox.contains(pending), isTrue);
+    expect(find.text('1 message needs attention'), findsOneWidget);
+    api.messages = [pending.message];
+    api.emit({'type': 'hello', 'sessionId': session.id});
+    await _pumpFrames(tester);
+    expect(await outbox.contains(pending), isFalse);
+    expect(find.text('1 message needs attention'), findsNothing);
+  });
+
+  testWidgets('cached live text remains visible while the host is offline', (tester) async {
+    final session = _session('cached-live-text', status: 'running');
+    final host = _host(session.id);
+    await _saveSessionLog(tester,host, SessionLog(
+      session: session, messages: const [], activities: const [], pendingAction: null, history: null,
+      liveAssistantText: 'Draft saved before disconnect', liveAssistantReasoning: 'Saved reasoning',
+    ));
+    final api = _RichEventFakeApi(sessionSummary: session, fetchLogError: StateError('offline'));
+    addTearDown(api.dispose);
+    await _pumpApp(tester, SessionScreen(host: host, session: session, api: api, desktopMode: true),
+      size: const Size(1180, 900));
+    await _pumpFrames(tester);
+    expect(find.text('Draft saved before disconnect'), findsOneWidget);
+  });
+
+  testWidgets('history invalidation replaces saved transcript without reconnect', (tester) async {
+    final session = _session('history-invalidation');
+    final api = _RichEventFakeApi(sessionSummary: session, messages: [
+      _assistantMessage(id: 'old', text: 'Before history change', content: const [TextBlock('Before history change')]),
+    ]);
+    addTearDown(api.dispose);
+    await _pumpApp(tester, SessionScreen(
+      host: _host(session.id), session: session, api: api, desktopMode: true,
+    ), size: const Size(1180, 900));
+    await _pumpFrames(tester);
+    expect(find.text('Before history change'), findsOneWidget);
+    api.messages = [
+      _assistantMessage(id: 'new', text: 'After history change', content: const [TextBlock('After history change')]),
+    ];
+    api.emit({'type': 'history_invalidated', 'sessionId': session.id, 'revision': 2});
+    await _pumpFrames(tester);
+    expect(find.text('Before history change'), findsNothing);
+    expect(find.text('After history change'), findsOneWidget);
   });
 
   testWidgets('snapshot draft and buffered live text join exactly once', (tester) async {
@@ -865,7 +973,7 @@ void main() {
     );
     addTearDown(api.dispose);
 
-    await SessionLocalStore.instance.saveSessionLog(
+    await _saveSessionLog(tester,
       host,
       SessionLog(
         session: session,
@@ -1093,7 +1201,7 @@ void main() {
       );
       addTearDown(api.dispose);
 
-      await SessionLocalStore.instance.saveSessionLog(
+      await _saveSessionLog(tester,
         host,
         SessionLog(
           session: session,
@@ -1208,7 +1316,7 @@ void main() {
     );
     addTearDown(api.dispose);
 
-    await SessionLocalStore.instance.saveSessionLog(
+    await _saveSessionLog(tester,
       host,
       SessionLog(
         session: session,
@@ -1277,7 +1385,7 @@ void main() {
       );
       addTearDown(api.dispose);
 
-      await SessionLocalStore.instance.saveSessionLog(
+      await _saveSessionLog(tester,
         host,
         SessionLog(
           session: session,
@@ -1306,7 +1414,7 @@ void main() {
       );
       await _pumpFrames(tester);
 
-      final cached = await SessionLocalStore.instance.loadSessionLog(
+      final cached = await _loadSessionLog(tester,
         host,
         session.id,
       );
@@ -1333,7 +1441,7 @@ void main() {
     );
     addTearDown(api.dispose);
 
-    await SessionLocalStore.instance.saveSessionLog(
+    await _saveSessionLog(tester,
       host,
       SessionLog(
         session: session,
@@ -1388,7 +1496,7 @@ void main() {
       );
       addTearDown(api.dispose);
 
-      await SessionLocalStore.instance.saveSessionLog(
+      await _saveSessionLog(tester,
         host,
         SessionLog(
           session: session,
@@ -1455,7 +1563,7 @@ void main() {
       );
       addTearDown(api.dispose);
 
-      await SessionLocalStore.instance.saveSessionLog(
+      await _saveSessionLog(tester,
         host,
         SessionLog(
           session: session,
@@ -1560,7 +1668,7 @@ void main() {
     );
     addTearDown(api.dispose);
 
-    await SessionLocalStore.instance.saveSessionLog(
+    await _saveSessionLog(tester,
       host,
       SessionLog(
         session: session,
@@ -2187,6 +2295,14 @@ void main() {
   );
 }
 
+Future<void> _saveSessionLog(WidgetTester tester, HostProfile host, SessionLog log) async {
+  await tester.runAsync(() => SessionLocalStore.instance.saveSessionLog(host, log));
+}
+
+Future<CachedSessionLog?> _loadSessionLog(WidgetTester tester, HostProfile host, String sessionId) {
+  return tester.runAsync<CachedSessionLog?>(() => SessionLocalStore.instance.loadSessionLog(host, sessionId));
+}
+
 Future<void> _pumpFrames(WidgetTester tester) async {
   await tester.pump();
   await tester.pump(const Duration(milliseconds: 50));
@@ -2226,6 +2342,7 @@ Future<void> _pumpApp(
   WidgetTester tester,
   Widget child, {
   required Size size,
+  ThemeMode themeMode = ThemeMode.system,
 }) async {
   tester.view
     ..devicePixelRatio = 1
@@ -2238,6 +2355,7 @@ Future<void> _pumpApp(
   final palette = ThemeVariant.codexAmber;
   await tester.pumpWidget(
     MaterialApp(
+      themeMode: themeMode,
       theme: buildLightTheme(
         palette.light,
         platform: size.width >= 760 ? TargetPlatform.macOS : TargetPlatform.iOS,

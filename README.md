@@ -20,7 +20,7 @@ Sidemesh currently supports these provider adapters:
 | Codex | primary | default setup option |
 | Pi | supported | public setup option |
 | GitHub Copilot CLI | supported | public setup option |
-| ACP via acpx | supported | generic bridge for ACP-compatible agents |
+| ACP | supported | generic bridge for ACP-compatible agents |
 | OpenCode | dev | available through `sidemesh setup --dev` |
 | Fake test provider | dev | deterministic contract-testing adapter |
 
