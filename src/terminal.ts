@@ -52,7 +52,18 @@ export interface CreateTerminalRequest {
   replaceExisting?: boolean | null;
 }
 
+export interface AuthenticationTerminalRequest {
+  cwd: string;
+  sessionId: string;
+  executable: string;
+  args: string[];
+  env?: Record<string, string>;
+  signal: AbortSignal;
+  onReady: (terminalId: string) => void;
+}
+
 export interface TerminalInfo {
+  purpose?: "authentication";
   id: string;
   title: string;
   cwd: string;
@@ -108,6 +119,8 @@ interface TerminalProcess {
 }
 
 interface TerminalRecord {
+  purpose?: "authentication";
+  done: Promise<void>;
   id: string;
   title: string;
   cwd: string;
@@ -173,11 +186,39 @@ export class TerminalRegistry {
   }
 
   public async create(request: CreateTerminalRequest): Promise<TerminalInfo> {
+    return this.createTerminal(request);
+  }
+
+  public async runAuthentication(request: AuthenticationTerminalRequest): Promise<void> {
+    request.signal.throwIfAborted();
+    const info = await this.createTerminal({ cwd: request.cwd, sessionId: request.sessionId, title: "Agent sign-in" }, request);
+    const terminal = this.requireTerminal(info.id);
+    const cancel = () => terminal.process.kill();
+    request.signal.addEventListener("abort", cancel, { once: true });
+    try {
+      if (request.signal.aborted) cancel();
+      else request.onReady(info.id);
+      await terminal.done;
+      request.signal.throwIfAborted();
+      if (terminal.exitCode !== 0 || terminal.signal) throw new TerminalError("Agent sign-in did not complete", 409);
+    } finally {
+      request.signal.removeEventListener("abort", cancel);
+      if (terminal.status === "running") terminal.process.kill();
+      this.terminals.delete(terminal.id);
+      terminal.replay = [];
+      terminal.replayBytes = 0;
+      for (const socket of terminal.clients) socket.close();
+      terminal.clients.clear();
+    }
+  }
+
+  private async createTerminal(request: CreateTerminalRequest, authentication?: AuthenticationTerminalRequest): Promise<TerminalInfo> {
     this.assertEnabled();
     this.enforceSessionLimit();
 
     const cwd = await this.resolveCwd(request.cwd, request);
-    const shell = this.resolveShell();
+    authentication?.signal.throwIfAborted();
+    const shell = authentication ? { path: authentication.executable, args: authentication.args } : this.resolveShell();
     const dimensions = normalizeDimensions(request.cols, request.rows);
     const id = randomUUID();
     const title = request.title?.trim() || basename(cwd) || "Terminal";
@@ -186,10 +227,13 @@ export class TerminalRegistry {
       cwd,
       cols: dimensions.cols,
       rows: dimensions.rows,
-      env: terminalEnvironment(dimensions),
-      requirePty: this.requirePty,
+      env: terminalEnvironment(dimensions, authentication?.env),
+      requirePty: authentication ? true : this.requirePty,
     });
+    let resolveExit!: () => void;
     const terminal: TerminalRecord = {
+      ...(authentication ? { purpose: "authentication" } : {}),
+      done: new Promise<void>((resolve) => { resolveExit = resolve; }),
       id,
       title,
       cwd,
@@ -234,6 +278,7 @@ export class TerminalRegistry {
         signal: terminal.signal,
       });
       this.broadcast(terminal, frame);
+      resolveExit();
     });
 
     if (request.replaceExisting === true) {
@@ -407,7 +452,7 @@ export class TerminalRegistry {
   private broadcastReplacement(replacement: TerminalRecord): void {
     const replacementInfo = this.info(replacement);
     for (const terminal of this.terminals.values()) {
-      if (terminal.id === replacement.id) continue;
+      if (terminal.id === replacement.id || terminal.purpose === "authentication") continue;
       if (terminal.clients.size === 0) continue;
       if (!sameLogicalTerminal(terminal, replacement)) continue;
       const frame = this.pushFrame(terminal, {
@@ -451,7 +496,7 @@ export class TerminalRegistry {
       return;
     }
     const stale = [...this.terminals.values()]
-      .filter((terminal) => terminal.clients.size === 0)
+      .filter((terminal) => terminal.clients.size === 0 && terminal.purpose !== "authentication")
       .sort((left, right) => left.lastClientAt - right.lastClientAt)[0];
     if (!stale) {
       throw new TerminalError("terminal session limit reached", 429);
@@ -474,6 +519,7 @@ export class TerminalRegistry {
 
   private info(terminal: TerminalRecord): TerminalInfo {
     return {
+      ...(terminal.purpose ? { purpose: terminal.purpose } : {}),
       id: terminal.id,
       title: terminal.title,
       cwd: terminal.cwd,
@@ -601,6 +647,7 @@ async function spawnPtyTerminalProcess(
         : "node-pty is unavailable on this host",
     );
   }
+  let exited = false;
   const ptyProcess = nodePty.spawn(shell, args, {
     name: "xterm-256color",
     cwd: options.cwd,
@@ -613,17 +660,22 @@ async function spawnPtyTerminalProcess(
     backend: "direct-pty",
     write: (data) => ptyProcess.write(data),
     resize: (cols, rows) => ptyProcess.resize(cols, rows),
-    kill: () => ptyProcess.kill(),
+    kill: () => {
+      if (exited) return;
+      ptyProcess.kill();
+      setTimeout(() => { if (!exited) ptyProcess.kill("SIGKILL"); }, 750).unref?.();
+    },
     onData: (callback) => {
       ptyProcess.onData(callback);
     },
     onExit: (callback) => {
-      ptyProcess.onExit((event) =>
+      ptyProcess.onExit((event) => {
+        exited = true;
         callback({
           exitCode: event.exitCode ?? null,
           signal: event.signal ?? null,
-        }),
-      );
+        });
+      });
     },
   };
 }
@@ -701,7 +753,11 @@ function spawnPipeTerminalProcess(
       child.stderr.on("data", (data) => callback(data.toString()));
     },
     onExit: (callback) => {
-      child.on("exit", (exitCode) => {
+      child.once("error", () => {
+        exited = true;
+        callback({ exitCode: 1, signal: null });
+      });
+      child.once("exit", (exitCode) => {
         exited = true;
         callback({ exitCode, signal: null });
       });
@@ -729,11 +785,9 @@ function spawnScriptTerminalProcess(
   let exited = false;
   const child = spawnChild(
     scriptPath,
-    [
-      "-qfec",
-      buildScriptProxyCommand(shell, args, options.cols, options.rows),
-      "/dev/null",
-    ],
+    platform() === "darwin"
+      ? ["-q", "/dev/null", "/bin/sh", "-c", buildScriptProxyCommand(shell, args, options.cols, options.rows)]
+      : ["-qfec", buildScriptProxyCommand(shell, args, options.cols, options.rows), "/dev/null"],
     {
       cwd: options.cwd,
       env: options.env,
@@ -759,7 +813,11 @@ function spawnScriptTerminalProcess(
       child.stderr.on("data", (data) => callback(data.toString()));
     },
     onExit: (callback) => {
-      child.on("exit", (exitCode) => {
+      child.once("error", () => {
+        exited = true;
+        callback({ exitCode: 1, signal: null });
+      });
+      child.once("exit", (exitCode) => {
         exited = true;
         callback({ exitCode, signal: null });
       });
@@ -767,7 +825,7 @@ function spawnScriptTerminalProcess(
   };
 }
 
-function terminatePipeProcess(
+export function terminatePipeProcess(
   child: ChildProcessWithoutNullStreams,
   hasExited: () => boolean,
 ): void {
@@ -812,9 +870,10 @@ function fallbackShellArgs(shell: string, args: string[]): string[] {
 function terminalEnvironment(dimensions: {
   cols: number;
   rows: number;
-}): NodeJS.ProcessEnv {
+}, overrides?: Record<string, string>): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = {
     ...process.env,
+    ...overrides,
     TERM: "xterm-256color",
     COLORTERM: process.env.COLORTERM || "truecolor",
     COLUMNS: String(dimensions.cols),

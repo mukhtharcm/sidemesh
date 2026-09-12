@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import nodePath from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
 
-import { loadConfig, rotatePersistedToken } from "./config.js";
+import { loadConfig, rotatePersistedToken, saveConfig } from "./config.js";
 
 describe("loadConfig", () => {
   let tempDir = "";
@@ -90,6 +90,48 @@ describe("loadConfig", () => {
     });
     assert.equal(config.updateChannel, "stable");
     assert.deepEqual(config.allowedBrowserOrigins, []);
+  });
+
+  it("keeps the legacy default when it is not the first stored provider", async () => {
+    await writeFile(configPath, JSON.stringify({
+      version: 1, token: "file-token", defaultProviderKind: "pi",
+      providers: [
+        { kind: "codex", bin: "codex" },
+        { kind: "pi", agentDir: null, stateDir: null },
+      ],
+    }));
+    const config = await loadConfig({ configPath, env: {} });
+    assert.equal(config.provider.kind, "pi");
+    assert.equal(config.defaultProviderId, "pi");
+  });
+
+  it("preserves multiple instances and resolves Sidemesh paths from the host root", async () => {
+    const providers = [
+      { id: "copilot", kind: "copilot", bin: "copilot", stateDir: null, allowAll: false, configuredModel: null },
+      { id: "reviewer", kind: "copilot", bin: "copilot-review", stateDir: null, allowAll: false, configuredModel: null },
+      { id: "pi", kind: "pi", agentDir: "/native/pi", stateDir: null },
+      { id: "opencode", kind: "opencode", bin: "opencode", stateDir: "/native/opencode" },
+    ];
+    await writeFile(configPath, JSON.stringify({
+      version: 1, token: "file-token", defaultProviderId: "reviewer", providers,
+    }));
+    const config = await loadConfig({ configPath, env: { SIDEMESH_STATE_DIR: tempDir } });
+    assert.equal(config.defaultProviderId, "reviewer");
+    assert.equal(config.provider.id, "reviewer");
+    assert.deepEqual(config.providers.map((provider) => provider.id), ["copilot", "reviewer", "pi", "opencode"]);
+    assert.equal(config.providers[0]?.kind === "copilot" && config.providers[0].stateDir,
+      nodePath.join(tempDir, "copilot-provider"));
+    assert.equal(config.providers[1]?.kind === "copilot" && config.providers[1].stateDir,
+      nodePath.join(tempDir, "providers/reviewer"));
+    assert.equal(config.providers[2]?.kind === "pi" && config.providers[2].stateDir,
+      nodePath.join(tempDir, "pi-provider"));
+    assert.equal(config.providers[3]?.kind === "opencode" && config.providers[3].stateDir, "/native/opencode");
+    await saveConfig(config);
+    const loaded = await loadConfig({ configPath, env: {} });
+    assert.deepEqual(loaded.providers, config.providers);
+    assert.equal(loaded.defaultProviderId, "reviewer");
+    await writeFile(configPath, JSON.stringify({ version: 1, providers: [providers[0], providers[0]] }));
+    await assert.rejects(loadConfig({ configPath, env: {} }), /instance IDs must be unique/);
   });
 
   it("loads exact browser origins from config and environment", async () => {
@@ -305,6 +347,25 @@ describe("loadConfig", () => {
     assert.equal(config.provider.command, "claude-agent-acp");
     assert.equal(config.provider.stateDir, "/tmp/acpx-state-old");
     assert.equal(config.provider.permissionMode, "deny-all");
+  });
+
+  it("preserves explicit ACP launch settings and lets a command override replace them", async () => {
+    const provider = { kind: "acpx", agent: "custom", executable: "/opt/agent with spaces",
+      args: ["--acp", "literal $HOME", ""], command: null, stateDir: null, permissionMode: "approve-reads" };
+    await writeFile(configPath, JSON.stringify({ version: 1, token: "file-token", providers: [provider] }));
+    const config = await loadConfig({ configPath, env: {} });
+    assert.equal(config.provider.kind, "acpx");
+    if (config.provider.kind !== "acpx") throw new Error("Expected ACP");
+    assert.equal(config.provider.executable, provider.executable);
+    assert.deepEqual(config.provider.args, provider.args);
+    await saveConfig(config, { configPath });
+    assert.deepEqual((await loadConfig({ configPath, env: {} })).providers, config.providers);
+    const overridden = await loadConfig({ configPath, env: { SIDEMESH_ACPX_COMMAND: "other-agent --acp" } });
+    assert.equal(overridden.provider.kind, "acpx");
+    if (overridden.provider.kind !== "acpx") throw new Error("Expected ACP");
+    assert.equal(overridden.provider.command, "other-agent --acp");
+    assert.equal(overridden.provider.executable, undefined);
+    assert.equal(overridden.provider.args, undefined);
   });
 
   it("loads terminal settings from persisted config and env overrides", async () => {

@@ -1,26 +1,27 @@
 import 'models.dart';
 
-String? agentProviderDisplayLabel(String? providerKind, {NodeInfo? nodeInfo}) {
+String? agentProviderDisplayLabel(String? providerKind, {String? providerId, NodeInfo? nodeInfo}) {
   final kind = (providerKind ?? '').trim();
   if (kind.isEmpty) {
     return null;
   }
 
-  final summary = nodeInfo?.providerSummary(kind);
+  final summary = nodeInfo?.providerSummary(providerId ?? kind);
   if (summary != null && summary.displayName.trim().isNotEmpty) {
-    return summary.displayName.trim();
+    return summary.label;
   }
   if (nodeInfo != null && kind == nodeInfo.provider) {
     return nodeInfo.providerDisplayName;
   }
 
-  return switch (kind) {
+  final name = switch (kind) {
     'codex' => 'Codex',
     'pi' => 'Pi',
     'copilot' => 'GitHub Copilot',
     'fake' => 'Fake',
     _ => _titleCaseProviderKind(kind),
   };
+  return providerId == null || providerId == kind ? name : '$name · $providerId';
 }
 
 String _titleCaseProviderKind(String kind) {

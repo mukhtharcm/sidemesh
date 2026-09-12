@@ -618,7 +618,8 @@ class _PlanUpdateCardState extends State<_PlanUpdateCard> {
                                 ),
                                 const SizedBox(width: AppSpacing.compact),
                                 Expanded(
-                                  child: Text(
+                                  child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                                  Text(
                                     steps[index].step,
                                     style: Theme.of(context)
                                         .textTheme
@@ -629,6 +630,9 @@ class _PlanUpdateCardState extends State<_PlanUpdateCard> {
                                           height: AppLineHeights.caption,
                                         ),
                                   ),
+                                  if (steps[index].priority != null)
+                                    Text('Priority: ${steps[index].priority}', style: Theme.of(context).textTheme.bodySmall),
+                                  ]),
                                 ),
                                 const SizedBox(width: AppSpacing.sm),
                                 MeshStatusBadge(
@@ -1432,6 +1436,9 @@ class _MessageAttachmentTile extends StatelessWidget {
         sessionId: sessionId,
         path: attachment.path!,
       );
+    }
+    if (const {'audio', 'resource', 'resourceLink'}.contains(attachment.type)) {
+      return Text('${attachment.type == 'audio' ? 'Audio' : 'Resource'}: ${attachment.name ?? attachment.mimeType ?? 'Attachment'}');
     }
     return const SizedBox.shrink();
   }

@@ -21,7 +21,7 @@ import {
   type AgentSessionActivityDraft,
   type AgentSessionInputItem,
   type AgentSessionListOptions,
-  type AgentSessionLogOptions,
+  type AgentSessionLogOptions, type AgentSessionSnapshot,
   type AgentSessionResumeOptions,
   type AgentSkillConfigWriteRequest,
   type AgentSkillListOptions,
@@ -139,7 +139,7 @@ export const FAKE_PROVIDER_CAPABILITIES: AgentProviderCapabilities = {
   },
 };
 
-function capabilitiesForFakeProfile(
+export function capabilitiesForFakeProfile(
   profile: FakeCapabilityProfile,
 ): AgentProviderCapabilities {
   const capabilities = cloneCapabilities(FAKE_PROVIDER_CAPABILITIES);
@@ -369,6 +369,13 @@ export class FakeAgentProvider
     };
   }
 
+  public async readSessionSnapshot(id: string, options: AgentSessionLogOptions = {}): Promise<AgentSessionSnapshot> {
+    const session = this.requireSession(id);
+    const log = await this.readSessionLog(session.thread, options);
+    const activeTurnId = this.activeTurnIds.get(id) ?? null;
+    return { ...log, thread: this.cloneThread(session, true), activeTurnId, busy: activeTurnId !== null };
+  }
+
   public async readSessionRuntime(thread: ThreadRecord): Promise<SessionRuntimeSummary | null> {
     const runtime = this.requireSession(thread.id).runtime;
     return runtime ? { ...runtime } : null;
@@ -489,9 +496,9 @@ export class FakeAgentProvider
     };
   }
 
-  public async interruptTurn(threadId: string, turnId: string): Promise<unknown> {
+  public async interruptTurn(threadId: string, turnId: string | null): Promise<unknown> {
     const session = this.requireSession(threadId);
-    const turn = session.turns.find((candidate) => candidate.id === turnId);
+    const turn = session.turns.find((candidate) => candidate.id === (turnId ?? this.activeTurnIds.get(threadId)));
     if (!turn || turn.status !== "inProgress") {
       return { interrupted: false };
     }
@@ -1370,6 +1377,7 @@ export class FakeAgentProvider
   private cloneThread(session: FakeSessionState, includeTurns: boolean): ThreadRecord {
     return {
       ...session.thread,
+      runtime: session.runtime ? structuredClone(session.runtime) : null,
       status: { ...session.thread.status },
       gitInfo: session.thread.gitInfo ? { ...session.thread.gitInfo } : null,
       turns: includeTurns

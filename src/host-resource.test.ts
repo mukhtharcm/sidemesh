@@ -10,7 +10,7 @@ import {
   normalizeHostResourceUrl,
   registerHostResourceRoutes,
 } from "./host-resource.js";
-import type { HonoServerEnv } from "./hono-route-adapter.js";
+import type { HonoServerEnv } from "./server-http.js";
 
 describe("host resources", () => {
   it("accepts loopback targets and rejects remote hosts", () => {

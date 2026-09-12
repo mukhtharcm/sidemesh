@@ -22,6 +22,7 @@ import 'src/ios_push_notification_service.dart';
 import 'src/screen_awake_settings_store.dart';
 import 'src/session_send_outbox_worker.dart';
 import 'src/theme/app_theme.dart';
+import 'src/session_identity_store.dart';
 import 'src/theme/theme_controller.dart';
 import 'src/windowing.dart';
 
@@ -49,6 +50,7 @@ Future<void> main(List<String> args) async {
       await WindowManipulator.hideTitle();
     }
   }
+  await SessionIdentityStore.instance.ensureLoaded();
   await CreateSessionDefaultsStore.instance.ensureLoaded();
   await ScreenAwakeSettingsStore.instance.ensureLoaded();
   final themeController = await ThemeController.load();

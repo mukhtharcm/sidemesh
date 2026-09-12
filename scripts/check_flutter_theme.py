@@ -63,7 +63,7 @@ def main():
     for path in paths:
         if (ROOT / 'apps/mobile/lib/src/theme') in path.parents:
             continue
-        failures += [f'{path.relative_to(ROOT)}:{line}: {reason}' for line, reason in violations(path.read_text())]
+        failures += [f'{path.relative_to(ROOT)}:{line}: {reason}' for line, reason in violations(path.read_text(encoding="utf-8"))]
     print('\n'.join(failures) if failures else f'Theme check passed ({len(paths)} Dart files scanned).')
     return bool(failures)
 

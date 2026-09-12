@@ -1,3 +1,7 @@
+import 'dart:convert';
+
+import 'session_identity.dart';
+
 class HostProfile {
   const HostProfile({
     required this.id,
@@ -53,6 +57,8 @@ class NodeInfo {
     required this.platform,
     this.homeDirectory,
     required this.provider,
+    String? providerId,
+    this.sessionAliases,
     required this.providerName,
     required this.providerVersion,
     required this.providerConfig,
@@ -69,13 +75,15 @@ class NodeInfo {
     this.updateSupported = false,
     this.recommendedMobileClientVersion,
     this.minimumMobileClientVersion,
-  });
+  }) : providerId = providerId ?? provider;
 
   final String label;
   final String hostname;
   final String platform;
   final String? homeDirectory;
   final String provider;
+  final String providerId;
+  final SessionAliases? sessionAliases;
   final String providerName;
   final String providerVersion;
   final ProviderConfigSummary providerConfig;
@@ -119,6 +127,8 @@ class NodeInfo {
       platform: platform,
       homeDirectory: homeDirectory,
       provider: provider,
+      providerId: providerId,
+      sessionAliases: sessionAliases,
       providerName: providerName,
       providerVersion: providerVersion,
       providerConfig: providerConfig,
@@ -190,25 +200,20 @@ class NodeInfo {
     return hostCapabilities.supports(section, feature);
   }
 
-  ProviderDefinitionSummary providerSummary(String? kind) {
-    if ((kind ?? '').isEmpty) {
-      return supportedProviders.firstWhere(
-        (provider) => provider.kind == providerConfig.kind,
-        orElse: () => ProviderDefinitionSummary.empty,
-      );
-    }
-    return supportedProviders.firstWhere(
-      (provider) => provider.kind == kind,
-      orElse: () => ProviderDefinitionSummary.empty,
-    );
+  ProviderDefinitionSummary providerSummary(String? reference) {
+    final requested = (reference ?? '').isEmpty ? providerId : reference!;
+    final resolved = sessionAliases?.aliases[requested] ?? requested;
+    final exact = supportedProviders.where((entry) => entry.id == resolved);
+    if (exact.isNotEmpty) return exact.first;
+    if (sessionAliases != null) return ProviderDefinitionSummary.empty;
+    final byKind = supportedProviders.where((entry) => entry.kind == requested);
+    return byKind.length == 1 ? byKind.single : ProviderDefinitionSummary.empty;
   }
 
-  ProviderCapabilities capabilitiesForProvider(String? kind) {
-    final summary = providerSummary(kind);
-    if (!summary.capabilities.isEmpty) {
-      return summary.capabilities;
-    }
-    if ((kind ?? '').isEmpty || kind == provider) {
+  ProviderCapabilities capabilitiesForProvider(String? reference) {
+    final summary = providerSummary(reference);
+    if (summary.id.isNotEmpty) return summary.capabilities;
+    if ((reference ?? '').isEmpty || reference == providerId) {
       return defaultProviderCapabilities;
     }
     return ProviderCapabilities.empty;
@@ -224,6 +229,8 @@ class NodeInfo {
       platform: _stringValue(json['platform']),
       homeDirectory: _stringOrNull(json['homeDirectory']),
       provider: _stringOrNull(json['provider']) ?? 'codex',
+      providerId: _stringOrNull(json['providerId']),
+      sessionAliases: SessionAliases.fromJson(json['sessionAliases']),
       providerName: _stringOrNull(json['providerName']) ?? 'Codex',
       providerVersion: _stringValue(json['providerVersion']),
       providerConfig: ProviderConfigSummary.fromJson(json['providerConfig']),
@@ -375,15 +382,21 @@ class UpdateOperation {
 class ProviderMetadata {
   const ProviderMetadata({
     required this.currentProvider,
+    String? currentProviderId,
+    this.sessionAliases,
     required this.providers,
-  });
+  }) : currentProviderId = currentProviderId ?? currentProvider;
 
   final String currentProvider;
+  final String currentProviderId;
+  final SessionAliases? sessionAliases;
   final List<ProviderDefinitionSummary> providers;
 
   factory ProviderMetadata.fromJson(Map<String, dynamic> json) =>
       ProviderMetadata(
         currentProvider: _stringValue(json['currentProvider']),
+        currentProviderId: _stringOrNull(json['currentProviderId']),
+        sessionAliases: SessionAliases.fromJson(json['sessionAliases']),
         providers: ProviderDefinitionSummary.listFromJson(json['providers']),
       );
 }
@@ -391,6 +404,9 @@ class ProviderMetadata {
 class ProviderDefinitionSummary {
   const ProviderDefinitionSummary({
     required this.kind,
+    String? id,
+    this.state = 'unknown',
+    this.error,
     required this.displayName,
     required this.defaultCommand,
     required this.commandEnvironmentVariables,
@@ -399,7 +415,7 @@ class ProviderDefinitionSummary {
     required this.config,
     required this.version,
     required this.isDefault,
-  });
+  }) : id = id ?? kind;
 
   static const empty = ProviderDefinitionSummary(
     kind: '',
@@ -414,6 +430,9 @@ class ProviderDefinitionSummary {
   );
 
   final String kind;
+  final String id;
+  final String state;
+  final String? error;
   final String displayName;
   final String defaultCommand;
   final List<String> commandEnvironmentVariables;
@@ -423,10 +442,18 @@ class ProviderDefinitionSummary {
   final String version;
   final bool isDefault;
 
+  String get label {
+    final name = displayName.isEmpty ? kind : displayName;
+    return id == kind ? name : '$name · $id';
+  }
+
   factory ProviderDefinitionSummary.fromJson(Object? json) {
     if (json is! Map) return empty;
     return ProviderDefinitionSummary(
       kind: _stringValue(json['kind']),
+      id: _stringOrNull(json['id']),
+      state: _stringOrNull(json['state']) ?? 'unknown',
+      error: _stringOrNull(json['error']),
       displayName: _stringValue(json['displayName']),
       defaultCommand: _stringValue(json['defaultCommand']),
       commandEnvironmentVariables:
@@ -501,6 +528,7 @@ class ProviderCapabilities {
 
 class HostTerminalInfo {
   const HostTerminalInfo({
+    this.purpose,
     required this.id,
     required this.title,
     required this.cwd,
@@ -518,6 +546,7 @@ class HostTerminalInfo {
     required this.clients,
   });
 
+  final String? purpose;
   final String id;
   final String title;
   final String cwd;
@@ -538,6 +567,7 @@ class HostTerminalInfo {
 
   factory HostTerminalInfo.fromJson(Map<String, dynamic> json) =>
       HostTerminalInfo(
+        purpose: _stringOrNull(json['purpose']),
         id: _stringValue(json['id']),
         title: _stringValue(json['title']),
         cwd: _stringValue(json['cwd']),
@@ -766,6 +796,8 @@ class SessionSummary {
     required this.updatedAt,
     required this.source,
     required this.provider,
+    this.providerId,
+    this.canonicalSessionId,
     required this.status,
     required this.runtime,
     required this.gitInfo,
@@ -783,6 +815,10 @@ class SessionSummary {
   final DateTime updatedAt;
   final String source;
   final String? provider;
+  final String? providerId;
+  final String? canonicalSessionId;
+
+  String? get providerReference => providerId ?? provider;
   final String status;
   final SessionRuntimeSummary? runtime;
   final GitInfoSummary? gitInfo;
@@ -798,6 +834,9 @@ class SessionSummary {
       status == 'waiting_for_approval';
 
   SessionSummary copyWith({
+    String? id,
+    String? providerId,
+    String? canonicalSessionId,
     String? title,
     String? preview,
     String? cwd,
@@ -823,7 +862,9 @@ class SessionSummary {
             ? true
             : (clearSubAgent ? false : this.isSubAgent));
     return SessionSummary(
-      id: id,
+      id: id ?? this.id,
+      providerId: providerId ?? this.providerId,
+      canonicalSessionId: canonicalSessionId ?? this.canonicalSessionId,
       title: title ?? this.title,
       preview: preview ?? this.preview,
       cwd: cwd ?? this.cwd,
@@ -854,6 +895,8 @@ class SessionSummary {
       updatedAt: _dateValue(json['updatedAt']),
       source: _stringValue(json['source']),
       provider: _stringOrNull(json['provider']),
+      providerId: _stringOrNull(json['providerId']),
+      canonicalSessionId: _stringOrNull(json['canonicalSessionId']),
       status: _stringValue(json['status']),
       runtime: json['runtime'] is Map<String, dynamic>
           ? SessionRuntimeSummary.fromJson(
@@ -881,6 +924,8 @@ class SessionSummary {
     'updatedAt': updatedAt.millisecondsSinceEpoch,
     'source': source,
     'provider': provider,
+    'providerId': providerId,
+    'canonicalSessionId': canonicalSessionId,
     'status': status,
     'runtime': runtime?.toJson(),
     'gitInfo': gitInfo?.toJson(),
@@ -901,6 +946,7 @@ class AgentRunSummary {
     required this.createdAt,
     required this.updatedAt,
     required this.provider,
+    this.providerId,
     required this.status,
     this.agentName,
     this.agentDisplayName,
@@ -917,6 +963,7 @@ class AgentRunSummary {
   final DateTime createdAt;
   final DateTime updatedAt;
   final String? provider;
+  final String? providerId;
   final String status;
   final String? agentName;
   final String? agentDisplayName;
@@ -954,6 +1001,7 @@ class AgentRunSummary {
         createdAt: _dateValue(json['createdAt']),
         updatedAt: _dateValue(json['updatedAt']),
         provider: _stringOrNull(json['provider']),
+        providerId: _stringOrNull(json['providerId']),
         status: _stringValue(json['status']),
         agentName: _stringOrNull(json['agentName']),
         agentDisplayName: _stringOrNull(json['agentDisplayName']),
@@ -977,6 +1025,8 @@ class SessionRuntimeSummary {
     this.summaryMode,
     this.personality,
     this.telemetry,
+    this.configurationOptions = const [],
+    this.commands = const [],
     this.updatedAt,
   });
 
@@ -992,6 +1042,8 @@ class SessionRuntimeSummary {
   final String? summaryMode;
   final String? personality;
   final SessionTelemetrySummary? telemetry;
+  final List<SessionConfigurationOption> configurationOptions;
+  final List<SessionCommandSummary> commands;
   final DateTime? updatedAt;
 
   SessionRuntimeSummary copyWith({
@@ -1008,6 +1060,8 @@ class SessionRuntimeSummary {
     String? personality,
     SessionTelemetrySummary? telemetry,
     bool clearTelemetry = false,
+    List<SessionConfigurationOption>? configurationOptions,
+    List<SessionCommandSummary>? commands,
     DateTime? updatedAt,
   }) => SessionRuntimeSummary(
     model: model ?? this.model,
@@ -1023,10 +1077,14 @@ class SessionRuntimeSummary {
     personality: personality ?? this.personality,
     telemetry: clearTelemetry ? null : (telemetry ?? this.telemetry),
     updatedAt: updatedAt ?? this.updatedAt,
+    configurationOptions: configurationOptions ?? this.configurationOptions,
+    commands: commands ?? this.commands,
   );
 
   factory SessionRuntimeSummary.fromJson(Map<String, dynamic> json) =>
       SessionRuntimeSummary(
+        configurationOptions: SessionConfigurationOption.listFromJson(json['configurationOptions']),
+        commands: SessionCommandSummary.listFromJson(json['commands']),
         model: json['model'] as String?,
         modelProvider: json['modelProvider'] as String?,
         mode: json['mode'] as String?,
@@ -1061,8 +1119,71 @@ class SessionRuntimeSummary {
     'summaryMode': summaryMode,
     'personality': personality,
     'telemetry': telemetry?.toJson(),
+    'configurationOptions': configurationOptions.map((option) => option.toJson()).toList(),
+    'commands': commands.map((command) => command.toJson()).toList(),
     'updatedAt': updatedAt?.millisecondsSinceEpoch,
   };
+}
+
+class SessionConfigurationOption {
+  const SessionConfigurationOption({required this.id, required this.label, required this.value,
+    this.description, this.category, this.options = const []});
+  final String id;
+  final String label;
+  final Object value;
+  final String? description;
+  final String? category;
+  final List<SessionConfigurationChoice> options;
+
+  static List<SessionConfigurationOption> listFromJson(Object? value) {
+    if (value is! List) return const [];
+    final ids = <String>{};
+    return value.whereType<Map<String, dynamic>>().where((entry) =>
+      entry['id'] is String && (entry['id'] as String).isNotEmpty && ids.add(entry['id'] as String) &&
+      entry['label'] is String && (entry['value'] is String || entry['value'] is bool))
+      .map((entry) => SessionConfigurationOption(id: entry['id'] as String, label: entry['label'] as String,
+        value: entry['value'] as Object, description: _stringOrNull(entry['description']),
+        category: _stringOrNull(entry['category']), options: SessionConfigurationChoice.listFromJson(entry['options'])))
+      .toList();
+  }
+
+  Map<String, dynamic> toJson() => {'id': id, 'label': label, 'value': value,
+    'description': description, 'category': category, 'options': options.map((option) => option.toJson()).toList()};
+}
+
+class SessionConfigurationChoice {
+  const SessionConfigurationChoice({required this.value, required this.label, this.group});
+  final String value;
+  final String label;
+  final String? group;
+
+  static List<SessionConfigurationChoice> listFromJson(Object? value) {
+    if (value is! List) return const [];
+    final ids = <String>{};
+    return value.whereType<Map<String, dynamic>>().where((entry) =>
+      entry['value'] is String && ids.add(entry['value'] as String) && entry['label'] is String)
+      .map((entry) => SessionConfigurationChoice(value: entry['value'] as String,
+        label: entry['label'] as String, group: _stringOrNull(entry['group']))).toList();
+  }
+
+  Map<String, dynamic> toJson() => {'value': value, 'label': label, 'group': group};
+}
+
+class SessionCommandSummary {
+  const SessionCommandSummary({required this.name, required this.description, this.inputHint});
+  final String name;
+  final String description;
+  final String? inputHint;
+
+  static List<SessionCommandSummary> listFromJson(Object? value) {
+    if (value is! List) return const [];
+    return value.whereType<Map<String, dynamic>>().where((entry) =>
+      entry['name'] is String && RegExp(r'^/?[^\s/]+$').hasMatch(entry['name'] as String))
+      .map((entry) => SessionCommandSummary(name: entry['name'] as String,
+        description: _stringValue(entry['description']), inputHint: _stringOrNull(entry['inputHint']))).toList();
+  }
+
+  Map<String, dynamic> toJson() => {'name': name, 'description': description, 'inputHint': inputHint};
 }
 
 class SessionTelemetrySummary {
@@ -2047,11 +2168,13 @@ class ThinkingBlock extends ContentBlock {
 }
 
 class SessionMessageAttachment {
-  const SessionMessageAttachment({required this.type, this.url, this.path});
+  const SessionMessageAttachment({required this.type, this.url, this.path, this.name, this.mimeType});
 
   final String type;
   final String? url;
   final String? path;
+  final String? name;
+  final String? mimeType;
 
   bool get isImage => type == 'image' && (url?.isNotEmpty ?? false);
   bool get isLocalImage => type == 'localImage' && (path?.isNotEmpty ?? false);
@@ -2061,9 +2184,12 @@ class SessionMessageAttachment {
         type: _stringValue(json['type']),
         url: _stringOrNull(json['url']),
         path: _stringOrNull(json['path']),
+        name: _stringOrNull(json['name']),
+        mimeType: _stringOrNull(json['mimeType']),
       );
 
-  Map<String, dynamic> toJson() => {'type': type, 'url': url, 'path': path};
+  Map<String, dynamic> toJson() => {'type': type, 'url': url, 'path': path,
+    if (name != null) 'name': name, if (mimeType != null) 'mimeType': mimeType};
 }
 
 class SessionResource {
@@ -2155,6 +2281,10 @@ class SessionInputItem {
     this.name,
     this.path,
     this.isDirectory,
+    this.data,
+    this.uri,
+    this.mimeType,
+    this.blob,
   });
 
   const SessionInputItem.text(String text) : this._(type: 'text', text: text);
@@ -2170,6 +2300,27 @@ class SessionInputItem {
   const SessionInputItem.file(String path, {bool isDirectory = false})
     : this._(type: 'file', path: path, isDirectory: isDirectory);
 
+  const SessionInputItem.audio(String data, String mimeType, {String? name})
+    : this._(type: 'audio', data: data, mimeType: mimeType, name: name);
+
+  const SessionInputItem.resource(String uri, {String? name, String? mimeType, String? text, String? blob})
+    : this._(type: 'resource', uri: uri, name: name, mimeType: mimeType, text: text, blob: blob);
+
+  const SessionInputItem.resourceLink(String uri, String name, {String? mimeType})
+    : this._(type: 'resourceLink', uri: uri, name: name, mimeType: mimeType);
+
+  final String? data;
+  final String? uri;
+  final String? mimeType;
+  final String? blob;
+  bool get isContent => const {'audio', 'resource', 'resourceLink'}.contains(type);
+  String get contentLabel => name ?? (type == 'audio' ? 'Audio' : uri ?? 'Resource');
+  SessionMessageAttachment get contentAttachment => SessionMessageAttachment(
+    type: type, name: contentLabel, mimeType: mimeType,
+    url: type == 'resourceLink' ? uri : type == 'audio' ? 'data:$mimeType;base64,$data' :
+      'data:${mimeType ?? (text != null ? 'text/plain' : 'application/octet-stream')};base64,${text != null ? base64Encode(utf8.encode(text!)) : blob}',
+  );
+
   final String type;
   final String? text;
   final String? url;
@@ -2180,6 +2331,13 @@ class SessionInputItem {
   factory SessionInputItem.fromJson(Map<String, dynamic> json) {
     final type = _stringValue(json['type']);
     switch (type) {
+      case 'audio':
+        return SessionInputItem.audio(_stringValue(json['data']), _stringValue(json['mimeType']), name: _stringOrNull(json['name']));
+      case 'resource':
+        return SessionInputItem.resource(_stringValue(json['uri']), name: _stringOrNull(json['name']),
+          mimeType: _stringOrNull(json['mimeType']), text: json['text'] is String ? json['text'] as String : null, blob: _stringOrNull(json['blob']));
+      case 'resourceLink':
+        return SessionInputItem.resourceLink(_stringValue(json['uri']), _stringValue(json['name']), mimeType: _stringOrNull(json['mimeType']));
       case 'text':
         return SessionInputItem.text(_stringValue(json['text']));
       case 'image':
@@ -2202,6 +2360,13 @@ class SessionInputItem {
   }
 
   Map<String, dynamic> toJson() {
+    if (isContent) {
+      return {
+      'type': type, if (data != null) 'data': data, if (uri != null) 'uri': uri,
+      if (name != null) 'name': name, if (mimeType != null) 'mimeType': mimeType,
+      if (text != null) 'text': text, if (blob != null) 'blob': blob,
+      };
+    }
     switch (type) {
       case 'text':
         return {
@@ -2654,6 +2819,7 @@ String? _semanticTargetPrimaryValue(SessionToolSemanticTarget target) {
 
 class PendingAction {
   const PendingAction({
+    this.terminalId,
     required this.id,
     required this.sessionId,
     required this.kind,
@@ -2670,6 +2836,7 @@ class PendingAction {
     this.elicitation,
   });
 
+  final String? terminalId;
   final String id;
   final String sessionId;
   final String kind;
@@ -2694,6 +2861,7 @@ class PendingAction {
   bool get isElicitation => kind == 'elicitation' && elicitation != null;
 
   factory PendingAction.fromJson(Map<String, dynamic> json) => PendingAction(
+    terminalId: _stringOrNull(json['terminalId']),
     id: _stringValue(json['id']),
     sessionId: _stringValue(json['sessionId']),
     kind: _stringValue(json['kind']),
@@ -2723,6 +2891,7 @@ class PendingAction {
   );
 
   Map<String, dynamic> toJson() => {
+    if (terminalId != null) 'terminalId': terminalId,
     'id': id,
     'sessionId': sessionId,
     'kind': kind,
@@ -3098,6 +3267,9 @@ class SessionLog {
     'pendingAction': pendingAction?.toJson(),
     'history': history?.toJson(),
     'latestPlanUpdate': latestPlanUpdate?.toJson(),
+    'revision': revision,
+    'liveAssistantText': liveAssistantText,
+    'liveAssistantReasoning': liveAssistantReasoning,
   };
 }
 
@@ -3200,18 +3372,20 @@ class RecentSessionsLiveEvent {
 }
 
 class LiveEventPlanStep {
-  const LiveEventPlanStep({required this.step, required this.status});
+  const LiveEventPlanStep({required this.step, required this.status, this.priority});
 
   final String step;
   final String status;
+  final String? priority;
 
   factory LiveEventPlanStep.fromJson(Map<String, dynamic> json) =>
       LiveEventPlanStep(
         step: _stringValue(json['step']),
         status: _stringValue(json['status']),
+        priority: _stringOrNull(json['priority']),
       );
 
-  Map<String, dynamic> toJson() => {'step': step, 'status': status};
+  Map<String, dynamic> toJson() => {'step': step, 'status': status, if (priority != null) 'priority': priority};
 }
 
 class LiveEvent {

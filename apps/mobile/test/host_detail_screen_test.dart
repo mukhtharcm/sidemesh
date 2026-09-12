@@ -26,7 +26,12 @@ final _node = NodeInfo.fromJson({
   'hostCapabilities': {
     'workspace': {'terminal': true},
   },
-  'supportedProviders': <Object>[],
+  'supportedProviders': [
+    {'id': 'acp-work', 'kind': 'acpx', 'displayName': 'Work agent',
+      'capabilities': {'lifecycle': {'logout': true}}},
+    {'id': 'acp-other', 'kind': 'acpx', 'displayName': 'Other agent',
+      'capabilities': {'lifecycle': {'logout': false}}},
+  ],
   'packageVersion': '1.0.0',
   'latestVersion': '1.1.0',
   'updateSupported': true,
@@ -64,6 +69,14 @@ void main() {
           await tester.tap(find.byTooltip('More machine actions'));
           await tester.pumpAndSettle();
           expect(find.text('Restart Sidemesh'), findsOneWidget);
+          expect(find.text('Sign out of Other agent · acp-other'), findsNothing);
+          await tester.tap(find.text('Sign out of Work agent · acp-work'));
+          await tester.pumpAndSettle();
+          expect(api.signedOut, 'acp-work');
+          await tester.pump(const Duration(seconds: 5));
+          await tester.pumpAndSettle();
+          await tester.tap(find.byTooltip('More machine actions'));
+          await tester.pumpAndSettle();
           await tester.tap(find.byTooltip('More machine actions'));
           await tester.pumpAndSettle();
 
@@ -147,6 +160,13 @@ class _MachineApi extends ApiClient {
   int nodeReads = 0;
   int sessionReads = 0;
   int updates = 0;
+  String? signedOut;
+
+  @override
+  Future<void> logoutProvider(HostProfile host, String providerId) async {
+    signedOut = providerId;
+  }
+
 
   @override
   Future<NodeInfo> fetchNode(HostProfile host) async {

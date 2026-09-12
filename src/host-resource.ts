@@ -2,7 +2,7 @@ import { isIP } from "node:net";
 
 import type { Hono } from "hono";
 
-import type { HonoServerEnv } from "./hono-route-adapter.js";
+import type { HonoServerEnv } from "./server-http.js";
 
 const MAX_HOST_RESOURCE_BYTES = 12 * 1024 * 1024;
 const MAX_REDIRECTS = 4;

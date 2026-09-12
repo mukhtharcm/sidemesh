@@ -24,10 +24,11 @@ SessionSendOverrides normalizeSessionSendOverrides({
   required SessionRuntimeSummary? runtime,
   required NodeInfo? nodeInfo,
   required String? providerKind,
+  String? providerId,
 }) {
-  final resolvedProviderKind = _trimmedOrNull(providerKind);
-  final capabilities = nodeInfo?.capabilitiesForProvider(resolvedProviderKind);
-  final providerSummary = nodeInfo?.providerSummary(resolvedProviderKind);
+  final providerReference = _trimmedOrNull(providerId) ?? _trimmedOrNull(providerKind);
+  final capabilities = nodeInfo?.capabilitiesForProvider(providerReference);
+  final providerSummary = nodeInfo?.providerSummary(providerReference);
   final runtimeModel = _trimmedOrNull(runtime?.model);
   final runtimeMode = _trimmedOrNull(runtime?.mode);
   final runtimeReasoning = _trimmedOrNull(runtime?.reasoningEffort);

@@ -69,14 +69,14 @@ class _SessionControlsSheetState extends State<SessionControlsSheet> {
     unawaited(_loadProviderModes());
   }
 
-  String get _providerKind => widget.session.provider ?? '';
+  String get _providerReference => widget.session.providerReference ?? '';
 
   String get _providerName {
     final node = _nodeInfo;
     if (node == null) return 'agent';
-    final summary = node.providerSummary(_providerKind);
+    final summary = node.providerSummary(_providerReference);
     if (summary.displayName.isNotEmpty) {
-      return summary.displayName;
+      return summary.label;
     }
     return node.providerDisplayName;
   }
@@ -124,7 +124,7 @@ class _SessionControlsSheetState extends State<SessionControlsSheet> {
     final node = _nodeInfo;
     if (node == null) return true;
     return node
-        .capabilitiesForProvider(_providerKind)
+        .capabilitiesForProvider(_providerReference)
         .supports(section, feature);
   }
 
@@ -133,7 +133,7 @@ class _SessionControlsSheetState extends State<SessionControlsSheet> {
     if (node == null) {
       return ProviderDefinitionSummary.empty;
     }
-    return node.providerSummary(_providerKind);
+    return node.providerSummary(_providerReference);
   }
 
   List<ApprovalPolicy> get _approvalOptions {
@@ -351,7 +351,7 @@ class _SessionControlsSheetState extends State<SessionControlsSheet> {
       final catalog = await widget.api.fetchAccessModes(
         widget.host,
         cwd: widget.session.cwd,
-        agentProvider: widget.session.provider,
+        agentProvider: widget.session.providerReference,
       );
       if (!mounted) return;
       setState(() {
@@ -394,7 +394,7 @@ class _SessionControlsSheetState extends State<SessionControlsSheet> {
       final catalog = await widget.api.fetchModes(
         widget.host,
         cwd: widget.session.cwd,
-        agentProvider: widget.session.provider,
+        agentProvider: widget.session.providerReference,
       );
       if (!mounted) return;
       setState(() {
@@ -437,7 +437,7 @@ class _SessionControlsSheetState extends State<SessionControlsSheet> {
         ...await widget.api.fetchModels(
           widget.host,
           cwd: widget.session.cwd,
-          agentProvider: widget.session.provider,
+          agentProvider: widget.session.providerReference,
           provider: _runtimeModelProvider,
         ),
       ];
@@ -874,6 +874,10 @@ class _SessionControlsSheetState extends State<SessionControlsSheet> {
 
   @override
   Widget build(BuildContext context) {
+    if (_nodeInfo != null && _supports('configuration', 'sessionOptions')) {
+      return SessionConfigurationControls(api: widget.api, host: widget.host,
+        session: widget.session, onClose: _close);
+    }
     final colors = context.colors;
     final theme = Theme.of(context);
     final bottomInset = MediaQuery.of(context).viewInsets.bottom;

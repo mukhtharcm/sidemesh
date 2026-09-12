@@ -7,7 +7,7 @@ bool recentSessionMatchesQuery(
   SessionSummary session,
   String rawQuery,
 ) {
-  final provider = agentProviderDisplayLabel(session.provider);
+  final provider = agentProviderDisplayLabel(session.provider, providerId: session.providerId);
   final haystack = [
     session.title,
     session.preview,

@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'models.dart';
+import 'session_identity_store.dart';
 
 /// Approval policies supported by Sidemesh providers. Mirrors the values accepted
 /// by the sidemesh server in `parseApprovalPolicy`.
@@ -207,6 +208,7 @@ class SessionPolicyStore extends ChangeNotifier {
   }
 
   Future<void> _load() async {
+    await SessionIdentityStore.instance.ensureLoaded();
     final prefs = await SharedPreferences.getInstance();
     final raw = prefs.getString(_prefsKey);
     if (raw != null && raw.isNotEmpty) {
@@ -238,5 +240,6 @@ class SessionPolicyStore extends ChangeNotifier {
     await prefs.setString(_prefsKey, jsonEncode(serialised));
   }
 
-  String _keyFor(String hostId, String sessionId) => '$hostId:$sessionId';
+  String _keyFor(String hostId, String sessionId) =>
+      SessionIdentityStore.instance.preferenceKey(hostId, sessionId, _policies);
 }

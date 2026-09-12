@@ -6,10 +6,12 @@ import 'src/screens/home_screen.dart';
 import 'src/screens/onboarding_screen.dart';
 import 'src/screen_awake_settings_store.dart';
 import 'src/theme/app_theme.dart';
+import 'src/session_identity_store.dart';
 import 'src/theme/theme_controller.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  await SessionIdentityStore.instance.ensureLoaded();
   await CreateSessionDefaultsStore.instance.ensureLoaded();
   await ScreenAwakeSettingsStore.instance.ensureLoaded();
   final themeController = await ThemeController.load();

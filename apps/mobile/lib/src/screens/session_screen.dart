@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:math' as math;
 
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
@@ -61,6 +62,7 @@ import '../widgets/app_dialogs.dart';
 import '../widgets/app_composer.dart';
 import '../widgets/mobile_model_picker.dart';
 import '../widgets/app_menu.dart';
+import '../widgets/session_configuration_controls.dart';
 import '../widgets/app_primitives.dart';
 import '../widgets/app_sheets.dart';
 import '../widgets/markdown_content.dart';
@@ -716,6 +718,7 @@ class _SessionScreenState extends State<SessionScreen>
   List<SessionMessage> _messages = const [];
   List<SessionMessage> _optimisticMessages = const [];
   List<SessionActivity> _activities = const [];
+  List<SessionInputItem> _draftContent = [];
   List<ComposerImageAttachment> _draftAttachments =
       const <ComposerImageAttachment>[];
   List<_ComposerSkillMention> _draftSkillMentions =
@@ -723,6 +726,7 @@ class _SessionScreenState extends State<SessionScreen>
   List<_ComposerFileMention> _draftFileMentions =
       const <_ComposerFileMention>[];
   List<PendingSessionSend> _pendingSends = const <PendingSessionSend>[];
+  bool _pendingSendsLoadFailed = false;
   List<SkillSummary> _skills = const <SkillSummary>[];
   List<FsSearchResult> _fileSuggestions = const <FsSearchResult>[];
   NodeInfo? _nodeInfo;
@@ -840,7 +844,7 @@ class _SessionScreenState extends State<SessionScreen>
     final node = _nodeInfo;
     if (node == null) return true;
     return node
-        .capabilitiesForProvider(widget.session.provider)
+        .capabilitiesForProvider((_session ?? widget.session).providerReference)
         .supports(section, feature);
   }
 
@@ -874,6 +878,10 @@ class _SessionScreenState extends State<SessionScreen>
 
   bool get _supportsSessionArchive =>
       _supportsProviderCapability('sessions', 'archive');
+
+  bool get _supportsSessionDelete => _nodeInfo != null &&
+      _supportsProviderCapability('sessions', 'delete');
+  bool _sessionDeleted = false;
 
   bool get _supportsSessionCompact =>
       _supportsProviderCapability('sessions', 'compact');
@@ -1094,11 +1102,13 @@ class _SessionScreenState extends State<SessionScreen>
   }
 
   void _applyComposerSeed(SessionComposerSeed seed) {
+    final draftContent = <SessionInputItem>[];
     final draftAttachments = <ComposerImageAttachment>[];
     final draftSkillMentions = <_ComposerSkillMention>[];
     final draftFileMentions = <_ComposerFileMention>[];
     var attachmentIndex = 0;
     for (final item in seed.inputItems) {
+      if (item.isContent) { draftContent.add(item); continue; }
       switch (item.type) {
         case 'image':
           final dataUrl = item.url?.trim();
@@ -1161,6 +1171,7 @@ class _SessionScreenState extends State<SessionScreen>
       }
     }
 
+    _draftContent = draftContent;
     _draftAttachments = draftAttachments;
     _draftSkillMentions = draftSkillMentions
         .where((item) => seed.text.contains(item.tokenText))
@@ -1307,7 +1318,7 @@ class _SessionScreenState extends State<SessionScreen>
             host: widget.host,
             api: widget.api,
             root: session.cwd,
-            agentProvider: session.provider,
+            agentProvider: session.providerReference,
             sessionId: session.id,
           ),
         );
@@ -1723,7 +1734,7 @@ class _SessionScreenState extends State<SessionScreen>
         widget.host,
         cwd: (_session ?? widget.session).cwd,
         forceReload: forceReload,
-        agentProvider: (_session ?? widget.session).provider,
+        agentProvider: (_session ?? widget.session).providerReference,
       );
       if (!mounted || requestId != _skillsRequestId) {
         return;
@@ -2250,10 +2261,10 @@ class _SessionScreenState extends State<SessionScreen>
 
   Future<void> _restartProvider() async {
     if (!_supportsProviderRestart) return;
-    final providerKind = widget.session.provider;
-    if (providerKind == null || providerKind.isEmpty) return;
+    final providerId = (_session ?? widget.session).providerReference;
+    if (providerId == null || providerId.isEmpty) return;
     try {
-      await widget.api.restartProvider(widget.host, providerKind);
+      await widget.api.restartProvider(widget.host, providerId);
       if (!mounted) return;
       showAppSnackBar(context, 'Provider restarting…');
       await Future<void>.delayed(const Duration(seconds: 2));
@@ -2451,6 +2462,14 @@ class _SessionScreenState extends State<SessionScreen>
         // stale approvals after the server already resolved or forgot them.
         _pendingAction = null;
         _running = log.session.isActive;
+        if (_running && _liveAssistantMessage == null) {
+          if (log.liveAssistantText.isNotEmpty) {
+            _liveAssistantNotifier.value = _appendLiveAssistantDelta(null, log.liveAssistantText);
+          }
+          if (log.liveAssistantReasoning.isNotEmpty) {
+            _liveAssistantNotifier.value = _appendLiveAssistantReasoning(_liveAssistantMessage, log.liveAssistantReasoning);
+          }
+        }
         _loading = false;
         _showingCachedSnapshot = true;
         _showingPossiblyStaleSnapshot = false;
@@ -2515,7 +2534,7 @@ class _SessionScreenState extends State<SessionScreen>
     _sessionCachePersistTimer?.cancel();
     _sessionCachePersistTimer = null;
     final session = _session;
-    if (session == null) {
+    if (session == null || _sessionDeleted) {
       return;
     }
     unawaited(
@@ -2527,6 +2546,8 @@ class _SessionScreenState extends State<SessionScreen>
           activities: _activities,
           pendingAction: null,
           history: _history,
+          liveAssistantText: _liveAssistantText,
+          liveAssistantReasoning: _liveAssistantMessage?.reasoning ?? '',
           latestPlanUpdate: _latestPlanUpdateForCache(),
         ),
       ),
@@ -2696,6 +2717,9 @@ class _SessionScreenState extends State<SessionScreen>
     }
 
     switch (event.type) {
+      case 'history_invalidated':
+        _markTranscriptPossiblyStale();
+        unawaited(_loadSnapshot(scrollToBottom: false));
       case 'user_message_submitted':
         final message = event.messageItem;
         if (message == null) {
@@ -3114,6 +3138,72 @@ class _SessionScreenState extends State<SessionScreen>
     _scrollToBottomFast();
   }
 
+  Future<void> _pickComposerContent() async {
+    if (_sending) return;
+    final type = await showModalBottomSheet<String>(
+      context: context,
+      useSafeArea: true,
+      builder: (context) => Column(mainAxisSize: MainAxisSize.min, children: [
+        for (final option in [('audio', 'audio', 'Attach audio'),
+          ('resource', 'embeddedResources', 'Attach file content'),
+          ('resourceLink', 'resourceLinks', 'Attach resource reference')])
+          if (_supportsProviderCapability('input', option.$2))
+            ListTile(title: Text(option.$3), onTap: () => Navigator.pop(context, option.$1)),
+      ]),
+    );
+    if (!mounted || type == null || _sending) return;
+    try {
+      SessionInputItem? item;
+      if (type == 'resourceLink') {
+        var resourceUri = '';
+        final uri = await showDialog<String>(context: context, builder: (context) => AlertDialog(
+          title: const Text('Resource reference'),
+          content: TextField(onChanged: (value) => resourceUri = value, autofocus: true,
+            decoration: const InputDecoration(labelText: 'Resource URI', hintText: 'https://example.com/document')),
+          actions: [TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
+            TextButton(onPressed: () => Navigator.pop(context, resourceUri.trim()), child: const Text('Attach'))],
+        ));
+        if (uri == null) return;
+        final parsed = Uri.tryParse(uri);
+        if (parsed == null || !parsed.hasScheme || uri.length > 4096 ||
+            RegExp(r'[\x00-\x20\x7f]').hasMatch(uri) ||
+            ['data', 'javascript', 'vbscript'].contains(parsed.scheme)) {
+          throw const FormatException('Enter a valid resource URI.');
+        }
+        item = SessionInputItem.resourceLink(uri, uri.length <= 512 ? uri : 'Resource reference');
+      } else {
+        final picked = await FilePicker.pickFiles(withData: true,
+          type: type == 'audio' ? FileType.custom : FileType.any,
+          allowedExtensions: type == 'audio' ? ['mp3', 'wav', 'ogg', 'm4a', 'flac', 'aac', 'webm'] : null);
+        if (picked == null || picked.files.isEmpty) return;
+        final file = picked.files.single;
+        final bytes = file.bytes;
+        if (bytes == null || bytes.length > 5 * 1024 * 1024) throw const FormatException('Attach a file of at most 5 MiB.');
+        if (type == 'audio') {
+          final mime = {'mp3': 'audio/mpeg', 'wav': 'audio/wav', 'ogg': 'audio/ogg',
+            'm4a': 'audio/mp4', 'flac': 'audio/flac', 'aac': 'audio/aac', 'webm': 'audio/webm'}[file.extension?.toLowerCase()];
+          if (mime == null || bytes.isEmpty) throw const FormatException('Choose a supported audio file.');
+          item = SessionInputItem.audio(base64Encode(bytes), mime, name: file.name);
+        } else {
+          final uri = 'attachment:///${Uri.encodeComponent(file.name)}';
+          String? text;
+          try { text = utf8.decode(bytes); } on FormatException { /* Use binary content. */ }
+          item = SessionInputItem.resource(uri, name: file.name,
+            mimeType: text == null ? 'application/octet-stream' : 'text/plain',
+            text: text, blob: text == null ? base64Encode(bytes) : null);
+        }
+      }
+      if (!mounted || _sending) return;
+      final candidate = [..._draftContent, item];
+      if (candidate.length > 4 || utf8.encode(jsonEncode(candidate.map((item) => item.toJson()).toList())).length > 9 * 1024 * 1024) {
+        throw const FormatException('Attach at most 4 items with a combined payload of at most 9 MiB.');
+      }
+      setState(() => _draftContent = candidate);
+    } catch (error) {
+      if (mounted) showAppSnackBar(context, 'Cannot attach content: ${friendlyError(error)}');
+    }
+  }
+
   Future<void> _pickComposerImages() async {
     if (_sending) {
       return;
@@ -3201,6 +3291,7 @@ class _SessionScreenState extends State<SessionScreen>
     List<_ComposerFileMention> files,
   ) {
     return <SessionInputItem>[
+      ..._draftContent,
       if (_supportsImageInput)
         ...attachments.map((item) => SessionInputItem.image(item.dataUrl)),
       if (_supportsSkillInput)
@@ -3372,20 +3463,25 @@ class _SessionScreenState extends State<SessionScreen>
   }
 
   Future<void> _loadPendingSends() async {
-    final pending = await _sendOutbox.loadForSession(
-      widget.host,
-      widget.session.id,
-    );
-    if (!mounted || _disposed) {
-      return;
-    }
-    setState(() {
-      _pendingSends = pending;
-      for (final send in pending) {
-        _upsertOptimisticMessage(send.message);
+    try {
+      final pending = await _sendOutbox.loadForSession(
+        widget.host,
+        widget.session.id,
+      );
+      if (!mounted || _disposed) {
+        return;
       }
-    });
-    _schedulePendingSendRetry();
+      setState(() {
+        _pendingSends = pending;
+        _pendingSendsLoadFailed = false;
+        for (final send in pending) {
+          _upsertOptimisticMessage(send.message);
+        }
+      });
+      _schedulePendingSendRetry();
+    } catch (_) {
+      if (mounted) setState(() => _pendingSendsLoadFailed = true);
+    }
   }
 
   Future<bool> _queuePendingSend({
@@ -3507,7 +3603,7 @@ class _SessionScreenState extends State<SessionScreen>
   void _schedulePendingSendRetry() {
     _pendingSendRetryTimer?.cancel();
     _pendingSendRetryTimer = null;
-    if (_pendingSends.isEmpty || _disposed) {
+    if (_pendingSends.isEmpty || _disposed || _sessionDeleted) {
       return;
     }
     final now = DateTime.now();
@@ -3560,7 +3656,7 @@ class _SessionScreenState extends State<SessionScreen>
     if (_retryingPendingSend ||
         _pendingSends.isEmpty ||
         !mounted ||
-        _disposed) {
+        _disposed || _sessionDeleted) {
       return;
     }
     final pending = _nextPendingSendForRetry(manual: manual);
@@ -3589,6 +3685,7 @@ class _SessionScreenState extends State<SessionScreen>
         runtime: session.runtime,
         nodeInfo: _nodeInfo,
         providerKind: session.provider,
+        providerId: session.providerId,
       );
       await widget.api.sendInput(
         widget.host,
@@ -3607,7 +3704,7 @@ class _SessionScreenState extends State<SessionScreen>
       );
       HostStatusStore.instance.markOnline(widget.host.id);
       await _sendOutbox.remove(pending);
-      if (!mounted || _disposed) {
+      if (!mounted || _disposed || _sessionDeleted) {
         return;
       }
       setState(() {
@@ -3627,7 +3724,7 @@ class _SessionScreenState extends State<SessionScreen>
         duration: const Duration(seconds: 2),
       );
     } catch (error) {
-      if (!mounted || _disposed) {
+      if (!mounted || _disposed || _sessionDeleted) {
         return;
       }
       final message = friendlyError(error);
@@ -3642,14 +3739,14 @@ class _SessionScreenState extends State<SessionScreen>
           blocked: false,
         );
         final saved = await _sendOutbox.upsert(updated);
-        if (!mounted || _disposed) {
+        if (!mounted || _disposed || _sessionDeleted) {
           return;
         }
         if (saved) {
           setState(() => _upsertPendingSend(updated));
         } else {
           await _sendOutbox.remove(pending);
-          if (!mounted || _disposed) {
+          if (!mounted || _disposed || _sessionDeleted) {
             return;
           }
           setState(() => _removePendingSend(pending));
@@ -3666,14 +3763,14 @@ class _SessionScreenState extends State<SessionScreen>
           blocked: true,
         );
         await _sendOutbox.upsert(updated);
-        if (!mounted || _disposed) {
+        if (!mounted || _disposed || _sessionDeleted) {
           return;
         }
         setState(() => _upsertPendingSend(updated));
         showAppSnackBar(context, 'Pending message needs attention: $message');
       }
     } finally {
-      if (mounted && !_disposed) {
+      if (mounted && !_disposed && !_sessionDeleted) {
         setState(() => _retryingPendingSend = false);
         _schedulePendingSendRetry();
       } else {
@@ -3717,6 +3814,7 @@ class _SessionScreenState extends State<SessionScreen>
   Future<void> _sendInput() async {
     if (_loading || _snapshotError != null) return;
     final text = _composerController.text.trim();
+    final draftContent = List<SessionInputItem>.from(_draftContent);
     final draftAttachments = List<ComposerImageAttachment>.from(
       _draftAttachments,
     );
@@ -3727,7 +3825,7 @@ class _SessionScreenState extends State<SessionScreen>
       _draftFileMentions.where((item) => text.contains(item.tokenText)),
     );
     if ((text.isEmpty &&
-            draftAttachments.isEmpty &&
+            draftAttachments.isEmpty && draftContent.isEmpty &&
             draftFileMentions.isEmpty) ||
         _sending) {
       return;
@@ -3755,6 +3853,7 @@ class _SessionScreenState extends State<SessionScreen>
       runtime: session.runtime,
       nodeInfo: _nodeInfo,
       providerKind: session.provider,
+      providerId: session.providerId,
     );
     final retrySignature = _buildSendRetrySignature(
       inputItems: inputItems,
@@ -3773,7 +3872,8 @@ class _SessionScreenState extends State<SessionScreen>
       role: 'user',
       text: text,
       content: text.trim().isNotEmpty ? [TextBlock(text)] : const [],
-      attachments: _buildDraftMessageAttachments(draftAttachments),
+      attachments: [..._buildDraftMessageAttachments(draftAttachments),
+        ...draftContent.map((item) => item.contentAttachment)],
       createdAt: DateTime.now(),
       seq: _nextTimelineSeq(),
     );
@@ -3783,6 +3883,7 @@ class _SessionScreenState extends State<SessionScreen>
       _sending = true;
       _running = true;
       _awaitingAssistantReply = true;
+      _draftContent = [];
       _draftAttachments = const <ComposerImageAttachment>[];
       _draftSkillMentions = const <_ComposerSkillMention>[];
       _clearLiveAssistantMessage();
@@ -3888,6 +3989,7 @@ class _SessionScreenState extends State<SessionScreen>
         _optimisticMessages = _optimisticMessages
             .where((message) => message.id != optimisticMessage.id)
             .toList();
+        _draftContent = draftContent;
         _draftAttachments = restoredAttachments;
         _draftSkillMentions = restoredSkillMentions;
         _draftFileMentions = restoredFileMentions;
@@ -4175,6 +4277,41 @@ class _SessionScreenState extends State<SessionScreen>
         return;
       }
       showAppSnackBar(context, "Failed to archive: ${friendlyError(error)}");
+    }
+  }
+
+  Future<void> _deleteSession() async {
+    if (!_supportsSessionDelete) return;
+    final confirmed = await _showSessionConfirmDialog(
+      icon: Icons.delete_outline,
+      title: 'Delete this session?',
+      body: 'This removes the session from the agent and clears its saved history and pending messages in this app. You cannot undo this action in Sidemesh.',
+      confirmLabel: 'Delete session',
+      danger: true,
+    );
+    if (!confirmed) return;
+    try {
+      await widget.api.deleteSession(widget.host, widget.session.id);
+      _sessionDeleted = true;
+      _pendingSendRetryTimer?.cancel();
+      for (final send in await _sendOutbox.loadForSession(widget.host, widget.session.id)) {
+        await _sendOutbox.remove(send);
+      }
+      _pendingSends = [];
+      _sessionCachePersistTimer?.cancel();
+      _session = null;
+      await _localStore.deleteSession(widget.host, widget.session.id, deleteLog: true);
+      if (!mounted) return;
+      unawaited(LiveActivityService.instance.endPrimarySession(
+        host: widget.host, sessionId: widget.session.id));
+      final onArchived = widget.onArchived;
+      if (onArchived != null) {
+        onArchived();
+      } else {
+        Navigator.of(context).pop();
+      }
+    } catch (error) {
+      if (mounted) showAppSnackBar(context, 'Failed to delete: ${friendlyError(error)}');
     }
   }
 
@@ -4493,6 +4630,7 @@ class _SessionScreenState extends State<SessionScreen>
     }
     final provider = agentProviderDisplayLabel(
       session.provider,
+      providerId: session.providerId,
       nodeInfo: _nodeInfo,
     );
     return provider ?? 'Model';
@@ -4506,7 +4644,7 @@ class _SessionScreenState extends State<SessionScreen>
     if (_cleanComposerLabel(session.runtime?.model) != null) {
       return 'Current model';
     }
-    if (agentProviderDisplayLabel(session.provider, nodeInfo: _nodeInfo) !=
+    if (agentProviderDisplayLabel(session.provider, providerId: session.providerId, nodeInfo: _nodeInfo) !=
         null) {
       return 'Agent default';
     }
@@ -4559,7 +4697,7 @@ class _SessionScreenState extends State<SessionScreen>
         // unavailable. Capability checks are best-effort here.
       }
     }
-    return node?.capabilitiesForProvider(session.provider);
+    return node?.capabilitiesForProvider(session.providerReference);
   }
 
   Future<List<ModelCatalogEntry>?> _fetchComposerModels(
@@ -4570,7 +4708,7 @@ class _SessionScreenState extends State<SessionScreen>
         ...await widget.api.fetchModels(
           widget.host,
           cwd: session.cwd,
-          agentProvider: session.provider,
+          agentProvider: session.providerReference,
           provider: _composerRuntimeModelProvider(session),
         ),
       ];
@@ -4759,6 +4897,24 @@ class _SessionScreenState extends State<SessionScreen>
 
     await _turnConfigStore.setConfig(widget.host, session.id, nextConfig);
     if (!mounted || _disposed) return;
+  }
+
+  Future<void> _chooseSessionCommand() async {
+    final commands = (_session ?? widget.session).runtime?.commands ?? const <SessionCommandSummary>[];
+    if (commands.isEmpty) return;
+    final selected = await showDialog<SessionCommandSummary>(context: context, builder: (dialogContext) =>
+      MeshDialogScaffold(icon: Icons.terminal_rounded, title: 'Agent commands', showCloseButton: true,
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          for (final command in commands) AppSettingsRow(icon: null, title: command.name,
+            subtitle: [command.description, if (command.inputHint != null) command.inputHint!].where((value) => value.isNotEmpty).join('\n'),
+            onTap: () => Navigator.of(dialogContext).pop(command)),
+        ])));
+    if (!mounted || selected == null) return;
+    final name = selected.name.startsWith('/') ? selected.name : '/${selected.name}';
+    final arguments = _composerController.text.replaceFirst(RegExp(r'^/[^\s]+(?:\s|$)'), '');
+    final text = '$name $arguments';
+    _composerController.value = TextEditingValue(text: text, selection: TextSelection.collapsed(offset: text.length));
+    _composerFocusNode.requestFocus();
   }
 
   Future<T?> _showComposerPicker<T>({
@@ -5042,6 +5198,15 @@ class _SessionScreenState extends State<SessionScreen>
     );
   }
 
+  Future<void> _openAuthenticationTerminal(PendingAction action) async {
+    await Navigator.of(context).push(MaterialPageRoute<void>(
+      builder: (_) => TerminalScreen(
+        host: widget.host, api: widget.api, cwd: action.cwd ?? widget.session.cwd,
+        sessionId: action.sessionId, terminalId: action.terminalId, title: 'Agent sign-in',
+      ),
+    ));
+  }
+
   Future<void> _openBrowserPreviewTarget(
     BrowserPreviewTargetCandidate candidate,
   ) async {
@@ -5117,7 +5282,7 @@ class _SessionScreenState extends State<SessionScreen>
       final metadata = await widget.api.fetchMetadata(
         widget.host,
         path,
-        agentProvider: session.provider,
+        agentProvider: session.providerReference,
         sessionId: session.id,
       );
       if (!mounted || _disposed) return;
@@ -5335,7 +5500,7 @@ class _SessionScreenState extends State<SessionScreen>
           host: widget.host,
           api: widget.api,
           root: session.cwd,
-          agentProvider: session.provider,
+          agentProvider: session.providerReference,
           sessionId: session.id,
           selectedPath: path,
         ),
@@ -5348,7 +5513,7 @@ class _SessionScreenState extends State<SessionScreen>
           host: widget.host,
           api: widget.api,
           path: path,
-          agentProvider: session.provider,
+          agentProvider: session.providerReference,
           sessionId: session.id,
         ),
       ),
@@ -5370,7 +5535,7 @@ class _SessionScreenState extends State<SessionScreen>
           host: widget.host,
           api: widget.api,
           root: browserRoot,
-          agentProvider: session.provider,
+          agentProvider: session.providerReference,
           sessionId: session.id,
         ),
       );
@@ -5382,7 +5547,7 @@ class _SessionScreenState extends State<SessionScreen>
           host: widget.host,
           api: widget.api,
           root: browserRoot,
-          agentProvider: session.provider,
+          agentProvider: session.providerReference,
           sessionId: session.id,
         ),
       ),
@@ -5971,18 +6136,7 @@ class _SessionScreenState extends State<SessionScreen>
         )) {
       return false;
     }
-    // Rollout history does not preserve clientMessageId, so use the pending
-    // send timestamps as a narrow window for stale outbox cleanup. This avoids
-    // treating an intentional same-text message much later as the pending send.
-    final lowerBound = pending.createdAt.subtract(const Duration(seconds: 90));
-    final latestKnownAttempt = [
-      pending.createdAt,
-      pending.updatedAt,
-      pending.nextAttemptAt,
-    ].reduce((left, right) => left.isAfter(right) ? left : right);
-    final upperBound = latestKnownAttempt.add(const Duration(minutes: 10));
-    return !persisted.createdAt.isBefore(lowerBound) &&
-        !persisted.createdAt.isAfter(upperBound);
+    return persisted.id == pending.clientMessageId;
   }
 
   bool _sameMessageAttachments(
@@ -6085,6 +6239,9 @@ class _SessionScreenState extends State<SessionScreen>
         break;
       case 'archive':
         _archiveSession();
+        break;
+      case 'delete':
+        unawaited(_deleteSession());
         break;
     }
   }
@@ -6247,7 +6404,7 @@ class _SessionScreenState extends State<SessionScreen>
       ),
       if (_supportsProviderRestart ||
           _supportsSessionRename ||
-          _supportsSessionArchive)
+          _supportsSessionArchive || _supportsSessionDelete)
         _SessionActionGroup(
           label: 'Manage',
           actions: [
@@ -6264,6 +6421,13 @@ class _SessionScreenState extends State<SessionScreen>
                 label: 'Archive',
                 detail: 'Move this session out of recents.',
                 icon: Icons.archive_rounded,
+                tone: _SessionActionTone.danger,
+              ),
+            if (_supportsSessionDelete)
+              const _SessionActionSpec(
+                value: 'delete', label: 'Delete',
+                detail: 'Remove the session from the agent.',
+                icon: Icons.delete_outline,
                 tone: _SessionActionTone.danger,
               ),
           ],
@@ -6388,6 +6552,7 @@ class _SessionScreenState extends State<SessionScreen>
             child: _PendingActionCard(
               action: _pendingAction!,
               onRespond: _respondAction,
+              onOpenTerminal: () => _openAuthenticationTerminal(_pendingAction!),
             ),
           ),
         if (_showOfflineTranscriptStatus)
@@ -6608,6 +6773,11 @@ class _SessionScreenState extends State<SessionScreen>
             onStop: () => unawaited(_stopDockedBrowserPreview()),
             onStopped: (_) => _closeDockedBrowserPreview(),
           ),
+        if (_pendingSendsLoadFailed)
+          MaterialBanner(
+            content: const Text('Cannot load queued messages. Saved messages are still in local storage.'),
+            actions: [TextButton(onPressed: _loadPendingSends, child: const Text('Retry'))],
+          ),
         if (_pendingSends.isNotEmpty)
           _PendingSendStrip(
             host: widget.host,
@@ -6642,6 +6812,10 @@ class _SessionScreenState extends State<SessionScreen>
               controller: _composerController,
               focusNode: _composerFocusNode,
               attachments: _draftAttachments,
+              content: _draftContent,
+              onRemoveContent: (index) => setState(() => _draftContent.removeAt(index)),
+              onContentTap: ['audio', 'embeddedResources', 'resourceLinks'].any(
+                (capability) => _supportsProviderCapability('input', capability)) ? _pickComposerContent : null,
               skills: _draftSkillMentions,
               files: _draftFileMentions,
               activeSkillQuery: _activeSkillQuery?.query,
@@ -6665,6 +6839,8 @@ class _SessionScreenState extends State<SessionScreen>
               onRemoveSkill: _removeDraftSkillMention,
               onSelectFile: _insertFileMention,
               onRemoveFile: _removeDraftFileMention,
+              onCommandsTap: _nodeInfo != null && _supportsProviderCapability('configuration', 'commands') &&
+                  (session.runtime?.commands.isNotEmpty ?? false) ? _chooseSessionCommand : null,
               onSend: _sendInput,
               onDismiss: _dismissKeyboard,
               onAddSkillTrigger: _supportsSkillInput

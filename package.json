@@ -1,6 +1,6 @@
 {
   "name": "sidemesh",
-  "version": "0.2.2",
+  "version": "0.3.0",
   "private": false,
   "description": "Fleet-first coding-agent session node and Flutter client.",
   "license": "Apache-2.0",
@@ -36,7 +36,6 @@
     "docs",
     "scripts/*.sh",
     "scripts/check-node-version.mjs",
-    "scripts/patch-pi-transitives.mjs",
     "scripts/prepare-package.mjs"
   ],
   "engines": {
@@ -46,7 +45,6 @@
     "clean": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\"",
     "build": "npm run clean && tsc && node -e \"require('node:fs').chmodSync('dist/cli.js', 0o755)\"",
     "preinstall": "node scripts/check-node-version.mjs",
-    "postinstall": "node scripts/patch-pi-transitives.mjs",
     "prepare": "node scripts/prepare-package.mjs",
     "daemon": "tsx src/cli.ts daemon",
     "daemon:compiled": "node dist/cli.js daemon",
@@ -86,20 +84,18 @@
     "secret:scan": "bash scripts/secret-scan.sh"
   },
   "dependencies": {
+    "@agentclientprotocol/sdk": "1.4.0",
     "@clack/prompts": "^1.7.0",
-    "@earendil-works/pi-coding-agent": "0.80.3",
+    "@earendil-works/pi-coding-agent": "0.85.1",
     "@github/copilot-sdk": "1.0.4",
     "@hono/node-server": "^2.0.11",
-    "acpx": "^0.12.0",
-    "brace-expansion": "5.0.9",
+    "@opencode-ai/sdk": "1.18.4",
     "commander": "^15.0.0",
     "hono": "^4.13.7",
     "ignore": "^7.0.6",
-    "protobufjs": "7.6.5",
     "qrcode": "^1.5.4",
     "ws": "^8.21.1",
-    "zod": "^4.4.3",
-    "undici": "8.9.0"
+    "zod": "^4.4.3"
   },
   "optionalDependencies": {
     "node-pty": "^1.1.0"

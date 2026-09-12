@@ -1,0 +1,173 @@
+import { contentInputAttachment } from "./input-content.js";
+import { randomUUID } from "node:crypto";
+import type { ContentBlock, SessionUpdate } from "@agentclientprotocol/sdk";
+import { materializeAgentActivityDraft, type AgentProviderLiveEvent } from "./agent-provider.js";
+import { semanticFromTool } from "./acp-history.js";
+import { extractSessionAttachments, mergeSessionAttachments } from "./session-attachments.js";
+import type { StoredSessionItem } from "./session-store.js";
+import type { SessionMessage, SessionMessageContentBlock, ToolActivity } from "./types.js";
+
+/** One reducer for live notifications and staged history replay. The caller owns storage. */
+export class AcpTranscript {
+  private currentMessageId: string | null = null;
+  private submittedUserId: string | null = null;
+  private submittedInputId: string | undefined;
+  private turnId: string | undefined;
+
+  constructor(private readonly sessionId: string, private nextSeq: number,
+    private readonly read: (kind: StoredSessionItem["kind"], id: string) => StoredSessionItem | null,
+    private readonly write: (item: StoredSessionItem) => void,
+    private readonly emit?: (event: AgentProviderLiveEvent) => void) {}
+
+  beginTurn(turnId: string, message: Omit<SessionMessage, "seq">, clientInputId?: string): void {
+    this.finish();
+    this.turnId = turnId;
+    this.submittedUserId = message.id;
+    this.submittedInputId = clientInputId;
+    this.write({ kind: "message", authority: "recovery", nativeId: null, value: { ...message, seq: this.nextSeq++ } });
+  }
+
+  update(update: SessionUpdate): void {
+    switch (update.sessionUpdate) {
+      case "user_message_chunk":
+      case "agent_message_chunk":
+      case "agent_thought_chunk": {
+        const role = update.sessionUpdate === "user_message_chunk" ? "user" : "assistant";
+        if (role === "user" && this.submittedUserId) {
+          // The agent may stream output before it echoes the submitted prompt, so the binding
+          // survives intermediate updates. Bind the echo to the input that produced it (native ID
+          // and, when it has one, the client identity) instead of writing the text twice.
+          const submitted = this.read("message", this.submittedUserId);
+          if (submitted?.kind === "message") {
+            const nativeId = update.messageId ?? submitted.nativeId;
+            this.write({ ...submitted, nativeId,
+              clientInputId: nativeId ? submitted.clientInputId ?? this.submittedInputId : submitted.clientInputId,
+              value: { ...submitted.value, ...metadataField(update, submitted.value.providerMetadata) } });
+            return;
+          }
+        }
+        if (role === "user") this.submittedUserId = null;
+        const current = this.currentMessageId ? this.read("message", this.currentMessageId) : null;
+        const id = update.messageId ? `acp-message-${update.messageId}`
+          : current?.kind === "message" && current.value.role === role ? current.value.id : `acp-message-${randomUUID()}`;
+        // A user message ends the previous assistant turn, so that assistant message is a final
+        // answer. Live streaming records this when the turn completes while native replay only sees
+        // the transcript; both must agree or reconciliation drops the turn.
+        if (id !== this.currentMessageId) this.finish(role === "user" ? "final_answer" : "commentary");
+        this.currentMessageId = id;
+        const previous = this.read("message", id);
+        const message: SessionMessage = previous?.kind === "message" ? previous.value : {
+          id, role, text: "", content: [], attachments: [], createdAt: Date.now(), seq: this.nextSeq++,
+        };
+        const text = contentText(update.content);
+        const thinking = update.sessionUpdate === "agent_thought_chunk";
+        const content = appendBlock(message.content, thinking ? { type: "thinking", thinking: text }
+          : { type: "text", text });
+        const value = { ...message, ...metadataField(update, message.providerMetadata), text: thinking ? message.text : message.text + text,
+          content, attachments: mergeSessionAttachments(message.attachments, extractSessionAttachments(update.content),
+            update.content.type === "audio" ? [contentInputAttachment(update.content)] :
+            update.content.type === "resource" ? [contentInputAttachment({ type: "resource", ...update.content.resource, mimeType: update.content.resource.mimeType ?? undefined })] :
+            update.content.type === "resource_link" ? [contentInputAttachment({ ...update.content, type: "resourceLink", mimeType: update.content.mimeType ?? undefined })] : []) };
+        this.write({ kind: "message", value, nativeId: update.messageId ?? previous?.nativeId ?? null, authority: "recovery" });
+        if (role === "assistant" && text) this.emit?.(thinking ? {
+          type: "reasoning_delta", sessionId: this.sessionId, turnId: this.turnId, itemId: id, reasoningId: id, delta: text, summary: false,
+        } : { type: "assistant_delta", sessionId: this.sessionId, turnId: this.turnId, itemId: id, delta: text });
+        return;
+      }
+      case "tool_call":
+      case "tool_call_update": {
+        // A tool call does not end the prompt: the agent may echo the submitted message after it.
+        this.finish("commentary");
+        const id = `acp-tool-${update.toolCallId}`;
+        const saved = this.read("activity", id);
+        const previous = saved?.kind === "activity" && saved.value.type === "tool" ? saved.value : null;
+        const title = update.title ?? previous?.title ?? update.name ?? "Tool";
+        const args = update.rawInput ?? previous?.args ?? null;
+        const result = update.rawOutput ?? update.content ?? previous?.result ?? null;
+        const status = update.status === "completed" ? "completed" : update.status === "failed" ? "failed"
+          : update.status ? "in_progress" : previous?.status ?? "in_progress";
+        const value = materializeAgentActivityDraft({
+          id, type: "tool", ...metadataField(update, previous?.providerMetadata), turnId: previous?.turnId ?? this.turnId ?? null, status,
+          toolName: update.name ?? previous?.toolName ?? title, title, args,
+          output: typeof result === "string" ? result : update.content?.flatMap((entry) =>
+            entry.type === "content" && entry.content.type === "text" ? [entry.content.text] : []).join("\n") || previous?.output || null,
+          result, isError: status === "failed", semantic: update.kind ? semanticFromTool(title, args, update.kind) : previous?.semantic ?? null,
+          attachments: mergeSessionAttachments(previous?.attachments ?? [], extractSessionAttachments(result)),
+        }, { seq: previous?.seq ?? this.nextSeq++, createdAt: previous?.createdAt ?? Date.now() }) as ToolActivity;
+        this.write({ kind: "activity", value, nativeId: update.toolCallId, authority: "recovery" });
+        this.emit?.({ type: "activity_updated", sessionId: this.sessionId, turnId: this.turnId, activity: value });
+        return;
+      }
+      case "compaction_update": {
+        this.finish("commentary");
+        const id = `acp-compaction-${update.compactionId}`;
+        const previous = this.read("activity", id);
+        const value = { id, type: "context_compaction" as const, ...metadataField(update, previous?.value.providerMetadata), turnId: this.turnId ?? null,
+          status: update.status === "completed" ? "completed" as const : update.status === "failed" ? "failed" as const : "in_progress" as const,
+          seq: previous?.value.seq ?? this.nextSeq++, createdAt: previous?.value.createdAt ?? Date.now() };
+        this.write({ kind: "activity", value, nativeId: update.compactionId, authority: "recovery" });
+        this.emit?.({ type: "activity_updated", sessionId: this.sessionId, turnId: this.turnId, activity: value });
+        return;
+      }
+      case "compaction_summary_chunk":
+        this.update({ sessionUpdate: "agent_thought_chunk", messageId: `compaction-${update.compactionId}`, content: update.content, _meta: update._meta });
+        return;
+    }
+  }
+
+  /** End a host-dispatched turn: the last assistant message is final and no echo is pending. */
+  endTurn(): void {
+    this.finish();
+    this.submittedUserId = null;
+    this.submittedInputId = undefined;
+  }
+
+  finish(phase: SessionMessage["phase"] = "final_answer"): void {
+    const current = this.currentMessageId ? this.read("message", this.currentMessageId) : null;
+    this.currentMessageId = null;
+    if (current?.kind !== "message" || current.value.role !== "assistant") return;
+    const value = { ...current.value, phase };
+    this.write({ ...current, value });
+    this.emit?.({ type: "assistant_message_completed", sessionId: this.sessionId, turnId: this.turnId, message: value });
+  }
+}
+
+function appendBlock(blocks: SessionMessageContentBlock[], block: SessionMessageContentBlock): SessionMessageContentBlock[] {
+  if ((block.type === "text" ? block.text : block.thinking) === "") return blocks;
+  const last = blocks.at(-1);
+  if (last?.type === "text" && block.type === "text") return [...blocks.slice(0, -1), { ...last, text: last.text + block.text }];
+  if (last?.type === "thinking" && block.type === "thinking") return [...blocks.slice(0, -1), { ...last, thinking: last.thinking + block.thinking }];
+  return [...blocks, block];
+}
+
+function contentText(content: ContentBlock): string {
+  switch (content.type) {
+    case "text": return content.text;
+    case "resource": return "text" in content.resource ? content.resource.text : `[Resource: ${content.resource.uri}]`;
+    case "resource_link": return `${content.name} (${content.uri})`;
+    case "audio": return `[Audio: ${content.mimeType}]`;
+    case "image": return "";
+  }
+}
+
+/** Keep opaque extension data at its source path without copying message bodies. */
+export function acpMetadata(value: unknown, previous?: Record<string, unknown>): Record<string, unknown> | undefined {
+  const result = { ...previous };
+  const pending: Array<{ entry: unknown; path: string }> = [{ entry: value, path: "" }];
+  while (pending.length) {
+    const { entry, path } = pending.pop()!;
+    if (!entry || typeof entry !== "object") continue;
+    for (const [key, child] of Object.entries(entry)) {
+      const childPath = `${path}/${key.replaceAll("~", "~0").replaceAll("/", "~1")}`;
+      if (key === "_meta" && child && typeof child === "object" && !Array.isArray(child)) {
+        result[childPath] = { ...(result[childPath] as Record<string, unknown> | undefined), ...child };
+      } else if (key !== "_meta" && child && typeof child === "object") pending.push({ entry: child, path: childPath });
+    }
+  }
+  return Object.keys(result).length ? result : undefined;
+}
+
+function metadataField(value: unknown, previous?: Record<string, unknown>): Pick<SessionMessage, "providerMetadata"> {
+  const providerMetadata = acpMetadata(value, previous);
+  return providerMetadata ? { providerMetadata } : {};
+}

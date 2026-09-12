@@ -1,15 +1,20 @@
+import { elicitationFields } from "./elicitation.js";
 import { randomUUID } from "node:crypto";
 import { lookup } from "node:dns/promises";
 import { EventEmitter } from "node:events";
-import { chmod, mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import { readFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { BlockList, isIP } from "node:net";
 import nodePath from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 
-import { StateWriter } from "./state-writer.js";
+import { SessionStore, type StoredProviderSession, type StoredSessionItem } from "./session-store.js";
+import { reconcileSessionHistory, confirmedSessionInputIds } from "./session-history.js";
+import { stripSessionAttachments } from "./session-attachments.js";
 
 import {
+  AgentProviderRequestError,
+  materializeAgentActivityDraft,
   type AgentCreateSessionRequest,
   type AgentCreateSessionResult,
   type AgentSkillConfigWriteRequest,
@@ -22,7 +27,7 @@ import {
   type AgentSessionActivityDraft,
   type AgentSessionInputItem,
   type AgentSessionListOptions,
-  type AgentSessionLogOptions,
+  type AgentSessionLogOptions, type AgentSessionSnapshot,
   type AgentSessionResumeOptions,
   type AgentSubmitInputRequest,
   type AgentSubmitInputResult,
@@ -60,7 +65,6 @@ import { normalizeStoredSessionActivity } from "./activity.js";
 import type {
   LivePlanStep,
   ModelSummary,
-  PendingActionElicitationField,
   SessionActivity,
   SkillCatalogEntry,
   SkillSummary,
@@ -83,20 +87,26 @@ export interface CopilotAgentProviderOptions {
   allowAll?: boolean;
   configuredModel?: string | null;
   sdkClientFactory?: CopilotSdkClientFactory;
+  providerId?: string;
+  sessionStore?: SessionStore;
+  hostStateDir?: string;
 }
 
 interface CopilotSessionState {
   thread: ThreadRecord;
-  messages: SessionMessage[];
-  activities: Map<string, SessionActivity>;
   turns: TurnRecord[];
   runtime: SessionRuntimeSummary | null;
   archived: boolean;
-  nextSeq: number;
-  draftAssistantMessages: Map<string, CopilotDraftAssistantMessage>;
   copilotSessionId: string | null;
   copilotSessionCreated: boolean;
   sdkSession?: CopilotSdkSession | null;
+}
+
+interface LegacyCopilotSessionState extends CopilotSessionState {
+  messages: SessionMessage[];
+  activities: Map<string, SessionActivity>;
+  nextSeq: number;
+  draftAssistantMessages: Map<string, CopilotDraftAssistantMessage>;
 }
 
 interface CopilotDraftAssistantMessage {
@@ -127,11 +137,11 @@ interface CopilotStateFile {
 
 interface ActiveCopilotTurn {
   turnId: string;
+  started: boolean;
   sdkSession: CopilotSdkSession;
   assistantBuffers: Map<string, string>;
   reasoningBlocks: SessionMessageContentBlock[];
   completedAssistantMessageIds: Set<string>;
-  resolve(status: string): void;
 }
 
 interface PendingCopilotPermission {
@@ -183,6 +193,7 @@ export const COPILOT_PROVIDER_CAPABILITIES: AgentProviderCapabilities = {
   },
   input: {
     text: true,
+    steer: true,
     imageUrl: true,
     localImage: true,
     skills: true,
@@ -238,6 +249,9 @@ export class CopilotAgentProvider
 
   private readonly bin: string;
   private readonly stateDir: string;
+  private readonly providerId: string;
+  private store?: SessionStore;
+  private storeStarting?: Promise<void>;
   private readonly allowAll: boolean;
   private readonly configuredModel: string | null;
   private readonly sdkClientFactory: CopilotSdkClientFactory;
@@ -259,10 +273,10 @@ export class CopilotAgentProvider
   private clientStarting: Promise<CopilotSdkClient> | null = null;
   private closed = false;
   private readonly turnTasks = new Set<Promise<void>>();
-  private readonly stateWriter = new StateWriter(() => this.saveState());
+  private readonly sessionStarting = new Map<string, Promise<CopilotSdkSession>>();
   private closing: Promise<void> | null = null;
 
-  public constructor(options: CopilotAgentProviderOptions = {}) {
+  public constructor(private readonly options: CopilotAgentProviderOptions = {}) {
     super();
     this.bin = options.bin?.trim() || "copilot";
     this.stateDir = nodePath.resolve(
@@ -271,13 +285,13 @@ export class CopilotAgentProvider
     this.allowAll = options.allowAll === true;
     this.configuredModel = options.configuredModel?.trim() || null;
     this.sdkClientFactory = options.sdkClientFactory ?? createCopilotSdkClient;
+    this.providerId = options.providerId ?? "copilot";
+    this.store = options.sessionStore;
   }
 
   public async start(): Promise<void> {
-    await mkdir(this.stateDir, { recursive: true, mode: 0o700 });
-    await chmod(this.stateDir, 0o700);
+    await this.ensureStore();
     await this.ensureSdkClient();
-    await this.loadState();
   }
 
   public close(): Promise<void> {
@@ -286,6 +300,7 @@ export class CopilotAgentProvider
 
   private async closeRuntime(): Promise<void> {
     this.closed = true;
+    await this.storeStarting?.catch(() => {});
     const client = this.sdkClient ?? await this.clientStarting?.catch(() => null);
     try {
       for (const [sessionId, active] of this.activeTurns) {
@@ -303,11 +318,15 @@ export class CopilotAgentProvider
       await client?.forceStop?.();
       throw error;
     } finally {
+      await Promise.allSettled(this.sessionStarting.values());
       await Promise.allSettled(this.turnTasks);
       this.sdkClient = null;
       this.loadedSessionIds.clear();
+      this.planUpdateVersions.clear();
       for (const session of this.sessions.values()) session.sdkSession = null;
-      await this.stateWriter.flush();
+      await this.persistSoon();
+      if (!this.options.sessionStore) this.store?.close();
+      this.store = undefined;
     }
   }
 
@@ -326,6 +345,12 @@ export class CopilotAgentProvider
       );
     }
     return "unknown";
+  }
+
+  public async health(): Promise<boolean> {
+    if (this.closed || !this.sdkClient) return false;
+    try { await this.sdkClient.getStatus?.(); return true; }
+    catch { return false; }
   }
 
   public async listSessionThreads(
@@ -384,39 +409,50 @@ export class CopilotAgentProvider
     threadId: string,
     includeTurns: boolean,
   ): Promise<ThreadRecord> {
-    const existing = this.sessions.get(threadId);
-    if (existing) {
-      return cloneThread(existing, includeTurns);
-    }
-    const sdkSession = await this.readSdkSessionMetadata(threadId);
-    if (sdkSession) {
-      return sdkSessionToThread(sdkSession, null, includeTurns);
-    }
-    return cloneThread(this.requireSession(threadId), includeTurns);
+    const session = await this.getWritableSession(threadId);
+    const sdkSession = await this.ensureSdkSession(session);
+    const [activity, name] = await Promise.all([sdkSession.rpc.metadata.activity(), sdkSession.rpc.name.get()]);
+    session.thread.status = { type: activity.hasActiveWork ? "running" : "idle" };
+    session.thread.name = name.name ?? session.thread.name;
+    return cloneThread(session, includeTurns);
   }
 
   public async readSessionLog(
     thread: ThreadRecord,
     options: AgentSessionLogOptions = {},
   ): Promise<SessionLogSnapshot> {
-    const session =
-      this.sessions.get(thread.id) ??
-      (await this.loadSdkSessionStateFromHistory(thread.id));
-    const messages = limitTail(session.messages, options.messageLimit ?? null);
-    const activities = limitTail(
-      [...session.activities.values()].sort(
-        (left, right) => left.seq - right.seq,
-      ),
-      options.activityLimit ?? null,
-    );
-    return {
-      messages: messages.map(cloneMessage),
-      activities: activities.map(cloneActivity),
-      runtime: session.runtime ? { ...session.runtime } : null,
-      totalMessages: session.messages.length,
-      totalActivities: session.activities.size,
-      nextSeq: session.nextSeq,
-    };
+    return this.readSessionSnapshot(thread.id, options);
+  }
+
+  public async readSessionSnapshot(id: string, options: AgentSessionLogOptions = {}): Promise<AgentSessionSnapshot> {
+    await this.ensureStore();
+    const session = await this.getWritableSession(id);
+    const sdkSession = await this.ensureSdkSession(session);
+    const beforeRuntime = session.runtime;
+    const [events, name, mode] = await Promise.all([sdkSession.getEvents(), sdkSession.rpc.name.get(), sdkSession.rpc.mode.get()]);
+    const nativeActivity = await sdkSession.rpc.metadata.activity();
+    const parsed = parseSdkSessionEvents(events, session.thread.cwd);
+    const replay: StoredSessionItem[] = [
+      ...parsed.messages.map((value): StoredSessionItem => ({ kind: "message", value, nativeId: value.id, authority: "cache" })),
+      ...parsed.activities.map((value): StoredSessionItem => ({ kind: "activity", value: nativeActivity.hasActiveWork ? value : normalizeInactiveCopilotActivity(value), nativeId: value.id, authority: "cache" })),
+    ].sort((a, b) => a.value.seq - b.value.seq);
+    const items = reconcileSessionHistory(this.db.readSessionItems(this.providerId, id), replay);
+    if (session.runtime === beforeRuntime) {
+      session.runtime = withRuntimeMetadata({ ...session.runtime, ...parsed.runtime }, { mode, updatedAt: Date.now() });
+    }
+    session.thread.name = name.name ?? session.thread.name;
+    if (!nativeActivity.hasActiveWork) session.runtime = normalizeInactiveCopilotRuntime(session.runtime, session.thread.updatedAt);
+    session.thread.status = { type: nativeActivity.hasActiveWork ? "running" : "idle" };
+    this.db.replaceProviderHistory(this.providerId, this.storedSession(session), items);
+    const messages = items.flatMap((item) => item.kind === "message" ? [item.value] : []);
+    const activities = items.flatMap((item) => item.kind === "activity" ? [item.value] : []);
+    const thread = cloneThread(session, true);
+    if (!nativeActivity.hasActiveWork) thread.turns = thread.turns?.filter((turn) => turn.status !== "inProgress");
+    return { thread, busy: nativeActivity.hasActiveWork,
+      activeTurnId: nativeActivity.hasActiveWork ? this.activeTurns.get(id)?.turnId ?? null : null,
+      confirmedInputIds: confirmedSessionInputIds(items), messages: limitTail(messages, options.messageLimit ?? null), activities: limitTail(activities, options.activityLimit ?? null),
+      runtime: session.runtime, totalMessages: messages.length, totalActivities: activities.length,
+      nextSeq: this.db.nextSessionSequence(this.providerId, id) };
   }
 
   public async readSessionRuntime(
@@ -424,7 +460,9 @@ export class CopilotAgentProvider
   ): Promise<SessionRuntimeSummary | null> {
     const session =
       this.sessions.get(thread.id) ??
-      (await this.loadSdkSessionStateFromHistory(thread.id));
+      (await this.loadSessionMetadata(thread.id));
+    const mode = await (await this.ensureSdkSession(session)).rpc.mode.get();
+    session.runtime = withRuntimeMetadata(session.runtime, { mode, updatedAt: Date.now() });
     const runtime = session.runtime;
     return runtime ? { ...runtime } : null;
   }
@@ -447,16 +485,17 @@ export class CopilotAgentProvider
     name: string,
   ): Promise<unknown> {
     const session = await this.getWritableSession(threadId);
+    await (await this.ensureSdkSession(session)).rpc.name.set({ name });
     session.thread.name = name;
     this.touch(session);
-    await this.persistSoon();
+    await this.persistSoon(session);
     return { renamed: true };
   }
 
   public async archiveSession(threadId: string): Promise<unknown> {
+    const session = await this.getWritableSession(threadId);
     this.archivedSessionIds.add(threadId);
     this.planUpdateVersions.delete(threadId);
-    const session = this.sessions.get(threadId);
     if (session) {
       session.archived = true;
       this.touch(session);
@@ -466,27 +505,24 @@ export class CopilotAgentProvider
       this.activeTurns.get(threadId)?.turnId ?? "",
     );
     this.loadedSessionIds.delete(threadId);
-    await this.persistSoon();
+    await this.persistSoon(session);
     return { archived: true };
   }
 
   public async unarchiveSession(threadId: string): Promise<unknown> {
+    const session = await this.getWritableSession(threadId);
     this.archivedSessionIds.delete(threadId);
-    const session = this.sessions.get(threadId);
     if (session) {
       session.archived = false;
       this.touch(session);
     }
-    await this.persistSoon();
+    await this.persistSoon(session);
     return { unarchived: true };
   }
 
   public async compactSession(threadId: string): Promise<unknown> {
     const session = await this.getWritableSession(threadId);
     const sdkSession = await this.ensureSdkSession(session);
-    if (!sdkSession.rpc?.compaction?.compact) {
-      throw new Error("Copilot SDK does not expose manual compaction.");
-    }
     const startedAt = Date.now();
     this.replaceRuntime(
       session,
@@ -504,7 +540,7 @@ export class CopilotAgentProvider
       }),
     );
     try {
-      const result = await sdkSession.rpc.compaction.compact();
+      const result = await sdkSession.rpc.history.compact();
       const completedAt = Date.now();
       this.replaceRuntime(
         session,
@@ -523,7 +559,7 @@ export class CopilotAgentProvider
           updatedAt: completedAt,
         }),
       );
-      await this.persistSoon();
+      await this.persistSoon(session);
       return result;
     } catch (error) {
       const completedAt = Date.now();
@@ -554,15 +590,14 @@ export class CopilotAgentProvider
     request: AgentCreateSessionRequest,
   ): Promise<AgentCreateSessionResult> {
     if (this.closed) throw new Error("Copilot provider is closed.");
+    await this.ensureStore();
     const session = this.createSessionState(request);
-    let activeTurnId: string | null = null;
-    if (request.input.length > 0) {
-      activeTurnId = this.startTurn(session, request.input);
-    }
-    await this.persistSoon();
+    await this.ensureSdkSession(session);
+    const input = request.input.length > 0 ? await this.submitInput({ sessionId: session.thread.id,
+      input: request.input, overrides: request.overrides, activeTurnId: null }) : null;
     return {
       thread: cloneThread(session, false),
-      activeTurnId,
+      activeTurnId: input?.turnId ?? null,
       runtime: session.runtime,
     };
   }
@@ -570,44 +605,60 @@ export class CopilotAgentProvider
   public async submitInput(
     request: AgentSubmitInputRequest,
   ): Promise<AgentSubmitInputResult> {
-    if (this.closed) throw new Error("Copilot provider is closed.");
-    const session = await this.getWritableSession(request.sessionId);
-    session.runtime = mergeRuntime(
-      session.runtime,
-      request.overrides,
-      this.configuredModel,
-      this.allowAll,
-    );
-
-    const active = this.activeTurns.get(session.thread.id);
-    if (active) {
-      await active.sdkSession.send({
-        prompt: inputPromptText(request.input),
-        attachments: await sdkAttachments(request.input),
-        mode: "immediate",
-      });
-      this.appendUserMessage(session, request.input);
-      await this.persistSoon();
-      return {
-        mode: "steer",
-        turnId: active.turnId,
-      };
+    let session: CopilotSessionState;
+    let sdkSession: CopilotSdkSession;
+    let attachments: Awaited<ReturnType<typeof sdkAttachments>>;
+    let nativeBusy: boolean;
+    try {
+      if (this.closed) throw new Error("Copilot provider is closed.");
+      session = await this.getWritableSession(request.sessionId);
+      if (session.archived) throw new Error("Copilot session is archived.");
+      if (request.overrides.mode && !normalizeCopilotSessionMode(request.overrides.mode)) throw new Error("Copilot mode is not available.");
+      attachments = await sdkAttachments(request.input);
+      session.runtime = mergeRuntime(session.runtime, request.overrides, this.configuredModel, this.allowAll);
+      sdkSession = await this.ensureSdkSession(session);
+      await this.applyRuntimeControls(session, sdkSession);
+      const before = this.activeTurns.get(session.thread.id);
+      nativeBusy = (await sdkSession.rpc.metadata.activity()).hasActiveWork;
+      if (!nativeBusy && before && this.activeTurns.get(session.thread.id) === before) this.completeActiveTurn(session.thread.id, "completed");
+      if (this.closed) throw new Error("Copilot provider is closed.");
+    } catch (error) { throw new AgentProviderRequestError(error instanceof Error ? error.message : String(error), 409, true); }
+    const existing = this.activeTurns.get(session.thread.id);
+    const message = this.appendUserMessage(session, request.input, request.clientMessageId);
+    const turnId = existing?.turnId ?? message.id;
+    if (!existing) {
+      session.turns.push({ id: turnId, status: "inProgress", startedAt: nowSeconds(), completedAt: null });
+      session.thread.status = { type: "running", activeFlags: ["inProgress"] };
+      this.activeTurns.set(session.thread.id, { turnId, started: false, sdkSession, assistantBuffers: new Map(), reasoningBlocks: [], completedAssistantMessageIds: new Set() });
     }
-
-    const turnId = this.startTurn(session, request.input);
-    await this.persistSoon();
-    return { mode: "turn", turnId };
+    this.saveSession(session);
+    const sent = (async () => {
+      try {
+        const nativeId = await sdkSession.send({ prompt: inputPromptText(request.input), displayPrompt: inputDisplayText(request.input), attachments, mode: nativeBusy ? "immediate" : "enqueue" });
+        const recovery = this.db.getSessionItem(this.providerId, session.thread.id, "message", message.id);
+        if (recovery) this.db.putSessionItem(this.providerId, session.thread.id, { ...recovery, nativeId });
+      } catch (error) {
+        if (!this.closed) {
+          this.emit("liveEvent", { type: "provider_warning", sessionId: session.thread.id, code: "copilot_input_uncertain",
+            level: "warning", source: "copilot/sdk", message: error instanceof Error ? error.message : String(error) });
+          this.emit("liveEvent", { type: "history_invalidated", sessionId: session.thread.id });
+        }
+        throw error;
+      }
+    })();
+    this.turnTasks.add(sent);
+    try { await sent; } finally { this.turnTasks.delete(sent); }
+    return { mode: nativeBusy ? "steer" : "turn", turnId };
   }
 
   public async interruptTurn(
     threadId: string,
-    turnId: string,
+    turnId: string | null,
   ): Promise<unknown> {
     const active = this.activeTurns.get(threadId);
-    if (!active || active.turnId !== turnId) {
-      return { interrupted: false };
-    }
-    await active.sdkSession.abort().catch(() => undefined);
+    if (active && turnId !== null && active.turnId !== turnId) return { interrupted: false };
+    const sdkSession = active?.sdkSession ?? await this.ensureSdkSession(await this.getWritableSession(threadId));
+    await sdkSession.abort();
     this.resolvePendingPermissionsForSession(threadId, rejectPermission());
     this.resolvePendingUserInputsForSession(threadId, {
       answer: "",
@@ -617,7 +668,7 @@ export class CopilotAgentProvider
       action: "cancel",
     });
     this.completeActiveTurn(threadId, "interrupted");
-    await this.persistSoon();
+    await this.persistSoon(this.sessions.get(threadId));
     return { interrupted: true };
   }
 
@@ -643,7 +694,7 @@ export class CopilotAgentProvider
         return false;
       }
       this.pendingPermissions.delete(action.id);
-      this.persistEventually();
+      this.persistEventually(this.sessions.get(action.sessionId));
       pending.resolve(result);
       return true;
     }
@@ -654,7 +705,7 @@ export class CopilotAgentProvider
         return false;
       }
       this.pendingUserInputs.delete(action.id);
-      this.persistEventually();
+      this.persistEventually(this.sessions.get(action.sessionId));
       inputRequest.resolve(decision);
       return true;
     }
@@ -665,7 +716,7 @@ export class CopilotAgentProvider
         return false;
       }
       this.pendingElicitations.delete(action.id);
-      this.persistEventually();
+      this.persistEventually(this.sessions.get(action.sessionId));
       elicitation.resolve(decision);
       return true;
     }
@@ -772,7 +823,7 @@ export class CopilotAgentProvider
 
   private async reloadSkillsForWorkspace(cwd: string): Promise<void> {
     const sessions = [...this.sessions.values()].filter(
-      (session) => session.thread.cwd === cwd,
+      (session) => session.thread.cwd === cwd && session.sdkSession != null,
     );
     await Promise.all(
       sessions.map(async (session) => {
@@ -813,8 +864,6 @@ export class CopilotAgentProvider
     };
     const session: CopilotSessionState = {
       thread,
-      messages: [],
-      activities: new Map(),
       turns: [],
       runtime: mergeRuntime(
         null,
@@ -823,93 +872,23 @@ export class CopilotAgentProvider
         this.allowAll,
       ),
       archived: false,
-      nextSeq: 0,
-      draftAssistantMessages: new Map(),
       copilotSessionId: id,
       copilotSessionCreated: false,
     };
     this.sessions.set(id, session);
+    this.saveSession(session);
     this.loadedSessionIds.add(id);
     return session;
   }
 
-  private startTurn(
-    session: CopilotSessionState,
-    input: AgentSessionInputItem[],
-  ): string {
-    this.appendUserMessage(session, input);
-    const turnId = `copilot-turn-${randomUUID()}`;
-    const turn: TurnRecord = {
-      id: turnId,
-      status: "inProgress",
-      startedAt: nowSeconds(),
-      completedAt: null,
-      items: [],
-    };
-    session.turns.push(turn);
-    session.thread.status = { type: "running", activeFlags: ["inProgress"] };
-    this.touch(session);
-    const task = this.runTurn(session.thread.id, turnId, input);
-    this.turnTasks.add(task);
-    void task.then(
-      () => this.turnTasks.delete(task),
-      (error: unknown) => {
-        this.turnTasks.delete(task);
-        this.emit("stderr", `Copilot turn persistence failed: ${String(error)}`);
-      },
-    );
-    return turnId;
-  }
-
-  private async runTurn(
-    sessionId: string,
-    turnId: string,
-    input: AgentSessionInputItem[],
-  ): Promise<void> {
-    const session = this.sessions.get(sessionId);
-    if (!session) return;
-
-    this.emit("liveEvent", { type: "turn_started", sessionId, turnId });
-
-    try {
-      const sdkSession = await this.ensureSdkSession(session);
-      await this.applyRuntimeControls(session, sdkSession);
-      if (this.closed) throw new Error("Copilot provider is closed.");
-      const completed = new Promise<string>((resolve) => {
-        this.activeTurns.set(sessionId, {
-          turnId,
-          sdkSession,
-          assistantBuffers: new Map(),
-          reasoningBlocks: [],
-          completedAssistantMessageIds: new Set(),
-          resolve,
-        });
-      });
-      await sdkSession.send({
-        prompt: inputPromptText(input),
-        attachments: await sdkAttachments(input),
-        mode: "enqueue",
-      });
-      await completed;
-    } catch (error) {
-      const current = this.sessions.get(sessionId);
-      if (!current) {
-        return;
-      }
-      const text =
-        error instanceof Error ? error.message : "Copilot SDK turn failed.";
-      this.failTurn(current, turnId, `Copilot SDK error: ${text}`);
-      await this.persistSoon();
-    }
-  }
-
   private async ensureSdkClient(): Promise<CopilotSdkClient> {
+    await this.ensureStore();
     if (this.closed) throw new Error("Copilot provider is closed.");
     if (this.sdkClient) return this.sdkClient;
     if (!this.clientStarting) {
       this.clientStarting = (async () => {
         const client = await this.sdkClientFactory({
-          bin: this.bin, cwd: process.cwd(), env: { ...process.env, NO_COLOR: "1" },
+          bin: this.bin, cwd: process.cwd(), env: { ...process.env, SIDEMESH_TOKEN: undefined, NO_COLOR: "1" },
         });
         try {
           await client.start();
@@ -925,33 +904,26 @@ export class CopilotAgentProvider
     finally { this.clientStarting = null; }
   }
 
-  private async ensureSdkSession(
-    session: CopilotSessionState,
-  ): Promise<CopilotSdkSession> {
+  private async ensureSdkSession(session: CopilotSessionState): Promise<CopilotSdkSession> {
     if (this.closed) throw new Error("Copilot provider is closed.");
-    if (session.sdkSession) {
-      return session.sdkSession;
-    }
-
-    const client = await this.ensureSdkClient();
-    const config = this.buildSdkSessionConfig(session);
-    const sdkSession = session.copilotSessionCreated
-      ? await client.resumeSession(
-          session.copilotSessionId ?? session.thread.id,
-          {
-            ...config,
-            suppressResumeEvent: true,
-          },
-        )
-      : await client.createSession({
-          ...config,
-          sessionId: session.copilotSessionId ?? session.thread.id,
-        });
-    session.sdkSession = sdkSession;
-    session.copilotSessionId = sdkSession.sessionId;
-    session.copilotSessionCreated = true;
-    await this.persistSoon();
-    return sdkSession;
+    if (session.sdkSession) return session.sdkSession;
+    const pending = this.sessionStarting.get(session.thread.id);
+    if (pending) return pending;
+    const opening = (async () => {
+      const client = await this.ensureSdkClient();
+      const config = this.buildSdkSessionConfig(session);
+      const sdkSession = session.copilotSessionCreated
+        ? await client.resumeSession(session.copilotSessionId ?? session.thread.id, { ...config, suppressResumeEvent: true })
+        : await client.createSession({ ...config, sessionId: session.copilotSessionId ?? session.thread.id });
+      if (this.closed) { await sdkSession.disconnect?.(); throw new Error("Copilot provider is closed."); }
+      session.sdkSession = sdkSession;
+      session.copilotSessionId = sdkSession.sessionId;
+      session.copilotSessionCreated = true;
+      this.saveSession(session);
+      return sdkSession;
+    })();
+    this.sessionStarting.set(session.thread.id, opening);
+    try { return await opening; } finally { this.sessionStarting.delete(session.thread.id); }
   }
 
   private buildSdkSessionConfig(
@@ -1022,7 +994,31 @@ export class CopilotAgentProvider
     if (!session) {
       return;
     }
-    const active = this.activeTurns.get(sessionId);
+    if (event.agentId && event.type === "session.error") {
+      this.emit("liveEvent", { type: "provider_warning", sessionId, code: "copilot_subagent_error", level: "warning",
+        source: "copilot/sdk", message: event.data.message });
+      return;
+    }
+    if (event.agentId && (event.type.startsWith("assistant.") || event.type === "user.message")) return;
+    let active = this.activeTurns.get(sessionId);
+    if (!active && session.sdkSession && (event.type === "user.message" || event.type === "assistant.turn_start")) {
+      active = { turnId: event.id, started: false, sdkSession: session.sdkSession,
+        assistantBuffers: new Map(), reasoningBlocks: [], completedAssistantMessageIds: new Set() };
+      this.activeTurns.set(sessionId, active);
+      session.turns.push({ id: active.turnId, status: "inProgress", startedAt: nowSeconds(), completedAt: null });
+      session.thread.status = { type: "running" };
+      if (event.type === "user.message") {
+        this.appendMessage(session, { id: event.id, nativeId: event.id, role: "user", text: event.data.content,
+          attachments: copilotHistoryAttachments(event.data.attachments) });
+        this.emit("liveEvent", { type: "history_invalidated", sessionId });
+      }
+      this.saveSession(session);
+    }
+    if (active && !active.started && !event.agentId && (event.type === "user.message" || event.type === "assistant.turn_start"
+      || event.type === "assistant.message_delta" || event.type === "assistant.message" || event.type === "assistant.reasoning_delta")) {
+      active.started = true;
+      this.emit("liveEvent", { type: "turn_started", sessionId, turnId: active.turnId });
+    }
 
     if (event.type === "session.model_change") {
       this.replaceRuntime(
@@ -1065,13 +1061,18 @@ export class CopilotAgentProvider
       if (sdkSession) {
         const version = (this.planUpdateVersions.get(sessionId) ?? 0) + 1;
         this.planUpdateVersions.set(sessionId, version);
-        void this.emitCopilotPlanUpdated(
+        const task = this.emitCopilotPlanUpdated(
           sessionId,
           sdkSession,
           active?.turnId ?? null,
           copilotPlanChangedOperation(event),
           version,
         );
+        this.turnTasks.add(task);
+        void task.then(() => this.turnTasks.delete(task), (error) => {
+          this.turnTasks.delete(task);
+          if (!this.closed) this.emit("stderr", `Copilot plan read failed: ${String(error)}`);
+        });
       }
       return;
     }
@@ -1152,8 +1153,9 @@ export class CopilotAgentProvider
         (b): b is SessionMessageContentBlockThinking =>
           b.type === "thinking" && b.reasoningId === reasoningId,
       );
+      const previous = existing?.thinking ?? "";
       if (existing) {
-        existing.thinking += delta;
+        existing.thinking = delta;
       } else {
         active.reasoningBlocks.push({
           type: "thinking",
@@ -1163,13 +1165,17 @@ export class CopilotAgentProvider
         });
       }
       this.syncDraftAssistantMessages(session, active);
+      if (!delta.startsWith(previous)) {
+        this.emit("liveEvent", { type: "history_invalidated", sessionId });
+        return;
+      }
       this.emit("liveEvent", {
         type: "reasoning_delta",
         sessionId,
         turnId: active.turnId,
         itemId: event.id,
         reasoningId,
-        delta,
+        delta: delta.slice(previous.length),
         summary: false,
       });
       return;
@@ -1225,6 +1231,8 @@ export class CopilotAgentProvider
           millisFromDateLike(event.timestamp) ?? Date.now(),
         ),
       );
+      const compaction = copilotCompactionActivity(session.runtime, event);
+      if (compaction) this.upsertAndEmitActivity(session, active?.turnId ?? null, compaction);
       return;
     }
 
@@ -1268,32 +1276,27 @@ export class CopilotAgentProvider
           assistantPhase(event.data.phase),
           messageId,
         );
-        session.draftAssistantMessages.delete(messageId);
       }
       active.completedAssistantMessageIds.add(messageId);
       active.assistantBuffers.delete(messageId);
-      this.persistEventually();
+      active.reasoningBlocks = [];
+      this.persistEventually(session);
       return;
     }
 
-    if (event.type === "assistant.turn_end" || event.type === "session.idle") {
+    if (event.type === "session.idle") {
       if (active) {
         this.completeActiveTurn(sessionId, "completed");
       }
+      this.emit("liveEvent", { type: "history_invalidated", sessionId });
       return;
     }
 
     if (event.type === "session.error") {
-      if (active) {
-        this.appendAndEmitAssistantMessage(
-          session,
-          active.turnId,
-          event.data.message,
-          "final_answer",
-          `copilot-assistant-error-${active.turnId}`,
-        );
-        this.completeActiveTurn(sessionId, "failed");
-      }
+      this.appendMessage(session, { id: event.id, nativeId: event.id, role: "system", text: event.data.message, attachments: [] });
+      this.emit("liveEvent", { type: "provider_warning", sessionId, code: "copilot_session_error", level: "error", source: "copilot/sdk", message: event.data.message });
+      if (active) this.completeActiveTurn(sessionId, "failed");
+      this.emit("liveEvent", { type: "history_invalidated", sessionId });
       return;
     }
 
@@ -1343,7 +1346,7 @@ export class CopilotAgentProvider
 
     if (event.type === "tool.execution_complete") {
       const completeData = event.data as unknown as Record<string, unknown>;
-      const existing = session.activities.get(event.data.toolCallId);
+      const existing = this.activity(session, event.data.toolCallId);
       const existingTool = existing?.type === "tool" ? existing : null;
       const output =
         extractCopilotToolOutput(event.data.result ?? event.data.error) ??
@@ -1403,13 +1406,14 @@ export class CopilotAgentProvider
     }
     let plan = await planRpc.read().catch(() => null);
     for (const delayMs of COPILOT_PLAN_READ_RETRY_DELAYS_MS) {
+      if (this.closed) return;
       if (plan?.exists && plan.content) {
         break;
       }
       await sleep(delayMs);
       plan = await planRpc.read().catch(() => null);
     }
-    if (this.planUpdateVersions.get(sessionId) !== version) {
+    if (this.closed || this.planUpdateVersions.get(sessionId) !== version) {
       return;
     }
     if (!plan?.exists || !plan.content) {
@@ -1451,14 +1455,6 @@ export class CopilotAgentProvider
         active.completedAssistantMessageIds.add(messageId);
       }
     }
-    if (session.draftAssistantMessages.size > 0) {
-      for (const [messageId, draft] of session.draftAssistantMessages) {
-        if (draft.turnId === active.turnId) {
-          session.draftAssistantMessages.delete(messageId);
-        }
-      }
-    }
-
     this.activeTurns.delete(sessionId);
     const turn = session.turns.find(
       (candidate) => candidate.id === active.turnId,
@@ -1466,41 +1462,7 @@ export class CopilotAgentProvider
     if (turn?.status === "inProgress") {
       this.finishTurn(session, turn, status);
     }
-    active.resolve(status);
-    this.persistEventually();
-  }
-
-  private failTurn(
-    session: CopilotSessionState,
-    turnId: string,
-    text: string,
-  ): void {
-    const active = this.activeTurns.get(session.thread.id);
-    if (active?.turnId === turnId) {
-      this.appendAndEmitAssistantMessage(
-        session,
-        turnId,
-        text,
-        "final_answer",
-        `copilot-assistant-error-${turnId}`,
-      );
-      this.completeActiveTurn(session.thread.id, "failed");
-      return;
-    }
-
-    const turn = session.turns.find((candidate) => candidate.id === turnId);
-    if (turn?.status !== "inProgress") {
-      return;
-    }
-    this.appendAndEmitAssistantMessage(
-      session,
-      turnId,
-      text,
-      "final_answer",
-      `copilot-assistant-error-${turnId}`,
-    );
-    this.finishTurn(session, turn, "failed");
-    this.persistEventually();
+    this.persistEventually(session);
   }
 
   private appendAndEmitAssistantMessage(
@@ -1538,15 +1500,12 @@ export class CopilotAgentProvider
     session: CopilotSessionState,
     activity: AgentSessionActivityDraft,
   ): SessionActivity {
-    const existing = session.activities.get(activity.id);
-    const next = {
-      ...activity,
-      createdAt: existing?.createdAt ?? Date.now(),
-      seq: existing?.seq ?? session.nextSeq++,
-    } as SessionActivity;
-    session.activities.set(activity.id, next);
+    const existing = this.activity(session, activity.id);
+    const next = materializeAgentActivityDraft(activity, { createdAt: existing?.createdAt ?? Date.now(),
+      seq: existing?.seq ?? this.db.nextSessionSequence(this.providerId, session.thread.id) });
+    this.db.putSessionItem(this.providerId, session.thread.id, { kind: "activity", value: next, nativeId: activity.id, authority: "recovery" });
     this.touch(session);
-    this.persistEventually();
+    this.persistEventually(session);
     return next;
   }
 
@@ -1556,14 +1515,12 @@ export class CopilotAgentProvider
     activityId: string,
     delta: string,
   ): void {
-    const existing = session.activities.get(activityId);
+    const existing = this.activity(session, activityId);
     if (existing?.type === "command" || existing?.type === "tool") {
-      session.activities.set(activityId, {
-        ...existing,
-        output: `${existing.output ?? ""}${delta}`,
-      });
+      this.db.putSessionItem(this.providerId, session.thread.id, { kind: "activity", nativeId: activityId, authority: "recovery",
+        value: { ...existing, output: `${existing.output ?? ""}${delta}` } });
       this.touch(session);
-      this.persistEventually();
+      this.persistEventually(session);
     }
     this.emit("liveEvent", {
       type: "activity_output_delta",
@@ -1588,7 +1545,7 @@ export class CopilotAgentProvider
       sessionId: session.thread.id,
       runtime: next ? { ...next } : null,
     });
-    this.persistEventually();
+    this.persistEventually(session);
   }
 
   private async handlePermissionRequest(
@@ -1615,7 +1572,7 @@ export class CopilotAgentProvider
     });
     return new Promise<CopilotSdkPermissionResult>((resolve) => {
       this.pendingPermissions.set(action.id, { action, resolve });
-      this.persistEventually();
+      this.persistEventually(session);
     });
   }
 
@@ -1636,7 +1593,7 @@ export class CopilotAgentProvider
     });
     return new Promise<CopilotSdkUserInputResponse>((resolve) => {
       this.pendingUserInputs.set(action.id, { action, resolve });
-      this.persistEventually();
+      this.persistEventually(session);
     });
   }
 
@@ -1657,7 +1614,7 @@ export class CopilotAgentProvider
     });
     return new Promise<CopilotSdkElicitationResult>((resolve) => {
       this.pendingElicitations.set(action.id, { action, resolve });
-      this.persistEventually();
+      this.persistEventually(session);
     });
   }
 
@@ -1671,11 +1628,12 @@ export class CopilotAgentProvider
         continue;
       }
       this.pendingPermissions.delete(actionId);
+      this.emit("liveEvent", { type: "action_resolved", sessionId, actionId });
       resolved = true;
       pending.resolve(result);
     }
     if (resolved) {
-      this.persistEventually();
+      this.persistEventually(this.sessions.get(sessionId));
     }
   }
 
@@ -1689,11 +1647,12 @@ export class CopilotAgentProvider
         continue;
       }
       this.pendingUserInputs.delete(actionId);
+      this.emit("liveEvent", { type: "action_resolved", sessionId, actionId });
       resolved = true;
       pending.resolve(result);
     }
     if (resolved) {
-      this.persistEventually();
+      this.persistEventually(this.sessions.get(sessionId));
     }
   }
 
@@ -1707,19 +1666,23 @@ export class CopilotAgentProvider
         continue;
       }
       this.pendingElicitations.delete(actionId);
+      this.emit("liveEvent", { type: "action_resolved", sessionId, actionId });
       resolved = true;
       pending.resolve(result);
     }
     if (resolved) {
-      this.persistEventually();
+      this.persistEventually(this.sessions.get(sessionId));
     }
   }
 
   private appendUserMessage(
     session: CopilotSessionState,
     input: AgentSessionInputItem[],
-  ): void {
-    this.appendMessage(session, {
+    id?: string,
+  ): SessionMessage {
+    return this.appendMessage(session, {
+      id,
+      clientInputId: id,
       role: "user",
       text: inputDisplayText(input),
       attachments: inputAttachments(input),
@@ -1756,37 +1719,15 @@ export class CopilotAgentProvider
       attachments: [],
       phase,
     });
-    const turn = this.requireTurn(session, turnId);
-    turn.items = [
-      ...(turn.items ?? []),
-      { id, type: "agentMessage", text, phase },
-    ];
   }
 
-  private syncDraftAssistantMessages(
-    session: CopilotSessionState,
-    active: ActiveCopilotTurn,
-  ): void {
-    let changed = false;
-    for (const [messageId, text] of active.assistantBuffers) {
-      const next = {
-        id: messageId,
-        turnId: active.turnId,
-        text,
-        content: buildAssistantMessageContent(text, active.reasoningBlocks),
-        phase: "final_answer" as const,
-        createdAt:
-          session.draftAssistantMessages.get(messageId)?.createdAt ?? Date.now(),
-      };
-      const existing = session.draftAssistantMessages.get(messageId);
-      if (copilotDraftAssistantMessageEquals(existing, next)) {
-        continue;
-      }
-      session.draftAssistantMessages.set(messageId, next);
-      changed = true;
-    }
-    if (changed) {
-      this.persistEventually();
+  private syncDraftAssistantMessages(session: CopilotSessionState, active: ActiveCopilotTurn): void {
+    for (const [id, text] of active.assistantBuffers) {
+      const previous = this.db.getSessionItem(this.providerId, session.thread.id, "message", id);
+      const value: SessionMessage = { id, role: "assistant", text, content: buildAssistantMessageContent(text, active.reasoningBlocks),
+        attachments: [], phase: "final_answer", createdAt: previous?.value.createdAt ?? Date.now(),
+        seq: previous?.value.seq ?? this.db.nextSessionSequence(this.providerId, session.thread.id) };
+      this.db.putSessionItem(this.providerId, session.thread.id, { kind: "message", value, nativeId: id, authority: "recovery" });
     }
   }
 
@@ -1794,6 +1735,8 @@ export class CopilotAgentProvider
     session: CopilotSessionState,
     message: {
       id?: string;
+      nativeId?: string;
+      clientInputId?: string;
       role: SessionMessage["role"];
       text: string;
       content?: SessionMessageContentBlock[];
@@ -1812,9 +1755,13 @@ export class CopilotAgentProvider
       attachments: message.attachments,
       phase: message.phase,
       createdAt: Date.now(),
-      seq: session.nextSeq++,
+      seq: this.db.nextSessionSequence(this.providerId, session.thread.id),
     };
-    session.messages.push(next);
+    const previous = this.db.getSessionItem(this.providerId, session.thread.id, "message", next.id);
+    if (previous) { next.seq = previous.value.seq; next.createdAt = previous.value.createdAt; }
+    this.db.putSessionItem(this.providerId, session.thread.id, { kind: "message", value: next,
+      nativeId: message.nativeId ?? (message.role === "assistant" ? next.id : null), clientInputId: message.clientInputId ?? previous?.clientInputId, authority: "recovery" });
+    session.thread.preview = next.text || session.thread.preview;
     this.touch(session);
     return next;
   }
@@ -1836,167 +1783,113 @@ export class CopilotAgentProvider
     });
   }
 
-  private requireSession(threadId: string): CopilotSessionState {
-    const session = this.sessions.get(threadId);
-    if (!session) {
-      throw new Error(`Unknown Copilot session: ${threadId}`);
-    }
-    return session;
-  }
-
   private async getWritableSession(
     threadId: string,
   ): Promise<CopilotSessionState> {
+    await this.ensureStore();
     const existing = this.sessions.get(threadId);
     if (existing) return existing;
-    return this.loadSdkSessionStateFromHistory(threadId);
-  }
-
-  private requireTurn(
-    session: CopilotSessionState,
-    turnId: string,
-  ): TurnRecord {
-    const turn = session.turns.find((candidate) => candidate.id === turnId);
-    if (!turn) {
-      throw new Error(`Unknown Copilot turn: ${turnId}`);
-    }
-    return turn;
+    return this.loadSessionMetadata(threadId);
   }
 
   private touch(session: CopilotSessionState): void {
     session.thread.updatedAt = nowSeconds();
-    if (session.messages.length > 0) {
-      session.thread.preview =
-        session.messages[session.messages.length - 1]!.text;
-    }
   }
 
-  private async loadState(): Promise<void> {
-    for (let attempt = 0; ; attempt += 1) {
+  private async ensureStore(): Promise<void> {
+    if (this.closed) throw new Error("Copilot provider is closed.");
+    this.storeStarting ??= (async () => {
+      this.store ??= await SessionStore.open(this.options.hostStateDir ?? this.options.stateDir
+        ?? process.env.SIDEMESH_STATE_DIR ?? nodePath.join(homedir(), ".sidemesh"));
+      await this.importLegacyState();
+      for (const record of this.db.listProviderSessions(this.providerId)) {
+        if (record.archived) this.archivedSessionIds.add(record.id);
+        const metadata = record.metadata as Partial<CopilotStateFile["sessions"][number]>;
+        if (!metadata.thread) continue;
+        const state: CopilotSessionState = { thread: { ...metadata.thread, status: { type: "idle" } },
+          turns: (metadata.turns ?? []).map((turn) => ({ ...turn, items: undefined,
+            status: isActiveCopilotTurnStatus(turn.status) ? "interrupted" : turn.status })),
+          runtime: runtimeWithoutTurnId(normalizeInactiveCopilotRuntime(normalizeStoredRuntime(metadata.runtime ?? null), record.updatedAt / 1000)),
+          archived: record.archived, copilotSessionId: record.nativeId,
+          copilotSessionCreated: metadata.copilotSessionCreated ?? record.nativeId != null };
+        this.sessions.set(record.id, state);
+        for (const item of this.db.readSessionItems(this.providerId, record.id)) {
+          if (item.kind === "activity" && item.value.status === "in_progress") {
+            this.db.putSessionItem(this.providerId, record.id, { ...item, value: normalizeInactiveCopilotActivity(item.value) });
+          }
+        }
+        if (metadata.pendingActions?.length) this.appendSystemMessage(state, interruptedPendingActionMessage(metadata.pendingActions));
+        this.saveSession(state);
+      }
+    })();
+    await this.storeStarting;
+  }
+
+  private async importLegacyState(): Promise<void> {
+    const migration = `copilot-json-v1:${this.providerId}:${this.stateDir}`;
+    if (this.db.hasMigration(migration)) return;
+    let parsed: CopilotStateFile | undefined;
+    for (let attempt = 0; ; attempt++) {
       try {
-        const raw = await readFile(this.statePath, "utf8");
-        const parsed = JSON.parse(raw) as CopilotStateFile;
-        const archivedSessionIds = new Set(parsed.archivedSessionIds ?? []);
-        const restoredSessions = new Map<string, CopilotSessionState>();
-        let stateChangedOnLoad = false;
-        for (const item of parsed.sessions ?? []) {
-          const state: CopilotSessionState = {
-            thread: item.thread,
-            messages: item.messages ?? [],
-            activities: new Map(
-              (item.activities ?? []).map((activity) => [
-                activity.id,
-                normalizeStoredSessionActivity(activity),
-              ]),
-            ),
-            turns: item.turns ?? [],
-            runtime: normalizeStoredRuntime(item.runtime ?? null),
-            archived: item.archived === true,
-            nextSeq: item.nextSeq ?? item.messages?.length ?? 0,
-            draftAssistantMessages: new Map(
-              (item.draftAssistantMessages ?? []).map((draft) => [
-                draft.id,
-                normalizeStoredCopilotDraftAssistantMessage(draft),
-              ]),
-            ),
-            copilotSessionId: item.copilotSessionId ?? null,
-            copilotSessionCreated:
-              item.copilotSessionCreated ?? item.copilotSessionId != null,
-          };
-          const restoredPendingActions = (item.pendingActions ?? []).map(
-            clonePendingAction,
-          );
-          if (normalizeInactiveCopilotSessionState(state)) {
-            stateChangedOnLoad = true;
-          }
-          if (restoredPendingActions.length > 0) {
-            this.appendSystemMessage(
-              state,
-              interruptedPendingActionMessage(restoredPendingActions),
-            );
-            stateChangedOnLoad = true;
-          }
-          restoredSessions.set(state.thread.id, state);
-        }
-        this.archivedSessionIds.clear();
-        this.sessions.clear();
-        this.loadedSessionIds.clear();
-        this.activeTurns.clear();
-        this.planUpdateVersions.clear();
-        for (const id of archivedSessionIds) {
-          this.archivedSessionIds.add(id);
-        }
-        for (const [threadId, state] of restoredSessions) {
-          this.sessions.set(threadId, state);
-        }
-        if (stateChangedOnLoad) {
-          await this.saveState();
-        }
-        return;
+        parsed = JSON.parse(await readFile(nodePath.join(this.stateDir, "sessions.json"), "utf8")) as CopilotStateFile;
+        if (!Array.isArray(parsed.sessions)) throw new Error("Invalid Copilot session migration file");
+        break;
       } catch (error) {
-        if (isMissingFileError(error)) {
-          return;
-        }
-        if (attempt >= COPILOT_STATE_LOAD_RETRY_DELAYS_MS.length) {
-          return;
-        }
+        if (isMissingFileError(error)) break;
+        if (attempt >= COPILOT_STATE_LOAD_RETRY_DELAYS_MS.length) throw error;
         await sleep(COPILOT_STATE_LOAD_RETRY_DELAYS_MS[attempt]!);
       }
     }
+    const archived = new Set(parsed?.archivedSessionIds ?? []);
+    const entries: Array<{ session: StoredProviderSession; items: StoredSessionItem[] }> = [];
+    for (const item of parsed?.sessions ?? []) {
+      if (!item.thread?.id || typeof item.thread.cwd !== "string") throw new Error("Invalid Copilot session identity in migration");
+      const state: LegacyCopilotSessionState = { thread: item.thread, messages: item.messages ?? [],
+        activities: new Map((item.activities ?? []).map((value) => [value.id, normalizeStoredSessionActivity(value)])),
+        turns: item.turns ?? [], runtime: normalizeStoredRuntime(item.runtime ?? null),
+        archived: item.archived === true || archived.has(item.thread.id), nextSeq: item.nextSeq ?? 0,
+        draftAssistantMessages: new Map((item.draftAssistantMessages ?? []).map((value) => [value.id, normalizeStoredCopilotDraftAssistantMessage(value)])),
+        copilotSessionId: item.copilotSessionId ?? null, copilotSessionCreated: item.copilotSessionCreated ?? item.copilotSessionId != null };
+      normalizeInactiveCopilotSessionState(state);
+      if (item.pendingActions?.length) {
+        const text = interruptedPendingActionMessage(item.pendingActions);
+        state.messages.push({ id: `copilot-recovery-${randomUUID()}`, role: "system", text, content: [{ type: "text", text }],
+          attachments: [], seq: state.nextSeq++, createdAt: Date.now() });
+      }
+      const items: StoredSessionItem[] = [
+        ...state.messages.map((value): StoredSessionItem => ({ kind: "message", value, nativeId: value.role === "assistant" ? value.id : null, authority: "recovery" })),
+        ...[...state.activities.values()].map((value): StoredSessionItem => ({ kind: "activity", value, nativeId: value.id, authority: "recovery" })),
+      ].sort((a, b) => a.value.seq - b.value.seq);
+      entries.push({ session: this.storedSession(state), items });
+      archived.delete(state.thread.id);
+    }
+    for (const id of archived) entries.push({ session: { id, nativeId: id, cwd: "", name: null, preview: "", createdAt: 0, updatedAt: 0, archived: true, metadata: {} }, items: [] });
+    this.db.importProviderSessions(migration, this.providerId, entries);
   }
 
-  private persistSoon(): Promise<void> {
-    return this.stateWriter.request();
+  private storedSession(session: CopilotSessionState): StoredProviderSession {
+    const { turns: _turns, ...thread } = session.thread;
+    return { id: thread.id, nativeId: session.copilotSessionId, cwd: thread.cwd, name: thread.name ?? null,
+      preview: thread.preview, createdAt: thread.createdAt * 1000, updatedAt: thread.updatedAt * 1000,
+      archived: session.archived, metadata: { thread, turns: session.turns.map(({ items: _items, ...turn }) => turn),
+        runtime: session.runtime, copilotSessionCreated: session.copilotSessionCreated,
+        pendingActions: pendingActionsForSession(thread.id, this.pendingPermissions, this.pendingUserInputs, this.pendingElicitations) } };
   }
-
-  private persistEventually(): void {
-    void this.persistSoon().catch((error: unknown) => {
-      this.emit(
-        "stderr",
-        error instanceof Error
-          ? `Copilot state persistence failed: ${error.message}`
-          : "Copilot state persistence failed.",
-      );
-    });
+  private saveSession(session: CopilotSessionState): void {
+    this.db.saveProviderSession(this.providerId, this.storedSession(session));
   }
-
-  private async saveState(): Promise<void> {
-    await mkdir(this.stateDir, { recursive: true, mode: 0o700 });
-    await chmod(this.stateDir, 0o700);
-    const payload: CopilotStateFile = {
-      archivedSessionIds: [...this.archivedSessionIds],
-      sessions: [...this.sessions.values()].map((session) => ({
-        thread: cloneThread(session, true),
-        messages: session.messages.map(cloneMessage),
-        activities: [...session.activities.values()].map(cloneActivity),
-        turns: session.turns.map(cloneTurn),
-        runtime: session.runtime ? { ...session.runtime } : null,
-        archived: session.archived,
-        nextSeq: session.nextSeq,
-        draftAssistantMessages: [...session.draftAssistantMessages.values()].map(
-          cloneCopilotDraftAssistantMessage,
-        ),
-        pendingActions: pendingActionsForSession(
-          session.thread.id,
-          this.pendingPermissions,
-          this.pendingUserInputs,
-          this.pendingElicitations,
-        ).map(clonePendingAction),
-        copilotSessionId: session.copilotSessionId,
-        copilotSessionCreated: session.copilotSessionCreated,
-      })),
-    };
-    const tmpPath = `${this.statePath}.${process.pid}.${randomUUID()}.tmp`;
-    await writeFile(tmpPath, JSON.stringify(payload, null, 2), {
-      encoding: "utf8",
-      mode: 0o600,
-    });
-    await rename(tmpPath, this.statePath);
+  private async persistSoon(session?: CopilotSessionState): Promise<void> {
+    if (session) this.saveSession(session);
+    else if (this.store) for (const state of this.sessions.values()) this.saveSession(state);
   }
-
-  private get statePath(): string {
-    return nodePath.join(this.stateDir, "sessions.json");
+  private persistEventually(session?: CopilotSessionState): void {
+    void this.persistSoon(session).catch((error: unknown) => this.emit("stderr", `Copilot state persistence failed: ${String(error)}`));
   }
+  private activity(session: CopilotSessionState, id: string): SessionActivity | undefined {
+    const item = this.db.getSessionItem(this.providerId, session.thread.id, "activity", id);
+    return item?.kind === "activity" ? item.value : undefined;
+  }
+  private get db(): SessionStore { if (!this.store) throw new Error("Copilot storage has not started"); return this.store; }
 
   private async listSdkSessionMetadata(): Promise<CopilotSdkSessionMetadata[]> {
     try {
@@ -2031,48 +1924,19 @@ export class CopilotAgentProvider
     );
   }
 
-  private async loadSdkSessionStateFromHistory(
-    sessionId: string,
-  ): Promise<CopilotSessionState> {
+  private async loadSessionMetadata(sessionId: string): Promise<CopilotSessionState> {
+    await this.ensureStore();
+    const existing = this.sessions.get(sessionId);
+    if (existing) return existing;
     const metadata = await this.readSdkSessionMetadata(sessionId);
-    if (!metadata) {
-      return this.requireSession(sessionId);
-    }
-    const thread = sdkSessionToThread(metadata, null, false);
-    const state: CopilotSessionState = {
-      thread,
-      messages: [],
-      activities: new Map(),
-      turns: [],
-      runtime: null,
-      archived: this.archivedSessionIds.has(sessionId),
-      nextSeq: 0,
-      draftAssistantMessages: new Map(),
-      copilotSessionId: sessionId,
-      copilotSessionCreated: true,
-    };
-    const sdkSession = await (
-      await this.ensureSdkClient()
-    ).resumeSession(sessionId, {
-      ...this.buildSdkSessionConfig(state),
-      suppressResumeEvent: true,
-    });
-    state.sdkSession = sdkSession;
-    const events = await sdkSession.getMessages?.();
-    if (events) {
-      const parsed = parseSdkSessionEvents(events, thread.cwd);
-      state.messages = parsed.messages;
-      state.activities = new Map(
-        parsed.activities.map((activity) => [activity.id, activity]),
-      );
-      state.runtime = parsed.runtime;
-      state.nextSeq = parsed.nextSeq;
-    }
-    normalizeInactiveCopilotSessionState(state);
+    if (!metadata) throw new Error(`Unknown Copilot session: ${sessionId}`);
+    const state: CopilotSessionState = { thread: sdkSessionToThread(metadata, null, false), turns: [], runtime: null,
+      archived: this.archivedSessionIds.has(sessionId), copilotSessionId: sessionId, copilotSessionCreated: true };
     this.sessions.set(sessionId, state);
-    await this.persistSoon();
+    this.saveSession(state);
     return state;
   }
+
 }
 
 function displayNameFromModel(model: string): string {
@@ -2871,7 +2735,7 @@ function buildCopilotElicitationAction(
   request: CopilotSdkElicitationContext,
 ): AgentPendingAction {
   const actionId = `copilot-elicitation-${randomUUID()}`;
-  const fields = normalizeCopilotElicitationFields(request.requestedSchema);
+  const fields = elicitationFields(request.requestedSchema);
   const message = request.message?.trim() || "Structured input requested";
   return {
     id: actionId,
@@ -2902,113 +2766,6 @@ function copilotPendingActionKind(kind: unknown): AgentPendingAction["kind"] {
   if (kind === "shell") return "command";
   if (kind === "write") return "file_change";
   return "permissions";
-}
-
-function normalizeCopilotElicitationFields(
-  schema: CopilotSdkElicitationContext["requestedSchema"],
-): PendingActionElicitationField[] {
-  if (!schema || schema.type !== "object" || !schema.properties) {
-    return [];
-  }
-  const required = new Set(schema.required ?? []);
-  return Object.entries(schema.properties)
-    .map(([key, field]) => normalizeCopilotElicitationField(key, field, required))
-    .filter((field): field is PendingActionElicitationField => field !== null);
-}
-
-function normalizeCopilotElicitationField(
-  key: string,
-  field: NonNullable<CopilotSdkElicitationContext["requestedSchema"]>["properties"][string],
-  required: Set<string>,
-): PendingActionElicitationField | null {
-  const title =
-    ("title" in field && typeof field.title === "string" && field.title.trim()) ||
-    key;
-  const description =
-    "description" in field && typeof field.description === "string"
-      ? field.description
-      : undefined;
-  const isRequired = required.has(key);
-
-  if (field.type === "boolean") {
-    return {
-      key,
-      type: "boolean",
-      title,
-      description,
-      required: isRequired,
-      ...(typeof field.default === "boolean"
-        ? { defaultValue: field.default }
-        : {}),
-    };
-  }
-  if (field.type === "number" || field.type === "integer") {
-    return {
-      key,
-      type: "number",
-      title,
-      description,
-      required: isRequired,
-      integer: field.type === "integer",
-      ...(typeof field.default === "number"
-        ? { defaultValue: field.default }
-        : {}),
-      ...(typeof field.minimum === "number" ? { minimum: field.minimum } : {}),
-      ...(typeof field.maximum === "number" ? { maximum: field.maximum } : {}),
-    };
-  }
-  if (field.type === "array") {
-    const options = "enum" in field.items
-      ? field.items.enum.map((value) => ({ value, label: value }))
-      : "anyOf" in field.items
-        ? field.items.anyOf
-            .filter((item) => typeof item.const === "string")
-            .map((item) => ({ value: item.const, label: item.title || item.const }))
-        : [];
-    return {
-      key,
-      type: "string[]",
-      title,
-      description,
-      required: isRequired,
-      options,
-      ...(Array.isArray(field.default) ? { defaultValue: field.default } : {}),
-      ...(typeof field.minItems === "number" ? { minItems: field.minItems } : {}),
-      ...(typeof field.maxItems === "number" ? { maxItems: field.maxItems } : {}),
-    };
-  }
-  const options =
-    "enum" in field
-      ? field.enum.map((value, index) => ({
-          value,
-          label:
-            Array.isArray(field.enumNames) &&
-            typeof field.enumNames[index] === "string" &&
-            field.enumNames[index].trim().length > 0
-              ? field.enumNames[index]
-              : value,
-        }))
-      : "oneOf" in field
-        ? field.oneOf
-            .filter((item) => typeof item.const === "string")
-            .map((item) => ({ value: item.const, label: item.title || item.const }))
-        : undefined;
-  return {
-    key,
-    type: "string",
-    title,
-    description,
-    required: isRequired,
-    ...(typeof field.default === "string" ? { defaultValue: field.default } : {}),
-    ...(("minLength" in field && typeof field.minLength === "number")
-      ? { minLength: field.minLength }
-      : {}),
-    ...(("maxLength" in field && typeof field.maxLength === "number")
-      ? { maxLength: field.maxLength }
-      : {}),
-    ...(("format" in field && field.format) ? { format: field.format } : {}),
-    ...(options && options.length > 0 ? { options } : {}),
-  };
 }
 
 function copilotApprovalCategory(
@@ -3457,6 +3214,7 @@ function sdkSessionToThread(
     session.context?.workingDirectory ?? local?.thread.cwd ?? process.cwd();
   return {
     id: session.sessionId,
+    runtime: local?.runtime ? structuredClone(local.runtime) : null,
     name: local?.thread.name ?? session.summary ?? null,
     preview: local?.thread.preview ?? session.summary ?? cwd,
     cwd,
@@ -3479,193 +3237,103 @@ function sdkSessionToThread(
   };
 }
 
-function parseSdkSessionEvents(
-  events: CopilotSdkSessionEvent[],
-  cwd: string,
-): {
-  messages: SessionMessage[];
-  activities: import("./types.js").SessionActivity[];
-  runtime: SessionRuntimeSummary | null;
-  nextSeq: number;
+function parseSdkSessionEvents(events: CopilotSdkSessionEvent[], _cwd: string): {
+  messages: SessionMessage[]; activities: SessionActivity[]; runtime: SessionRuntimeSummary | null; nextSeq: number;
 } {
   const messages: SessionMessage[] = [];
-  const activities = new Map<string, import("./types.js").SessionActivity>();
+  const activities = new Map<string, SessionActivity>();
+  const thoughts = new Map<string, SessionMessageContentBlockThinking>();
   let seq = 0;
   let runtime: SessionRuntimeSummary | null = null;
-  let updatedAt: number | undefined;
-
   for (const event of events) {
     const timestamp = millisFromDateLike(event.timestamp) ?? Date.now();
-    updatedAt = timestamp;
-    const data = (event.data ?? {}) as Record<string, any>;
-
-    if (
-      event.type === "session.model_change" &&
-      typeof data.newModel === "string"
-    ) {
-      runtime = withRuntimeMetadata(runtime, {
-        model: data.newModel,
-        updatedAt: timestamp,
-      });
-      continue;
-    }
-
-    if (event.type === "session.mode_changed") {
-      const nextMode = normalizeCopilotSessionMode(data.newMode);
-      if (nextMode) {
-        runtime = withRuntimeMetadata(runtime, {
-          mode: nextMode,
-          updatedAt: timestamp,
-        });
-        const activity = buildCopilotModeChangeActivity({
-          activityId: copilotModeActivityId(event, seq),
-          turnId: null,
-          newMode: nextMode,
-          previousMode: data.previousMode,
-        });
-        activities.set(activity.id, {
-          ...activity,
-          createdAt: timestamp,
-          seq: seq++,
-        });
+    const data = asRecord(event.data) ?? {};
+    if (event.agentId && (event.type.startsWith("assistant.") || event.type === "user.message" || event.type === "session.error")) continue;
+    if (event.type === "session.model_change") {
+      runtime = withRuntimeMetadata(runtime, { model: event.data.newModel, updatedAt: timestamp });
+    } else if (event.type === "session.mode_changed") {
+      const mode = normalizeCopilotSessionMode(event.data.newMode);
+      if (mode) {
+        runtime = withRuntimeMetadata(runtime, { mode, updatedAt: timestamp });
+        const draft = buildCopilotModeChangeActivity({ activityId: copilotModeActivityId(event), turnId: null, newMode: mode, previousMode: event.data.previousMode });
+        activities.set(draft.id, materializeAgentActivityDraft(draft, { createdAt: timestamp, seq: seq++ }));
       }
-      continue;
-    }
-
-    if (
-      event.type === "session.usage_info" ||
-      event.type === "assistant.usage" ||
-      event.type === "session.compaction_start" ||
-      event.type === "session.compaction_complete"
-    ) {
+    } else if (event.type === "session.usage_info" || event.type === "assistant.usage"
+      || event.type === "session.compaction_start" || event.type === "session.compaction_complete") {
       runtime = applyCopilotRuntimeEvent(runtime, event, timestamp);
-      continue;
-    }
-
-    if (event.type === "user.message" && typeof data.content === "string") {
-      messages.push({
-        id: typeof event.id === "string" ? event.id : `copilot-user-${seq}`,
-        role: "user",
-        text: data.content,
-        content: [{ type: "text", text: data.content }],
-        attachments: [],
-        createdAt: timestamp,
-        seq: seq++,
-      });
-      continue;
-    }
-
-    if (
-      event.type === "assistant.message" &&
-      typeof data.content === "string"
-    ) {
-      if (typeof data.model === "string") {
-        runtime = withRuntimeMetadata(runtime, {
-          model: data.model,
-          updatedAt: timestamp,
-        });
-      }
-      const text = data.content.trim();
-      if (text.length > 0) {
-        messages.push({
-          id:
-            typeof data.messageId === "string"
-              ? data.messageId
-              : typeof event.id === "string"
-                ? event.id
-                : `copilot-assistant-${seq}`,
-          role: "assistant",
-          text,
-          content: [{ type: "text", text }],
-          attachments: [],
-          createdAt: timestamp,
-          seq: seq++,
-          phase: "final_answer",
-        });
-      }
-      continue;
-    }
-
-    if (
-      event.type === "tool.execution_start" &&
-      typeof data.toolCallId === "string"
-    ) {
-      activities.set(data.toolCallId, {
-        id: data.toolCallId,
-        type: "tool",
-        turnId: null,
-        createdAt: timestamp,
-        seq: seq++,
-        status: "in_progress",
-        toolName: copilotToolName(data.toolName),
-        title: formatCopilotToolCommand(data.toolName, data.arguments),
-        args: data.arguments ?? null,
-        output: null,
-        result: null,
-        isError: null,
-        semantic: inferCopilotToolSemantic(data.toolName, data.arguments, null),
-      });
-      continue;
-    }
-
-    if (
-      event.type === "tool.execution_complete" &&
-      typeof data.toolCallId === "string"
-    ) {
-      if (typeof data.model === "string") {
-        runtime = withRuntimeMetadata(runtime, {
-          model: data.model,
-          updatedAt: timestamp,
-        });
-      }
-      const existing = activities.get(data.toolCallId);
-      const existingTool = existing?.type === "tool" ? existing : null;
-      const output =
-        extractCopilotToolOutput(data.result ?? data.error) ??
-        (existing?.type === "tool" || existing?.type === "command"
-          ? existing.output
-          : null);
-      activities.set(data.toolCallId, {
-        id: data.toolCallId,
-        type: "tool",
-        turnId: existingTool?.turnId ?? null,
-        createdAt: existingTool?.createdAt ?? timestamp,
-        seq: existingTool?.seq ?? seq++,
-        status: data.success === false ? "failed" : "completed",
-        toolName: existingTool?.toolName ?? copilotToolName(data.toolName),
-        title:
-          existingTool?.title ?? formatCopilotToolCommand(data.toolName, null),
-        args: existingTool?.args ?? data.arguments ?? null,
-        output,
-        result: data.result ?? data.error ?? null,
-        isError: data.success === false,
-        semantic: mergeCopilotToolSemantic(
-          existingTool,
-          inferCopilotToolSemantic(
-            data.toolName,
-            existingTool?.args ?? data.arguments,
-            data.result ?? data.error ?? null,
-          ),
-        ),
-      });
+      const draft = copilotCompactionActivity(runtime, event);
+      if (draft) activities.set(draft.id, materializeAgentActivityDraft(draft,
+        { createdAt: activities.get(draft.id)?.createdAt ?? timestamp, seq: activities.get(draft.id)?.seq ?? seq++ }));
+    } else if (event.type === "user.message") {
+      messages.push({ id: event.id, role: "user", text: event.data.content, content: [{ type: "text", text: event.data.content }],
+        attachments: copilotHistoryAttachments(event.data.attachments), createdAt: timestamp, seq: seq++ });
+    } else if (event.type === "session.error") {
+      messages.push({ id: event.id, role: "system", text: event.data.message, content: [{ type: "text", text: event.data.message }], attachments: [], createdAt: timestamp, seq: seq++ });
+    } else if (event.type === "assistant.reasoning" || event.type === "assistant.reasoning_delta") {
+      const id = event.data.reasoningId ?? event.id;
+      const previous = thoughts.get(id)?.thinking ?? "";
+      thoughts.set(id, { type: "thinking", thinking: event.type === "assistant.reasoning" ? event.data.content : previous + event.data.deltaContent,
+        reasoningId: id, summary: false });
+    } else if (event.type === "assistant.message") {
+      const text = event.data.content.trim();
+      const reasoning = [...thoughts.values()];
+      if (!reasoning.length && event.data.reasoningText) reasoning.push({ type: "thinking", thinking: event.data.reasoningText, summary: false });
+      if (text || reasoning.length) messages.push({ id: event.data.messageId || event.id, role: "assistant", text,
+        content: buildAssistantMessageContent(text, reasoning), attachments: [], createdAt: timestamp, seq: seq++, phase: assistantPhase(event.data.phase) });
+      thoughts.clear();
+      if (event.data.model) runtime = withRuntimeMetadata(runtime, { model: event.data.model, updatedAt: timestamp });
+    } else if (event.type === "tool.execution_start") {
+      const draft: AgentSessionActivityDraft = { id: event.data.toolCallId, type: "tool", turnId: null, status: "in_progress",
+        toolName: copilotToolName(event.data.toolName), title: formatCopilotToolCommand(event.data.toolName, event.data.arguments),
+        args: event.data.arguments ?? null, output: null, result: null, isError: null,
+        semantic: inferCopilotToolSemantic(event.data.toolName, event.data.arguments, null) };
+      activities.set(draft.id, materializeAgentActivityDraft(draft, { createdAt: timestamp, seq: seq++ }));
+    } else if (event.type === "tool.execution_partial_result" || event.type === "tool.execution_progress") {
+      const previous = activities.get(event.data.toolCallId);
+      if (previous?.type === "tool" || previous?.type === "command") activities.set(previous.id, { ...previous,
+        output: (previous.output ?? "") + (event.type === "tool.execution_partial_result" ? event.data.partialOutput : `${event.data.progressMessage}\n`) });
+    } else if (event.type === "tool.execution_complete") {
+      const previous = activities.get(event.data.toolCallId);
+      const tool = previous?.type === "tool" ? previous : null;
+      const draft: AgentSessionActivityDraft = { id: event.data.toolCallId, type: "tool", turnId: null,
+        status: event.data.success ? "completed" : "failed", toolName: tool?.toolName ?? copilotToolName(data.toolName),
+        title: tool?.title ?? formatCopilotToolCommand(data.toolName, data.arguments ?? event.data.result ?? event.data.error),
+        args: tool?.args ?? data.arguments ?? null, output: extractCopilotToolOutput(event.data.result ?? event.data.error) ?? tool?.output ?? null,
+        result: event.data.result ?? event.data.error ?? null, isError: !event.data.success,
+        semantic: mergeCopilotToolSemantic(tool, inferCopilotToolSemantic(data.toolName, tool?.args ?? data.arguments, event.data.result ?? event.data.error ?? null)) };
+      activities.set(draft.id, materializeAgentActivityDraft(draft, { createdAt: previous?.createdAt ?? timestamp, seq: previous?.seq ?? seq++ }));
+    } else if (event.type === "subagent.started" || event.type === "subagent.completed" || event.type === "subagent.failed") {
+      const id = event.data.toolCallId ?? event.id;
+      const previous = activities.get(id);
+      const duration = event.type === "subagent.completed" && typeof event.data.durationMs === "number" ? ` (${Math.round(event.data.durationMs / 1000)}s)` : "";
+      const draft: AgentSessionActivityDraft = { id, type: "tool", turnId: null,
+        status: event.type === "subagent.started" ? "in_progress" : event.type === "subagent.failed" ? "failed" : "completed",
+        toolName: event.data.agentName ?? "subagent", title: `${event.data.agentDisplayName ?? event.data.agentName ?? "Subagent"}${duration}`,
+        args: null, output: null, result: event.type === "subagent.failed" ? { type: "error", summary: event.data.error ?? "Subagent failed" }
+          : event.type === "subagent.completed" ? { type: "success", summary: "Subagent completed" } : null,
+        isError: event.type === "subagent.failed", semantic: null };
+      activities.set(id, materializeAgentActivityDraft(draft, { createdAt: previous?.createdAt ?? timestamp, seq: previous?.seq ?? seq++ }));
     }
   }
+  return { messages, activities: [...activities.values()].sort((a, b) => a.seq - b.seq), runtime, nextSeq: seq };
+}
 
-  if (runtime && updatedAt != null) {
-    runtime = {
-      ...runtime,
-      updatedAt,
-    };
-  }
+function copilotHistoryAttachments(attachments: Extract<CopilotSdkSessionEvent, { type: "user.message" }>["data"]["attachments"]): SessionMessageAttachment[] {
+  return (attachments ?? []).flatMap((item): SessionMessageAttachment[] => {
+    if (item.type === "file") return [{ type: item.mimeType?.startsWith("image/") || /\.(png|jpe?g|gif|webp)$/i.test(item.path) ? "localImage" : "file", path: item.path }];
+    if (item.type === "directory") return [{ type: "file", path: item.path }];
+    if (item.type === "selection") return [{ type: "file", path: item.filePath }];
+    if (item.type === "blob" && item.data) return [{ type: item.mimeType.startsWith("image/") ? "image" : "file", url: `data:${item.mimeType};base64,${item.data}` }];
+    if (item.type === "github_reference") return [{ type: "file", url: item.url }];
+    return [];
+  });
+}
 
-  return {
-    messages,
-    activities: [...activities.values()].sort(
-      (left, right) => left.seq - right.seq,
-    ),
-    runtime,
-    nextSeq: seq,
-  };
+function copilotCompactionActivity(runtime: SessionRuntimeSummary | null, event: CopilotSdkSessionEvent): AgentSessionActivityDraft | null {
+  if (event.type !== "session.compaction_start" && event.type !== "session.compaction_complete") return null;
+  return { id: `copilot-compaction:${runtime?.telemetry?.compaction?.startedAt ?? event.id}`, type: "context_compaction", turnId: null,
+    status: event.type === "session.compaction_start" ? "in_progress" : event.data.success ? "completed" : "failed",
+    ...(event.type === "session.compaction_complete" && event.data.summaryContent ? { summary: event.data.summaryContent } : {}) };
 }
 
 function formatCopilotToolCommand(toolName: unknown, args: unknown): string {
@@ -3679,10 +3347,11 @@ function copilotToolName(value: unknown): string {
 }
 
 function extractCopilotToolOutput(result: unknown): string | null {
-  if (!result || typeof result !== "object") return null;
-  const data = result as Record<string, unknown>;
+  const clean = stripSessionAttachments(result);
+  if (!clean || typeof clean !== "object") return null;
+  const data = clean as Record<string, unknown>;
   const content = data.detailedContent ?? data.content ?? data.message;
-  return typeof content === "string" ? content : JSON.stringify(result);
+  return typeof content === "string" ? content : JSON.stringify(clean);
 }
 
 function copilotModeActivityId(
@@ -4286,7 +3955,7 @@ function normalizeStoredRuntime(
 }
 
 function normalizeInactiveCopilotSessionState(
-  session: CopilotSessionState,
+  session: LegacyCopilotSessionState,
 ): boolean {
   const restoredAt = session.thread.updatedAt;
   const hadDraftAssistantMessages = session.draftAssistantMessages.size > 0;
@@ -4401,7 +4070,7 @@ function runtimeWithoutTurnId(
 }
 
 function materializeInterruptedCopilotDraftMessages(
-  session: CopilotSessionState,
+  session: LegacyCopilotSessionState,
 ): void {
   const drafts = [...session.draftAssistantMessages.values()].sort(
     (left, right) => left.createdAt - right.createdAt,
@@ -4475,16 +4144,6 @@ function buildAssistantMessageContent(
   return blocks;
 }
 
-function copilotDraftAssistantMessageEquals(
-  left: CopilotDraftAssistantMessage | undefined,
-  right: CopilotDraftAssistantMessage,
-): boolean {
-  if (!left) {
-    return false;
-  }
-  return JSON.stringify(left) === JSON.stringify(right);
-}
-
 function normalizeStoredCopilotDraftAssistantMessage(
   draft: CopilotDraftAssistantMessage,
 ): CopilotDraftAssistantMessage {
@@ -4492,15 +4151,6 @@ function normalizeStoredCopilotDraftAssistantMessage(
     ...draft,
     content: cloneSessionMessageContentBlocks(draft.content ?? []),
     phase: draft.phase === "commentary" ? "commentary" : "final_answer",
-  };
-}
-
-function cloneCopilotDraftAssistantMessage(
-  draft: CopilotDraftAssistantMessage,
-): CopilotDraftAssistantMessage {
-  return {
-    ...draft,
-    content: cloneSessionMessageContentBlocks(draft.content),
   };
 }
 
@@ -4720,6 +4370,7 @@ function cloneThread(
 ): ThreadRecord {
   return {
     ...session.thread,
+    runtime: session.runtime ? structuredClone(session.runtime) : null,
     status: { ...session.thread.status },
     gitInfo: session.thread.gitInfo ? { ...session.thread.gitInfo } : null,
     turns: includeTurns ? session.turns.map(cloneTurn) : undefined,
@@ -4740,34 +4391,6 @@ function cloneTurn(turn: TurnRecord): TurnRecord {
     ...turn,
     items: turn.items ? turn.items.map((item) => ({ ...item })) : undefined,
   };
-}
-
-function cloneMessage(message: SessionMessage): SessionMessage {
-  return {
-    ...message,
-    content: cloneSessionMessageContentBlocks(message.content),
-    attachments: message.attachments.map((attachment) => ({ ...attachment })),
-  };
-}
-
-function clonePendingAction(action: AgentPendingAction): AgentPendingAction {
-  return structuredClone(action);
-}
-
-function cloneActivity(activity: SessionActivity): SessionActivity {
-  if (activity.type === "command") {
-    return {
-      ...activity,
-      commandActions: activity.commandActions.map((action) => ({ ...action })),
-    };
-  }
-  if (activity.type === "file_change") {
-    return {
-      ...activity,
-      changes: activity.changes.map((change) => ({ ...change })),
-    };
-  }
-  return { ...activity };
 }
 
 function limitTail<T>(items: T[], limit: number | null): T[] {

@@ -1,3 +1,4 @@
+import type { AuthenticationTerminalRequest } from "./terminal.js";
 import type { EventEmitter } from "node:events";
 
 import type { PendingActionResponseInput } from "./approvals.js";
@@ -43,6 +44,7 @@ export class AgentProviderRequestError extends Error {
   public constructor(
     message: string,
     public readonly status = 400,
+    public readonly inputNotDispatched = false,
   ) {
     super(message);
     this.name = "AgentProviderRequestError";
@@ -62,6 +64,7 @@ export interface AgentMessageDraft {
   id: string;
   text: string;
   content?: SessionMessageContentBlock[];
+  attachments?: SessionMessage["attachments"];
   phase?: SessionMessage["phase"];
 }
 
@@ -74,9 +77,22 @@ export interface AgentPendingAction extends PendingAction {
 export interface AgentSessionLogOptions {
   messageLimit?: number | null;
   activityLimit?: number | null;
+  /** A client input still lacks native evidence; the cache alone cannot be trusted. */
+  requireNativeHistory?: boolean;
+}
+
+export interface AgentSessionSnapshot extends SessionLogSnapshot {
+  thread: ThreadRecord;
+  activeTurnId: string | null;
+  busy: boolean;
+  /** Native history explicitly binds these client input IDs. */
+  confirmedInputIds?: string[];
 }
 
 export type AgentSessionInputItem =
+  | { type: "audio"; data: string; mimeType: string; name?: string }
+  | { type: "resource"; uri: string; name?: string; mimeType?: string; text?: string; blob?: string }
+  | { type: "resourceLink"; uri: string; name: string; mimeType?: string }
   | {
       type: "text";
       text: string;
@@ -132,6 +148,7 @@ export interface AgentSubmitInputRequest {
   input: AgentSessionInputItem[];
   activeTurnId: string | null;
   overrides: AgentSessionOverrides;
+  clientMessageId?: string;
 }
 
 export interface AgentSubmitInputResult {
@@ -198,6 +215,7 @@ export interface AgentProviderCapabilities {
     resume: boolean;
     rename: boolean;
     archive: boolean;
+    delete?: boolean;
     compact: boolean;
     interrupt: boolean;
     history: boolean;
@@ -206,6 +224,11 @@ export interface AgentProviderCapabilities {
   };
   input: {
     text: boolean;
+    /** False means the host must keep follow-up input in its durable queue. */
+    steer?: boolean;
+    audio?: boolean;
+    embeddedResources?: boolean;
+    resourceLinks?: boolean;
     imageUrl: boolean;
     localImage: boolean;
     skills: boolean;
@@ -223,6 +246,8 @@ export interface AgentProviderCapabilities {
     approveForSession: boolean;
   };
   configuration: {
+    sessionOptions?: boolean;
+    commands?: boolean;
     models: boolean;
     profiles: boolean;
     accessModes: boolean;
@@ -242,6 +267,7 @@ export interface AgentProviderCapabilities {
   };
   lifecycle: {
     restart: boolean;
+    logout?: boolean;
   };
   usage: {
     accountLimits: boolean;
@@ -253,7 +279,16 @@ export interface AgentProviderCapabilities {
 
 export type AgentProviderLiveEvent =
   | {
+      type: "input_confirmed";
+      sessionId: string;
+      clientInputId: string;
+    }
+  | {
       type: "skills_changed";
+    }
+  | {
+      type: "history_invalidated";
+      sessionId: string;
     }
   | {
       type: "turn_started";
@@ -355,23 +390,35 @@ export type AgentProviderLiveEvent =
       status: string;
     }
   | {
+      type: "action_resolved";
+      sessionId: string;
+      actionId: string;
+    }
+  | {
       type: "action_opened";
       action: AgentPendingAction;
     };
+
+export interface AgentHostServices {
+  runAuthenticationTerminal(request: AuthenticationTerminalRequest): Promise<void>;
+}
 
 export interface AgentProviderCore extends EventEmitter<AgentProviderEvents> {
   readonly kind: string;
   readonly displayName: string;
   readonly capabilities: AgentProviderCapabilities;
 
+  attachHostServices?(services: AgentHostServices): void;
   start(): Promise<void>;
   close?(): Promise<void>;
   restart?(): Promise<void>;
+  logout?(): Promise<void>;
   health?(): Promise<boolean>;
   getVersion(): Promise<string>;
 }
 
 export interface AgentSessionHistoryProvider {
+  readSessionSnapshot(sessionId: string, options?: AgentSessionLogOptions): Promise<AgentSessionSnapshot>;
   listSessionThreads(options: AgentSessionListOptions): Promise<ThreadRecord[]>;
   readSessionThread(threadId: string, includeTurns: boolean): Promise<ThreadRecord>;
   listRecentUnindexedSessionThreads(limit: number): Promise<ThreadRecord[]>;
@@ -383,6 +430,7 @@ export interface AgentSessionHistoryProvider {
 }
 
 export interface AgentSessionLifecycleProvider {
+  setSessionConfiguration(sessionId: string, optionId: string, value: string | boolean): Promise<SessionRuntimeSummary | null>;
   listLoadedSessionIds(): Promise<string[]>;
   resumeSessionThread(
     threadId: string,
@@ -390,11 +438,12 @@ export interface AgentSessionLifecycleProvider {
   ): Promise<unknown>;
   setSessionName(threadId: string, name: string): Promise<unknown>;
   archiveSession(threadId: string): Promise<unknown>;
+  deleteSession(threadId: string): Promise<unknown>;
   unarchiveSession(threadId: string): Promise<unknown>;
   compactSession(threadId: string): Promise<unknown>;
   createSession(request: AgentCreateSessionRequest): Promise<AgentCreateSessionResult>;
   submitInput(request: AgentSubmitInputRequest): Promise<AgentSubmitInputResult>;
-  interruptTurn(threadId: string, turnId: string): Promise<unknown>;
+  interruptTurn(threadId: string, turnId: string | null): Promise<unknown>;
 }
 
 export interface AgentApprovalProvider {

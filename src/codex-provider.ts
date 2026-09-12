@@ -1,3 +1,4 @@
+import { elicitationFields } from "./elicitation.js";
 import { execFileSync } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import { EventEmitter } from "node:events";
@@ -20,6 +21,7 @@ import {
   type AgentProviderCapabilities,
   type AgentProviderEvents,
   type AgentSessionLogOptions,
+  type AgentSessionSnapshot,
   type AgentSessionActivityDraft,
   type AgentSubmitInputRequest as SharedSubmitInputRequest,
   type AgentSubmitInputResult,
@@ -41,8 +43,11 @@ import {
   listRecentRolloutThreads,
   loadRolloutLog,
   loadSessionRuntime,
+  mergeRuntime,
   subAgentInfoFromCodexSource,
 } from "./codex-history.js";
+import type { ThreadReadResponse } from "./codex-protocol.js";
+import { codexReasoningBlocks, codexThreadHistory, supplementCodexLegacyHistory } from "./codex-thread-history.js";
 import type {
   LivePlanStep,
   LiveThreadStatus,
@@ -65,7 +70,6 @@ import type {
   ThreadRecord,
   SessionMessageContentBlock,
   SessionMessageContentBlockThinking,
-  PendingActionElicitationField,
   UsageAccountRef,
   UsageCredits,
   UsageObservation,
@@ -123,9 +127,9 @@ export class CodexAgentProvider
   public readonly displayName = "Codex";
   public readonly capabilities = CODEX_PROVIDER_CAPABILITIES;
 
-  public constructor(private readonly codexBin: string) {
+  public constructor(private readonly codexBin: string, env?: NodeJS.ProcessEnv) {
     super();
-    this.bridge = new CodexBridge(codexBin);
+    this.bridge = new CodexBridge(codexBin, env);
     this.bridge.on("notification", (message) => {
       this.emitCodexNotification(message.method, message.params);
     });
@@ -154,7 +158,7 @@ export class CodexAgentProvider
     await this.bridge.start();
   }
 
-public async health(): Promise<boolean> {
+  public async health(): Promise<boolean> {
     return this.bridge.isAlive;
   }
 
@@ -226,14 +230,18 @@ public async health(): Promise<boolean> {
     threadId: string,
     includeTurns: boolean,
   ): Promise<ThreadRecord> {
-    const result = (await this.bridge.request("thread/read", {
+    return normalizeCodexThreadRecord(await this.readNativeThread(threadId, includeTurns));
+  }
+
+  private async readNativeThread(threadId: string, includeTurns: boolean): Promise<ThreadReadResponse["thread"]> {
+    const result = await this.bridge.request<ThreadReadResponse>("thread/read", {
       threadId,
       includeTurns,
-    })) as { thread?: unknown };
+    });
     if (!result.thread || typeof result.thread !== "object") {
       throw new Error("thread/read did not return a thread");
     }
-    return normalizeCodexThreadRecord(result.thread as ThreadRecord);
+    return result.thread;
   }
 
   public async listLoadedSessionIds(): Promise<string[]> {
@@ -282,13 +290,39 @@ public async health(): Promise<boolean> {
     thread: ThreadRecord,
     options: AgentSessionLogOptions = {},
   ): Promise<SessionLogSnapshot> {
-    return loadRolloutLog(
-      thread.id,
-      thread.path,
-      this.runtimeHome,
-      options.messageLimit ?? null,
-      options.activityLimit ?? null,
-    );
+    return this.readSessionSnapshot(thread.id, options);
+  }
+
+  public async readSessionSnapshot(
+    sessionId: string,
+    options: AgentSessionLogOptions = {},
+  ): Promise<AgentSessionSnapshot> {
+    const thread = await this.readNativeThread(sessionId, true);
+    const normalized = normalizeCodexThreadRecord(thread);
+    let log = codexThreadHistory(thread);
+    // 0.144.6 thread/read does not expose saved model/permission settings or
+    // token usage. Keep only this compatibility supplement in the file reader.
+    let runtime: SessionRuntimeSummary | null;
+    if (thread.historyMode === "legacy") {
+      // The native legacy projection drops persisted function-call outputs.
+      // Keep that compatibility gap separate from the native message source.
+      const legacy = await loadRolloutLog(sessionId, thread.path, this.runtimeHome);
+      log = { ...supplementCodexLegacyHistory(log, legacy), confirmedInputIds: log.confirmedInputIds };
+      runtime = legacy.runtime;
+    } else {
+      runtime = await this.readSessionRuntime(normalized);
+    }
+    const nativeRuntime = buildRuntimeFromThreadStart(thread);
+    if (nativeRuntime) runtime = mergeRuntime(runtime, nativeRuntime);
+    if (runtime) runtime.accessMode = codexAccessModeFromRuntime(runtime);
+    return {
+      ...log, thread: normalized, runtime: runtime ?? log.runtime,
+      messages: options.messageLimit && options.messageLimit > 0 ? log.messages.slice(-options.messageLimit) : log.messages,
+      activities: options.activityLimit && options.activityLimit > 0 ? log.activities.slice(-options.activityLimit) : log.activities,
+      busy: thread.status.type === "active",
+      activeTurnId: thread.status.type === "active"
+        ? [...thread.turns].reverse().find((turn) => turn.status === "inProgress")?.id ?? null : null,
+    };
   }
 
   public async readSessionRuntime(
@@ -351,6 +385,7 @@ public async health(): Promise<boolean> {
         threadId: request.sessionId,
         input: normalizeCodexInput(request.input),
         expectedTurnId: request.activeTurnId,
+        ...(request.clientMessageId ? { clientUserMessageId: request.clientMessageId } : {}),
       })) as Record<string, unknown>;
       return {
         mode: "steer",
@@ -385,7 +420,8 @@ public async health(): Promise<boolean> {
     };
   }
 
-  public interruptTurn(threadId: string, turnId: string): Promise<unknown> {
+  public interruptTurn(threadId: string, turnId: string | null): Promise<unknown> {
+    if (!turnId) throw new AgentProviderRequestError("The native turn ID is not available for interruption", 409);
     return this.bridge.request("turn/interrupt", { threadId, turnId });
   }
 
@@ -858,7 +894,8 @@ public async health(): Promise<boolean> {
       }
       const existing = blocks.find(
         (b): b is SessionMessageContentBlockThinking =>
-          b.type === "thinking" && b.reasoningId === itemId,
+          b.type === "thinking" && b.reasoningId === itemId &&
+          b.summary === (method === "item/reasoning/summaryTextDelta"),
       );
       if (existing) {
         existing.thinking += delta;
@@ -906,6 +943,18 @@ public async health(): Promise<boolean> {
       }
 
       const itemType = asString(item.type);
+      if (method === "item/completed" && itemType === "reasoning" && turnId && typeof item.id === "string") {
+        const blocks = (this.turnReasoningBlocks.get(turnId) ?? []).filter(
+          (block) => block.type !== "thinking" || block.reasoningId !== item.id,
+        );
+        blocks.push(...codexReasoningBlocks({
+          type: "reasoning", id: item.id,
+          summary: Array.isArray(item.summary) ? item.summary.filter((part): part is string => typeof part === "string") : [],
+          content: Array.isArray(item.content) ? item.content.filter((part): part is string => typeof part === "string") : [],
+        }));
+        this.turnReasoningBlocks.set(turnId, blocks);
+        return;
+      }
       if (method === "item/completed" && itemType === "agentMessage") {
         const content = turnId
           ? this.turnReasoningBlocks.get(turnId) ?? []
@@ -2187,6 +2236,7 @@ function buildCodexTurnStartParams(
   const params: Record<string, unknown> = {
     threadId: request.sessionId,
     input: normalizeCodexInput(request.input),
+    ...(request.clientMessageId ? { clientUserMessageId: request.clientMessageId } : {}),
   };
   const permissionProfile = cleanOptionalString(overrides.permissionProfile);
   if (permissionProfile) {
@@ -2530,16 +2580,17 @@ function normalizeCodexThreadStatus(status: unknown): {
   return { status: "running" };
 }
 
-function normalizeCodexThreadRecord(thread: ThreadRecord): ThreadRecord {
+function normalizeCodexThreadRecord(thread: ThreadRecord | ThreadReadResponse["thread"]): ThreadRecord {
   const normalized = normalizeCodexThreadStatus(thread.status);
   return {
     ...thread,
+    gitInfo: thread.gitInfo ? { gitCommonDir: null, ...thread.gitInfo } : null,
     status: {
       ...thread.status,
       phase: normalized.status,
     },
     subAgent:
-      thread.subAgent ??
+      ("subAgent" in thread ? thread.subAgent : null) ??
       subAgentInfoFromCodexSource(thread.source, {
         agentRole: thread.agentRole ?? undefined,
         agentNickname: thread.agentNickname ?? undefined,
@@ -3004,7 +3055,7 @@ function buildCodexElicitationAction(
       typed.requested_schema && typeof typed.requested_schema === "object"
         ? (typed.requested_schema as Record<string, any>)
         : null;
-    const fields = schema ? normalizeCodexElicitationFields(schema) : [];
+    const fields = schema ? elicitationFields(schema) : [];
 
     if (schema && Array.isArray(schema.required)) {
       const producedKeys = new Set(fields.map((f) => f.key));
@@ -3044,96 +3095,6 @@ function buildCodexElicitationAction(
   }
 
   return null;
-}
-
-function normalizeCodexElicitationFields(
-  schema: Record<string, any>,
-): PendingActionElicitationField[] {
-  if (schema.type !== "object" || !schema.properties) {
-    return [];
-  }
-  const required = new Set(Array.isArray(schema.required) ? schema.required : []);
-  return Object.entries(schema.properties as Record<string, any>)
-    .map(([key, field]) => normalizeCodexElicitationField(key, field, required))
-    .filter((field): field is PendingActionElicitationField => field !== null);
-}
-
-function normalizeCodexElicitationField(
-  key: string,
-  field: Record<string, any>,
-  required: Set<string>,
-): PendingActionElicitationField | null {
-  const title = asString(field.title) || key;
-  const description = asString(field.description) ?? undefined;
-  const isRequired = required.has(key);
-
-  if (field.type === "boolean") {
-    return {
-      key,
-      type: "boolean",
-      title,
-      description,
-      required: isRequired,
-      ...(typeof field.default === "boolean" ? { defaultValue: field.default } : {}),
-    };
-  }
-
-  if (field.type === "number" || field.type === "integer") {
-    return {
-      key,
-      type: "number",
-      title,
-      description,
-      required: isRequired,
-      integer: field.type === "integer",
-      ...(typeof field.default === "number" ? { defaultValue: field.default } : {}),
-      ...(typeof field.minimum === "number" ? { minimum: field.minimum } : {}),
-      ...(typeof field.maximum === "number" ? { maximum: field.maximum } : {}),
-    };
-  }
-
-  if (field.type === "array" && field.items && typeof field.items === "object") {
-    const items = field.items as Record<string, any>;
-    const options = Array.isArray(items.enum)
-      ? items.enum
-          .filter((v: unknown): v is string => typeof v === "string")
-          .map((value: string) => ({ value, label: value }))
-      : undefined;
-    return {
-      key,
-      type: "string[]",
-      title,
-      description,
-      required: isRequired,
-      options: options ?? [],
-      ...(Array.isArray(field.default) ? { defaultValue: field.default } : {}),
-      ...(typeof field.minItems === "number" ? { minItems: field.minItems } : {}),
-      ...(typeof field.maxItems === "number" ? { maxItems: field.maxItems } : {}),
-    };
-  }
-
-  if (field.type !== "string" && field.type !== undefined && field.type !== null) {
-    return null;
-  }
-
-  const options = Array.isArray(field.enum)
-    ? field.enum
-        .filter((v: unknown): v is string => typeof v === "string")
-        .map((value: string) => ({ value, label: value }))
-    : undefined;
-
-  return {
-    key,
-    type: "string",
-    title,
-    description,
-    required: isRequired,
-    ...(typeof field.default === "string" ? { defaultValue: field.default } : {}),
-    ...(options && options.length > 0 ? { options } : {}),
-    ...(typeof field.minLength === "number" ? { minLength: field.minLength } : {}),
-    ...(typeof field.maxLength === "number" ? { maxLength: field.maxLength } : {}),
-    ...(asString(field.format) ? { format: asString(field.format) as any } : {}),
-  };
 }
 
 function buildCodexActionResponse(

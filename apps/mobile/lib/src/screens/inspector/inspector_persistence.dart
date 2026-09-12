@@ -1,6 +1,7 @@
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'inspector_controller.dart';
+import '../../session_identity_store.dart';
 
 /// Per-session persistence of which inspector surface (if any) was last
 /// open for a given session ownerKey. The value stored is the
@@ -15,11 +16,23 @@ class InspectorPersistence {
   static String _key(String ownerKey) => '$_prefix$ownerKey';
   static String _legacyKey(String ownerKey) => '$_legacyPrefix$ownerKey';
 
+  static List<String> _owners(String ownerKey) {
+    final separator = ownerKey.indexOf('|');
+    if (separator < 0) return [ownerKey];
+    final hostId = ownerKey.substring(0, separator);
+    return SessionIdentityStore.instance.references(hostId, ownerKey.substring(separator + 1))
+        .map((id) => '$hostId|$id').toList();
+  }
+
   /// Returns the persisted surface kind for [ownerKey], or null when no
   /// state has been saved (or the stored value is no longer recognised).
   static Future<InspectorSurfaceKind?> load(String ownerKey) async {
     try {
       final prefs = await SharedPreferences.getInstance();
+      await SessionIdentityStore.instance.ensureLoaded();
+      final owners = _owners(ownerKey);
+      ownerKey = owners.firstWhere((owner) => prefs.containsKey(_key(owner)) ||
+          prefs.containsKey(_legacyKey(owner)), orElse: () => owners.first);
       var raw = prefs.getString(_key(ownerKey));
       if (raw == null) {
         final legacyKey = _legacyKey(ownerKey);
@@ -57,7 +70,13 @@ class InspectorPersistence {
   static Future<void> save(String ownerKey, InspectorSurfaceKind? kind) async {
     try {
       final prefs = await SharedPreferences.getInstance();
-      final key = _key(ownerKey);
+      await SessionIdentityStore.instance.ensureLoaded();
+      final owners = _owners(ownerKey);
+      final key = _key(owners.first);
+      for (final owner in owners) {
+        if (_key(owner) != key || kind == null) await prefs.remove(_key(owner));
+        await prefs.remove(_legacyKey(owner));
+      }
       if (kind == null) {
         await prefs.remove(key);
       } else {

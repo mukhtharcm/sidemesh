@@ -649,8 +649,9 @@ String _formatPinnedTimestamp(DateTime value) {
 String _twoDigits(int value) => value.toString().padLeft(2, '0');
 
 class _PendingActionCard extends StatefulWidget {
-  const _PendingActionCard({required this.action, required this.onRespond});
+  const _PendingActionCard({required this.action, required this.onRespond, this.onOpenTerminal});
 
+  final VoidCallback? onOpenTerminal;
   final PendingAction action;
   final ValueChanged<PendingActionResponseDraft> onRespond;
 
@@ -792,6 +793,12 @@ class _PendingActionCardState extends State<_PendingActionCard> {
                         ),
                       ),
                     ],
+                    if (action.terminalId != null && widget.onOpenTerminal != null)
+                      TextButton.icon(
+                        onPressed: widget.onOpenTerminal,
+                        icon: const Icon(Icons.terminal_rounded),
+                        label: const Text('Open sign-in terminal'),
+                      ),
                     if (action.isUserInput) ...[
                       const SizedBox(height: AppSpacing.md),
                       _buildUserInputBody(context, action.userInput!),

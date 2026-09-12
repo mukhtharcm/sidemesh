@@ -193,7 +193,7 @@ export class CodexBridge extends EventEmitter<{
   private readonly pending = new Map<number | string, PendingRequest>();
   private codexHomePath: string | null = null;
 
-  public constructor(private readonly codexBin: string) {
+  public constructor(private readonly codexBin: string, private readonly env?: NodeJS.ProcessEnv) {
     super();
   }
 
@@ -209,11 +209,14 @@ export class CodexBridge extends EventEmitter<{
 
   public async start(): Promise<void> {
     this.requestId = 1;
-    const spawnEnv = await buildCodexSpawnEnv();
-    this.process = spawn(this.codexBin, ["app-server"], {
+    const clientVersion = await readPackageVersion(resolvePackageRoot());
+    const spawnEnv = { ...await buildCodexSpawnEnv(), ...this.env };
+    delete spawnEnv.SIDEMESH_TOKEN;
+    const child = spawn(this.codexBin, ["app-server"], {
       env: spawnEnv,
       stdio: ["pipe", "pipe", "pipe"],
     });
+    this.process = child;
 
     this.process.stderr.setEncoding("utf8");
     this.process.stderr.on("data", (chunk) => {
@@ -221,6 +224,8 @@ export class CodexBridge extends EventEmitter<{
     });
 
     this.process.on("exit", (code) => {
+      if (this.process !== child) return;
+      this.process = null;
       const error = new Error(`codex app-server exited with code ${code ?? "unknown"}`);
       for (const request of this.pending.values()) {
         request.reject(error);
@@ -228,13 +233,20 @@ export class CodexBridge extends EventEmitter<{
       this.pending.clear();
       this.emit("exit", code);
     });
+    child.on("error", (error) => {
+      if (this.process !== child) return;
+      this.process = null;
+      for (const request of this.pending.values()) request.reject(error);
+      this.pending.clear();
+      this.emit("stderr", `${error.message}\n`);
+      this.emit("exit", null);
+    });
 
     const lines = readline.createInterface({ input: this.process.stdout });
     lines.on("line", (line) => {
-      this.handleLine(line);
+      if (this.process === child) this.handleLine(line);
     });
 
-    const clientVersion = await readPackageVersion(resolvePackageRoot());
     const init = (await this.request(
       "initialize",
       buildCodexInitializeParams(clientVersion),
@@ -288,7 +300,13 @@ export class CodexBridge extends EventEmitter<{
       pending.reject(new Error(`Codex request timed out: ${method}`));
     }, CODEX_RPC_REQUEST_TIMEOUT_MS);
     codexRpcAudit.recordRequest(method);
-    this.send(payload);
+    try {
+      this.send(payload);
+    } catch (error) {
+      const pending = this.pending.get(id);
+      this.pending.delete(id);
+      pending?.reject(error instanceof Error ? error : new Error(String(error)));
+    }
     return promise.finally(() => clearTimeout(timeout));
   }
 
