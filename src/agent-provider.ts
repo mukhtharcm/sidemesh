@@ -77,6 +77,8 @@ export interface AgentPendingAction extends PendingAction {
 export interface AgentSessionLogOptions {
   messageLimit?: number | null;
   activityLimit?: number | null;
+  /** A client input still lacks native evidence; the cache alone cannot be trusted. */
+  requireNativeHistory?: boolean;
 }
 
 export interface AgentSessionSnapshot extends SessionLogSnapshot {
