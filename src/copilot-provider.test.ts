@@ -732,7 +732,7 @@ describe("Copilot provider", () => {
     }
   });
 
-  it("lists and toggles Copilot skills through SDK discovery", async () => {
+  it("lists Copilot skills through SDK discovery", async () => {
     const dir = await mkdtemp(
       nodePath.join(tmpdir(), "sidemesh-copilot-skills-test-"),
     );
@@ -782,28 +782,6 @@ describe("Copilot provider", () => {
           { name: "release-checks", scope: "user", enabled: false },
         ],
       );
-
-      const liveEvents: string[] = [];
-      provider.on("liveEvent", (event) => {
-        if (event.type === "skills_changed") {
-          liveEvents.push(event.type);
-        }
-      });
-
-      await provider.writeSkillConfig!({
-        name: "release-checks",
-        path: null,
-        enabled: true,
-      });
-      assert.deepEqual([...sdk.disabledSkills], []);
-      assert.deepEqual(liveEvents, ["skills_changed"]);
-
-      await provider.writeSkillConfig!({
-        name: null,
-        path: nodePath.join(dir, ".github/skills/frontend-design/SKILL.md"),
-        enabled: false,
-      });
-      assert.deepEqual([...sdk.disabledSkills], ["frontend-design"]);
     } finally {
       await settleProviderWrites();
       await rm(dir, {

@@ -28,82 +28,6 @@ const MAX_COMMAND_OUTPUT_CHARS = 12_000;
 const MAX_DIFF_CHARS = 8_000;
 const MAX_TERMINAL_INPUT_CHARS = 2_000;
 
-export interface ExtractedSessionActivities {
-  activities: SessionActivity[];
-  totalCount: number;
-}
-
-export function extractSessionActivities(
-  thread: ThreadRecord,
-  limit: number | null = null,
-): ExtractedSessionActivities {
-  const turns = Array.isArray(thread.turns) ? thread.turns : [];
-  const boundedLimit = limit && limit > 0 ? limit : null;
-
-  if (!boundedLimit) {
-    const activities: SessionActivity[] = [];
-    let seq = 0;
-    for (const turn of turns) {
-      const items = Array.isArray(turn.items) ? turn.items : [];
-      const baseCreatedAt = pickTurnTimestamp(
-        turn.startedAt,
-        turn.completedAt,
-        thread.updatedAt,
-      );
-      for (let index = 0; index < items.length; index += 1) {
-        const item = items[index];
-        const activity = buildActivityFromThreadItem(item, {
-          turnId: turn.id,
-          createdAt: baseCreatedAt + index,
-          seq: seq++,
-        });
-        if (activity) {
-          activities.push(activity);
-        }
-      }
-    }
-    return {
-      activities: activities.sort((left, right) => left.seq - right.seq),
-      totalCount: activities.length,
-    };
-  }
-
-  let totalCount = 0;
-  const activities: SessionActivity[] = [];
-  let seq = 0;
-
-  for (let turnIndex = turns.length - 1; turnIndex >= 0; turnIndex -= 1) {
-    const turn = turns[turnIndex];
-    const items = Array.isArray(turn.items) ? turn.items : [];
-    const baseCreatedAt = pickTurnTimestamp(
-      turn.startedAt,
-      turn.completedAt,
-      thread.updatedAt,
-    );
-    for (let itemIndex = items.length - 1; itemIndex >= 0; itemIndex -= 1) {
-      const item = items[itemIndex];
-      if (!isActivityThreadItem(item)) {
-        continue;
-      }
-      totalCount += 1;
-      if (activities.length >= boundedLimit) {
-        continue;
-      }
-      const activity = buildActivityFromThreadItem(item, {
-        turnId: turn.id,
-        createdAt: baseCreatedAt + itemIndex,
-        seq: seq++,
-      });
-      if (activity) {
-        activities.push(activity);
-      }
-    }
-  }
-
-  activities.sort((left, right) => left.seq - right.seq);
-  return { activities, totalCount };
-}
-
 export function buildActivityFromThreadItem(
   item: ThreadItemRecord,
   context: {
@@ -747,29 +671,6 @@ export function buildFileChangeChangesFromPatchMap(raw: unknown): SessionActivit
   }
 
   return changes;
-}
-
-function pickTurnTimestamp(
-  startedAtSeconds: number | null,
-  completedAtSeconds: number | null,
-  threadUpdatedAtSeconds: number,
-): number {
-  const candidate = startedAtSeconds ?? completedAtSeconds ?? threadUpdatedAtSeconds;
-  return candidate * 1000;
-}
-
-function isActivityThreadItem(item: ThreadItemRecord): boolean {
-  return (
-    item.type === "commandExecution" ||
-    item.type === "toolExecution" ||
-    item.type === "mcpToolCall" ||
-    item.type === "dynamicToolCall" ||
-    item.type === "collabAgentToolCall" ||
-    item.type === "fileChange" ||
-    item.type === "webSearch" ||
-    item.type === "imageGeneration" ||
-    item.type === "contextCompaction"
-  );
 }
 
 function buildContextCompactionActivity(

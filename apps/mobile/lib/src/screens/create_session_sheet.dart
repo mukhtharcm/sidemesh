@@ -15,7 +15,6 @@ import '../session_policy_store.dart';
 import '../session_turn_config_store.dart';
 import '../theme/app_colors.dart';
 import '../theme/app_control_styles.dart';
-import '../theme/color_contrast.dart';
 import '../theme/app_theme.dart';
 import '../theme/app_tokens.dart';
 import '../widgets/app_composer.dart';
@@ -25,14 +24,12 @@ import '../widgets/app_dialogs.dart';
 import '../widgets/app_primitives.dart';
 import '../widgets/app_snackbar.dart';
 import '../widgets/app_sheets.dart';
-import '../widgets/launch_controls.dart';
-import '../widgets/launch_options_form.dart';
 import '../widgets/mesh_widgets.dart';
 import '../widgets/provider_access_mode_choices.dart';
 import '../widgets/reasoning_choice_list.dart';
 import '../theme/app_status_styles.dart';
 
-enum CreateSessionPresentation { sheet, dialog, page, pane }
+enum CreateSessionPresentation { page, pane }
 
 @immutable
 class CreateSessionDraftSeed {
@@ -220,7 +217,7 @@ class CreateSessionSheet extends StatefulWidget {
     this.hosts = const [],
     this.onChooseHost,
     this.seed,
-    this.presentation = CreateSessionPresentation.sheet,
+    required this.presentation,
     this.imageAttachmentService = const SystemComposerImageAttachmentService(),
     this.topPadding = 0,
     this.onCreated,
@@ -291,7 +288,6 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
   bool _allowPop = false;
   bool _loadingNode = false;
   String? _error;
-  String? _nodeError;
   NodeInfo? _nodeInfo;
   String? _modelsLoadedForCwd;
   String? _modelsLoadedForProfile;
@@ -364,9 +360,7 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
   }
 
   void _handlePromptChanged() {
-    if (mounted &&
-        (widget.presentation == CreateSessionPresentation.page ||
-            widget.presentation == CreateSessionPresentation.pane)) {
+    if (mounted) {
       setState(() {});
     }
   }
@@ -446,21 +440,6 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
       return summary.label;
     }
     return _nodeInfo?.providerDisplayName ?? 'agent';
-  }
-
-  String get _providerPillLabel {
-    final summary = _selectedProviderSummary;
-    if (summary.kind.isNotEmpty) {
-      final version = summary.version.trim();
-      return version.isEmpty
-          ? summary.label
-          : '${summary.label} $version';
-    }
-    final node = _nodeInfo;
-    if (node != null) return node.providerPillLabel;
-    if (_loadingNode) return 'checking agent';
-    if (_nodeError != null) return 'agent unknown';
-    return 'agent';
   }
 
   bool get _supportsModels => _supports('configuration', 'models');
@@ -604,40 +583,6 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
     return 'Use defaults';
   }
 
-  String get _profileDescription {
-    if (!_supportsProfiles) {
-      return 'This agent does not offer saved profiles here.';
-    }
-    if (_loadingProfiles) {
-      return 'Loading saved profiles for this folder.';
-    }
-    if (_profilesError != null) {
-      return _profilesError!;
-    }
-    final selected = _selectedProfile;
-    if (selected != null) {
-      final provider = _profileProviderLabel(selected);
-      final providerText = provider == null
-          ? ''
-          : ' Uses models from $provider.';
-      return '${_describeProviderProfile(selected)}$providerText Other settings will stay linked to this profile until you change them.';
-    }
-    final unresolvedProfile = _profileToSubmit;
-    if (unresolvedProfile != null) {
-      return '$unresolvedProfile is selected, but it has not been loaded for this folder yet.';
-    }
-    if (_defaultProfileName != null) {
-      return 'Use this folder\'s default profile: $_defaultProfileName, or choose another one.';
-    }
-    if (_currentCwd == null) {
-      return 'Enter a folder first to load saved profiles.';
-    }
-    if (_profilesLoadedForCwd == _currentCwd && _profiles.isEmpty) {
-      return 'No saved profiles were found for this folder.';
-    }
-    return 'Choose a saved profile, or keep the machine defaults.';
-  }
-
   String? get _reasoningToSubmit {
     if (!_supportsReasoningEffort) return null;
     if (_controlModelIsAuto) return null;
@@ -758,7 +703,6 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
     if (_loadingNode) return;
     setState(() {
       _loadingNode = true;
-      _nodeError = null;
     });
 
     try {
@@ -770,7 +714,6 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
         final resolved = node.providerSummary(requested);
         _selectedProviderId = resolved.id.isEmpty ? requested : resolved.id;
         _loadingNode = false;
-        _nodeError = null;
         _coerceForProviderCapabilities();
       });
       if (_supportsMode) {
@@ -792,7 +735,6 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
       if (!mounted) return;
       setState(() {
         _loadingNode = false;
-        _nodeError = friendlyError(error);
       });
     }
   }
@@ -1844,64 +1786,7 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
     if (widget.presentation == CreateSessionPresentation.page) {
       return _buildDraftPage(context);
     }
-    if (widget.presentation == CreateSessionPresentation.pane) {
-      return _buildDraftPane(context);
-    }
-    final isDialog = widget.presentation == CreateSessionPresentation.dialog;
-    final bottom = isDialog ? 0.0 : MediaQuery.viewInsetsOf(context).bottom;
-    final maxHeight = (MediaQuery.sizeOf(context).height - 80)
-        .clamp(360.0, 820.0)
-        .toDouble();
-
-    return Padding(
-      padding: isDialog
-          ? EdgeInsets.zero
-          : EdgeInsets.fromLTRB(
-              AppSpacing.compact,
-              AppSpacing.sm,
-              AppSpacing.compact,
-              bottom + AppSpacing.compact,
-            ),
-      child: ConstrainedBox(
-        constraints: isDialog
-            ? BoxConstraints.tightFor(height: maxHeight)
-            : const BoxConstraints(),
-        child: MeshCard(
-          tone: MeshCardTone.elevated,
-          padding: EdgeInsets.all(isDialog ? AppSpacing.lg : AppSpacing.md),
-          child: SafeArea(
-            top: false,
-            child: Column(
-              children: [
-                Expanded(
-                  child: SingleChildScrollView(
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        _buildHeader(context),
-                        const SizedBox(height: AppSpacing.lg),
-                        _buildPrimaryPanel(context),
-                        const SizedBox(height: AppSpacing.md),
-                        _showAdvanced
-                            ? _buildAdvancedPanel(context)
-                            : _buildLaunchSummaryCard(context),
-                        if (_error != null) ...[
-                          const SizedBox(height: AppSpacing.md),
-                          _ErrorPanel(message: _error!),
-                        ],
-                      ],
-                    ),
-                  ),
-                ),
-                const SizedBox(height: AppSpacing.md),
-                _buildFooter(context),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
+    return _buildDraftPane(context);
   }
 
   Widget _buildDraftPage(BuildContext context) {
@@ -2735,262 +2620,6 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
           (_effectiveApproval == ApprovalPolicy.never ||
               _effectiveSandbox == SandboxMode.dangerFullAccess));
 
-  Widget _buildHeader(BuildContext context) {
-    final colors = context.colors;
-    final theme = Theme.of(context);
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Container(
-          width: 38,
-          height: 38,
-          decoration: BoxDecoration(
-            color: colors.accentMuted,
-            borderRadius: AppShapes.input,
-            border: Border.all(
-              color: colors.accent.withValues(alpha: AppEmphasis.borderTint),
-            ),
-          ),
-          alignment: Alignment.center,
-          child: Icon(
-            Icons.play_arrow_rounded,
-            color: colors.accent,
-            size: AppSizes.icon,
-          ),
-        ),
-        const SizedBox(width: AppSpacing.md),
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                'New session',
-                style: theme.textTheme.titleLarge?.copyWith(
-                  fontWeight: AppWeights.title,
-                  letterSpacing: AppLetterSpacing.headline,
-                ),
-              ),
-              const SizedBox(height: AppSpacing.xs),
-              Text(
-                '${widget.host.label} · $_providerName',
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: theme.textTheme.bodySmall?.copyWith(
-                  color: colors.textSecondary,
-                  fontWeight: AppWeights.body,
-                ),
-              ),
-            ],
-          ),
-        ),
-        const SizedBox(width: AppSpacing.sm),
-        MeshIconButton(
-          icon: Icons.close_rounded,
-          tooltip: 'Close',
-          color: colors.textSecondary,
-          onTap: () => Navigator.of(context).pop(),
-        ),
-      ],
-    );
-  }
-
-  Widget _buildPrimaryPanel(BuildContext context, {bool includeTask = true}) {
-    final colors = context.colors;
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        if (_availableProviders.length > 1) ...[
-          LaunchSelectorRow(
-            key: const ValueKey('create-session-provider-selector'),
-            icon: Icons.smart_toy_rounded,
-            label: 'Agent',
-            value: _providerName,
-            detail: _providerPillLabel,
-            onTap: _submitting ? null : _chooseProvider,
-          ),
-          const SizedBox(height: AppSpacing.compact),
-        ],
-        LaunchFieldFrame(
-          icon: Icons.folder_open_rounded,
-          label: 'Folder',
-          trailing: _nodeInfo != null
-              ? IconButton(
-                  tooltip: 'Browse folders on this machine',
-                  onPressed: _submitting ? null : _browseDirectory,
-                  icon: Icon(
-                    Icons.folder_rounded,
-                    size: AppSizes.inlineIcon,
-                    color: context.colors.accent,
-                  ),
-                )
-              : _loadingNode
-              ? const SizedBox(
-                  width: 18,
-                  height: 18,
-                  child: CircularProgressIndicator(
-                    strokeWidth: AppStrokes.indicator,
-                  ),
-                )
-              : null,
-          child: TextField(
-            controller: _cwdController,
-            textInputAction: TextInputAction.next,
-            style: monoStyle(
-              color: colors.textPrimary,
-              fontSize: AppFontSizes.body,
-            ),
-            decoration: AppInputDecorations.borderless.copyWith(
-              isDense: true,
-              hintText: '/Users/you/src/project',
-              contentPadding: EdgeInsets.zero,
-            ),
-          ),
-        ),
-        if (includeTask) ...[
-          const SizedBox(height: AppSpacing.compact),
-          LaunchFieldFrame(
-            icon: Icons.keyboard_command_key_rounded,
-            label: 'Task',
-            alignTop: true,
-            child: TextField(
-              key: const ValueKey('create-session-prompt-field'),
-              controller: _promptController,
-              minLines: 5,
-              maxLines: 10,
-              decoration: AppInputDecorations.borderless.copyWith(
-                isDense: true,
-                hintText: 'Tell the agent what to work on...',
-                contentPadding: EdgeInsets.zero,
-              ),
-            ),
-          ),
-        ],
-      ],
-    );
-  }
-
-  Widget _buildLaunchSummaryCard(BuildContext context) {
-    final colors = context.colors;
-    return MeshSurface(
-      tone: MeshSurfaceTone.muted,
-      radius: AppRadii.control,
-      width: double.infinity,
-      onTap: _submitting ? null : _toggleAdvanced,
-      padding: const EdgeInsets.fromLTRB(
-        AppSpacing.md,
-        AppSpacing.compact,
-        AppSpacing.compact,
-        AppSpacing.compact,
-      ),
-      child: Row(
-        children: [
-          Icon(
-            Icons.tune_rounded,
-            size: AppSizes.inlineIcon,
-            color: colors.accent,
-          ),
-          const SizedBox(width: AppSpacing.compact),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  'Session setup',
-                  style: Theme.of(context).textTheme.labelLarge?.copyWith(
-                    color: colors.textPrimary,
-                    fontWeight: AppWeights.title,
-                  ),
-                ),
-                const SizedBox(height: AppSpacing.xxs),
-                Text(
-                  _launchSummaryText(),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: Theme.of(
-                    context,
-                  ).textTheme.bodySmall?.copyWith(color: colors.textSecondary),
-                ),
-              ],
-            ),
-          ),
-          Icon(Icons.keyboard_arrow_down_rounded, color: colors.accent),
-        ],
-      ),
-    );
-  }
-
-  String _launchSummaryText() {
-    final accessLabel = _selectedAccessMode?.label;
-    final parts = <String>[
-      _providerName,
-      if (_supportsProfiles) _profileLabel,
-      if (_supportsModels && _supportsModelOverride) _modelLabel,
-      if (_supportsAccessModes)
-        accessLabel ?? 'loading access'
-      else ...[
-        if (_supportsApprovalPolicy) _effectiveApproval.label,
-        if (_supportsSandboxMode) _effectiveSandbox.label,
-      ],
-      if (_supportsNetworkAccess &&
-          _networkAccess &&
-          _effectiveSandbox != SandboxMode.dangerFullAccess)
-        'network',
-      if (_supportsWebSearch && _effectiveWebSearch) 'web search',
-    ];
-    return parts.join(' · ');
-  }
-
-  Widget _buildAccessModes(BuildContext context) {
-    final colors = context.colors;
-    final catalog = _accessModeCatalog;
-    if (_loadingAccessModes && catalog == null) {
-      return const MeshLoader(label: 'Loading options');
-    }
-    if (_accessModesError != null && catalog == null) {
-      return Row(
-        children: [
-          Expanded(
-            child: Text(
-              _accessModesError!,
-              style: Theme.of(
-                context,
-              ).textTheme.bodySmall?.copyWith(color: colors.textSecondary),
-            ),
-          ),
-          TextButton(onPressed: _loadAccessModes, child: const Text('Retry')),
-        ],
-      );
-    }
-    if (catalog == null) return const SizedBox.shrink();
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          'Access',
-          style: Theme.of(context).textTheme.titleSmall?.copyWith(
-            color: colors.textPrimary,
-            fontWeight: AppWeights.title,
-          ),
-        ),
-        const SizedBox(height: AppSpacing.xs),
-        if (catalog.modes.isEmpty)
-          Text(
-            'No access modes are available for this workspace.',
-            style: Theme.of(
-              context,
-            ).textTheme.bodySmall?.copyWith(color: colors.textSecondary),
-          )
-        else
-          ProviderAccessModeChoices(
-            modes: catalog.modes,
-            selectedModeId: _accessMode,
-            onSelected: (mode) => unawaited(_selectAccessMode(mode)),
-          ),
-        const SizedBox(height: AppSpacing.md),
-      ],
-    );
-  }
-
   ProviderAccessModeSummary? get _selectedAccessMode {
     final catalog = _accessModeCatalog;
     if (catalog == null) return null;
@@ -3015,420 +2644,6 @@ class _CreateSessionSheetState extends State<CreateSessionSheet> {
     if (!mounted) return;
     setState(() => _accessMode = mode.id);
   }
-
-  Widget _buildAdvancedPanel(
-    BuildContext context, {
-    bool showHeading = true,
-    bool showCollapseControl = true,
-  }) {
-    final effectiveReasoning = _effectiveReasoningEffort;
-    String? reasoningDescription;
-    for (final option in _supportedReasoningOptions) {
-      if (option.reasoningEffort == effectiveReasoning) {
-        reasoningDescription = option.description;
-        break;
-      }
-    }
-
-    final content = Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        if (showHeading) ...[
-          _PanelHeading(
-            icon: Icons.tune_rounded,
-            title: 'Session setup',
-            subtitle:
-                'Only the options available for $_providerName are shown here.',
-            trailing: showCollapseControl
-                ? IconButton(
-                    tooltip: 'Hide advanced',
-                    onPressed: _submitting ? null : _toggleAdvanced,
-                    icon: const Icon(Icons.expand_less_rounded),
-                  )
-                : null,
-          ),
-          const SizedBox(height: AppSpacing.md),
-        ],
-        if (_supportsAccessModes) _buildAccessModes(context),
-        LaunchOptionsForm(
-          dense: true,
-          capabilities: LaunchOptionsCapabilities(
-            supportsApprovalPolicy:
-                !_supportsAccessModes && _supportsApprovalPolicy,
-            supportsSandboxMode: !_supportsAccessModes && _supportsSandboxMode,
-            supportsFastMode: false,
-            supportsWebSearch: _supportsWebSearch,
-            supportsNetworkAccess:
-                !_supportsAccessModes &&
-                _supportsNetworkAccess &&
-                _effectiveSandbox != SandboxMode.dangerFullAccess,
-            supportsSessionMode: _supportsMode,
-            approvalOptions: _approvalOptions,
-          ),
-          sessionModes: _availableModeChoices,
-          value: LaunchOptionsValue(
-            approval: _effectiveApproval,
-            sandbox: _effectiveSandbox,
-            fastMode: _effectiveFastMode,
-            webSearch: _effectiveWebSearch,
-            networkAccess: _networkAccess,
-            sessionMode: _modeToSubmit,
-          ),
-          onApprovalChanged: (policy) => setState(() {
-            _approval = policy;
-            _approvalTouched = true;
-          }),
-          onSandboxChanged: (mode) => setState(() {
-            _sandbox = mode;
-            _sandboxTouched = true;
-          }),
-          onWebSearchChanged: (next) => setState(() {
-            _webSearch = next;
-            _webSearchTouched = true;
-          }),
-          onNetworkAccessChanged: (next) => setState(() {
-            _networkAccess = next;
-          }),
-          onSessionModeChanged: (mode) => setState(() {
-            _mode = mode;
-          }),
-          permissionsTrailing: null,
-          brainExtras: _buildBrainExtras(
-            context,
-            effectiveReasoning,
-            reasoningDescription,
-          ),
-        ),
-        const SizedBox(height: AppSpacing.sm),
-        Row(
-          children: [
-            Expanded(
-              child: FilledButton.tonalIcon(
-                onPressed: _submitting
-                    ? null
-                    : () async {
-                        await CreateSessionDefaultsStore.instance.setDefaults(
-                          CreateSessionDefaults(
-                            approval: _effectiveApproval,
-                            sandbox: _effectiveSandbox,
-                            fastMode: _effectiveFastMode,
-                            webSearch: _effectiveWebSearch,
-                          ),
-                        );
-                        if (context.mounted) {
-                          showAppSnackBar(
-                            context,
-                            'Saved as default session setup.',
-                          );
-                          HapticFeedback.mediumImpact();
-                        }
-                      },
-                icon: const Icon(
-                  Icons.save_outlined,
-                  size: AppSizes.inlineIcon,
-                ),
-                label: const Text('Save as defaults'),
-              ),
-            ),
-          ],
-        ),
-      ],
-    );
-    return content;
-  }
-
-  List<Widget>? _buildBrainExtras(
-    BuildContext context,
-    String? effectiveReasoning,
-    String? reasoningDescription,
-  ) {
-    final theme = Theme.of(context);
-    final colors = context.colors;
-    final extras = <Widget>[];
-
-    if (_supportsProfiles && _currentCwd != null) {
-      extras.add(
-        _loadingProfiles && _profiles.isEmpty
-            ? const MeshLoader(label: 'Loading options')
-            : MeshSelectionField(
-                title: 'Profile',
-                value: _profileLabel,
-                subtitle: _profileDescription,
-                loading: _loadingProfiles,
-                error: _profilesError,
-                compact: true,
-                retryLabel: 'Retry loading profiles',
-                onTap: _chooseProfile,
-                onRetry: () => unawaited(_loadProfiles(force: true)),
-              ),
-      );
-    }
-
-    if (_supportsModels && _supportsModelOverride) {
-      extras.add(
-        _loadingModels && _models.isEmpty
-            ? const MeshLoader(label: 'Loading options')
-            : MeshSelectionField(
-                key: const ValueKey('new-session-model-selector'),
-                title: 'Model',
-                value: _modelLabel,
-                subtitle: _modelDescription,
-                loading: _loadingModels,
-                error: _modelsError,
-                compact: true,
-                onTap: _chooseModel,
-                onRetry: () => unawaited(_loadModels()),
-              ),
-      );
-    }
-
-    if (!_supportsProfiles && (!_supportsModels || !_supportsModelOverride)) {
-      extras.add(
-        LaunchInfoLine(
-          icon: Icons.info_outline_rounded,
-          text: '$_providerName does not offer profiles or model choices here.',
-        ),
-      );
-    }
-
-    if (_supportsReasoningEffort && _supportsModels && _supportsModelOverride) {
-      if (_loadingModels && _models.isEmpty) {
-        extras.add(const MeshLoader(label: 'Loading options'));
-      } else if (_controlModelIsAuto) {
-        extras.add(
-          LaunchInfoLine(
-            icon: Icons.psychology_alt_rounded,
-            text: 'Thinking follows the selected model automatically.',
-          ),
-        );
-      } else if (_supportedReasoningOptions.isEmpty) {
-        extras.add(
-          const LaunchInfoLine(
-            icon: Icons.psychology_alt_rounded,
-            text: 'Choose a model to adjust thinking.',
-          ),
-        );
-      } else {
-        extras.add(
-          Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Text('Thinking', style: theme.textTheme.labelLarge),
-              AppSelect<String>(
-                value: effectiveReasoning,
-                values: _supportedReasoningOptions
-                    .map((option) => option.reasoningEffort)
-                    .toList(),
-                label: reasoningEffortLabel,
-                expanded: true,
-                onChanged: (value) => setState(() {
-                  _reasoningEffort = value;
-                  _reasoningTouched = true;
-                }),
-              ),
-            ],
-          ),
-        );
-        if (reasoningDescription != null &&
-            reasoningDescription.trim().isNotEmpty) {
-          extras.add(
-            Padding(
-              padding: const EdgeInsets.only(top: AppSpacing.tight),
-              child: Text(
-                reasoningDescription.trim(),
-                style: theme.textTheme.bodySmall?.copyWith(
-                  color: colors.textSecondary,
-                  height: AppLineHeights.label,
-                ),
-              ),
-            ),
-          );
-        }
-      }
-    }
-
-    if (_supportsFastMode) {
-      extras.add(
-        LaunchSwitchRow(
-          icon: Icons.bolt_rounded,
-          title: 'Fast mode',
-          subtitle: _fastSupported
-              ? 'Ask for the fast service tier.'
-              : 'Not advertised by this model.',
-          value: _effectiveFastMode,
-          enabled: _fastSupported,
-          onChanged: (value) => setState(() {
-            _fastMode = value;
-            _fastModeTouched = true;
-          }),
-        ),
-      );
-    }
-
-    return extras.isEmpty ? null : extras;
-  }
-
-  Widget _buildFooter(BuildContext context) {
-    final colors = context.colors;
-    final actionForeground = readableActionForeground(colors, colors.accent);
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        final compact = constraints.maxWidth < 560;
-        final actions = [
-          TextButton(
-            onPressed: _submitting ? null : () => Navigator.of(context).pop(),
-            child: const Text('Cancel'),
-          ),
-          FilledButton.icon(
-            onPressed: _submitting || _configurationIsLoading ? null : _submit,
-            icon: _submitting
-                ? SizedBox(
-                    width: 16,
-                    height: 16,
-                    child: CircularProgressIndicator(
-                      strokeWidth: AppStrokes.indicator,
-                      color: actionForeground,
-                    ),
-                  )
-                : const Icon(Icons.play_arrow_rounded),
-            label: const Text('Start session'),
-          ),
-        ];
-        if (compact) {
-          return Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Wrap(spacing: 7, runSpacing: 7, children: _launchPills()),
-              const SizedBox(height: AppSpacing.md),
-              FilledButton.icon(
-                onPressed: _submitting || _configurationIsLoading
-                    ? null
-                    : _submit,
-                icon: _submitting
-                    ? SizedBox(
-                        width: 16,
-                        height: 16,
-                        child: CircularProgressIndicator(
-                          strokeWidth: AppStrokes.indicator,
-                          color: actionForeground,
-                        ),
-                      )
-                    : const Icon(Icons.play_arrow_rounded),
-                label: const Text('Start session'),
-              ),
-              const SizedBox(height: AppSpacing.tight),
-              TextButton(
-                onPressed: _submitting
-                    ? null
-                    : () => Navigator.of(context).pop(),
-                child: const Text('Cancel'),
-              ),
-            ],
-          );
-        }
-        return Row(
-          children: [
-            Expanded(
-              child: Wrap(spacing: 8, runSpacing: 8, children: _launchPills()),
-            ),
-            const SizedBox(width: AppSpacing.md),
-            ...actions.expand(
-              (action) => [action, const SizedBox(width: AppSpacing.sm)],
-            ),
-          ]..removeLast(),
-        );
-      },
-    );
-  }
-
-  List<Widget> _launchPills() {
-    final reasoning = _effectiveReasoningEffort;
-    return [
-      MeshPill(
-        label: _providerPillLabel,
-        icon: Icons.smart_toy_rounded,
-        tone: MeshPillTone.neutral,
-      ),
-      if (_supportsProfiles)
-        MeshPill(
-          label: _profileLabel,
-          icon: Icons.badge_rounded,
-          tone: _profileToSubmit == null
-              ? MeshPillTone.neutral
-              : MeshPillTone.accent,
-        ),
-      if (_supportsMode)
-        MeshPill(
-          label: _sessionModeChoiceLabel(_modeToSubmit, _availableModeChoices),
-          icon: Icons.alt_route_rounded,
-          tone: _modeToSubmit == null
-              ? MeshPillTone.neutral
-              : MeshPillTone.info,
-        ),
-      if (_supportsModels && _supportsModelOverride)
-        MeshPill(
-          label: _modelLabel,
-          icon: Icons.memory_rounded,
-          tone: _selectedModel == null && _inheritedModel == null
-              ? MeshPillTone.neutral
-              : MeshPillTone.accent,
-        ),
-      if (_supportsReasoningEffort && _supportsModels && _supportsModelOverride)
-        MeshPill(
-          label: _controlModelIsAuto
-              ? 'thinking auto'
-              : reasoning == null
-              ? 'thinking default'
-              : reasoningEffortLabel(reasoning),
-          icon: Icons.psychology_alt_rounded,
-        ),
-      if (_supportsFastMode && _effectiveFastMode)
-        const MeshPill(
-          label: 'fast',
-          icon: Icons.bolt_rounded,
-          tone: MeshPillTone.warning,
-        ),
-      if (_supportsAccessModes && _selectedAccessMode != null)
-        MeshPill(
-          label: _selectedAccessMode!.label,
-          icon: providerAccessModeIcon(_selectedAccessMode!.icon),
-          tone: _selectedAccessMode!.isDangerous
-              ? MeshPillTone.danger
-              : MeshPillTone.neutral,
-        ),
-      if (!_supportsAccessModes) ...[
-        if (_supportsApprovalPolicy)
-          MeshPill(
-            label: _effectiveApproval.label,
-            icon: Icons.verified_user_rounded,
-          ),
-        if (_supportsSandboxMode)
-          MeshPill(
-            label: _effectiveSandbox.label,
-            icon: _effectiveSandbox == SandboxMode.dangerFullAccess
-                ? Icons.lock_open_rounded
-                : Icons.folder_special_rounded,
-            tone: _effectiveSandbox == SandboxMode.dangerFullAccess
-                ? MeshPillTone.danger
-                : MeshPillTone.neutral,
-          ),
-        if (_supportsNetworkAccess &&
-            _networkAccess &&
-            _effectiveSandbox != SandboxMode.dangerFullAccess)
-          const MeshPill(
-            label: 'network',
-            icon: Icons.wifi_rounded,
-            tone: MeshPillTone.info,
-          ),
-      ],
-      if (_supportsWebSearch && _effectiveWebSearch)
-        const MeshPill(
-          label: 'web search',
-          icon: Icons.public_rounded,
-          tone: MeshPillTone.info,
-        ),
-    ];
-  }
 }
 
 class _DraftChoice<T> {
@@ -3449,30 +2664,6 @@ class _DraftChoice<T> {
   final bool selected;
   final bool enabled;
   final bool danger;
-}
-
-class _PanelHeading extends StatelessWidget {
-  const _PanelHeading({
-    required this.icon,
-    required this.title,
-    required this.subtitle,
-    this.trailing,
-  });
-
-  final IconData icon;
-  final String title;
-  final String subtitle;
-  final Widget? trailing;
-
-  @override
-  Widget build(BuildContext context) {
-    return AppSectionHeader(
-      icon: icon,
-      title: title,
-      subtitle: subtitle,
-      trailing: trailing,
-    );
-  }
 }
 
 class _ErrorPanel extends StatelessWidget {

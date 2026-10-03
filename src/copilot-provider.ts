@@ -17,7 +17,6 @@ import {
   materializeAgentActivityDraft,
   type AgentCreateSessionRequest,
   type AgentCreateSessionResult,
-  type AgentSkillConfigWriteRequest,
   type AgentSkillListOptions,
   type AgentModelListOptions,
   type AgentPendingAction,
@@ -215,7 +214,6 @@ export const COPILOT_PROVIDER_CAPABILITIES: AgentProviderCapabilities = {
     profiles: false,
     accessModes: false,
     skills: true,
-    skillManagement: true,
   },
   runtimeControls: {
     model: true,
@@ -783,44 +781,6 @@ export class CopilotAgentProvider
     };
   }
 
-  public async writeSkillConfig(
-    request: AgentSkillConfigWriteRequest,
-  ): Promise<unknown> {
-    const sdkClient = await this.ensureSdkClient();
-    const rpc = sdkClient.rpc?.skills;
-    if (!rpc) {
-      throw new Error("GitHub Copilot SDK skill configuration is unavailable.");
-    }
-    const discovered = await rpc.discover({});
-    const skillName = resolveCopilotSkillName(discovered.skills, request);
-    if (!skillName) {
-      throw new Error("Unable to resolve Copilot skill to update.");
-    }
-    const disabledSkills = new Set(
-      discovered.skills
-        .filter((skill) => skill.enabled === false)
-        .map((skill) => skill.name),
-    );
-    if (request.enabled) {
-      disabledSkills.delete(skillName);
-    } else {
-      disabledSkills.add(skillName);
-    }
-    await rpc.config.setDisabledSkills({
-      disabledSkills: [...disabledSkills].sort((left, right) =>
-        left.localeCompare(right),
-      ),
-    });
-    await this.reloadSkillsForLoadedSessions();
-    this.emit("liveEvent", { type: "skills_changed" });
-    return {
-      ok: true,
-      path: request.path,
-      name: skillName,
-      enabled: request.enabled,
-    };
-  }
-
   private async reloadSkillsForWorkspace(cwd: string): Promise<void> {
     const sessions = [...this.sessions.values()].filter(
       (session) => session.thread.cwd === cwd && session.sdkSession != null,
@@ -829,17 +789,6 @@ export class CopilotAgentProvider
       sessions.map(async (session) => {
         const sdkSession = await this.ensureSdkSession(session);
         await sdkSession.rpc?.skills.reload();
-      }),
-    );
-  }
-
-  private async reloadSkillsForLoadedSessions(): Promise<void> {
-    await Promise.all(
-      [...this.sessions.values()].map(async (session) => {
-        if (!session.sdkSession) {
-          return;
-        }
-        await session.sdkSession.rpc?.skills.reload();
       }),
     );
   }
@@ -4233,22 +4182,6 @@ function copilotSkillScope(
     return "system";
   }
   return normalized || "system";
-}
-
-function resolveCopilotSkillName(
-  skills: Array<{ name: string; path?: string }>,
-  request: AgentSkillConfigWriteRequest,
-): string | null {
-  const requestedName = request.name?.trim();
-  if (requestedName) {
-    return requestedName;
-  }
-  const requestedPath = request.path?.trim();
-  if (!requestedPath) {
-    return null;
-  }
-  const match = skills.find((skill) => skill.path?.trim() === requestedPath);
-  return match?.name?.trim() || null;
 }
 
 function previewFromInput(input: AgentSessionInputItem[]): string {

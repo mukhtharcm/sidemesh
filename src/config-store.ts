@@ -183,10 +183,6 @@ export interface ResolvedConfigSource {
   value: PersistedNodeConfig | null;
 }
 
-export function defaultConfigPath(): string {
-  return DEFAULT_CONFIG_PATH;
-}
-
 export function resolveConfigPath(
   explicitPath?: string | null,
   env: Record<string, string | undefined> = process.env,

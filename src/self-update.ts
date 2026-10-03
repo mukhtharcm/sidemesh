@@ -15,10 +15,8 @@ import { setTimeout as delay } from "node:timers/promises";
 
 import type { NodeConfig, UpdateChannel } from "./types.js";
 import type { InstallInfo } from "./install-info.js";
-import { isTermuxEnvironment } from "./host-environment.js";
 import type { LaunchdPaths } from "./launchd-service.js";
 import type { ServicePaths } from "./systemd-service.js";
-import type { TermuxServicePaths } from "./termux-service.js";
 import { assertGitCheckoutClean } from "./update-preflight.js";
 import {
   BLEEDING_EDGE_GIT_REF,
@@ -43,15 +41,6 @@ import {
   readSystemdUnitLimits,
   resolveInstalledServicePaths,
 } from "./systemd-service.js";
-import {
-  installTermuxService,
-  isServiceWrapperStale as isTermuxServiceWrapperStale,
-  isTermuxServiceEnabled,
-  isTermuxServiceInstalled,
-  resolveInstalledTermuxServicePaths,
-  startTermuxService,
-  stopTermuxService,
-} from "./termux-service.js";
 import {
   assertUpdateLockOwner,
   createQueuedUpdateStatus,
@@ -109,13 +98,6 @@ export interface SelfUpdateDependencies {
   isLaunchdServiceInstalled: typeof isLaunchdServiceInstalled;
   isLaunchdServiceWrapperStale: typeof isLaunchdServiceWrapperStale;
   resolveInstalledLaunchdPaths: typeof resolveInstalledLaunchdPaths;
-  installTermuxService: typeof installTermuxService;
-  isTermuxServiceInstalled: typeof isTermuxServiceInstalled;
-  isTermuxServiceEnabled: typeof isTermuxServiceEnabled;
-  isTermuxServiceWrapperStale: typeof isTermuxServiceWrapperStale;
-  resolveInstalledTermuxServicePaths: typeof resolveInstalledTermuxServicePaths;
-  startTermuxService: typeof startTermuxService;
-  stopTermuxService: typeof stopTermuxService;
   runCommand: (
     file: string,
     args: string[],
@@ -142,13 +124,6 @@ const DEFAULT_SELF_UPDATE_DEPENDENCIES: SelfUpdateDependencies = {
   isLaunchdServiceInstalled,
   isLaunchdServiceWrapperStale,
   resolveInstalledLaunchdPaths,
-  installTermuxService,
-  isTermuxServiceInstalled,
-  isTermuxServiceEnabled,
-  isTermuxServiceWrapperStale,
-  resolveInstalledTermuxServicePaths,
-  startTermuxService,
-  stopTermuxService,
   runCommand: async (file, args, options = {}) => {
     const { stdout = "", stderr = "" } = await execFileAsync(file, args, options);
     return { stdout, stderr };
@@ -1192,10 +1167,6 @@ async function stopManagedService(
   },
   dependencies: SelfUpdateDependencies,
 ): Promise<void> {
-  if (isTermuxEnvironment()) {
-    await dependencies.stopTermuxService(options.managedService);
-    return;
-  }
   if (process.platform === "darwin") {
     const paths = await dependencies.resolveInstalledLaunchdPaths(options.config, {
       label: options.managedService,
@@ -1225,10 +1196,6 @@ async function startManagedService(
   },
   dependencies: SelfUpdateDependencies,
 ): Promise<void> {
-  if (isTermuxEnvironment()) {
-    await dependencies.startTermuxService(options.managedService);
-    return;
-  }
   if (process.platform === "darwin") {
     const paths = await dependencies.resolveInstalledLaunchdPaths(options.config, {
       label: options.managedService,
@@ -1268,14 +1235,6 @@ async function getManagedServiceInstalledState(
   },
   dependencies: SelfUpdateDependencies,
 ): Promise<boolean> {
-  if (isTermuxEnvironment()) {
-    const paths = await dependencies.resolveInstalledTermuxServicePaths({
-      serviceName: options.managedService,
-      packageDir: options.packageDir,
-      nodeBin: process.execPath,
-    });
-    return dependencies.isTermuxServiceInstalled(paths.serviceName);
-  }
   if (process.platform === "darwin") {
     const paths = await dependencies.resolveInstalledLaunchdPaths(options.config, {
       label: options.managedService,
@@ -1392,17 +1351,6 @@ async function reinstallManagedServiceIfNeeded(
         memoryMax: staleState.limits.memoryMax,
         start: false,
       });
-    } else if (staleState.kind === "termux") {
-      await dependencies.installTermuxService(options.config, {
-        serviceName: staleState.paths.serviceName,
-        packageDir: staleState.paths.packageDir,
-        nodeBin: staleState.paths.nodeBin,
-        serviceDir: staleState.paths.serviceDir,
-        envPath: staleState.paths.envPath,
-        launcherPath: staleState.paths.launcherPath,
-        enabled: staleState.enabled,
-        start: false,
-      });
     } else {
       await dependencies.installLaunchdService(options.config, {
         label: staleState.paths.label,
@@ -1445,14 +1393,6 @@ type ManagedServiceReinstallState =
       stale: boolean;
       serviceId: string;
       paths: LaunchdPaths;
-    }
-  | {
-      kind: "termux";
-      installed: boolean;
-      stale: boolean;
-      serviceId: string;
-      enabled: boolean;
-      paths: TermuxServicePaths;
     };
 
 async function getManagedServiceReinstallState(
@@ -1467,34 +1407,6 @@ async function getManagedServiceReinstallState(
   },
   dependencies: SelfUpdateDependencies,
 ): Promise<ManagedServiceReinstallState> {
-  if (isTermuxEnvironment()) {
-    const paths = await dependencies.resolveInstalledTermuxServicePaths({
-      serviceName: options.managedService,
-      packageDir: options.packageDir,
-      nodeBin: process.execPath,
-    });
-    const installed =
-      options.installed ??
-      (await dependencies.isTermuxServiceInstalled(paths.serviceName));
-    const enabled = installed && (
-      options.force === true
-        ? await dependencies.isTermuxServiceEnabled(paths.serviceName)
-            .catch(() => true)
-        : await dependencies.isTermuxServiceEnabled(paths.serviceName)
-    );
-    const stale = installed && (
-      options.force === true ||
-      (await dependencies.isTermuxServiceWrapperStale(paths, options.config))
-    );
-    return {
-      kind: "termux",
-      installed,
-      stale,
-      serviceId: paths.serviceName,
-      enabled,
-      paths,
-    };
-  }
   if (process.platform === "darwin") {
     const paths = await dependencies.resolveInstalledLaunchdPaths(options.config, {
       label: options.managedService,

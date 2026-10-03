@@ -31,9 +31,6 @@
     "!dist/**/*.test.js",
     "README.md",
     "SECURITY.md",
-    "CONTRIBUTING.md",
-    "TODO.md",
-    "docs",
     "scripts/*.sh",
     "scripts/check-node-version.mjs",
     "scripts/prepare-package.mjs"

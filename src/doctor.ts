@@ -9,10 +9,7 @@ import { VERSION as PI_VERSION } from "@earendil-works/pi-coding-agent";
 import { resolveAcpCommand } from "./acp-provider.js";
 
 import { createCopilotSdkClient } from "./copilot-sdk-client.js";
-import {
-  isTermuxEnvironment,
-  supportsSystemdServiceManagement,
-} from "./host-environment.js";
+import { supportsSystemdServiceManagement } from "./host-environment.js";
 import type {
   AgentProviderConfig,
   AcpxProviderConfig,
@@ -738,9 +735,6 @@ function daemonStartRemedy(): string {
   }
   if (supportsSystemdServiceManagement()) {
     return "Start it with `sidemesh up` or `sidemesh start`, or install the Linux systemd service if you want the app's Restart and Update buttons to bring it back on their own.";
-  }
-  if (isTermuxEnvironment()) {
-    return "Start it with `sidemesh up` or `sidemesh start`, or install the Termux runit service with `pkg install termux-services` and `sidemesh service install` if you want the app's Restart and Update buttons to manage it.";
   }
   return "Start it with `sidemesh up` or `sidemesh start`.";
 }

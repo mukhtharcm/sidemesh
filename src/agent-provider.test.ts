@@ -46,7 +46,6 @@ const EMPTY_CAPABILITIES: AgentProviderCapabilities = {
     profiles: false,
     accessModes: false,
     skills: false,
-    skillManagement: false,
   },
   runtimeControls: {
     model: false,

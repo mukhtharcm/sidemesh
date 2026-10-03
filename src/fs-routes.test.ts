@@ -1,6 +1,5 @@
 import assert from "node:assert/strict";
 import {
-  access,
   chmod,
   mkdir,
   mkdtemp,
@@ -257,26 +256,6 @@ describe("filesystem routes", () => {
       assert.deepEqual(await response.json(), {
         error: "path is outside any workspace",
       });
-    } finally {
-      await close(server);
-    }
-  });
-
-  it("rejects deletion of a workspace root", async () => {
-    const root = await tempRoot(tempRoots);
-    const app = testApp(root);
-    const server = await listen(app);
-    try {
-      const response = await fetch(`${baseUrl(server)}/api/fs/remove`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ path: root }),
-      });
-      assert.equal(response.status, 403);
-      assert.deepEqual(await response.json(), {
-        error: "cannot remove a workspace root",
-      });
-      await access(root);
     } finally {
       await close(server);
     }

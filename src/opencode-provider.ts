@@ -107,7 +107,6 @@ export const OPENCODE_PROVIDER_CAPABILITIES: AgentProviderCapabilities = {
     profiles: false,
     accessModes: false,
     skills: true,
-    skillManagement: false,
   },
   runtimeControls: {
     model: true,

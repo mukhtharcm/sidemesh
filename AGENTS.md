@@ -19,6 +19,7 @@
   etc.) from a session running *inside* that same daemon. systemd kills the
   entire cgroup including your own process tree. Use an out-of-band mechanism
   (see "Resilient Daemon Updates" below).
+- The daemon is **trusted-network-only** (Tailscale, private LAN). Do not add
   public-internet exposure features without a proper auth layer.
 - Terminal, filesystem, and approval changes are **high-trust surfaces**;
   keep them conservative and well-tested.
@@ -144,8 +145,8 @@ Every provider implements the interface in `src/agent-provider.ts`.
 - `AgentProviderRuntime` holds a direct map of configured instances. It is not
   an `AgentProvider`. Resolve an instance and its native session ID before a call.
   Construction and startup are lazy. Host health and controls remain available
-  when a provider fails. `/api/node` and `/api/providers` report each instance's
-  state, error, and version; restart recreates only that instance.
+  when a provider fails. `/api/node` reports each instance's state, error, and
+  version; restart recreates only that instance.
 - Configured providers have stable `id` values. Old entries default to their kind.
   Keep the old entry ID when adding another instance of that kind. Set
   `defaultProviderId` to select an instance. IDs are namespaced as
@@ -311,6 +312,11 @@ specific agent provider.
   pubspec version/build without rebuilding or uploading a duplicate binary.
   Internal groups whose `hasAccessToAllBuilds` flag is true already receive the
   build and must not be passed to the manual group-assignment API.
+- **Website**: `web/` has its own visual identity, separate from the app's
+  themes. Its CSP is `script-src 'self'`: keep scripts external (no inline
+  `<script>` bodies), and keep every page readable without JavaScript. CI and
+  the deploy run `npm run audit:ci` (`web/scripts/audit.mjs`), which fails on
+  high or critical advisories except the ones listed there with a reason.
 - **Flutter web**: The browser entry point is `apps/mobile/lib/main_web.dart`.
   Build it with `npm run mobile:web:build`; the hosted client only accepts
   remote daemon URLs over HTTPS/WSS. Browser WebSocket authentication uses the
@@ -445,16 +451,13 @@ specific agent provider.
   belongs in the pending action; arguments, environment values, and output
   must stay out of transcripts. Open the exact terminal ID and remove its
   replay output on exit. Do not replace it with a shell or reuse it by cwd.
-- **Termux / Android PTY support**: keep `node-pty` optional. Do not
-  reintroduce eager top-level PTY imports or make `node-pty` a required npm
-  dependency; Termux installs can lack a working native addon, so the daemon
-  must still start and fall back to `script`/pipe-backed terminals.
-- **Termux services**: native managed service support uses `termux-services`
-  (`runit`) via `src/termux-service.ts`, not `systemd`. Termux service files
-  live under `$PREFIX/var/service/<name>` and use `$PREFIX/var/log/sv/<name>`
-  for logs; preserve this layout so `sv`, `sv-enable`, and Termux:Boot work.
-- **Port forwarding lockdown**: Targets must resolve to loopback by default.
-  Enable `allowNonLoopbackTargets` in config to relax.
+- **Optional PTY support**: keep `node-pty` optional. Do not reintroduce eager
+  top-level PTY imports or make `node-pty` a required npm dependency; installs
+  can lack a working native addon (for example macOS `spawn-helper`
+  permissions), so the daemon must still start and fall back to
+  `script`/pipe-backed terminals.
+- **Supported hosts**: Linux (systemd) and macOS (launchd). Termux/Android
+  hosts are not supported.
 
 ## Common Workflows
 
@@ -481,11 +484,10 @@ sidemesh pair        # show host URL + token for mobile app
 1. Add the provider kind to `AgentProviderKind` in `src/types.ts`.
 2. Add config type to `AgentProviderConfig` in `src/types.ts`.
 3. Implement the adapter in `src/<name>-provider.ts`.
-4. Add a `*_PROVIDER_DEFINITION` to `AGENT_PROVIDER_DEFINITIONS` in
-   `src/provider-registry.ts` and register construction in
-   `src/provider-factory.ts`.
+4. Add a `*_PROVIDER_DEFINITION` (including its `create()` constructor) to
+   `AGENT_PROVIDER_DEFINITIONS` in `src/provider-registry.ts`.
 5. Add focused tests using `src/fake-provider.ts` patterns.
-6. Update `CONTRIBUTING.md` and this file if the contract changes.
+6. Update this file if the contract changes.
 
 ### Release Artifacts
 
@@ -536,8 +538,6 @@ directory; the atomic updater depends on that.
 
 ## Quick References
 
-- Provider contract: `docs/provider-adapter-contract.md`
-- Dependency/runtime compatibility: `docs/dependency-runtime-compatibility.md`
-- Contributing guide: `CONTRIBUTING.md`
+- Provider contract: `src/agent-provider.ts`
 - Release playbook: `docs/release-playbook.md`
 - CI definition: `.github/workflows/ci.yml`

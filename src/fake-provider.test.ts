@@ -198,26 +198,11 @@ describe("fake test provider", () => {
     assert.equal(profiles.defaultProfile, "balanced");
     assert.equal(profiles.profiles.some((profile) => profile.name === "locked-down"), true);
 
-    let skills = await provider.listSkills({ cwd, forceReload: false });
+    const skills = await provider.listSkills({ cwd, forceReload: false });
     assert.equal(skills.skills.some((skill) => skill.scope === "repo"), true);
     assert.equal(
       skills.skills.find((skill) => skill.name === "fake code review")?.enabled,
       true,
-    );
-
-    await provider.writeSkillConfig({
-      name: "fake code review",
-      path: null,
-      enabled: false,
-    });
-    await waitFor(
-      () => events.find((event) => event.type === "skills_changed"),
-      "skills_changed event",
-    );
-    skills = await provider.listSkills({ cwd, forceReload: true });
-    assert.equal(
-      skills.skills.find((skill) => skill.name === "fake code review")?.enabled,
-      false,
     );
   });
 

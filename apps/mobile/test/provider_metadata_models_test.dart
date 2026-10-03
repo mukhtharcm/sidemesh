@@ -283,26 +283,22 @@ void main() {
     expect(operation.finishedDateTime?.millisecondsSinceEpoch, 3000);
   });
 
-  test('ProviderMetadata drops malformed provider entries', () {
-    final metadata = ProviderMetadata.fromJson({
-      'currentProvider': 'codex',
-      'providers': [
-        {
-          'kind': 'codex',
-          'displayName': 'Codex',
-          'defaultCommand': 'codex',
-          'commandEnvironmentVariables': ['SIDEMESH_CODEX_BIN'],
-          'supportedApprovalPolicies': ['on-request', 'never'],
-        },
-        {'displayName': 'Missing kind'},
-      ],
-    });
+  test('ProviderDefinitionSummary list drops malformed provider entries', () {
+    final providers = ProviderDefinitionSummary.listFromJson([
+      {
+        'kind': 'codex',
+        'displayName': 'Codex',
+        'defaultCommand': 'codex',
+        'commandEnvironmentVariables': ['SIDEMESH_CODEX_BIN'],
+        'supportedApprovalPolicies': ['on-request', 'never'],
+      },
+      {'displayName': 'Missing kind'},
+    ]);
 
-    expect(metadata.currentProvider, 'codex');
-    expect(metadata.providers, hasLength(1));
-    expect(metadata.providers.single.kind, 'codex');
-    expect(metadata.providers.single.displayName, 'Codex');
-    expect(metadata.providers.single.defaultCommand, 'codex');
+    expect(providers, hasLength(1));
+    expect(providers.single.kind, 'codex');
+    expect(providers.single.displayName, 'Codex');
+    expect(providers.single.defaultCommand, 'codex');
   });
 
   test('agent provider labels use advertised metadata before fallbacks', () {

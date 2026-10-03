@@ -1,0 +1,113 @@
+---
+import '../styles/away.css';
+import displayFontUrl from '../assets/fonts/away/bricolage-grotesque.woff2?url';
+import { links } from '../site.ts';
+
+interface Props {
+  /** Full document title. */
+  title: string;
+  description: string;
+  /** Site-relative canonical path, for example "/" or "/privacy". Omit for pages that should not be indexed. */
+  path?: string;
+  ogTitle?: string;
+  ogDescription?: string;
+  /** Site-relative image path. */
+  ogImage?: string;
+  ogImageAlt?: string;
+  /** Sends the visitor to this URL immediately, without JavaScript. */
+  redirectTo?: string;
+  /** The landing page draws its own header inside the first colour field. */
+  landing?: boolean;
+}
+
+const {
+  title,
+  description,
+  path,
+  ogTitle = title,
+  ogDescription = description,
+  ogImage = '/assets/og-card-v1.png',
+  ogImageAlt = 'Sidemesh — agent workstation control from anywhere.',
+  redirectTo,
+  landing = false,
+} = Astro.props;
+
+const canonicalUrl = path ? new URL(path, Astro.site).toString() : undefined;
+const ogImageUrl = new URL(ogImage, Astro.site).toString();
+---
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    {redirectTo && <meta http-equiv="refresh" content={`0;url=${redirectTo}`} />}
+    <title>{title}</title>
+    <meta name="description" content={description} />
+    <meta name="color-scheme" content="light" />
+    <meta name="theme-color" content={landing ? '#ffe7a0' : '#f3efe6'} />
+    {canonicalUrl ? <link rel="canonical" href={canonicalUrl} /> : <meta name="robots" content="noindex" />}
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <link rel="icon" href="/assets/favicon.png" type="image/png" sizes="256x256" />
+    <link rel="apple-touch-icon" href="/assets/app-icon.png" />
+    <link rel="preload" href={displayFontUrl} as="font" type="font/woff2" crossorigin />
+
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="Sidemesh" />
+    <meta property="og:title" content={ogTitle} />
+    <meta property="og:description" content={ogDescription} />
+    {canonicalUrl && <meta property="og:url" content={canonicalUrl} />}
+    <meta property="og:image" content={ogImageUrl} />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta property="og:image:alt" content={ogImageAlt} />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content={ogTitle} />
+    <meta name="twitter:description" content={ogDescription} />
+    <meta name="twitter:image" content={ogImageUrl} />
+    <meta name="twitter:image:alt" content={ogImageAlt} />
+    <meta name="twitter:site" content="@mukhtharcm" />
+    <meta name="twitter:creator" content="@mukhtharcm" />
+  </head>
+  <body>
+    <a class="skip" href="#main">Skip to content</a>
+
+    {!landing && (
+      <header class="band band--moon bar">
+        <div class="top top--bar">
+          <a class="brand" href="/" aria-label="Sidemesh home">
+            <svg viewBox="0 0 48 48" width="34" height="34" aria-hidden="true">
+              <path d="M15 13 37 24 15 35" fill="none" stroke="currentColor" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round" />
+              <circle cx="15" cy="13" r="4.6" fill="currentColor" />
+              <circle cx="15" cy="35" r="4.6" fill="currentColor" />
+              <circle cx="37" cy="24" r="6" fill="currentColor" />
+            </svg>
+            <span>Sidemesh</span>
+          </a>
+          <nav class="top__nav" aria-label="Main">
+            <a href="/#agents">Agents</a>
+            <a href="/#network">Security</a>
+            <a href="/#install">Install</a>
+            <a href={links.github}>GitHub</a>
+          </nav>
+        </div>
+      </header>
+    )}
+
+    <main id="main" tabindex="-1">
+      <slot />
+    </main>
+
+    <footer class="band band--night foot">
+      <div class="wrap foot__inner">
+        <p class="foot__brand">Sidemesh</p>
+        <nav aria-label="Footer">
+          <a href={links.github}>GitHub</a>
+          <a href={links.discord}>Discord</a>
+          <a href="/support">Support</a>
+          <a href="/privacy">Privacy</a>
+        </nav>
+        <p class="foot__fine">Open source under the Apache 2.0 license.</p>
+      </div>
+    </footer>
+  </body>
+</html>

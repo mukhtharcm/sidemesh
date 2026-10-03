@@ -203,12 +203,6 @@ export interface AgentSkillListOptions {
   forceReload: boolean;
 }
 
-export interface AgentSkillConfigWriteRequest {
-  path: string | null;
-  name: string | null;
-  enabled: boolean;
-}
-
 export interface AgentProviderCapabilities {
   sessions: {
     create: boolean;
@@ -252,7 +246,6 @@ export interface AgentProviderCapabilities {
     profiles: boolean;
     accessModes: boolean;
     skills: boolean;
-    skillManagement: boolean;
   };
   runtimeControls: {
     model: boolean;
@@ -455,7 +448,6 @@ export interface AgentApprovalProvider {
 
 export interface AgentConfigurationProvider {
   listSkills(options: AgentSkillListOptions): Promise<SkillCatalogEntry>;
-  writeSkillConfig(request: AgentSkillConfigWriteRequest): Promise<unknown>;
   listModels(options: AgentModelListOptions): Promise<ModelSummary[]>;
   listProfiles(options: AgentProfileListOptions): Promise<ProviderProfileCatalog>;
   listAccessModes(

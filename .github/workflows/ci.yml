@@ -144,7 +144,7 @@ jobs:
         run: npm run check
 
       - name: Security audit
-        run: npm audit --audit-level=high
+        run: npm run audit:ci
 
       - name: Build website
         run: npm run build

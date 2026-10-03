@@ -1,0 +1,147 @@
+---
+// One illustrative phone screen for the "Away" landing direction. Rendered
+// twice per moment: inside the sticky phone and as an inline card on small
+// screens and without JavaScript.
+interface Props {
+  kind: 'live' | 'approve' | 'review' | 'question' | 'quiet';
+}
+
+const { kind } = Astro.props;
+---
+{kind === 'live' && (
+  <div class="screen screen--live" data-screen="live">
+    <p class="lock__label">Lock Screen</p>
+    <p class="lock__time">08:40</p>
+    <div class="activity">
+      <div class="activity__head">
+        <span class="pulse" aria-hidden="true"></span>
+        <span class="activity__who">Codex · Laptop</span>
+        <span class="activity__state">Working</span>
+      </div>
+      <p class="activity__task">Upgrade the payments SDK and fix what breaks.</p>
+      <p class="activity__path">~/shop</p>
+    </div>
+  </div>
+)}
+
+{kind === 'approve' && (
+  <div class="screen screen--app" data-screen="approve" data-state="ask">
+    <header class="screen__bar">
+      <span class="screen__machine">Laptop</span>
+      <span class="screen__path">~/shop</span>
+    </header>
+    <div class="msg">
+      <span class="msg__who">Codex</span>
+      <p>The SDK upgrade is in. I want to run the tests before going further.</p>
+    </div>
+    <div class="ask" data-when="ask">
+      <p class="ask__label">Approval needed</p>
+      <p class="ask__what">Run command</p>
+      <code class="ask__cmd">npm test</code>
+      <p class="ask__where">in ~/shop</p>
+      <div class="ask__actions">
+        <button type="button" class="tap" data-action="declined">Decline</button>
+        <button type="button" class="tap tap--go" data-action="approved">Approve</button>
+      </div>
+      <p class="ask__static">In the app you approve or decline right here.</p>
+    </div>
+    <div class="outcome" data-when="approved">
+      <p class="chip chip--go" tabindex="-1" data-status>Approved · running on the laptop</p>
+      <div class="msg">
+        <span class="msg__who">Codex</span>
+        <p data-stream>Tests pass. The upgrade is ready for you to review.</p>
+      </div>
+      <button type="button" class="again" data-action="ask">Ask again</button>
+    </div>
+    <div class="outcome" data-when="declined">
+      <p class="chip chip--stop" tabindex="-1" data-status>Declined</p>
+      <div class="msg">
+        <span class="msg__who">Codex</span>
+        <p data-stream>Okay, I won't run them. Want a summary of what changed instead?</p>
+      </div>
+      <button type="button" class="again" data-action="ask">Ask again</button>
+    </div>
+    <p class="composer" aria-hidden="true">Reply to Codex…</p>
+    <p class="sr-only" role="status" aria-live="polite" data-live></p>
+  </div>
+)}
+
+{kind === 'review' && (
+  <div class="screen screen--app" data-screen="review">
+    <header class="screen__bar">
+      <span class="screen__machine">Workstation</span>
+      <span class="screen__path">~/api</span>
+    </header>
+    <div class="msg">
+      <span class="msg__who">Pi</span>
+      <p>Done. Rate limiting now lives in one middleware, and the tests cover it.</p>
+    </div>
+    <div class="files">
+      <p class="files__label">3 files changed</p>
+      <ul>
+        <li><code>src/middleware/rate-limit.ts</code><span class="add">+84</span></li>
+        <li><code>src/routes/orders.ts</code><span class="add">+6</span><span class="del">−31</span></li>
+        <li><code>test/rate-limit.test.ts</code><span class="add">+52</span></li>
+      </ul>
+    </div>
+    <p class="composer" aria-hidden="true">Reply to Pi…</p>
+  </div>
+)}
+
+{kind === 'question' && (
+  <div class="screen screen--app" data-screen="question" data-state="ask">
+    <header class="screen__bar">
+      <span class="screen__machine">Cloud server</span>
+      <span class="screen__path">~/infra</span>
+    </header>
+    <div class="msg">
+      <span class="msg__who">Copilot CLI</span>
+      <p>I can fix the deploy script. Which branch should the hotfix start from?</p>
+    </div>
+    <div class="ask ask--question" data-when="ask">
+      <p class="ask__label">Question for you</p>
+      <div class="ask__choices">
+        <button type="button" class="tap tap--choice" data-action="answered" data-answer="main">main</button>
+        <button type="button" class="tap tap--choice" data-action="answered" data-answer="release-1.4">release-1.4</button>
+      </div>
+      <p class="ask__static">In the app you pick an answer right here.</p>
+    </div>
+    <div class="outcome" data-when="answered">
+      <p class="chip chip--go" tabindex="-1" data-status>Answered · <span data-answer-slot>main</span></p>
+      <div class="msg">
+        <span class="msg__who">Copilot CLI</span>
+        <p data-stream data-template="Starting the hotfix from {answer}.">Starting the hotfix from main.</p>
+      </div>
+      <button type="button" class="again" data-action="ask">Ask again</button>
+    </div>
+    <p class="composer" aria-hidden="true">Reply to Copilot CLI…</p>
+    <p class="sr-only" role="status" aria-live="polite" data-live></p>
+  </div>
+)}
+
+{kind === 'quiet' && (
+  <div class="screen screen--app screen--night" data-screen="quiet">
+    <header class="screen__bar">
+      <span class="screen__machine">Recent</span>
+      <span class="screen__path">3 machines</span>
+    </header>
+    <ul class="recent">
+      <li>
+        <span class="recent__title">Payments SDK upgrade</span>
+        <span class="recent__meta">Codex · Laptop</span>
+        <span class="recent__state">Done</span>
+      </li>
+      <li>
+        <span class="recent__title">Rate limiting</span>
+        <span class="recent__meta">Pi · Workstation</span>
+        <span class="recent__state">Done</span>
+      </li>
+      <li>
+        <span class="recent__title">Deploy script hotfix</span>
+        <span class="recent__meta">Copilot CLI · Cloud server</span>
+        <span class="recent__state">Done</span>
+      </li>
+    </ul>
+    <p class="quiet">Nothing is waiting for you.</p>
+  </div>
+)}

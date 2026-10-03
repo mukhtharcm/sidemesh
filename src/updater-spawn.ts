@@ -3,7 +3,6 @@ import { randomUUID } from "node:crypto";
 import { promisify } from "node:util";
 import nodePath from "node:path";
 
-import { isTermuxEnvironment } from "./host-environment.js";
 import { detectInstallInfo } from "./install-info.js";
 import type { NodeConfig, UpdateChannel } from "./types.js";
 import { assertGitCheckoutClean } from "./update-preflight.js";
@@ -100,11 +99,7 @@ export async function spawnSelfUpdater(
     ? info.serviceName ?? "sidemesh"
     : null;
 
-  if (
-    dependencies.platform === "linux" &&
-    managedService &&
-    !isTermuxEnvironment()
-  ) {
+  if (dependencies.platform === "linux" && managedService) {
     const unitName =
       `sidemesh-self-update-${now.toString(36)}-${status.id.slice(0, 8)}`;
     const args = [

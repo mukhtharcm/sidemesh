@@ -37,25 +37,6 @@ describe("SessionSearchIndex", () => {
     }
   });
 
-  it("returns stats after indexing", async () => {
-    const index = new SessionSearchIndex(dbPath);
-    await index.open();
-
-    await index.indexDocument(makeDoc("stats-session", {
-      providerKind: "fake",
-      messages: [{ id: "m1", role: "user" as const, text: "stats test", content: [], attachments: [], createdAt: Date.now(), seq: 1 }],
-    }));
-
-    const stats = index.getStats();
-    assert.equal(stats.indexedSessions, 1);
-    assert.ok(stats.indexSizeMB >= 0);
-    assert.equal(stats.providers.length, 1);
-    assert.equal(stats.providers[0].providerKind, "fake");
-    assert.equal(stats.providers[0].indexedSessions, 1);
-
-    await index.close();
-  });
-
   it("returns a non-null snippet with the matched keyword", async () => {
     const index = new SessionSearchIndex(dbPath);
     await index.open();
@@ -241,23 +222,6 @@ describe("SessionSearchIndex", () => {
     await index.close();
   });
 
-  it("filters search results by providerKind", async () => {
-    const index = new SessionSearchIndex(dbPath);
-    await index.open();
-
-    await index.indexDocument(makeDoc("fake-a", { providerKind: "fake", messages: [{ id: "m1", role: "user" as const, text: "shared keyword", content: [], attachments: [], createdAt: Date.now(), seq: 1 }] }));
-    await index.indexDocument(makeDoc("pi-a", { providerKind: "pi", messages: [{ id: "m1", role: "user" as const, text: "shared keyword", content: [], attachments: [], createdAt: Date.now(), seq: 1 }] }));
-
-    const all = await index.search("shared keyword", 10);
-    assert.equal(all.length, 2);
-
-    const filtered = await index.search("shared keyword", 10, { providerKind: "pi" });
-    assert.equal(filtered.length, 1);
-    assert.equal(filtered[0].sessionId, "pi-a");
-
-    await index.close();
-  });
-
   it("returns complete summaries and filters configured instances before the limit", async () => {
     const index = new SessionSearchIndex(dbPath);
     await index.open();
@@ -268,13 +232,8 @@ describe("SessionSearchIndex", () => {
       await index.indexDocument(second);
       const selected = await index.search("shared", 1, { providerIds: ["first"] });
       assert.deepEqual(selected[0]?.session, first.session);
-      assert.deepEqual((await index.search("", 1, { providerId: "second" }))[0]?.session, second.session);
+      assert.deepEqual((await index.search("shared", 1, { providerIds: ["second"] }))[0]?.session, second.session);
       assert.deepEqual(await index.search("shared", 10, { providerIds: [] }), []);
-      assert.equal((await index.search("shared", 10, { providerKind: "pi" })).length, 2);
-      index.setProviderError("offline", "Could not connect", "pi");
-      assert.deepEqual(index.getStats().providers.find((entry) => entry.providerId === "offline"), {
-        providerId: "offline", providerKind: "pi", indexedSessions: 0, lastIndexedAt: null, lastError: "Could not connect",
-      });
     } finally { await index.close(); }
   });
 
@@ -295,82 +254,6 @@ describe("SessionSearchIndex", () => {
     const archived = await index.search("banana", 10, { archived: true });
     assert.equal(archived.length, 1);
     assert.equal(archived[0].sessionId, "archived-a");
-
-    await index.close();
-  });
-
-  it("filters search results by cwd prefix", async () => {
-    const index = new SessionSearchIndex(dbPath);
-    await index.open();
-
-    await index.indexDocument(makeDoc("cwd-a", { cwd: "/projects/sidemesh", messages: [{ id: "m1", role: "user" as const, text: "project work", content: [], attachments: [], createdAt: Date.now(), seq: 1 }] }));
-    await index.indexDocument(makeDoc("cwd-b", { cwd: "/personal/notes", messages: [{ id: "m1", role: "user" as const, text: "project work", content: [], attachments: [], createdAt: Date.now(), seq: 1 }] }));
-
-    const all = await index.search("project work", 10);
-    assert.equal(all.length, 2);
-
-    const filtered = await index.search("project work", 10, { cwd: "/projects" });
-    assert.equal(filtered.length, 1);
-    assert.equal(filtered[0].sessionId, "cwd-a");
-
-    await index.close();
-  });
-
-  it("returns filtered browse results with empty query", async () => {
-    const index = new SessionSearchIndex(dbPath);
-    await index.open();
-
-    await index.indexDocument(makeDoc("browse-a", { providerKind: "fake", archived: false, updatedAt: NOW - 1000 }));
-    await index.indexDocument(makeDoc("browse-b", { providerKind: "pi", archived: true, updatedAt: NOW - 500 }));
-
-    const emptyNoFilter = await index.search("", 10);
-    assert.equal(emptyNoFilter.length, 0);
-
-    const fakeActive = await index.search("", 10, { providerKind: "fake", archived: false });
-    assert.equal(fakeActive.length, 1);
-    assert.equal(fakeActive[0].sessionId, "browse-a");
-
-    await index.close();
-  });
-
-  it("per-provider stats and backfillRunning flag", async () => {
-    const index = new SessionSearchIndex(dbPath);
-    await index.open();
-
-    index.setBackfillRunning(true);
-    await index.indexDocument(makeDoc("stat-a", { providerKind: "fake" }));
-    await index.indexDocument(makeDoc("stat-b", { providerKind: "pi" }));
-
-    const stats = index.getStats();
-    assert.equal(stats.backfillRunning, true);
-    assert.equal(stats.providers.length, 2);
-    const fakeStats = stats.providers.find((p) => p.providerKind === "fake");
-    assert.ok(fakeStats);
-    assert.equal(fakeStats!.indexedSessions, 1);
-
-    index.setBackfillRunning(false);
-    const stats2 = index.getStats();
-    assert.equal(stats2.backfillRunning, false);
-    assert.equal(stats2.indexedSessions, 2);
-
-    await index.close();
-  });
-
-  it("setProviderError stores and clears errors", async () => {
-    const index = new SessionSearchIndex(dbPath);
-    await index.open();
-
-    await index.indexDocument(makeDoc("err-a", { providerKind: "fake" }));
-    index.setProviderError("fake", "connection timeout");
-
-    const stats = index.getStats();
-    const fakeStats = stats.providers.find((p) => p.providerKind === "fake");
-    assert.equal(fakeStats?.lastError, "connection timeout");
-
-    index.setProviderError("fake", null);
-    const stats2 = index.getStats();
-    const fakeStats2 = stats2.providers.find((p) => p.providerKind === "fake");
-    assert.equal(fakeStats2?.lastError, null);
 
     await index.close();
   });
@@ -479,7 +362,7 @@ describe("SessionSearchIndex", () => {
 
     const results = await index.search("stale", 10);
     assert.deepEqual(results, []);
-    assert.equal(index.getStats().indexedSessions, 0);
+    assert.deepEqual(await index.search("", 10, {}), []);
 
     await index.close();
 

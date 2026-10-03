@@ -1,205 +1,72 @@
 ---
-const pageUrl = new URL("/support", Astro.site);
-const ogImageUrl = new URL("/assets/og-card-v1.png", Astro.site);
+import Base from '../layouts/Base.astro';
+import { links } from '../site.ts';
 ---
-<!doctype html>
-<html lang="en">
-<head>
-<meta charset="utf-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Support — Sidemesh</title>
-<meta name="description" content="Get help with Sidemesh. Common issues, setup guidance, and how to reach us." />
-<meta name="theme-color" content="#e9edf0" />
-<meta property="og:title" content="Support — Sidemesh" />
-<meta property="og:description" content="Get help with Sidemesh. Common issues, setup guidance, and how to reach us." />
-<meta property="og:type" content="website" />
-<meta property="og:url" content={pageUrl.toString()} />
-<meta property="og:image" content={ogImageUrl.toString()} />
-<meta property="og:image:width" content="1200" />
-<meta property="og:image:height" content="630" />
-<meta property="og:image:alt" content="Sidemesh — agent workstation control from anywhere." />
-<meta name="twitter:card" content="summary_large_image" />
-<meta name="twitter:image" content={ogImageUrl.toString()} />
-<meta name="twitter:image:alt" content="Sidemesh — agent workstation control from anywhere." />
-<meta name="twitter:site" content="@mukhtharcm" />
-<meta name="twitter:creator" content="@mukhtharcm" />
-<link rel="canonical" href={pageUrl.toString()} />
-<link rel="icon" type="image/png" href="/assets/favicon.png" />
-<link rel="preconnect" href="https://fonts.googleapis.com" />
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-<link href="https://fonts.googleapis.com/css2?family=Geist+Mono:wght@400;500;600;700&family=Instrument+Serif:ital@0;1&family=Manrope:wght@500;600;700;800&display=swap" rel="stylesheet" />
-<style>
-  :root {
-    --paper: #e9edf0;
-    --ink: #101616;
-    --ink-soft: #323d3c;
-    --muted: #65706f;
-    --line: rgba(16, 22, 22, 0.14);
-    --surface-solid: #fafcf7;
-    --sage: #2e7666;
-    --wrap: min(1220px, calc(100% - 40px));
-    --ease: cubic-bezier(0.16, 1, 0.3, 1);
-  }
-  * { box-sizing: border-box; }
-  html { scroll-behavior: smooth; text-size-adjust: 100%; }
-  body {
-    min-height: 100dvh;
-    margin: 0;
-    color: var(--ink);
-    background: var(--paper);
-    font-family: "Manrope", sans-serif;
-    line-height: 1.55;
-    -webkit-font-smoothing: antialiased;
-  }
-  a { color: var(--sage); text-decoration: none; }
-  a:hover { text-decoration: underline; }
-  .wrap { width: var(--wrap); margin: 0 auto; }
-  .nav {
-    position: sticky;
-    top: 0;
-    z-index: 10;
-    backdrop-filter: blur(18px);
-    background: rgba(233, 237, 240, 0.78);
-    border-bottom: 1px solid rgba(16, 22, 22, 0.08);
-  }
-  .nav-inner {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 22px;
-    min-height: 76px;
-  }
-  .brand {
-    display: inline-flex;
-    align-items: center;
-    gap: 11px;
-    font-weight: 800;
-    letter-spacing: -0.045em;
-    color: var(--ink);
-    text-decoration: none;
-  }
-  .brand-logo {
-    width: 34px;
-    height: 34px;
-    display: block;
-    object-fit: cover;
-    border-radius: 12px;
-    box-shadow: 0 12px 24px rgba(16, 22, 22, 0.12);
-  }
-  .nav-back {
-    font-family: "Geist Mono", monospace;
-    font-size: 12px;
-    font-weight: 600;
-    color: var(--muted);
-    padding: 9px 14px;
-    border-radius: 999px;
-    transition: color 180ms var(--ease), background 180ms var(--ease);
-  }
-  .nav-back:hover {
-    color: var(--ink);
-    background: rgba(250, 252, 247, 0.56);
-    text-decoration: none;
-  }
-  main { padding: 48px 0 96px; }
-  h1 {
-    font-family: "Instrument Serif", serif;
-    font-size: clamp(2rem, 4vw, 3rem);
-    font-weight: 400;
-    line-height: 1.15;
-    letter-spacing: -0.02em;
-    margin: 0 0 24px;
-  }
-  h2 {
-    font-size: 1.15rem;
-    font-weight: 700;
-    margin: 40px 0 12px;
-    letter-spacing: -0.01em;
-  }
-  p, ul { color: var(--ink-soft); margin: 0 0 16px; }
-  ul { padding-left: 22px; }
-  li { margin-bottom: 8px; }
-  .card {
-    background: var(--surface-solid);
-    border: 1px solid var(--line);
-    border-radius: 16px;
-    padding: 24px;
-    margin-bottom: 16px;
-  }
-  .card h3 {
-    font-size: 1rem;
-    font-weight: 700;
-    margin: 0 0 8px;
-  }
-  .card p { margin: 0; }
-  .section { max-width: 720px; }
-  footer {
-    border-top: 1px solid var(--line);
-    padding: 24px 0 48px;
-    font-size: 13px;
-    color: var(--muted);
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    gap: 16px;
-    flex-wrap: wrap;
-  }
-  footer a { color: var(--muted); }
-  footer a:hover { color: var(--ink); }
-  @media (max-width: 640px) {
-    .nav-inner { min-height: 64px; }
-    main { padding: 32px 0 64px; }
-  }
-</style>
-</head>
-<body>
-  <header class="nav">
-    <div class="wrap nav-inner">
-      <a class="brand" href="/">
-        <img class="brand-logo" src="/assets/app-icon.png" alt="" width="34" height="34" />
-        Sidemesh
-      </a>
-      <a class="nav-back" href="/">← Back</a>
-    </div>
-  </header>
+<Base
+  title="Support — Sidemesh"
+  description="Get help with Sidemesh. Common issues, setup guidance, and how to reach us."
+  path="/support"
+>
+  <div class="page">
+    <div class="container">
+      <header class="page__header">
+        <p class="kicker"><span class="node" aria-hidden="true"></span>Sidemesh · Help</p>
+        <h1>Support</h1>
+        <p>Quick answers to common questions and how to get in touch if you need more help.</p>
+      </header>
 
-  <main class="wrap">
-    <div class="section">
-      <h1>Support</h1>
-      <p>Quick answers to common questions and how to get in touch if you need more help.</p>
+      <div class="help-list">
+        <section class="help-item" aria-labelledby="help-start">
+          <h2 id="help-start">Getting started</h2>
+          <p>
+            Install the host on a trusted machine with <code>npm install -g sidemesh @openai/codex</code>,
+            then run <code>sidemesh up</code>. Open the app and scan the pairing QR code, or add the
+            host manually. The app will connect directly to your host over your private network.
+            The <a href={links.readme}>setup guide on GitHub</a> covers other agents and options.
+          </p>
+        </section>
 
-      <div class="card">
-        <h3>Getting started</h3>
-        <p>Install the daemon on a trusted host with <code>sidemesh setup</code>, then open the app and scan the pairing QR code or add the host manually. The app will connect directly to your host over your private network.</p>
-      </div>
+        <section class="help-item" aria-labelledby="help-reach">
+          <h2 id="help-reach">The app cannot reach my host</h2>
+          <p>
+            Make sure your device and host are on the same network or connected through Tailscale.
+            Verify the daemon is running with <code>sidemesh status</code>,
+            and run <code>sidemesh doctor</code> to check the host and its agents. Check that the host
+            address and token in the app match what the daemon printed during setup.
+          </p>
+        </section>
 
-      <div class="card">
-        <h3>The app cannot reach my host</h3>
-        <p>Make sure your device and host are on the same network or connected through Tailscale. Verify the daemon is running with <code>sidemesh status</code>. Check that the host address and token in the app match what the daemon printed during setup.</p>
-      </div>
+        <section class="help-item" aria-labelledby="help-notifications">
+          <h2 id="help-notifications">Notifications are not arriving</h2>
+          <p>
+            Enable notifications for Sidemesh in iOS Settings → Notifications. Background sync
+            also requires Background App Refresh to be enabled. The app checks for updates
+            periodically when in the background.
+          </p>
+        </section>
 
-      <div class="card">
-        <h3>Notifications are not arriving</h3>
-        <p>Enable notifications for Sidemesh in iOS Settings → Notifications. Background sync also requires Background App Refresh to be enabled. The app checks for updates periodically when in the background.</p>
-      </div>
+        <section class="help-item" aria-labelledby="help-live-activities">
+          <h2 id="help-live-activities">Live Activities are not showing</h2>
+          <p>
+            Live Activities require iOS 16.1 or later. Make sure they are enabled in
+            Settings → Sidemesh → Live Activities. They appear when an agent session is active.
+          </p>
+        </section>
 
-      <div class="card">
-        <h3>Live Activities are not showing</h3>
-        <p>Live Activities require iOS 16.1 or later. Make sure they are enabled in Settings → Sidemesh → Live Activities. They appear when an agent session is active.</p>
-      </div>
-
-      <div class="card">
-        <h3>Contact us</h3>
-        <p>For bugs and feature requests, open an issue on <a href="https://github.com/mukhtharcm/sidemesh/issues">GitHub</a>. Report security vulnerabilities privately through <a href="https://github.com/mukhtharcm/sidemesh/security/advisories/new">GitHub Security Advisories</a>; never put tokens, hostnames, logs, or private paths in a public issue.</p>
+        <section class="help-item" aria-labelledby="help-contact">
+          <h2 id="help-contact">Contact us</h2>
+          <p>
+            For bugs and feature requests, open an issue on <a href={links.issues}>GitHub</a>.
+            Report security vulnerabilities privately through <a href={links.securityAdvisory}>GitHub Security Advisories</a>;
+            never put tokens, hostnames, logs, or private paths in a public issue.
+          </p>
+          <p>For setup questions, you can also ask in the Sidemesh Discord.</p>
+          <div class="actions">
+            <a class="button button--primary" href={links.issues}>Open a GitHub issue</a>
+            <a class="button button--secondary" href={links.discord}>Join the Discord</a>
+          </div>
+        </section>
       </div>
     </div>
-  </main>
-
-  <footer class="wrap">
-    <span>© Sidemesh</span>
-    <nav aria-label="Footer">
-      <a href="/">Home</a>
-      <a href="/privacy">Privacy</a>
-    </nav>
-  </footer>
-</body>
-</html>
+  </div>
+</Base>

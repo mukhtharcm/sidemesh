@@ -5,15 +5,7 @@ import { fileURLToPath } from "node:url";
 import nodePath from "node:path";
 import { promisify } from "node:util";
 
-import {
-  isTermuxEnvironment,
-  supportsSystemdServiceManagement,
-  supportsTermuxServiceManagement,
-} from "./host-environment.js";
-import {
-  DEFAULT_TERMUX_SERVICE_NAME,
-  isTermuxServiceActive,
-} from "./termux-service.js";
+import { supportsSystemdServiceManagement } from "./host-environment.js";
 import type { NodeConfig, UpdateChannel } from "./types.js";
 
 const execFileAsync = promisify(execFile);
@@ -69,9 +61,6 @@ export async function detectInstallInfo(
   if (supportsSystemdServiceManagement()) {
     isManagedService = await isSystemdServiceActive().catch(() => false);
     serviceName = isManagedService ? "sidemesh" : null;
-  } else if (isTermuxEnvironment() && supportsTermuxServiceManagement()) {
-    isManagedService = await isTermuxServiceActive().catch(() => false);
-    serviceName = isManagedService ? DEFAULT_TERMUX_SERVICE_NAME : null;
   }
   const currentCommitSha =
     installType === "git" ? await readCurrentCommitSha(packageRoot) : null;

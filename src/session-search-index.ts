@@ -14,30 +14,10 @@ export interface SessionSearchResult {
   snippet: string | null;
 }
 
-export interface ProviderSearchIndexStats {
-  providerId: string;
-  providerKind: string;
-  indexedSessions: number;
-  lastIndexedAt: number | null;
-  lastError: string | null;
-}
-
-export interface SessionSearchIndexStats {
-  indexedSessions: number;
-  indexSizeMB: number;
-  providers: ProviderSearchIndexStats[];
-  backfillRunning: boolean;
-}
-
 export interface SearchFilter {
-  providerKind?: string;
-  providerId?: string;
   /** Apply configured ownership before the result limit. */
   providerIds?: string[];
-  cwd?: string;
   archived?: boolean;
-  updatedAfter?: number;
-  updatedBefore?: number;
 }
 
 export interface SessionSearchDocument {
@@ -115,7 +95,6 @@ function buildFts5MatchQuery(query: string): string {
 
 export class SessionSearchIndex {
   private db: DatabaseSync | null = null;
-  private backfillRunning = false;
 
   constructor(private readonly dbPath: string) {}
 
@@ -177,17 +156,12 @@ export class SessionSearchIndex {
     const conditions: string[] = [];
     const params: SQLInputValue[] = [];
     if (match) { conditions.push("fts.session_fts MATCH ?"); params.push(match); }
-    if (filter?.providerKind) { conditions.push("d.provider_kind = ?"); params.push(filter.providerKind); }
-    if (filter?.providerId) { conditions.push("d.provider_id = ?"); params.push(filter.providerId); }
     if (filter?.providerIds) {
       if (!filter.providerIds.length) return [];
       conditions.push(`d.provider_id IN (${filter.providerIds.map(() => "?").join(",")})`);
       params.push(...filter.providerIds);
     }
-    if (filter?.cwd) { conditions.push("substr(d.cwd, 1, length(?)) = ?"); params.push(filter.cwd, filter.cwd); }
     if (filter?.archived != null) { conditions.push("d.archived = ?"); params.push(filter.archived ? 1 : 0); }
-    if (filter?.updatedAfter != null) { conditions.push("d.updated_at >= ?"); params.push(filter.updatedAfter); }
-    if (filter?.updatedBefore != null) { conditions.push("d.updated_at <= ?"); params.push(filter.updatedBefore); }
     const rows = db.prepare(`SELECT d.session_id, d.summary,
         ${match ? "fts.rank, snippet(fts.session_fts, 1, '<<<', '>>>', '...', 48)" : "0 AS rank, NULL"} AS snippet
       FROM session_search_documents d
@@ -207,38 +181,6 @@ export class SessionSearchIndex {
       db.prepare("DELETE FROM session_search_documents WHERE session_id = ?").run(sessionId);
       db.exec("COMMIT");
     } catch (error) { db.exec("ROLLBACK"); throw error; }
-  }
-
-  setBackfillRunning(running: boolean): void { this.backfillRunning = running; }
-
-  getStats(): SessionSearchIndexStats {
-    const db = this.db;
-    if (!db) return { indexedSessions: 0, indexSizeMB: 0, providers: [], backfillRunning: this.backfillRunning };
-    const { count } = db.prepare("SELECT COUNT(*) AS count FROM session_search_documents").get() as { count: number };
-    const { page_count } = db.prepare("PRAGMA page_count").get() as { page_count: number };
-    const { page_size } = db.prepare("PRAGMA page_size").get() as { page_size: number };
-    const rows = db.prepare(`SELECT provider_id, provider_kind, COUNT(*) AS count, MAX(indexed_at) AS last_indexed_at
-      FROM session_search_documents GROUP BY provider_id`).all() as Array<{ provider_id: string; provider_kind: string; count: number; last_indexed_at: number }>;
-    const providers = new Map<string, ProviderSearchIndexStats>(rows.map((row) => [row.provider_id, {
-      providerId: row.provider_id, providerKind: row.provider_kind, indexedSessions: row.count,
-      lastIndexedAt: row.last_indexed_at, lastError: null,
-    }]));
-    const errors = db.prepare("SELECT key, value FROM session_search_meta WHERE key LIKE 'backfill_error:%'").all() as Array<{ key: string; value: string }>;
-    for (const row of errors) {
-      const id = row.key.slice("backfill_error:".length);
-      const error = JSON.parse(row.value) as { kind: string; message: string };
-      const provider = providers.get(id) ?? { providerId: id, providerKind: error.kind, indexedSessions: 0, lastIndexedAt: null, lastError: null };
-      providers.set(id, { ...provider, lastError: error.message });
-    }
-    return { indexedSessions: count, indexSizeMB: Math.round(page_count * page_size / 1024 / 1024 * 100) / 100,
-      providers: [...providers.values()], backfillRunning: this.backfillRunning };
-  }
-
-  setProviderError(providerId: string, error: string | null, providerKind = providerId): void {
-    if (!this.db) return;
-    if (error) this.db.prepare("INSERT OR REPLACE INTO session_search_meta (key, value) VALUES (?, ?)")
-      .run(`backfill_error:${providerId}`, JSON.stringify({ kind: providerKind, message: error }));
-    else this.db.prepare("DELETE FROM session_search_meta WHERE key = ?").run(`backfill_error:${providerId}`);
   }
 
   private database(): DatabaseSync {
