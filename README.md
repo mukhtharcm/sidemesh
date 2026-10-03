@@ -170,10 +170,6 @@ Current auth is a shared bearer token:
 Host-side features such as integrated terminals and browser tabs should stay
 disabled unless you intentionally need them.
 
-## More documentation
+## Maintainers
 
-- `docs/getting-started.md`
-- `docs/provider-adapter-contract.md`
-- `docs/dependency-runtime-compatibility.md`
-- `CONTRIBUTING.md`
-- `docs/release-playbook.md`
+Release steps live in `docs/release-playbook.md`.

@@ -261,7 +261,17 @@ not use Firebase Cloud Messaging. Before archiving a TestFlight build:
 4. Keep the APNs `.p8` key only in the relay's secret store. Never commit it or
    put it in a mobile build.
 
-See `docs/push-notifications.md` for the architecture and deployment commands.
+The relay's resource bindings are in `push-relay/wrangler.jsonc`. To deploy it,
+set the APNs secrets once, then apply migrations and deploy from `push-relay/`:
+
+```bash
+npx wrangler secret put APNS_KEY_ID
+npx wrangler secret put APNS_TEAM_ID
+npx wrangler secret put APNS_PRIVATE_KEY
+npm ci && npm run check && npm test
+npx wrangler d1 migrations apply sidemesh-push-relay --remote
+npx wrangler deploy
+```
 
 Before running TestFlight or macOS release workflows, bump and commit the mobile
 version in a PR:
