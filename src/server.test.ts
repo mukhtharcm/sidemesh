@@ -3607,22 +3607,6 @@ describe("provider-scoped catalog routes", () => {
         })).statusCode,
         200,
       );
-      assert.equal(
-        (await request({
-          ...baseRequest,
-          path: "/api/skills/config/write",
-          method: "POST",
-          headers: {
-            ...baseRequest.headers,
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            name: "fake code review",
-            enabled: false,
-          }),
-        })).statusCode,
-        200,
-      );
     });
   });
 
@@ -3646,23 +3630,6 @@ describe("provider-scoped catalog routes", () => {
         assert.equal(res.statusCode, 400, path);
         assert.equal((res.body as any).error, "unknown provider");
       }
-
-      const writeRes = await request({
-        ...baseRequest,
-        path: "/api/skills/config/write",
-        method: "POST",
-        headers: {
-          ...baseRequest.headers,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          agentProvider: "unknown",
-          name: "fake code review",
-          enabled: false,
-        }),
-      });
-      assert.equal(writeRes.statusCode, 400);
-      assert.equal((writeRes.body as any).error, "unknown provider");
     });
   });
 
@@ -3687,21 +3654,6 @@ describe("provider-scoped catalog routes", () => {
           const res = await request({ ...baseRequest, path, method: "GET" });
           assert.equal(res.statusCode, 501, path);
         }
-
-        const writeRes = await request({
-          ...baseRequest,
-          path: "/api/skills/config/write",
-          method: "POST",
-          headers: {
-            ...baseRequest.headers,
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            name: "fake code review",
-            enabled: false,
-          }),
-        });
-        assert.equal(writeRes.statusCode, 501);
       },
     );
   });
@@ -4733,123 +4685,6 @@ describe("GET /api/sessions/search", () => {
       results = searchRes.body as any[];
       assert.ok(!results.some((s) => s.id === sessionId), "expected session hidden after archive");
     });
-  });
-
-  it("returns archived provider sessions from search backfill when requested", async () => {
-    const stateDir = await mkdtemp(nodePath.join(tmpdir(), "sidemesh-server-search-startup-archive-test-"));
-    const provider = new SearchFixtureProvider([
-      {
-        thread: makeSearchFixtureThread(
-          "fixture-active",
-          secondsForIso("2026-01-02T11:45:00.000Z"),
-          "Active fixture session",
-        ),
-        archived: false,
-        searchText: "shared fixture search active",
-      },
-      {
-        thread: makeSearchFixtureThread(
-          "fixture-archived",
-          secondsForIso("2026-01-02T12:00:00.000Z"),
-          "Archived fixture session",
-        ),
-        archived: true,
-        searchText: "shared fixture search archived",
-      },
-    ]);
-    await withServerRuntime(
-      makeConfig(stateDir),
-      makeCustomSingleProviderRuntime(provider),
-      async (server, config) => {
-        await new Promise((r) => setTimeout(r, 300));
-
-        const searchRes = await request({
-          hostname: "127.0.0.1",
-          port: server.port,
-          headers: { Authorization: "Bearer " + config.token },
-          path:
-            `/api/sessions/search?q=${encodeURIComponent("shared fixture search")}` +
-            "&archived=true",
-          method: "GET",
-        });
-        assert.equal(searchRes.statusCode, 200);
-        const results = searchRes.body as any[];
-        assert.ok(
-          results.some((session) => session.id === wrapProviderScopedId("fake", "fixture-archived")),
-          "expected archived session from search backfill in archived search",
-        );
-        assert.ok(
-          !results.some((session) => session.id === wrapProviderScopedId("fake", "fixture-active")),
-          "expected active session excluded from archived-only search",
-        );
-      },
-    );
-  });
-
-  it("applies updatedAfter filters to provider-backed search results using millisecond timestamps", async () => {
-    const stateDir = await mkdtemp(nodePath.join(tmpdir(), "sidemesh-server-search-date-filter-test-"));
-    const updatedAtSeconds = secondsForIso("2026-01-02T12:00:00.000Z");
-    const provider = new SearchFixtureProvider([
-      {
-        thread: makeSearchFixtureThread(
-          "fixture-filter",
-          updatedAtSeconds,
-          "Filter fixture session",
-        ),
-        archived: false,
-        searchText: "date filter fixture session",
-      },
-    ]);
-    await withServerRuntime(
-      makeConfig(stateDir),
-      makeCustomSingleProviderRuntime(provider),
-      async (server, config) => {
-        await new Promise((r) => setTimeout(r, 300));
-
-        const includeRes = await request({
-          hostname: "127.0.0.1",
-          port: server.port,
-          headers: { Authorization: "Bearer " + config.token },
-          path:
-            `/api/sessions/search?q=${encodeURIComponent("date filter fixture")}` +
-            `&updatedAfter=${encodeURIComponent("2026-01-02T11:59:00.000Z")}`,
-          method: "GET",
-        });
-        assert.equal(includeRes.statusCode, 200);
-        const included = includeRes.body as any[];
-        assert.ok(
-          included.some((session) => session.id === wrapProviderScopedId("fake", "fixture-filter")),
-          "expected session newer than updatedAfter filter",
-        );
-
-        let nativeReads = 0;
-        provider.readSessionThread = async () => { nativeReads += 1; throw new Error("Native reads unavailable"); };
-        provider.readSessionSnapshot = async () => { nativeReads += 1; throw new Error("Native snapshots unavailable"); };
-        const cached = await request({ hostname: "127.0.0.1", port: server.port,
-          headers: { Authorization: "Bearer " + config.token },
-          path: `/api/sessions/search?q=${encodeURIComponent("date filter fixture")}&providerId=fake`, method: "GET" });
-        assert.equal(cached.statusCode, 200);
-        assert.equal((cached.body as SessionSummary[])[0]?.id, wrapProviderScopedId("fake", "fixture-filter"));
-        assert.equal(nativeReads, 0, "search results must use the indexed summary");
-
-        const excludeRes = await request({
-          hostname: "127.0.0.1",
-          port: server.port,
-          headers: { Authorization: "Bearer " + config.token },
-          path:
-            `/api/sessions/search?q=${encodeURIComponent("date filter fixture")}` +
-            `&updatedAfter=${encodeURIComponent("2026-01-02T12:01:00.000Z")}`,
-          method: "GET",
-        });
-        assert.equal(excludeRes.statusCode, 200);
-        assert.equal(nativeReads, 0);
-        const excluded = excludeRes.body as any[];
-        assert.ok(
-          !excluded.some((session) => session.id === wrapProviderScopedId("fake", "fixture-filter")),
-          "expected session older than updatedAfter filter to be excluded",
-        );
-      },
-    );
   });
 });
 

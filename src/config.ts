@@ -4,7 +4,6 @@ import { isAbsolute, join } from "node:path";
 
 import type {
   AgentProviderConfig,
-  AgentProviderConfigSummary,
   AgentProviderKind,
   HostBrowserPreviewConfig,
   HostTerminalConfig,
@@ -23,7 +22,6 @@ import {
   DEFAULT_AGENT_PROVIDER_KIND,
   isAgentProviderKind,
   resolveAgentProviderConfig,
-  summarizeAgentProviderConfig,
   supportedAgentProviderKinds,
 } from "./provider-registry.js";
 import { inferInstalledProviderConfigs } from "./provider-autodetect.js";
@@ -225,12 +223,6 @@ export async function rotatePersistedToken(
   };
   await saveConfig(rotated, { configPath: rotated.configPath });
   return { ...rotated, configExists: true };
-}
-
-export function summarizeProviderConfig(
-  provider: AgentProviderConfig,
-): AgentProviderConfigSummary {
-  return summarizeAgentProviderConfig(provider);
 }
 
 async function resolveProviderConfigs(

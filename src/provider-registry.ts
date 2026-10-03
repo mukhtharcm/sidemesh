@@ -489,10 +489,6 @@ const AGENT_PROVIDER_DEFINITIONS = [
   ACPX_PROVIDER_DEFINITION,
 ] as const;
 
-export function listAgentProviderDefinitions(): readonly AgentProviderDefinition[] {
-  return AGENT_PROVIDER_DEFINITIONS;
-}
-
 export function listAgentProviderDefinitionSummaries(): AgentProviderDefinitionSummary[] {
   return AGENT_PROVIDER_DEFINITIONS.map((definition) => ({
     kind: definition.kind,

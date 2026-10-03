@@ -23,7 +23,6 @@ import {
   type AgentSessionListOptions,
   type AgentSessionLogOptions, type AgentSessionSnapshot,
   type AgentSessionResumeOptions,
-  type AgentSkillConfigWriteRequest,
   type AgentSkillListOptions,
   type AgentSubmitInputRequest,
   type AgentSubmitInputResult,
@@ -115,7 +114,6 @@ export const FAKE_PROVIDER_CAPABILITIES: AgentProviderCapabilities = {
     profiles: true,
     accessModes: false,
     skills: true,
-    skillManagement: true,
   },
   runtimeControls: {
     model: true,
@@ -219,7 +217,6 @@ function disableConfiguration(capabilities: AgentProviderCapabilities): void {
   capabilities.configuration.profiles = false;
   capabilities.configuration.accessModes = false;
   capabilities.configuration.skills = false;
-  capabilities.configuration.skillManagement = false;
 }
 
 function disableRuntimeControls(capabilities: AgentProviderCapabilities): void {
@@ -251,7 +248,6 @@ export class FakeAgentProvider
   private readonly loadedSessionIds = new Set<string>();
   private readonly activeTurnIds = new Map<string, string>();
   private readonly pendingApprovals = new Map<string, PendingFakeApproval>();
-  private readonly skillEnabled = new Map<string, boolean>();
 
   public constructor(options: FakeAgentProviderOptions = {}) {
     super();
@@ -538,40 +534,27 @@ export class FakeAgentProvider
         description: "Exercises skill mention UI and provider-neutral skill inputs.",
         path: "fake://skills/code-review/SKILL.md",
         scope: "system",
-        enabled: this.isSkillEnabled("fake code review", true),
+        enabled: true,
       }),
       buildSkill({
         name: "fake debugging",
         description: "Creates deterministic tool, approval, and transcript scenarios.",
         path: "fake://skills/debugging/SKILL.md",
         scope: "admin",
-        enabled: this.isSkillEnabled("fake debugging", true),
+        enabled: true,
       }),
       buildSkill({
         name: "fake workspace skill",
         description: "Represents a workspace-local skill for the current cwd.",
         path: workspacePath,
         scope: "repo",
-        enabled: this.isSkillEnabled(workspacePath, true),
+        enabled: true,
       }),
     ];
     return {
       cwd: options.cwd,
       skills,
       errors: [],
-    };
-  }
-
-  public async writeSkillConfig(
-    request: AgentSkillConfigWriteRequest,
-  ): Promise<unknown> {
-    this.skillEnabled.set(request.path ?? request.name ?? "", request.enabled);
-    this.emit("liveEvent", { type: "skills_changed" });
-    return {
-      ok: true,
-      path: request.path,
-      name: request.name,
-      enabled: request.enabled,
     };
   }
 
@@ -1393,10 +1376,6 @@ export class FakeAgentProvider
     session.thread.updatedAt = nowSeconds();
   }
 
-  private isSkillEnabled(key: string, fallback: boolean): boolean {
-    return this.skillEnabled.get(key) ?? this.skillEnabled.get(skillNameKey(key)) ?? fallback;
-  }
-
   private supportsToolingScenario(): boolean {
     return this.capabilityProfile !== "chat-only" && this.capabilityProfile !== "minimal";
   }
@@ -1686,10 +1665,6 @@ function buildSkill(options: {
       defaultPrompt: `Use $${options.name} in fake provider mode.`,
     },
   };
-}
-
-function skillNameKey(value: string): string {
-  return value.toLowerCase().trim();
 }
 
 function limitTail<T>(items: T[], limit: number | null): T[] {
