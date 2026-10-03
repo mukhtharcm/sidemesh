@@ -4,7 +4,6 @@ import { dirname, join } from "node:path";
 import { promisify } from "node:util";
 
 import {
-  isTermuxEnvironment,
   resolveDefaultShell,
   supportsSystemdServiceManagement,
 } from "./host-environment.js";
@@ -380,11 +379,6 @@ export function assertSystemdHost(options: { requireRoot: boolean }): void {
     throw new Error("Sidemesh service helpers currently support Linux/systemd only.");
   }
   if (!supportsSystemdServiceManagement()) {
-    if (isTermuxEnvironment()) {
-      throw new Error(
-        "Sidemesh service helpers are not available in Termux. Use `sidemesh start` and `sidemesh stop` to manage the background daemon there.",
-      );
-    }
     throw new Error(
       "Sidemesh service helpers require a Linux host with `systemctl` available.",
     );
