@@ -342,13 +342,6 @@ export interface SessionGitDiff {
   maxChars: number;
 }
 
-export interface WorkspaceSummary {
-  cwd: string;
-  label: string;
-  sessionCount: number;
-  lastUsedAt: number;
-}
-
 export interface SkillInterfaceSummary {
   displayName?: string | null;
   shortDescription?: string | null;

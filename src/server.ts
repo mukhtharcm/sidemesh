@@ -55,7 +55,6 @@ import type {
   ThreadRecord,
   UsageObservation,
   UsageSnapshotResponse,
-  WorkspaceSummary,
 } from "./types.js";
 import {
   parsePendingActionResponseBody,
@@ -725,7 +724,6 @@ export async function startServer(
       defaultProviderCapabilities,
       hostCapabilities,
       searchSessions: hostCapabilities.sessions.search,
-      searchIndexStats: searchIndex.getStats(),
       supportedProviders,
       sessionAliases: providerRuntime.sessionAliases,
       startedAt: process.uptime(),
@@ -761,24 +759,6 @@ export async function startServer(
       });
     },
   );
-
-  app.get("/api/providers", (c) => {
-    return jsonResponse(c, {
-      currentProvider: providerRuntime.defaultProviderKind,
-      currentProviderId: providerRuntime.defaultProviderId,
-      sessionAliases: providerRuntime.sessionAliases,
-      providers: providerRuntime.providers.map((entry) => ({
-        ...entry.definitionSummary,
-        id: entry.id ?? entry.kind,
-        config: entry.configSummary,
-        capabilities: entry.capabilities,
-        version: entry.version ?? "unknown",
-      state: entry.state,
-      error: entry.error,
-        isDefault: entry === providerRuntime.defaultProvider,
-      })),
-    });
-  });
 
   app.get("/api/push/subscriptions", (c) => {
     return jsonResponse(c, { subscriptions: pushNotifications.listSubscriptions() });
@@ -1035,44 +1015,12 @@ export async function startServer(
         100,
       ));
       if (normalizedQuery.length < 2) {
-        const hasFilters =
-          asString(query.providerId) ||
-          asString(query.provider) ||
-          asString(query.cwd) ||
-          query.archived !== undefined ||
-          asString(query.updatedAfter) ||
-          asString(query.updatedBefore);
-        if (!hasFilters) {
-          return jsonResponse(c, { error: "Query must be at least 2 characters" }, 400);
-        }
+        return jsonResponse(c, { error: "Query must be at least 2 characters" }, 400);
       }
-      const filter: SearchFilter = { providerIds: providerRuntime.providers.map((entry) => entry.id) };
-      const providerId = asString(query.providerId);
-      if (providerId) filter.providerId = providerId;
-      const providerFilter = asString(query.provider);
-      if (providerFilter) {
-        filter.providerKind = providerFilter;
-      }
-      const cwdFilter = asString(query.cwd);
-      if (cwdFilter) {
-        filter.cwd = cwdFilter;
-      }
-      const archivedFilter = query.archived;
-      if (archivedFilter === "true") {
-        filter.archived = true;
-      } else if (archivedFilter === "false") {
-        filter.archived = false;
-      } else {
-        filter.archived = false;
-      }
-      const updatedAfter = parseTimestamp(query.updatedAfter);
-      if (updatedAfter != null) {
-        filter.updatedAfter = updatedAfter;
-      }
-      const updatedBefore = parseTimestamp(query.updatedBefore);
-      if (updatedBefore != null) {
-        filter.updatedBefore = updatedBefore;
-      }
+      const filter: SearchFilter = {
+        providerIds: providerRuntime.providers.map((entry) => entry.id),
+        archived: false,
+      };
       await ensureSearchBackfill();
       const searchResults = await searchIndex.search(normalizedQuery, limit, filter);
       const sessions = searchResults.map((result) => ({
@@ -1113,17 +1061,6 @@ export async function startServer(
     },
   );
 
-  app.get(
-    "/api/workspaces",
-    async (c) => {
-      if (!providerRuntime.providers.some((entry) => entry.capabilities.sessions.history)) {
-        return jsonResponse(c, { error: "No provider supports workspace history" }, 501);
-      }
-      const sessions = await loadRecentSessions(null, "none");
-      return jsonResponse(c, buildWorkspaces(sessions));
-    },
-  );
-
   registerFsRoutes(app, {
     listSessions: () =>
       listSessions(
@@ -1142,7 +1079,7 @@ export async function startServer(
       if (
         !sessionProvider ||
         !sessionProvider.provider.capabilities.sessions.history ||
-        !hasProviderMethod(sessionProvider.provider, "readSessionLog")
+        !hasProviderMethod(sessionProvider.provider, "readSessionSnapshot")
       ) {
         return false;
       }
@@ -1183,20 +1120,6 @@ export async function startServer(
         replaceExisting: body?.replaceExisting === true,
       });
       return jsonResponse(c, terminal, 201);
-    },
-  );
-
-  app.post(
-    "/api/terminals/:terminalId/resize",
-    async (c) => {
-      const body = await readJsonBody(c);
-      requireHostCapability(hostCapabilities.workspace.terminal, "integrated terminal");
-      const terminalId = (c.req.param("terminalId") ?? "");
-      return jsonResponse(c, terminalRegistry.resize(
-          terminalId,
-          asInteger(body?.cols),
-          asInteger(body?.rows),
-        ));
     },
   );
 
@@ -1262,7 +1185,7 @@ export async function startServer(
         return jsonResponse(c, { error: "unknown provider" }, 400);
       }
       requireProviderCapability(sessionProvider.provider, sessionProvider.provider.capabilities.sessions.history, "session history", "readSessionThread");
-      requireProviderCapability(sessionProvider.provider, sessionProvider.provider.capabilities.sessions.history, "session log", "readSessionLog");
+      requireProviderCapability(sessionProvider.provider, sessionProvider.provider.capabilities.sessions.history, "session log", "readSessionSnapshot");
       const query = readQuery(c);
       const messageLimit = Math.max(1, asInteger(query.messageLimit) ?? 200);
       const activityLimit = Math.max(1, asInteger(query.activityLimit) ?? 200);
@@ -1291,7 +1214,7 @@ export async function startServer(
         return jsonResponse(c, { error: "unknown provider" }, 400);
       }
       requireProviderCapability(sessionProvider.provider, sessionProvider.provider.capabilities.sessions.history, "session resources", "readSessionThread");
-      requireProviderCapability(sessionProvider.provider, sessionProvider.provider.capabilities.sessions.history, "session resources", "readSessionLog");
+      requireProviderCapability(sessionProvider.provider, sessionProvider.provider.capabilities.sessions.history, "session resources", "readSessionSnapshot");
       return jsonResponse(c, await readSessionResources(
           sessionId,
           sessionState,
@@ -1369,35 +1292,6 @@ export async function startServer(
 
       const forceReload = parseQueryBool(query.forceReload);
       return jsonResponse(c, await selectedProvider.provider.listSkills!({ cwd, forceReload }));
-    },
-  );
-
-  app.post(
-    "/api/skills/config/write",
-    async (c) => {
-      const body = await readJsonBody(c);
-      const requestedProvider = asString(body?.agentProvider) || null;
-      const selectedProvider = await startedProviderForKind(requestedProvider);
-      if (!selectedProvider) {
-        return jsonResponse(c, { error: "unknown provider" }, 400);
-      }
-      requireProviderCapability(selectedProvider.provider, selectedProvider.provider.capabilities.configuration.skillManagement, "skill configuration", "writeSkillConfig");
-      const path = asString(body?.path);
-      const name = asString(body?.name);
-      const enabled = parseOptionalBool(body?.enabled);
-      if (enabled === null) {
-        return jsonResponse(c, { error: "enabled is required" }, 400);
-      }
-      if ((path && name) || (!path && !name)) {
-        return jsonResponse(c, { error: "provide exactly one of path or name" }, 400);
-      }
-
-      const result = await selectedProvider.provider.writeSkillConfig!({
-        path,
-        name,
-        enabled,
-      });
-      return jsonResponse(c, result);
     },
   );
 
@@ -1964,29 +1858,25 @@ export async function startServer(
   let searchIndexBackfill: Promise<void> | null = null;
   function ensureSearchBackfill(): Promise<void> {
     searchIndexBackfill ??= (async () => {
-      searchIndex.setBackfillRunning(true);
-      try {
-        for (const entry of providerRuntime.providers) {
-          if (closing) break;
-          if (!entry.capabilities.sessions.history) continue;
-          searchIndex.setProviderError(entry.id, null);
-          try {
-            const provider = await providerRuntime.ensure(entry);
-            if (!hasProviderMethod(provider, "listSessionThreads") || !hasProviderMethod(provider, "readSessionSnapshot")) continue;
-            for (const archived of [false, true]) {
-              const threads = await provider.listSessionThreads({ limit: 200, archived, includeSubAgents: false });
-              for (const thread of threads) {
-                if (closing) break;
-                const sessionId = wrapProviderScopedId(entry.id, thread.id);
-                if (sessionSubAgentForThread(thread)) { await searchIndex.remove(sessionId); continue; }
-                await indexSessionForSearch(searchIndex, sessionState, sessionId, archived);
-              }
+      for (const entry of providerRuntime.providers) {
+        if (closing) break;
+        if (!entry.capabilities.sessions.history) continue;
+        try {
+          const provider = await providerRuntime.ensure(entry);
+          if (!hasProviderMethod(provider, "listSessionThreads") || !hasProviderMethod(provider, "readSessionSnapshot")) continue;
+          for (const archived of [false, true]) {
+            const threads = await provider.listSessionThreads({ limit: 200, archived, includeSubAgents: false });
+            for (const thread of threads) {
+              if (closing) break;
+              const sessionId = wrapProviderScopedId(entry.id, thread.id);
+              if (sessionSubAgentForThread(thread)) { await searchIndex.remove(sessionId); continue; }
+              await indexSessionForSearch(searchIndex, sessionState, sessionId, archived);
             }
-          } catch (error) {
-            searchIndex.setProviderError(entry.id, error instanceof Error ? error.message : String(error), entry.kind);
           }
+        } catch (error) {
+          console.warn(`[search] backfill failed for ${entry.id}: ${error instanceof Error ? error.message : String(error)}`);
         }
-      } finally { searchIndex.setBackfillRunning(false); }
+      }
     })();
     return searchIndexBackfill;
   }
@@ -2409,35 +2299,9 @@ export async function mergeRecentUnindexedThreads(
     .slice(0, limit);
 }
 
-function buildWorkspaces(sessions: SessionSummary[]): WorkspaceSummary[] {
-  const grouped = new Map<string, WorkspaceSummary>();
-  for (const session of sessions) {
-    const label = session.cwd.split("/").filter(Boolean).pop() || session.cwd;
-    const existing = grouped.get(session.cwd);
-    if (!existing) {
-      grouped.set(session.cwd, {
-        cwd: session.cwd,
-        label,
-        sessionCount: 1,
-        lastUsedAt: session.updatedAt,
-      });
-      continue;
-    }
-    existing.sessionCount += 1;
-    existing.lastUsedAt = Math.max(existing.lastUsedAt, session.updatedAt);
-  }
-  return [...grouped.values()].sort(
-    (left, right) => right.lastUsedAt - left.lastUsedAt,
-  );
-}
-
 async function listPendingActions(
   providerRuntime: AgentProviderRuntime,
   pendingActions: Map<string, AgentPendingAction>,
-  reconcileStatus?: (
-    sessionId: string,
-    observedStatus: LiveThreadStatus,
-  ) => void,
 ): Promise<PendingAction[]> {
   const actions = [...pendingActions.values()].sort(
     (left, right) => right.requestedAt - left.requestedAt,
@@ -2463,7 +2327,6 @@ async function listPendingActions(
       if (!session) {
         return toPublicPendingAction(action);
       }
-      reconcileStatus?.(action.sessionId, threadStatusPhase(session));
       if (!pendingActions.has(action.id)) {
         return null;
       }
@@ -2870,22 +2733,6 @@ function asBoolean(value: unknown): boolean | null {
   return typeof value === "boolean" ? value : null;
 }
 
-function parseTimestamp(value: unknown): number | null {
-  if (typeof value === "number" && Number.isFinite(value)) {
-    return Math.trunc(value);
-  }
-  if (typeof value === "string" && value.trim()) {
-    const trimmed = value.trim();
-    if (/^-?\d+$/.test(trimmed)) {
-      const parsedInt = Number.parseInt(trimmed, 10);
-      return Number.isFinite(parsedInt) ? parsedInt : null;
-    }
-    const parsed = Date.parse(trimmed);
-    if (!Number.isNaN(parsed)) return parsed;
-  }
-  return null;
-}
-
 function threadTimestampMillis(value: number): number {
   const timestamp = Math.trunc(value);
   return timestamp >= 1_000_000_000_000 ? timestamp : timestamp * 1000;
@@ -2919,14 +2766,6 @@ function resolvedSessionStatus(
 
 function threadStatusPhase(thread: ThreadRecord): LiveThreadStatus {
   return normalizeThreadStatusPhase(thread.status?.phase ?? thread.status?.type);
-}
-
-function isRunningThreadStatus(status: LiveThreadStatus | null | undefined): boolean {
-  return (
-    status === "running" ||
-    status === "waiting_for_input" ||
-    status === "waiting_for_approval"
-  );
 }
 
 

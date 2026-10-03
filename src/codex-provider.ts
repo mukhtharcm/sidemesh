@@ -10,7 +10,6 @@ import {
   type AgentAccessModeListOptions,
   type AgentModelListOptions,
   type AgentProfileListOptions,
-  type AgentSkillConfigWriteRequest,
   type AgentSkillListOptions,
   type AgentSessionListOptions,
   type AgentSessionResumeOptions,
@@ -439,14 +438,6 @@ export class CodexAgentProvider
 
   public async listSkills(options: AgentSkillListOptions): Promise<SkillCatalogEntry> {
     return listCodexSkills(this.bridge, options);
-  }
-
-  public writeSkillConfig(request: AgentSkillConfigWriteRequest): Promise<unknown> {
-    return this.bridge.request("skills/config/write", {
-      path: request.path ?? undefined,
-      name: request.name ?? undefined,
-      enabled: request.enabled,
-    });
   }
 
   public listModels(options: AgentModelListOptions): Promise<ModelSummary[]> {
@@ -2923,7 +2914,6 @@ export const CODEX_PROVIDER_CAPABILITIES: AgentProviderCapabilities = {
     profiles: true,
     accessModes: true,
     skills: true,
-    skillManagement: true,
   },
   runtimeControls: {
     model: true,

@@ -1,1725 +1,283 @@
 ---
-// Landing page — custom layout, not Starlight
-const testFlightUrl = "/testflight";
-const discordUrl = "/discord";
-const githubUrl = "https://github.com/mukhtharcm/sidemesh";
-const homepageOgImageUrl = new URL("/assets/og-card-v1.png", Astro.site);
+// The landing page: a day away from your desk, told in colour fields with a
+// phone that follows the story.
+import Base from '../layouts/Base.astro';
+import AwayScreen from '../components/AwayScreen.astro';
+import { links } from '../site.ts';
+
+type ScreenKind = 'live' | 'approve' | 'review' | 'question' | 'quiet';
+
+const moments: {
+  id: string;
+  time: string;
+  band: string;
+  kind: ScreenKind;
+  where: string;
+  title: string;
+  text: string;
+}[] = [
+  {
+    id: 't-1012',
+    time: '10:12',
+    band: 'day',
+    kind: 'approve',
+    where: 'In the coffee line',
+    title: 'It asks. You decide.',
+    text: 'Codex wants to run a command. The request reaches your phone with the command and the folder in plain sight. Approve or decline, and the work carries on at your laptop.',
+  },
+  {
+    id: 't-1305',
+    time: '13:05',
+    band: 'noon',
+    kind: 'review',
+    where: 'At lunch',
+    title: 'Check the work.',
+    text: 'Pi finished on the workstation. Read its reply, look through the changed files and the diff, and send a follow-up if it missed something.',
+  },
+  {
+    id: 't-1748',
+    time: '17:48',
+    band: 'dusk',
+    kind: 'question',
+    where: 'On the train home',
+    title: 'Answer in a tap.',
+    text: 'Copilot CLI on your cloud server has a question. Pick an answer and it carries on. Every machine you pair shows up in the same app.',
+  },
+  {
+    id: 't-2310',
+    time: '23:10',
+    band: 'night',
+    kind: 'quiet',
+    where: 'Before bed',
+    title: 'Nothing waiting.',
+    text: 'Every session from every machine, in one list you can search later. Tonight there is nothing left to decide.',
+  },
+];
+
+const day = [{ id: 't-0840', time: '08:40', kind: 'live' as ScreenKind }, ...moments];
+
+const agents = [
+  { name: 'Codex', note: 'The default setup' },
+  { name: 'Pi', note: 'Supported' },
+  { name: 'GitHub Copilot CLI', note: 'Supported' },
+  { name: 'ACP agents', note: 'Agents that speak the Agent Client Protocol' },
+  { name: 'OpenCode', note: 'In development' },
+];
+
+const safeguards = [
+  {
+    title: 'Private network only',
+    text: 'Connect over Tailscale, a VPN or your own network. The host is not meant for the public internet.',
+  },
+  {
+    title: 'A token on every request',
+    text: 'Pairing gives the app an access token. Requests without it are refused.',
+  },
+  {
+    title: 'Powerful tools start off',
+    text: 'The host terminal and browser tabs stay disabled until you turn them on.',
+  },
+  {
+    title: 'No account, no analytics',
+    text: 'The app has no Sidemesh account, ads or third-party analytics.',
+  },
+];
+
+const steps = [
+  { command: 'npm install -g sidemesh @openai/codex', text: 'Install the host and Codex. Needs Node.js 22.19 or newer.' },
+  { command: 'sidemesh up', text: 'Start the host and show the pairing QR code. Scan it in the app.' },
+  { command: 'sidemesh service install', text: 'Keep the host running after a restart.' },
+];
+
+const digits = (time: string) => time.split('');
 ---
-<!doctype html>
-<html lang="en">
-<head>
-<meta charset="utf-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Sidemesh — Your agent workstation, from anywhere</title>
-<meta name="description" content="Run coding agents on your own Mac, VPS, or workstation. Control sessions, approvals, files, terminals, and browser tabs from your phone or desktop." />
-<meta name="theme-color" content="#0d0f14" />
-<meta property="og:title" content="Sidemesh — Your agent workstation, from anywhere" />
-<meta property="og:description" content="Sidemesh pairs a small daemon on your own machines with an iOS app for sessions, approvals, files, terminals, and browser tabs." />
-<meta property="og:type" content="website" />
-<meta property="og:image" content={homepageOgImageUrl.toString()} />
-<meta property="og:image:width" content="1200" />
-<meta property="og:image:height" content="630" />
-<meta property="og:image:alt" content="Sidemesh — agent workstation control from anywhere." />
-<meta name="twitter:card" content="summary_large_image" />
-<meta name="twitter:image" content={homepageOgImageUrl.toString()} />
-<meta name="twitter:image:alt" content="Sidemesh — agent workstation control from anywhere." />
-<meta name="twitter:site" content="@mukhtharcm" />
-<meta name="twitter:creator" content="@mukhtharcm" />
-<link rel="icon" type="image/png" href="/assets/favicon.png" />
-<link rel="apple-touch-icon" href="/assets/app-icon.png" />
-<link rel="preconnect" href="https://fonts.googleapis.com" />
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-<link href="https://fonts.googleapis.com/css2?family=Geist+Mono:wght@400;500;600;700&family=Instrument+Serif:ital@0;1&family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
-<style>
-  /* ── Design tokens ── */
-  :root {
-    --bg:             #0d0f14;
-    --bg-2:           #131519;
-    --bg-3:           #191c23;
-    --border:         rgba(255, 255, 255, 0.08);
-    --border-strong:  rgba(255, 255, 255, 0.14);
-    --text:           #ece9e3;
-    --text-2:         #8b8e9c;
-    --text-3:         #4d5060;
-    --accent:         #f97316;
-    --accent-dim:     rgba(249, 115, 22, 0.12);
-    --green:          #34d399;
-    --green-dim:      rgba(52, 211, 153, 0.08);
-    --terminal-bg:    #07090d;
-    --ease:           cubic-bezier(0.16, 1, 0.3, 1);
-    --wrap:           min(1100px, calc(100% - 48px));
-    --r:              16px;
-  }
-
-  /* ── Reset ── */
-  *, *::before, *::after { box-sizing: border-box; }
-
-  html {
-    scroll-behavior: smooth;
-    text-size-adjust: 100%;
-  }
-
-  body {
-    margin: 0;
-    overflow-x: hidden;
-    color: var(--text);
-    background-color: var(--bg);
-    background-image:
-      radial-gradient(ellipse 80% 50% at 12% -8%, rgba(249, 115, 22, 0.07), transparent),
-      radial-gradient(ellipse 60% 40% at 88% 14%, rgba(52, 211, 153, 0.04), transparent);
-    font-family: "Manrope", sans-serif;
-    font-size: 16px;
-    line-height: 1.55;
-    -webkit-font-smoothing: antialiased;
-  }
-
-  ::selection {
-    background: rgba(249, 115, 22, 0.2);
-  }
-
-  a { color: inherit; text-decoration: none; }
-  p, li { text-wrap: pretty; margin: 0; }
-  code { font-family: "Geist Mono", monospace; }
-
-  .wrap {
-    width: var(--wrap);
-    margin: 0 auto;
-  }
-
-  /* ── Skip link ── */
-  .skip-link {
-    position: fixed;
-    top: 12px;
-    left: 12px;
-    z-index: 40;
-    padding: 8px 14px;
-    border: 1px solid var(--border-strong);
-    border-radius: 999px;
-    background: var(--bg-2);
-    font-family: "Geist Mono", monospace;
-    font-size: 12px;
-    transform: translateY(-200%);
-    transition: transform 180ms var(--ease);
-  }
-
-  .skip-link:focus {
-    transform: translateY(0);
-  }
-
-  /* ── Nav ── */
-  .nav {
-    position: sticky;
-    top: 0;
-    z-index: 20;
-    border-bottom: 1px solid var(--border);
-    background: rgba(13, 15, 20, 0.88);
-    backdrop-filter: blur(20px);
-    -webkit-backdrop-filter: blur(20px);
-  }
-
-  .nav-inner {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    min-height: 70px;
-  }
-
-  .brand {
-    display: inline-flex;
-    align-items: center;
-    gap: 10px;
-    font-weight: 800;
-    letter-spacing: -0.04em;
-    flex-shrink: 0;
-    margin-right: auto;
-  }
-
-  .brand-logo {
-    width: 30px;
-    height: 30px;
-    border-radius: 9px;
-    box-shadow: 0 0 0 1px var(--border-strong);
-    display: block;
-  }
-
-  .nav-links {
-    display: flex;
-    flex-wrap: nowrap;
-    gap: 2px;
-    font-family: "Geist Mono", monospace;
-    font-size: 12px;
-    color: var(--text-2);
-  }
-
-  .nav-links a {
-    padding: 8px 11px;
-    border-radius: 8px;
-    white-space: nowrap;
-    transition: color 150ms, background 150ms;
-  }
-
-  .nav-links a:hover,
-  .nav-links a:focus-visible {
-    color: var(--text);
-    background: rgba(255, 255, 255, 0.05);
-  }
-
-  .nav-cta {
-    margin-left: 10px;
-    flex-shrink: 0;
-  }
-
-  /* ── Buttons ── */
-  .btn {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    gap: 7px;
-    min-height: 42px;
-    padding: 10px 18px;
-    border-radius: 10px;
-    border: 1px solid transparent;
-    font-family: "Geist Mono", monospace;
-    font-size: 12px;
-    font-weight: 600;
-    cursor: pointer;
-    white-space: nowrap;
-    transition:
-      transform 200ms var(--ease),
-      background 200ms var(--ease),
-      border-color 200ms var(--ease),
-      box-shadow 200ms var(--ease);
-  }
-
-  .btn-primary {
-    background: var(--accent);
-    border-color: var(--accent);
-    color: #fff;
-    box-shadow: 0 0 0 0 rgba(249, 115, 22, 0.3);
-  }
-
-  .btn-primary:hover,
-  .btn-primary:focus-visible {
-    background: #ea6d10;
-    border-color: #ea6d10;
-    box-shadow: 0 0 0 4px rgba(249, 115, 22, 0.16);
-    transform: translateY(-1px);
-  }
-
-  .btn-secondary {
-    background: rgba(255, 255, 255, 0.05);
-    border-color: var(--border-strong);
-    color: var(--text);
-  }
-
-  .btn-secondary:hover,
-  .btn-secondary:focus-visible {
-    background: rgba(255, 255, 255, 0.09);
-    transform: translateY(-1px);
-  }
-
-  .btn-ghost {
-    background: transparent;
-    border-color: transparent;
-    color: var(--text-2);
-    padding-left: 4px;
-    padding-right: 4px;
-  }
-
-  .btn-ghost:hover,
-  .btn-ghost:focus-visible {
-    color: var(--text);
-    background: transparent;
-  }
-
-  .btn-ghost::after {
-    content: " →";
-    opacity: 0.6;
-  }
-
-  .btn:active {
-    transform: translateY(1px) scale(0.99);
-  }
-
-  /* ── Eyebrow label ── */
-  .eyebrow {
-    display: inline-flex;
-    align-items: center;
-    gap: 9px;
-    color: var(--accent);
-    font-family: "Geist Mono", monospace;
-    font-size: 11px;
-    font-weight: 600;
-    letter-spacing: 0.12em;
-    text-transform: uppercase;
-  }
-
-  .eyebrow::before {
-    display: inline-block;
-    width: 6px;
-    height: 6px;
-    border-radius: 50%;
-    background: var(--accent);
-    box-shadow: 0 0 0 3px var(--accent-dim);
-    content: "";
-    flex-shrink: 0;
-  }
-
-  /* ── Hero ── */
-  .hero {
-    padding: 88px 0 72px;
-  }
-
-  .hero-grid {
-    display: grid;
-    grid-template-columns: minmax(0, 0.95fr) minmax(420px, 0.8fr);
-    gap: 56px;
-    align-items: center;
-  }
-
-  .hero h1 {
-    margin: 20px 0 16px;
-    font-family: "Instrument Serif", serif;
-    font-size: clamp(3rem, 6vw, 5.5rem);
-    font-weight: 400;
-    line-height: 0.94;
-    letter-spacing: -0.04em;
-    text-wrap: balance;
-  }
-
-  .hero h1 em {
-    font-style: italic;
-    color: var(--accent);
-  }
-
-  .hero .lede {
-    max-width: 32rem;
-    color: var(--text-2);
-    font-size: 1.05rem;
-    line-height: 1.68;
-  }
-
-  .hero-actions {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 10px;
-    margin-top: 28px;
-  }
-
-  .hero-pills {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 8px;
-    margin-top: 26px;
-    padding-top: 22px;
-    border-top: 1px solid var(--border);
-  }
-
-  .pill {
-    display: inline-flex;
-    align-items: center;
-    gap: 7px;
-    padding: 6px 12px;
-    border: 1px solid var(--border);
-    border-radius: 999px;
-    background: rgba(255, 255, 255, 0.03);
-    color: var(--text-2);
-    font-family: "Geist Mono", monospace;
-    font-size: 11px;
-    font-weight: 500;
-  }
-
-  .pill::before {
-    display: inline-block;
-    width: 5px;
-    height: 5px;
-    border-radius: 50%;
-    background: var(--green);
-    box-shadow: 0 0 0 3px var(--green-dim);
-    content: "";
-    flex-shrink: 0;
-  }
-
-  /* ── Terminal block ── */
-  .terminal {
-    border-radius: 18px;
-    border: 1px solid var(--border-strong);
-    background: var(--terminal-bg);
-    overflow: hidden;
-    box-shadow:
-      0 0 0 1px rgba(255, 255, 255, 0.03),
-      0 32px 80px rgba(0, 0, 0, 0.55),
-      0 8px 24px rgba(0, 0, 0, 0.3);
-  }
-
-  .terminal-bar {
-    display: flex;
-    align-items: center;
-    gap: 7px;
-    padding: 13px 16px;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.06);
-  }
-
-  .terminal-dot {
-    width: 10px;
-    height: 10px;
-    border-radius: 50%;
-  }
-
-  .terminal-dot:nth-child(1) { background: #ff5f57; }
-  .terminal-dot:nth-child(2) { background: #febc2e; }
-  .terminal-dot:nth-child(3) { background: #28c840; }
-
-  .terminal-title {
-    margin-left: 6px;
-    font-family: "Geist Mono", monospace;
-    font-size: 11px;
-    color: var(--text-3);
-    letter-spacing: 0.02em;
-  }
-
-  .terminal-body {
-    padding: 22px;
-    font-family: "Geist Mono", monospace;
-    font-size: 13px;
-    line-height: 2;
-    color: rgba(255, 255, 255, 0.72);
-  }
-
-  .t-dim   { color: var(--text-3); }
-  .t-cmt   { color: #4d5870; }
-  .t-prompt { color: var(--accent); font-weight: 600; }
-  .t-cmd   { color: var(--text); }
-  .t-ok    { color: var(--green); }
-  .t-val   { color: #93c5fd; }
-  .t-gap   { display: block; height: 4px; }
-
-  /* ── Section base ── */
-  .section {
-    padding: 108px 0;
-    border-top: 1px solid var(--border);
-  }
-
-  .section-lead {
-    margin-bottom: 48px;
-  }
-
-  .section-lead h2 {
-    margin: 14px 0 14px;
-    font-family: "Instrument Serif", serif;
-    font-size: clamp(2.4rem, 4vw, 3.8rem);
-    font-weight: 400;
-    line-height: 0.96;
-    letter-spacing: -0.04em;
-    text-wrap: balance;
-    max-width: 15ch;
-  }
-
-  .section-lead p {
-    max-width: 36rem;
-    color: var(--text-2);
-    font-size: 1.02rem;
-    line-height: 1.68;
-  }
-
-  /* ── Feature grid ── */
-  /* gap:1px + bg = visible 1px grid lines */
-  .feature-grid {
-    display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-    gap: 1px;
-    background: var(--border);
-    border: 1px solid var(--border);
-    border-radius: var(--r);
-    overflow: hidden;
-  }
-
-  .feature-card {
-    padding: 28px 24px;
-    background: var(--bg-2);
-    transition: background 200ms;
-  }
-
-  .feature-card:hover {
-    background: var(--bg-3);
-  }
-
-  .feature-icon {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    width: 38px;
-    height: 38px;
-    border-radius: 10px;
-    background: var(--accent-dim);
-    border: 1px solid rgba(249, 115, 22, 0.18);
-    margin-bottom: 18px;
-    color: var(--accent);
-    flex-shrink: 0;
-  }
-
-  .feature-card h3 {
-    margin: 0 0 9px;
-    font-size: 1rem;
-    font-weight: 700;
-    letter-spacing: -0.02em;
-    line-height: 1.3;
-  }
-
-  .feature-card p {
-    color: var(--text-2);
-    font-size: 0.91rem;
-    line-height: 1.65;
-  }
-
-  /* ── How it works: steps ── */
-  .steps-grid {
-    display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-    gap: 40px;
-  }
-
-  .step {
-    padding-top: 22px;
-    border-top: 2px solid var(--border);
-    position: relative;
-  }
-
-  .step-num {
-    display: block;
-    margin-bottom: 14px;
-    font-family: "Geist Mono", monospace;
-    font-size: 11px;
-    font-weight: 600;
-    letter-spacing: 0.12em;
-    text-transform: uppercase;
-    color: var(--accent);
-  }
-
-  .step h3 {
-    margin: 0 0 10px;
-    font-size: 1.1rem;
-    font-weight: 700;
-    letter-spacing: -0.025em;
-    line-height: 1.3;
-  }
-
-  .step p {
-    color: var(--text-2);
-    font-size: 0.91rem;
-    line-height: 1.65;
-  }
-
-  /* ── CSS-only product visuals ── */
-  .mesh-panel {
-    position: relative;
-    min-height: 520px;
-    overflow: hidden;
-    border: 1px solid var(--border-strong);
-    border-radius: 30px;
-    background:
-      radial-gradient(circle at 78% 28%, rgba(249, 115, 22, 0.14), transparent 18rem),
-      radial-gradient(circle at 18% 72%, rgba(52, 211, 153, 0.12), transparent 17rem),
-      linear-gradient(135deg, #10131a 0%, #090b10 62%, #11151d 100%);
-    box-shadow:
-      0 0 0 1px rgba(255, 255, 255, 0.03),
-      0 38px 100px rgba(0, 0, 0, 0.55);
-    isolation: isolate;
-  }
-
-  .mesh-panel::before {
-    position: absolute;
-    inset: 0;
-    z-index: -2;
-    content: "";
-    opacity: 0.28;
-    background-image:
-      linear-gradient(rgba(255, 255, 255, 0.055) 1px, transparent 1px),
-      linear-gradient(90deg, rgba(255, 255, 255, 0.045) 1px, transparent 1px),
-      radial-gradient(circle, rgba(255, 255, 255, 0.18) 1px, transparent 1.6px);
-    background-size: 96px 96px, 96px 96px, 22px 22px;
-    mask-image: linear-gradient(140deg, black 0%, rgba(0, 0, 0, 0.72) 56%, transparent 100%);
-  }
-
-  .mesh-panel::after {
-    position: absolute;
-    inset: auto -10% -28% -10%;
-    z-index: -1;
-    height: 42%;
-    content: "";
-    background: radial-gradient(ellipse at center, rgba(0, 0, 0, 0.58), transparent 68%);
-  }
-
-  .mesh-route {
-    position: absolute;
-    border: 1px dashed rgba(52, 211, 153, 0.34);
-    border-right: 0;
-    border-bottom: 0;
-    border-radius: 26px 0 0 0;
-  }
-
-  .mesh-route.orange {
-    border-color: rgba(249, 115, 22, 0.34);
-    border-left: 0;
-    border-right: 1px dashed rgba(249, 115, 22, 0.34);
-    border-radius: 0 26px 0 0;
-  }
-
-  .route-a { left: 12%; top: 26%; width: 35%; height: 38%; }
-  .route-b { right: 9%; top: 32%; width: 30%; height: 34%; }
-
-  .mesh-node {
-    position: absolute;
-    display: grid;
-    justify-items: center;
-    gap: 7px;
-    color: var(--text-3);
-    font-family: "Geist Mono", monospace;
-    font-size: 10px;
-    letter-spacing: 0.02em;
-    text-align: center;
-  }
-
-  .mesh-node i {
-    display: grid;
-    place-items: center;
-    width: 54px;
-    height: 54px;
-    border: 1px solid rgba(52, 211, 153, 0.38);
-    border-radius: 999px;
-    background: rgba(52, 211, 153, 0.06);
-    color: var(--green);
-    box-shadow: 0 0 0 18px rgba(52, 211, 153, 0.035);
-    font-style: normal;
-  }
-
-  .mesh-node.orange i {
-    border-color: rgba(249, 115, 22, 0.42);
-    background: rgba(249, 115, 22, 0.07);
-    color: var(--accent);
-    box-shadow: 0 0 0 18px rgba(249, 115, 22, 0.035);
-  }
-
-  .node-phone { left: 8%; top: 38%; }
-  .node-host { left: 23%; top: 12%; }
-  .node-agent { left: 24%; bottom: 15%; }
-  .node-work { right: 10%; top: 39%; }
-
-  .device-stack {
-    position: absolute;
-    inset: 0;
-  }
-
-  .mini-phone {
-    position: absolute;
-    width: 236px;
-    min-height: 398px;
-    overflow: hidden;
-    border: 1px solid rgba(255, 255, 255, 0.16);
-    border-radius: 35px;
-    background: linear-gradient(180deg, #171b24, #090b10);
-    box-shadow:
-      inset 0 0 0 1px rgba(255, 255, 255, 0.05),
-      0 28px 70px rgba(0, 0, 0, 0.7);
-  }
-
-  .phone-front {
-    left: 28%;
-    bottom: -34px;
-    z-index: 3;
-    transform: rotate(-3deg);
-  }
-
-  .phone-back {
-    right: 12%;
-    bottom: 22px;
-    z-index: 2;
-    opacity: 0.9;
-    transform: rotate(4deg);
-  }
-
-  .phone-top {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 12px;
-    padding: 18px 18px 10px;
-    color: rgba(255, 255, 255, 0.82);
-    font-family: "Geist Mono", monospace;
-    font-size: 10px;
-  }
-
-  .phone-pill {
-    width: 66px;
-    height: 21px;
-    border-radius: 999px;
-    background: #020305;
-    box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.05);
-  }
-
-  .phone-title {
-    padding: 4px 18px 14px;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.07);
-  }
-
-  .phone-title strong {
-    display: block;
-    margin-bottom: 2px;
-    font-size: 14px;
-    letter-spacing: -0.03em;
-  }
-
-  .phone-title span {
-    color: var(--text-3);
-    font-family: "Geist Mono", monospace;
-    font-size: 10px;
-  }
-
-  .phone-body {
-    padding: 14px 16px 20px;
-  }
-
-  .action-row,
-  .file-row,
-  .session-row {
-    display: grid;
-    grid-template-columns: auto 1fr auto;
-    gap: 10px;
-    align-items: center;
-    padding: 11px 0;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.07);
-  }
-
-  .action-row:last-child,
-  .file-row:last-child,
-  .session-row:last-child { border-bottom: 0; }
-
-  .row-icon {
-    display: grid;
-    place-items: center;
-    width: 28px;
-    height: 28px;
-    border-radius: 9px;
-    background: rgba(255, 255, 255, 0.06);
-    color: #9fc7d6;
-    font-family: "Geist Mono", monospace;
-    font-size: 12px;
-  }
-
-  .row-copy strong {
-    display: block;
-    font-size: 12px;
-    line-height: 1.2;
-  }
-
-  .row-copy span {
-    color: var(--text-3);
-    font-size: 10px;
-  }
-
-  .file-row {
-    grid-template-columns: auto 1fr auto;
-    font-family: "Geist Mono", monospace;
-    font-size: 11px;
-  }
-
-  .file-row b {
-    color: #9fc7d6;
-    font-weight: 600;
-  }
-
-  .file-row small {
-    color: var(--text-3);
-  }
-
-  .surface-grid {
-    display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 14px;
-  }
-
-  .surface-card {
-    min-height: 250px;
-    overflow: hidden;
-    border: 1px solid var(--border);
-    border-radius: 22px;
-    background:
-      radial-gradient(circle at 24% 12%, rgba(249, 115, 22, 0.13), transparent 14rem),
-      linear-gradient(180deg, #11151d, #090b10);
-  }
-
-  .surface-head {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 13px 15px;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.07);
-    color: var(--text-3);
-    font-family: "Geist Mono", monospace;
-    font-size: 10px;
-  }
-
-  .surface-body {
-    padding: 15px;
-    font-family: "Geist Mono", monospace;
-    font-size: 12px;
-    line-height: 1.8;
-  }
-
-  .surface-body .green { color: #a7d38f; }
-  .surface-body .blue { color: #9fc7d6; }
-  .surface-body .orange { color: #e7b06d; }
-  .surface-body .dim { color: var(--text-3); }
-
-  .surface-list {
-    display: grid;
-    gap: 9px;
-    padding: 15px;
-  }
-
-  .surface-list span {
-    display: flex;
-    align-items: center;
-    gap: 9px;
-    color: rgba(236, 233, 227, 0.84);
-    font-family: "Geist Mono", monospace;
-    font-size: 12px;
-  }
-
-  .surface-list span::before {
-    width: 8px;
-    height: 8px;
-    border-radius: 2px;
-    background: #9fc7d6;
-    content: "";
-  }
-
-  .showcase-list {
-    display: grid;
-    gap: 24px;
-  }
-
-  .showcase-row {
-    display: grid;
-    grid-template-columns: minmax(0, 1.05fr) minmax(280px, 0.75fr);
-    gap: 32px;
-    align-items: center;
-    padding: 26px;
-    border: 1px solid var(--border);
-    border-radius: 30px;
-    background: rgba(255, 255, 255, 0.025);
-  }
-
-  .showcase-row.reverse {
-    grid-template-columns: minmax(280px, 0.75fr) minmax(0, 1.05fr);
-  }
-
-  .showcase-copy h3 {
-    margin: 10px 0 12px;
-    font-size: clamp(1.7rem, 3vw, 2.6rem);
-    line-height: 1;
-    letter-spacing: -0.055em;
-    text-wrap: balance;
-  }
-
-  .showcase-copy p {
-    color: var(--text-2);
-    line-height: 1.7;
-  }
-
-  /* ── Install section ── */
-  .install-grid {
-    display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-    gap: 1px;
-    background: var(--border);
-    border: 1px solid var(--border);
-    border-radius: var(--r);
-    overflow: hidden;
-  }
-
-  .install-card {
-    padding: 28px 24px;
-    background: var(--bg-2);
-    display: flex;
-    flex-direction: column;
-  }
-
-  .install-num {
-    display: block;
-    margin-bottom: 14px;
-    font-family: "Geist Mono", monospace;
-    font-size: 11px;
-    font-weight: 600;
-    letter-spacing: 0.12em;
-    text-transform: uppercase;
-    color: var(--accent);
-  }
-
-  .install-card h3 {
-    margin: 0 0 10px;
-    font-size: 1.18rem;
-    font-weight: 700;
-    letter-spacing: -0.03em;
-    line-height: 1.25;
-  }
-
-  .install-card > p {
-    color: var(--text-2);
-    font-size: 0.91rem;
-    line-height: 1.65;
-    flex: 1;
-  }
-
-  .code-block {
-    margin-top: 18px;
-    padding: 16px 18px;
-    border-radius: 12px;
-    background: var(--terminal-bg);
-    border: 1px solid var(--border);
-    font-family: "Geist Mono", monospace;
-    font-size: 12.5px;
-    line-height: 2;
-    color: rgba(255, 255, 255, 0.72);
-    overflow-x: auto;
-  }
-
-  .code-block .p { color: var(--accent); }
-
-  .install-actions {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 10px;
-    margin-top: 20px;
-  }
-
-  /* ── Security ── */
-  .security-inner {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-    gap: 56px;
-    align-items: start;
-  }
-
-  .security-copy h2 {
-    margin: 14px 0 14px;
-    font-family: "Instrument Serif", serif;
-    font-size: clamp(2rem, 3.4vw, 3.2rem);
-    font-weight: 400;
-    line-height: 0.96;
-    letter-spacing: -0.04em;
-    text-wrap: balance;
-  }
-
-  .security-copy p {
-    color: var(--text-2);
-    font-size: 0.97rem;
-    line-height: 1.7;
-  }
-
-  .security-copy p + p {
-    margin-top: 12px;
-  }
-
-  .route-diagram {
-    padding: 24px;
-    border-radius: var(--r);
-    border: 1px solid var(--border);
-    background: var(--bg-2);
-  }
-
-  .route-label {
-    display: block;
-    margin-bottom: 18px;
-    font-family: "Geist Mono", monospace;
-    font-size: 11px;
-    font-weight: 600;
-    letter-spacing: 0.1em;
-    text-transform: uppercase;
-    color: var(--text-3);
-  }
-
-  .route-item {
-    display: grid;
-    grid-template-columns: 1fr auto 1fr;
-    gap: 10px;
-    align-items: center;
-    padding: 12px 0;
-    border-top: 1px solid var(--border);
-    font-family: "Geist Mono", monospace;
-    font-size: 12px;
-  }
-
-  .route-item:first-of-type {
-    border-top: none;
-  }
-
-  .route-from {
-    color: var(--text-2);
-  }
-
-  .route-to {
-    color: var(--text-2);
-    text-align: right;
-  }
-
-  .route-via {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: 4px;
-    font-size: 10px;
-    font-weight: 600;
-    letter-spacing: 0.06em;
-    text-transform: uppercase;
-    color: var(--green);
-    white-space: nowrap;
-    padding: 0 4px;
-  }
-
-  .route-via::before,
-  .route-via::after {
-    display: block;
-    height: 1px;
-    min-width: 14px;
-    flex: 1;
-    background: rgba(52, 211, 153, 0.2);
-    content: "";
-  }
-
-  .route-note {
-    margin-top: 18px;
-    padding-top: 16px;
-    border-top: 1px solid var(--border);
-    font-size: 0.83rem;
-    color: var(--text-3);
-    line-height: 1.6;
-  }
-
-  /* ── FAQ ── */
-  .faq-list {
-    display: grid;
-    gap: 0;
-    border-top: 1px solid var(--border);
-  }
-
-  .faq-item {
-    display: grid;
-    grid-template-columns: minmax(180px, 240px) minmax(0, 1fr);
-    gap: 24px;
-    padding: 20px 0;
-    border-bottom: 1px solid var(--border);
-  }
-
-  .faq-item strong {
-    display: block;
-    font-size: 0.96rem;
-    letter-spacing: -0.02em;
-    color: var(--text);
-    align-self: start;
-    padding-top: 1px;
-    line-height: 1.4;
-  }
-
-  .faq-item p {
-    color: var(--text-2);
-    font-size: 0.93rem;
-    line-height: 1.68;
-  }
-
-  /* ── Closing CTA ── */
-  .closing {
-    padding: 100px 0;
-    border-top: 1px solid var(--border);
-  }
-
-  .closing-card {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) auto;
-    gap: 40px;
-    align-items: end;
-    padding: 44px;
-    border-radius: 22px;
-    border: 1px solid var(--border-strong);
-    background:
-      radial-gradient(ellipse 70% 80% at 0% 60%, rgba(249, 115, 22, 0.08), transparent),
-      var(--bg-2);
-  }
-
-  .closing-card h2 {
-    margin: 0 0 12px;
-    font-family: "Instrument Serif", serif;
-    font-size: clamp(2rem, 3.6vw, 3.4rem);
-    font-weight: 400;
-    line-height: 0.96;
-    letter-spacing: -0.04em;
-    text-wrap: balance;
-    max-width: 14ch;
-  }
-
-  .closing-card p {
-    color: var(--text-2);
-    font-size: 0.97rem;
-    max-width: 34rem;
-    line-height: 1.68;
-  }
-
-  .closing-actions {
-    display: flex;
-    flex-direction: column;
-    gap: 10px;
-    align-items: flex-end;
-  }
-
-  /* ── Footer ── */
-  footer {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    gap: 16px;
-    padding: 24px 0 40px;
-    border-top: 1px solid var(--border);
-    font-family: "Geist Mono", monospace;
-    font-size: 12px;
-    color: var(--text-3);
-  }
-
-  footer nav {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 4px;
-  }
-
-  footer a {
-    padding: 6px 10px;
-    border-radius: 6px;
-    color: var(--text-3);
-    transition: color 150ms, background 150ms;
-  }
-
-  footer a:hover {
-    color: var(--text);
-    background: rgba(255, 255, 255, 0.04);
-  }
-
-  /* ── Focus ── */
-  :focus-visible {
-    outline: 2px solid var(--accent);
-    outline-offset: 3px;
-    border-radius: 4px;
-  }
-
-  /* ── Responsive ── */
-  @media (max-width: 980px) {
-    .mesh-panel {
-      width: min(100%, 640px);
-    }
-
-    .hero-grid {
-      grid-template-columns: 1fr;
-    }
-
-    .terminal {
-      max-width: 480px;
-    }
-
-    .feature-grid,
-    .steps-grid,
-    .install-grid {
-      grid-template-columns: repeat(2, minmax(0, 1fr));
-    }
-
-    .security-inner,
-    .closing-card,
-    .showcase-row,
-    .showcase-row.reverse {
-      grid-template-columns: 1fr;
-    }
-
-    .showcase-row.reverse .showcase-copy {
-      order: -1;
-    }
-
-    .closing-actions {
-      align-items: flex-start;
-      flex-direction: row;
-      flex-wrap: wrap;
-    }
-
-    .section {
-      padding: 84px 0;
-    }
-  }
-
-  @media (max-width: 680px) {
-    .mesh-panel {
-      display: none;
-    }
-
-    .surface-grid {
-      grid-template-columns: 1fr;
-    }
-
-    .surface-card {
-      min-height: auto;
-    }
-
-    .showcase-row {
-      padding: 16px;
-    }
-
-    :root {
-      --wrap: min(calc(100% - 32px), 1100px);
-    }
-
-    .nav-links {
-      display: none;
-    }
-
-    .hero {
-      padding: 52px 0 56px;
-    }
-
-    .hero h1 {
-      font-size: clamp(2.8rem, 13vw, 3.8rem);
-    }
-
-    .hero-actions,
-    .install-actions {
-      flex-direction: column;
-    }
-
-    .btn-primary,
-    .btn-secondary {
-      width: 100%;
-      justify-content: center;
-    }
-
-    .btn-ghost {
-      width: auto;
-    }
-
-    .feature-grid,
-    .steps-grid,
-    .install-grid,
-    .faq-item {
-      grid-template-columns: 1fr;
-    }
-
-    .closing-card {
-      padding: 28px;
-      grid-template-columns: 1fr;
-    }
-
-    .closing-actions {
-      flex-direction: column;
-    }
-
-    footer {
-      flex-direction: column;
-      align-items: flex-start;
-      gap: 10px;
-    }
-
-    .section {
-      padding: 72px 0;
-    }
-  }
-
-  @media (prefers-reduced-motion: no-preference) {
-    .feature-card,
-    .install-card,
-    .step {
-      animation: rise 560ms var(--ease) both;
-    }
-
-    .feature-card:nth-child(2),
-    .install-card:nth-child(2),
-    .step:nth-child(2) { animation-delay: 60ms; }
-
-    .feature-card:nth-child(3),
-    .install-card:nth-child(3),
-    .step:nth-child(3) { animation-delay: 120ms; }
-
-    .feature-card:nth-child(4) { animation-delay: 80ms; }
-    .feature-card:nth-child(5) { animation-delay: 140ms; }
-    .feature-card:nth-child(6) { animation-delay: 200ms; }
-  }
-
-  @keyframes rise {
-    from { opacity: 0; transform: translateY(12px); }
-    to   { opacity: 1; transform: none; }
-  }
-</style>
-</head>
-<body>
-  <a class="skip-link" href="#main">Skip to content</a>
-
-  <!-- ── Nav ── -->
-  <header class="nav">
-    <div class="wrap nav-inner">
-      <a class="brand" href="/" aria-label="Sidemesh home">
-        <img class="brand-logo" src="/assets/app-icon.png" alt="" width="30" height="30" aria-hidden="true" />
-        <span>Sidemesh</span>
-      </a>
-      <nav class="nav-links" aria-label="Primary">
-        <a href="#features">Features</a>
-        <a href="#install">Install</a>
-        <a href="#security">Security</a>
-        <a href="/getting-started/">Docs</a>
-        <a href={githubUrl}>GitHub</a>
-        <a href={discordUrl}>Discord</a>
-      </nav>
-      <div class="nav-cta">
-        <a
-          class="btn btn-primary"
-          href={testFlightUrl}
-        >
-          Join iOS Beta
+<Base
+  title="Sidemesh — Leave your desk. Not your agents."
+  description="Sidemesh keeps the coding agents on your own machines within reach of your phone and desktop. Follow the work, approve what needs approving, answer what needs answering."
+  path="/"
+  landing
+>
+  <div class="day" data-day>
+    <section class="band band--morning band--hero" id="t-0840" data-scene="live" data-time="08:40">
+      <span class="sun sun--morning" aria-hidden="true"></span>
+      <header class="top">
+        <a class="brand" href="/" aria-label="Sidemesh home">
+          <svg viewBox="0 0 48 48" width="34" height="34" aria-hidden="true">
+            <path d="M15 13 37 24 15 35" fill="none" stroke="currentColor" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round" />
+            <circle cx="15" cy="13" r="4.6" fill="currentColor" />
+            <circle cx="15" cy="35" r="4.6" fill="currentColor" />
+            <circle cx="37" cy="24" r="6" fill="currentColor" />
+          </svg>
+          <span>Sidemesh</span>
         </a>
+        <nav class="top__nav" aria-label="Main">
+          <a href="#agents">Agents</a>
+          <a href="#network">Security</a>
+          <a href="#install">Install</a>
+          <a href={links.github}>GitHub</a>
+        </nav>
+      </header>
+
+      <div class="wrap hero">
+        <div class="col">
+          <p class="kicker"><span class="kicker__time">08:40</span> You start a task and head out</p>
+          <h1 class="hero__title">
+            <span class="line"><span>Leave your desk.</span></span>
+            <span class="line"><span>Not your agents.</span></span>
+          </h1>
+          <p class="hero__lede">
+            Sidemesh keeps the coding agents on your own machines within reach of your phone and desktop. Follow
+            the work, approve what needs approving, answer what needs answering.
+          </p>
+          <div class="actions">
+            <a class="cta" href="#install">Get started</a>
+            <a class="cta cta--ghost" href={links.testflight}>Join the iPhone beta</a>
+          </div>
+          <p class="hero__fine">
+            Open source. No account. No cloud workspace. <a href={links.github}>See the code on GitHub</a>.
+          </p>
+          <div class="moment__card" aria-label="Illustration of the Lock Screen at 08:40">
+            <AwayScreen kind="live" />
+          </div>
+          <p class="scroll-cue" aria-hidden="true">Scroll through a day <span>↓</span></p>
+        </div>
+      </div>
+    </section>
+
+    {moments.map((moment) => (
+      <section
+        class={`band band--${moment.band} moment`}
+        id={moment.id}
+        data-scene={moment.kind}
+        data-time={moment.time}
+        aria-labelledby={`${moment.id}-title`}
+      >
+        <span class={`sun sun--${moment.band}`} aria-hidden="true"></span>
+        <div class="wrap">
+          <div class="col">
+            <p class="moment__time" aria-hidden="true" data-clock>
+              {digits(moment.time).map((digit, index) => (
+                <span style={`--d:${index}`}>{digit}</span>
+              ))}
+            </p>
+            <p class="kicker">
+              <span class="sr-only">{moment.time}, </span>{moment.where}
+            </p>
+            <h2 id={`${moment.id}-title`} class="moment__title">{moment.title}</h2>
+            <p class="moment__text">{moment.text}</p>
+            <div class="moment__card" aria-label={`Illustration of the phone at ${moment.time}`}>
+              <AwayScreen kind={moment.kind} />
+            </div>
+          </div>
+        </div>
+      </section>
+    ))}
+
+    <div class="rail">
+      <div class="rail__inner">
+        <div class="rail__stack">
+          <div class="phone" data-phone data-scene="live" aria-label="Illustration of the Sidemesh app through the day">
+            <span class="phone__island" aria-hidden="true"></span>
+            <div class="phone__status" aria-hidden="true">
+              <span data-phone-clock>08:40</span>
+              <span class="phone__signal"><i></i><i></i><i></i><i></i></span>
+            </div>
+            <div class="phone__screens">
+              {day.map((item) => (
+                <div class="phone__screen" data-for={item.kind}>
+                  <AwayScreen kind={item.kind} />
+                </div>
+              ))}
+            </div>
+          </div>
+          <nav class="strip" aria-label="Times of the day">
+            {day.map((item) => (
+              <a href={`#${item.id}`} data-strip={item.kind}>{item.time}</a>
+            ))}
+          </nav>
+          <p class="rail__note">Illustration, not a screenshot</p>
+        </div>
       </div>
     </div>
-  </header>
+  </div>
 
-  <main id="main">
+  <section class="band band--night plain" id="agents" aria-labelledby="agents-title">
+    <div class="wrap">
+      <h2 id="agents-title" class="plain__title">Works with the agents you already run.</h2>
+      <ul class="agents">
+        {agents.map((agent) => (
+          <li>
+            <span class="agents__name">{agent.name}</span>
+            <span class="agents__note">{agent.note}</span>
+          </li>
+        ))}
+      </ul>
+    </div>
+  </section>
 
-    <!-- ── Hero ── -->
-    <section class="hero">
-      <div class="wrap hero-grid">
-
-        <div>
-          <span class="eyebrow">iOS Beta · Open Now</span>
-          <h1>Control your coding agents <em>from anywhere.</em></h1>
-          <p class="lede">
-            Sidemesh runs beside your coding agents on the machines you trust,
-            then gives you the remote surface around them: sessions, approvals,
-            files, terminals, and browser tabs from your phone or desktop.
-          </p>
-          <div class="hero-actions">
-            <a
-              class="btn btn-primary"
-              href={testFlightUrl}
-            >
-              Join iOS Beta
-            </a>
-            <a
-              class="btn btn-secondary"
-              href={discordUrl}
-            >
-              Join Discord
-            </a>
-            <a class="btn btn-ghost" href="/getting-started/">Read the docs</a>
-          </div>
-          <div class="hero-pills" role="list" aria-label="Key properties">
-            <span class="pill" role="listitem">your machines</span>
-            <span class="pill" role="listitem">private network first</span>
-            <span class="pill" role="listitem">no cloud workspace</span>
-          </div>
-        </div>
-
-        <div class="mesh-panel hero-mesh" aria-label="Sidemesh private network control plane visual">
-          <div class="mesh-route route-a" aria-hidden="true"></div>
-          <div class="mesh-route orange route-b" aria-hidden="true"></div>
-          <span class="mesh-node node-phone" aria-hidden="true"><i>▯</i>iPhone</span>
-          <span class="mesh-node node-host" aria-hidden="true"><i>▤</i>daemon host</span>
-          <span class="mesh-node node-agent" aria-hidden="true"><i>›_</i>agent session</span>
-          <span class="mesh-node orange node-work" aria-hidden="true"><i>▱</i>workspace</span>
-          <div class="device-stack" aria-hidden="true">
-            <div class="mini-phone phone-back">
-              <div class="phone-top"><span>9:41</span><span class="phone-pill"></span><span>4G</span></div>
-              <div class="phone-title"><strong>sidemesh</strong><span>~/code/sidemesh</span></div>
-              <div class="phone-body">
-                <div class="file-row"><b>▰</b><span>apps</span><small>›</small></div>
-                <div class="file-row"><b>▰</b><span>docs</span><small>›</small></div>
-                <div class="file-row"><b>▰</b><span>src</span><small>›</small></div>
-                <div class="file-row"><b>▰</b><span>web</span><small>›</small></div>
-                <div class="file-row"><b>▱</b><span>README.md</span><small>›</small></div>
-                <div class="file-row"><b>▱</b><span>package.json</span><small>›</small></div>
-                <div class="file-row"><b>▱</b><span>AGENTS.md</span><small>›</small></div>
-              </div>
-            </div>
-            <div class="mini-phone phone-front">
-              <div class="phone-top"><span>9:41</span><span class="phone-pill"></span><span>71%</span></div>
-              <div class="phone-title"><strong>Landing page polish</strong><span>Session actions</span></div>
-              <div class="phone-body">
-                <div class="action-row"><span class="row-icon">↻</span><span class="row-copy"><strong>Reload</strong><span>Refresh this transcript.</span></span></div>
-                <div class="action-row"><span class="row-icon">＋</span><span class="row-copy"><strong>New session</strong><span>Start beside this directory.</span></span></div>
-                <div class="action-row"><span class="row-icon">›_</span><span class="row-copy"><strong>Open terminal</strong><span>Open a shell for this workspace.</span></span></div>
-                <div class="action-row"><span class="row-icon">◉</span><span class="row-copy"><strong>Open browser</strong><span>Browse from this host.</span></span></div>
-                <div class="action-row"><span class="row-icon">⌕</span><span class="row-copy"><strong>Search transcript</strong><span>Find loaded messages.</span></span></div>
-              </div>
-            </div>
-          </div>
-        </div>
-
+  <section class="band band--moon plain" id="network" aria-labelledby="network-title">
+    <div class="wrap split">
+      <div>
+        <h2 id="network-title" class="plain__title">Your machines.<br />Your network.</h2>
+        <p class="plain__lede">
+          Sidemesh is a small host on each machine and an app that talks to it directly. Nothing sits in between.
+        </p>
+        <p class="plain__fine"><a href="/privacy">Read the privacy policy</a></p>
       </div>
-    </section>
+      <ol class="guards">
+        {safeguards.map((item, index) => (
+          <li>
+            <span class="guards__n" aria-hidden="true">{String(index + 1).padStart(2, '0')}</span>
+            <h3>{item.title}</h3>
+            <p>{item.text}</p>
+          </li>
+        ))}
+      </ol>
+    </div>
+  </section>
 
-    <!-- ── Features ── -->
-    <section class="section" id="features">
-      <div class="wrap">
-        <div class="section-lead">
-          <span class="eyebrow">What you get</span>
-          <h2>The missing layer around coding agents.</h2>
-          <p>
-            Chat is only one part of supervising an agent. Sidemesh keeps the rest of
-            the workstation close too: approvals, files, git context, terminals,
-            and browser tabs.
-          </p>
-        </div>
+  <section class="band band--go plain" id="install" aria-labelledby="install-title">
+    <div class="wrap">
+      <h2 id="install-title" class="plain__title plain__title--huge">Three commands.</h2>
+      <ol class="steps">
+        {steps.map((step, index) => (
+          <li>
+            <span class="steps__n" aria-hidden="true">{index + 1}</span>
+            <code>{step.command}</code>
+            <p>{step.text}</p>
+          </li>
+        ))}
+      </ol>
+      <p class="plain__fine">
+        Using Pi, Copilot CLI or an ACP agent? Run <code>sidemesh setup</code> to choose.
+        <a href={links.readme}>Full setup guide on GitHub</a>
+      </p>
+    </div>
+  </section>
 
-        <div class="feature-grid">
-
-          <article class="feature-card">
-            <div class="feature-icon" aria-hidden="true">
-              <svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
-                <rect x="1" y="2" width="16" height="12" rx="2"/>
-                <path d="M6 16h6M9 14v2"/>
-              </svg>
-            </div>
-            <h3>Session control</h3>
-            <p>Running sessions, pending approvals, transcript events, and host status — reachable across all paired machines from one place.</p>
-          </article>
-
-          <article class="feature-card">
-            <div class="feature-icon" aria-hidden="true">
-              <svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
-                <path d="M9 2l2 5h5l-4 3 1.5 5L9 12l-4.5 3L6 10 2 7h5z"/>
-              </svg>
-            </div>
-            <h3>Approvals, surfaced</h3>
-            <p>Blocked sessions don't stay blocked. Pending decisions get their own space instead of disappearing into transcript history.</p>
-          </article>
-
-          <article class="feature-card">
-            <div class="feature-icon" aria-hidden="true">
-              <svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
-                <path d="M10 2H4a1 1 0 00-1 1v12a1 1 0 001 1h10a1 1 0 001-1V7l-5-5z"/>
-                <path d="M10 2v5h5M6 10h6M6 13h4"/>
-              </svg>
-            </div>
-            <h3>Workspace inspection</h3>
-            <p>Browse files, render markdown, review git context, and inspect generated assets before approving the agent's next step.</p>
-          </article>
-
-          <article class="feature-card">
-            <div class="feature-icon" aria-hidden="true">
-              <svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
-                <rect x="1" y="2" width="16" height="14" rx="2"/>
-                <path d="M5 7l3 3-3 3M10 13h4"/>
-              </svg>
-            </div>
-            <h3>Terminal access</h3>
-            <p>Attach to a host shell when chat is not enough. Deliberately gated — kept behind the private network where host access is intentional.</p>
-          </article>
-
-          <article class="feature-card">
-            <div class="feature-icon" aria-hidden="true">
-              <svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
-                <rect x="1" y="3" width="16" height="13" rx="2"/>
-                <path d="M1 7h16M5 5h.01M7.5 5h.01M10 5h.01"/>
-              </svg>
-            </div>
-            <h3>Browser</h3>
-            <p>Open local apps and URLs in a browser running on the host. Tabs stay with the session so you can reopen them from phone or desktop.</p>
-          </article>
-
-        </div>
-      </div>
-    </section>
-
-    <!-- ── App screenshots ── -->
-    <section class="section" id="screenshots">
-      <div class="wrap">
-        <div class="section-lead">
-          <span class="eyebrow">In the app</span>
-          <h2>Mobile first, host aware.</h2>
-          <p>Terminal output, workspace files, session actions, and private routes are represented directly in the page instead of relying on screenshot mockups.</p>
-        </div>
-
-        <div class="showcase-list">
-          <article class="showcase-row">
-            <div class="surface-grid" aria-label="Terminal and file browser interface preview">
-              <div class="surface-card">
-                <div class="surface-head"><span>live terminal</span><span>host</span></div>
-                <div class="surface-body">
-                  <span class="dim">[vite]</span> connected.<br />
-                  <span class="green">astro</span> v6.2.1 ready<br />
-                  <span class="blue">Local</span> localhost:4321<br />
-                  <span class="green">watching</span> for file changes<br />
-                  <span class="blue">[200]</span> /getting-started
-                </div>
-              </div>
-              <div class="surface-card">
-                <div class="surface-head"><span>workspace</span><span>~/code/sidemesh</span></div>
-                <div class="surface-list">
-                  <span>apps</span><span>docs</span><span>src</span><span>web</span><span>README.md</span><span>package.json</span>
-                </div>
-              </div>
-            </div>
-            <div class="showcase-copy">
-              <span class="eyebrow">Host access</span>
-              <h3>Use the machine without opening the laptop.</h3>
-              <p>Attach a terminal, inspect files, and understand what changed while the agent keeps running on the host you already trust.</p>
-            </div>
-          </article>
-
-          <article class="showcase-row reverse">
-            <div class="showcase-copy">
-              <span class="eyebrow">Session control</span>
-              <h3>Unblock work from the phone in your hand.</h3>
-              <p>Open the current session, review the transcript, jump into actions, search, browser tabs, resources, git details, or a terminal exactly when the work needs you.</p>
-            </div>
-            <div class="surface-grid" aria-label="Session transcript and action preview">
-              <div class="surface-card">
-                <div class="surface-head"><span>session</span><span>running</span></div>
-                <div class="surface-body">
-                  <span class="orange">tool</span> edited landing page<br />
-                  <span class="blue">build</span> web build passed<br />
-                  <span class="green">ready</span> waiting for review<br />
-                  <span class="dim">reply</span> Message this session
-                </div>
-              </div>
-              <div class="surface-card">
-                <div class="surface-head"><span>actions</span><span>quick moves</span></div>
-                <div class="surface-list">
-                  <span>Open terminal</span><span>Open browser</span><span>Search transcript</span><span>Open resources</span><span>Git details</span>
-                </div>
-              </div>
-            </div>
-          </article>
-        </div>
-      </div>
-    </section>
-
-    <!-- ── How it works ── -->
-    <section class="section" id="how">
-      <div class="wrap">
-        <div class="section-lead">
-          <span class="eyebrow">How it works</span>
-          <h2>Install the host. Pair the app. Stay close.</h2>
-          <p>
-            Your code stays where it already lives. The daemon runs next to your agents,
-            credentials, and development servers on the machines you control.
-          </p>
-        </div>
-
-        <div class="steps-grid">
-          <article class="step">
-            <span class="step-num">01 — Install</span>
-            <h3>Run the daemon where your agents run.</h3>
-            <p>
-              One <code>npm install</code> and <code style="color:var(--accent)">sidemesh up</code> is enough.
-              Run it on a Mac, VPS, or workstation. Pair over Tailscale, a VPN, or a local network.
-            </p>
-          </article>
-          <article class="step">
-            <span class="step-num">02 — Pair</span>
-            <h3>Pair the app over your private route.</h3>
-            <p>
-              The daemon prints a pairing URL on first run. Scan it in the iOS app.
-              Sessions, approvals, and all host surfaces become immediately reachable.
-            </p>
-          </article>
-          <article class="step">
-            <span class="step-num">03 — Work</span>
-            <h3>Drop into the right tool for the job.</h3>
-            <p>
-              Reply in chat, clear an approval, browse files, attach a terminal,
-              or open the browser from anywhere, in one app.
-            </p>
-          </article>
-        </div>
-      </div>
-    </section>
-
-    <!-- ── Install ── -->
-    <section class="section" id="install">
-      <div class="wrap">
-        <div class="section-lead">
-          <span class="eyebrow">Install</span>
-          <h2>Install the host. Join the beta. Pair once.</h2>
-          <p>
-            The iOS beta is open now. Install the daemon on a trusted machine,
-            pair over your private network, and use Discord if setup gets weird.
-          </p>
-        </div>
-
-        <div class="install-grid">
-
-          <article class="install-card">
-            <span class="install-num">01 — Host daemon</span>
-            <h3>Start on each trusted machine.</h3>
-            <p>
-              Install the package, run setup, install the service to survive restarts,
-              then pair with the generated URL. Machines pair independently.
-            </p>
-            <div class="code-block" aria-label="Install commands">
-              <span class="p">$</span> npm install -g sidemesh @openai/codex<br />
-              <span class="p">$</span> sidemesh up<br />
-              <span class="p">$</span> sidemesh service install
-            </div>
-            <div class="install-actions">
-              <a class="btn btn-secondary" href="/getting-started/">Read the docs</a>
-            </div>
-          </article>
-
-          <article class="install-card">
-            <span class="install-num">02 — iOS beta</span>
-            <h3>Join TestFlight once the host is reachable.</h3>
-            <p>
-              The app is the daily surface: sessions, approvals, files, terminal,
-              previews, usage, and host management. Install the daemon first.
-            </p>
-            <div class="install-actions" style="margin-top: auto; padding-top: 24px;">
-              <a
-                class="btn btn-primary"
-                href={testFlightUrl}
-              >
-                Open TestFlight
-              </a>
-            </div>
-          </article>
-
-          <article class="install-card">
-            <span class="install-num">03 — Community</span>
-            <h3>Discord is the fast path for help.</h3>
-            <p>
-              Setup friction, provider quirks, and bug reports land better in a
-              live conversation than a quiet inbox. Come find us there.
-            </p>
-            <div class="install-actions" style="margin-top: auto; padding-top: 24px;">
-              <a
-                class="btn btn-secondary"
-                href={discordUrl}
-              >
-                Join Discord
-              </a>
-            </div>
-          </article>
-
-        </div>
-      </div>
-    </section>
-
-    <!-- ── Security ── -->
-    <section class="section" id="security">
-      <div class="wrap security-inner">
-
-        <div class="security-copy">
-          <span class="eyebrow">Security model</span>
-          <h2>Powerful host access belongs on a private route.</h2>
-          <p>
-            Sidemesh can reach transcripts, approvals, files, terminals, and
-            browser sessions. That is what makes it useful — and why
-            you should run it over Tailscale, WireGuard, or a trusted LAN.
-          </p>
-          <p>
-            Do not casually expose a daemon with host-level capabilities to the open
-            internet. Keep the network boundary explicit.
-          </p>
-        </div>
-
-        <div class="route-diagram" role="img" aria-label="Private network route: phone and desktop connect through a private route to the daemon host, which connects locally to the agent and workspace">
-          <span class="route-label">private network route</span>
-          <div class="route-item">
-            <span class="route-from">iPhone / desktop</span>
-            <span class="route-via">private</span>
-            <span class="route-to">daemon host</span>
-          </div>
-          <div class="route-item">
-            <span class="route-from">daemon</span>
-            <span class="route-via">local</span>
-            <span class="route-to">agent + tools</span>
-          </div>
-          <div class="route-item">
-            <span class="route-from">agent</span>
-            <span class="route-via">local</span>
-            <span class="route-to">workspace + fs</span>
-          </div>
-          <p class="route-note">
-            Tailscale and WireGuard both work out of the box. The daemon listens
-            on whatever address you give it — keep that address off the public internet.
-          </p>
-        </div>
-
-      </div>
-    </section>
-
-    <!-- ── FAQ ── -->
-    <section class="section" id="faq">
-      <div class="wrap">
-        <div class="section-lead">
-          <span class="eyebrow">FAQ</span>
-          <h2>Plain answers before you install.</h2>
-        </div>
-
-        <div class="faq-list">
-          <div class="faq-item">
-            <strong>Is this a cloud IDE?</strong>
-            <p>No. Sidemesh does not host your code or move your workspace. It connects to a daemon running on your own Mac, VPS, or workstation.</p>
-          </div>
-          <div class="faq-item">
-            <strong>Do I need the daemon before TestFlight?</strong>
-            <p>Yes. The mobile app becomes useful once a trusted host is installed, running, and reachable over the same private network as your device. Start with the daemon.</p>
-          </div>
-          <div class="faq-item">
-            <strong>Which agents does it support today?</strong>
-            <p>The iOS beta focuses on Codex sessions. The daemon is provider-based, so the same host surface works as more providers are added. Copilot CLI is also supported.</p>
-          </div>
-          <div class="faq-item">
-            <strong>Should I expose the daemon to the internet?</strong>
-            <p>No. Use a private route first. The daemon is intentionally close to powerful host capabilities: terminal, files, approvals, and browser. Treat that boundary seriously.</p>
-          </div>
-          <div class="faq-item">
-            <strong>How is this different from SSH?</strong>
-            <p>SSH gives you a shell. Sidemesh gives you the agent-aware view: running sessions, pending approvals, transcripts, files, git context, browser tabs, and terminal access when you need it.</p>
-          </div>
-        </div>
-      </div>
-    </section>
-
-    <!-- ── Closing ── -->
-    <section class="closing">
-      <div class="wrap">
-        <div class="closing-card">
-          <div>
-            <h2>Carry the workstation surface, not the workstation.</h2>
-            <p>
-              Install Sidemesh on the hosts you trust, join the iOS beta, and stay
-              close to your agents when your laptop is not in front of you.
-            </p>
-          </div>
-          <div class="closing-actions">
-            <a
-              class="btn btn-primary"
-              href={testFlightUrl}
-            >
-              Join iOS Beta
-            </a>
-            <a
-              class="btn btn-secondary"
-              href={discordUrl}
-            >
-              Join Discord
-            </a>
-          </div>
-        </div>
-      </div>
-    </section>
-
-  </main>
-
-  <footer class="wrap">
-    <span>Sidemesh — private agent workstation</span>
-    <nav aria-label="Footer links">
-      <a href="/getting-started/">Docs</a>
-      <a href="/support">Support</a>
-      <a href="/privacy">Privacy</a>
-      <a href={githubUrl}>GitHub</a>
-      <a href={discordUrl}>Discord</a>
-    </nav>
-  </footer>
-
-</body>
-</html>
+  <section class="band band--moon plain" id="apps" aria-labelledby="apps-title">
+    <div class="wrap">
+      <h2 id="apps-title" class="plain__title">Then pick it up anywhere.</h2>
+      <ul class="apps">
+        <li>
+          <h3>iPhone</h3>
+          <p>The beta is open on TestFlight, with notifications and Live Activities.</p>
+          <a class="cta" href={links.testflight}>Join the beta</a>
+        </li>
+        <li>
+          <h3>Mac</h3>
+          <p>Download the latest macOS build from the project's GitHub releases.</p>
+          <a class="cta cta--ghost" href={links.releases}>Open GitHub releases</a>
+        </li>
+        <li>
+          <h3>Web</h3>
+          <p>Use Sidemesh in a browser. Hosts on other machines need an HTTPS address.</p>
+          <a class="cta cta--ghost" href={links.webApp}>Open app.sidemesh.com</a>
+        </li>
+      </ul>
+    </div>
+  </section>
+  <script>
+    import '../scripts/away.ts';
+  </script>
+</Base>

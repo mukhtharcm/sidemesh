@@ -188,7 +188,6 @@ abstract final class AppMotion {
   static const Duration reveal = Duration(milliseconds: 220);
   static const Curve standard = Curves.easeOutCubic;
   static const Duration page = Duration(milliseconds: 400);
-  static const Duration pulse = Duration(milliseconds: 1200);
   static const Duration breathe = Duration(milliseconds: 1500);
   static const Duration feedback = Duration(milliseconds: 1400);
   static const Curve continuous = Curves.easeInOut;
@@ -222,14 +221,6 @@ abstract final class AppShadows {
     blurRadius: 18,
     offset: const Offset(0, AppSpacing.sm),
   );
-  static List<BoxShadow> dialog(Color source) => [
-    BoxShadow(
-      color: source.withValues(alpha: 0.12),
-      blurRadius: 28,
-      offset: const Offset(0, 16),
-    ),
-  ];
-
   static List<BoxShadow> sheet(Color source) => [
     BoxShadow(
       color: source.withValues(alpha: 0.12),

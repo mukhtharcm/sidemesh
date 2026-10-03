@@ -3,10 +3,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { createReadStream, watch, type FSWatcher } from "node:fs";
 import type { IncomingMessage } from "node:http";
 import {
-  copyFile,
-  cp,
   lstat,
-  mkdir,
   open,
   readdir,
   realpath,
@@ -253,84 +250,6 @@ export function registerFsRoutes(app: Hono<HonoServerEnv>, opts: FsRoutesOptions
   );
 
   routes.post(
-    "/api/fs/createDir",
-    async (c) => {
-      const body = await readJsonBody(c);
-      const resolveRoots = createRequestRootsResolver(
-        asString(readQuery(c).sessionId) ?? asString(body?.sessionId),
-        opts,
-        fallbackResolveRoots,
-      );
-      const target = await resolveIncomingPath(
-        body?.path,
-        resolveRoots,
-        {
-          allowMissing: true,
-        },
-      );
-      const recursive = body?.recursive !== false;
-      await mkdir(target, { recursive });
-      clearFsSearchCache();
-      return jsonResponse(c, { path: target });
-    },
-  );
-
-  routes.post(
-    "/api/fs/remove",
-    async (c) => {
-      const body = await readJsonBody(c);
-      const resolveRoots = createRequestRootsResolver(
-        asString(readQuery(c).sessionId) ?? asString(body?.sessionId),
-        opts,
-        fallbackResolveRoots,
-      );
-      const target = await resolveIncomingPath(
-        body?.path,
-        resolveRoots,
-      );
-      await assertNotWorkspaceRoot(target, await resolveRoots());
-      const recursive = body?.recursive !== false;
-      const force = body?.force !== false;
-      await rm(target, { recursive, force });
-      clearFsSearchCache();
-      return jsonResponse(c, { path: target });
-    },
-  );
-
-  routes.post(
-    "/api/fs/copy",
-    async (c) => {
-      const body = await readJsonBody(c);
-      const resolveRoots = createRequestRootsResolver(
-        asString(readQuery(c).sessionId) ?? asString(body?.sessionId),
-        opts,
-        fallbackResolveRoots,
-      );
-      const source = await resolveIncomingPath(
-        body?.sourcePath,
-        resolveRoots,
-      );
-      const destination = await resolveIncomingPath(
-        body?.destinationPath,
-        resolveRoots,
-        { allowMissing: true },
-      );
-      const recursive = body?.recursive === true;
-      const sourceMeta = await buildMetadata(source);
-      if (sourceMeta.isDirectory) {
-        if (!recursive) {
-          return jsonResponse(c, { error: "recursive must be true when copying a directory" }, 400);
-        }
-        await cp(source, destination, { recursive: true });
-      } else {
-        await copyFile(source, destination);
-      }
-      clearFsSearchCache();
-      return jsonResponse(c, { sourcePath: source, destinationPath: destination });
-    },
-  );
-
-  routes.post(
     "/api/fs/search",
     async (c) => {
       const body = await readJsonBody(c);
@@ -349,17 +268,6 @@ export function registerFsRoutes(app: Hono<HonoServerEnv>, opts: FsRoutesOptions
     },
   );
 
-  routes.get(
-    "/api/fs/roots",
-    async (c) => {
-      const resolveRoots = createRequestRootsResolver(
-        asString(readQuery(c).sessionId),
-        opts,
-        fallbackResolveRoots,
-      );
-      return jsonResponse(c, { roots: await resolveRoots() });
-    },
-  );
   app.route("/", routes);
 }
 
@@ -533,18 +441,6 @@ async function assertExpectedFileVersion(
 
 function asFiniteNumber(value: unknown): number | null {
   return typeof value === "number" && Number.isFinite(value) ? value : null;
-}
-
-async function assertNotWorkspaceRoot(
-  target: string,
-  roots: string[],
-): Promise<void> {
-  const canonicalRoots = await Promise.all(
-    roots.map((root) => realpath(root).catch(() => null)),
-  );
-  if (canonicalRoots.includes(target)) {
-    throw new WorkspaceAccessError("cannot remove a workspace root");
-  }
 }
 
 export async function writeFileAtomically(target: string, buffer: Buffer): Promise<void> {

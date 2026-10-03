@@ -1,0 +1,23 @@
+---
+import Base from '../layouts/Base.astro';
+import { links } from '../site.ts';
+---
+<Base
+  title="Page not found — Sidemesh"
+  description="This page does not exist on sidemesh.com."
+>
+  <div class="page">
+    <div class="container notice">
+      <p class="kicker notice__kicker"><span class="node node--signal" aria-hidden="true"></span>404 · Page not found</p>
+      <h1>Off the map.</h1>
+      <p>
+        This page does not exist. The old documentation pages have been retired; setup
+        instructions now live in the README on GitHub.
+      </p>
+      <div class="actions">
+        <a class="button button--primary" href="/">Go to the home page</a>
+        <a class="button button--secondary" href={links.readme}>Read the setup guide</a>
+      </div>
+    </div>
+  </div>
+</Base>

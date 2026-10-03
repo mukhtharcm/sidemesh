@@ -8,10 +8,10 @@
     "check": "astro check",
     "build": "astro build",
     "preview": "astro preview",
-    "astro": "astro"
+    "astro": "astro",
+    "audit:ci": "node scripts/audit.mjs"
   },
   "dependencies": {
-    "@astrojs/starlight": "^0.41.3",
     "astro": "^7.1.1",
     "sharp": "^0.35.3"
   },
@@ -21,7 +21,7 @@
     "wrangler": "^4.112.0"
   },
   "overrides": {
-    "fast-uri": "3.1.6",
+    "fast-uri": "3.1.8",
     "sharp": "$sharp"
   },
   "engines": {

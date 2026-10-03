@@ -156,12 +156,6 @@ class NodeInfo {
 
   String get providerDisplayVersion => providerVersion;
 
-  String get providerPillLabel {
-    final version = providerDisplayVersion;
-    if (version.isEmpty) return providerDisplayName;
-    return '$providerDisplayName $version';
-  }
-
   bool get usesBleedingEdgeTrack =>
       installType == 'git' && updateChannel == 'bleeding-edge';
 
@@ -376,28 +370,6 @@ class UpdateOperation {
         restored: json['restored'] == true,
         error: _stringOrNull(json['error']),
         logPath: _stringOrNull(json['logPath']),
-      );
-}
-
-class ProviderMetadata {
-  const ProviderMetadata({
-    required this.currentProvider,
-    String? currentProviderId,
-    this.sessionAliases,
-    required this.providers,
-  }) : currentProviderId = currentProviderId ?? currentProvider;
-
-  final String currentProvider;
-  final String currentProviderId;
-  final SessionAliases? sessionAliases;
-  final List<ProviderDefinitionSummary> providers;
-
-  factory ProviderMetadata.fromJson(Map<String, dynamic> json) =>
-      ProviderMetadata(
-        currentProvider: _stringValue(json['currentProvider']),
-        currentProviderId: _stringOrNull(json['currentProviderId']),
-        sessionAliases: SessionAliases.fromJson(json['sessionAliases']),
-        providers: ProviderDefinitionSummary.listFromJson(json['providers']),
       );
 }
 
@@ -1602,28 +1574,6 @@ class SessionGitDiff {
     truncated: _boolValue(json['truncated']),
     maxChars: _intValue(json['maxChars']),
   );
-}
-
-class WorkspaceSummary {
-  const WorkspaceSummary({
-    required this.cwd,
-    required this.label,
-    required this.sessionCount,
-    required this.lastUsedAt,
-  });
-
-  final String cwd;
-  final String label;
-  final int sessionCount;
-  final DateTime lastUsedAt;
-
-  factory WorkspaceSummary.fromJson(Map<String, dynamic> json) =>
-      WorkspaceSummary(
-        cwd: _stringValue(json['cwd']),
-        label: _stringValue(json['label']),
-        sessionCount: _intValue(json['sessionCount']),
-        lastUsedAt: _dateValue(json['lastUsedAt']),
-      );
 }
 
 class SkillCatalog {

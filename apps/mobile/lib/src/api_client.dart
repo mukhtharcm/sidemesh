@@ -53,16 +53,6 @@ class ApiClient {
     return node;
   }
 
-  Future<ProviderMetadata> fetchProviders(HostProfile host) async {
-    final response = await _get(
-      host,
-      '/api/providers',
-      timeout: _quickReadTimeout,
-      operation: 'load providers',
-    );
-    return ProviderMetadata.fromJson(_decodeObject(response));
-  }
-
   Future<HostUsageSnapshot> fetchUsage(HostProfile host) async {
     final response = await _get(
       host,
@@ -71,15 +61,6 @@ class ApiClient {
       operation: 'load usage',
     );
     return HostUsageSnapshot.fromJson(host, _decodeObject(response));
-  }
-
-  Future<List<WorkspaceSummary>> fetchWorkspaces(HostProfile host) async {
-    final response = await _get(
-      host,
-      '/api/workspaces',
-      operation: 'load workspaces',
-    );
-    return _decodeList(response).map(WorkspaceSummary.fromJson).toList();
   }
 
   Future<SkillCatalog> fetchSkills(
@@ -385,22 +366,6 @@ class ApiClient {
       body: body,
       timeout: _standardReadTimeout,
       operation: 'start terminal',
-    );
-    return HostTerminalInfo.fromJson(_decodeObject(response));
-  }
-
-  Future<HostTerminalInfo> resizeTerminal(
-    HostProfile host,
-    String terminalId, {
-    required int cols,
-    required int rows,
-  }) async {
-    final response = await _post(
-      host,
-      '/api/terminals/$terminalId/resize',
-      body: {'cols': cols, 'rows': rows},
-      timeout: _quickReadTimeout,
-      operation: 'resize terminal',
     );
     return HostTerminalInfo.fromJson(_decodeObject(response));
   }
@@ -940,23 +905,6 @@ class ApiClient {
 
   // -------------------------- Workspace filesystem --------------------------
 
-  Future<List<String>> fetchFsRoots(
-    HostProfile host, {
-    String? agentProvider,
-    String? sessionId,
-  }) async {
-    final response = await _get(
-      host,
-      '/api/fs/roots',
-      queryParameters: _fsQuery(sessionId: sessionId),
-      operation: 'load roots',
-    );
-    final decoded = _decodeObject(response);
-    return ((decoded['roots'] as List?) ?? const [])
-        .map((e) => e.toString())
-        .toList();
-  }
-
   Future<List<FsSearchResult>> searchFiles(
     HostProfile host, {
     required String query,
@@ -1060,67 +1008,6 @@ class ApiClient {
             : <String, dynamic>{'expectedSize': expectedSize},
       },
       operation: 'write file',
-    );
-  }
-
-  Future<void> createDirectory(
-    HostProfile host, {
-    required String path,
-    bool recursive = true,
-    String? agentProvider,
-    String? sessionId,
-  }) async {
-    await _post(
-      host,
-      '/api/fs/createDir',
-      body: {
-        'path': path,
-        'recursive': recursive,
-        if ((sessionId ?? '').isNotEmpty) 'sessionId': sessionId,
-      },
-      operation: 'create directory',
-    );
-  }
-
-  Future<void> remove(
-    HostProfile host, {
-    required String path,
-    bool recursive = true,
-    bool force = true,
-    String? agentProvider,
-    String? sessionId,
-  }) async {
-    await _post(
-      host,
-      '/api/fs/remove',
-      body: {
-        'path': path,
-        'recursive': recursive,
-        'force': force,
-        if ((sessionId ?? '').isNotEmpty) 'sessionId': sessionId,
-      },
-      operation: 'remove file',
-    );
-  }
-
-  Future<void> copy(
-    HostProfile host, {
-    required String sourcePath,
-    required String destinationPath,
-    bool recursive = false,
-    String? agentProvider,
-    String? sessionId,
-  }) async {
-    await _post(
-      host,
-      '/api/fs/copy',
-      body: {
-        'sourcePath': sourcePath,
-        'destinationPath': destinationPath,
-        'recursive': recursive,
-        if ((sessionId ?? '').isNotEmpty) 'sessionId': sessionId,
-      },
-      operation: 'copy file',
     );
   }
 

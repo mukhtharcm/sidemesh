@@ -96,7 +96,7 @@ export const ACP_PROVIDER_CAPABILITIES: AgentProviderCapabilities = {
   input: { resourceLinks: true, text: true, imageUrl: false, localImage: false, skills: false, fileMentions: true, steer: false },
   interaction: { userInput: true, elicitation: true },
   approvals: { command: true, tool: true, fileChange: true, permissions: true, approveForSession: true },
-  configuration: { sessionOptions: true, commands: true, models: true, profiles: false, accessModes: false, skills: false, skillManagement: false },
+  configuration: { sessionOptions: true, commands: true, models: true, profiles: false, accessModes: false, skills: false },
   runtimeControls: { model: true, mode: true, reasoningEffort: false, fastMode: false,
     approvalPolicy: false, sandboxMode: false, networkAccess: false, webSearch: false, accessMode: false },
   lifecycle: { restart: false },

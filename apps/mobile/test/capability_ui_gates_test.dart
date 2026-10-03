@@ -1424,7 +1424,7 @@ void main() {
     );
   }
 
-  testWidgets('create session sheet hides unsupported launch controls', (
+  testWidgets('create session page hides unsupported launch controls', (
     tester,
   ) async {
     await CreateSessionDefaultsStore.instance.ensureLoaded();
@@ -1436,26 +1436,23 @@ void main() {
         host: _host('create-minimal'),
         api: api,
         initialCwd: '/repo',
-        presentation: CreateSessionPresentation.dialog,
+        presentation: CreateSessionPresentation.page,
       ),
-      size: const Size(1600, 1100),
+      size: const Size(390, 844),
     );
     await _pumpFrames(tester);
 
-    await tester.tap(find.text('Session setup'));
+    await tester.tap(find.byKey(const ValueKey('new-session-settings-button')));
     await _pumpFrames(tester);
 
-    expect(
-      find.text(
-        'Fake Test Provider does not offer profiles or model choices here.',
-      ),
-      findsOneWidget,
-    );
+    expect(find.text('Session settings'), findsOneWidget);
+    expect(find.text('Profile'), findsNothing);
+    expect(find.text('Model'), findsNothing);
     expect(find.text('Permissions'), findsNothing);
     expect(find.text('Live web search'), findsNothing);
   });
 
-  testWidgets('create session sheet shows advertised launch controls', (
+  testWidgets('create session page shows advertised launch controls', (
     tester,
   ) async {
     await CreateSessionDefaultsStore.instance.ensureLoaded();
@@ -1471,13 +1468,13 @@ void main() {
         host: _host('create-full'),
         api: api,
         initialCwd: '/repo',
-        presentation: CreateSessionPresentation.dialog,
+        presentation: CreateSessionPresentation.page,
       ),
-      size: const Size(1600, 1200),
+      size: const Size(390, 844),
     );
     await _pumpFrames(tester);
 
-    await tester.tap(find.text('Session setup'));
+    await tester.tap(find.byKey(const ValueKey('new-session-settings-button')));
     await _pumpFrames(tester);
 
     expect(find.text('Profile'), findsOneWidget);
@@ -1532,31 +1529,28 @@ void main() {
       ),
     );
 
-    await _pumpApp(
+    await _openCreateSessionPage(
       tester,
-      CreateSessionSheet(
-        host: _host('create-native-permissions'),
-        api: api,
-        initialCwd: '/repo',
-        presentation: CreateSessionPresentation.dialog,
-      ),
-      size: const Size(1600, 1200),
+      api,
+      host: _host('create-native-permissions'),
     );
-    await _pumpFrames(tester);
 
-    await tester.tap(find.text('Session setup'));
+    await tester.tap(find.byKey(const ValueKey('new-session-settings-button')));
     await _pumpFrames(tester);
-    expect(find.text('Workspace'), findsNothing);
+    expect(find.text('Approval'), findsNothing);
+    expect(find.text('File access'), findsNothing);
+    await tester.ensureVisible(
+      find.byKey(const ValueKey('new-session-access-selector')),
+    );
+    await tester.tap(find.byKey(const ValueKey('new-session-access-selector')));
+    await _pumpFrames(tester);
     await tester.tap(find.text('Full access'));
     await _pumpFrames(tester);
     await tester.tap(find.text('Enable full access'));
     await _pumpFrames(tester);
-    await tester.enterText(
-      find.byKey(const ValueKey('create-session-prompt-field')),
-      'Use native permissions.',
-    );
-    await tester.tap(find.widgetWithText(FilledButton, 'Start session'));
+    await tester.tap(find.byTooltip('Back to new session'));
     await _pumpFrames(tester);
+    await _sendDraftPrompt(tester, 'Use native permissions.');
 
     expect(api.lastCreateRequest?.accessMode, 'full-access');
     expect(api.lastCreateRequest?.approvalPolicy, isNull);
@@ -1595,25 +1589,13 @@ void main() {
       ),
     );
 
-    await _pumpApp(
+    await _openCreateSessionPage(
       tester,
-      CreateSessionSheet(
-        host: _host('create-inherited-access'),
-        api: api,
-        initialCwd: '/repo',
-        seed: const CreateSessionDraftSeed(accessMode: 'retired'),
-        presentation: CreateSessionPresentation.dialog,
-      ),
-      size: const Size(1600, 1200),
+      api,
+      host: _host('create-inherited-access'),
+      seed: const CreateSessionDraftSeed(accessMode: 'retired'),
     );
-    await _pumpFrames(tester);
-
-    await tester.enterText(
-      find.byKey(const ValueKey('create-session-prompt-field')),
-      'Use the valid provider default.',
-    );
-    await tester.tap(find.widgetWithText(FilledButton, 'Start session'));
-    await _pumpFrames(tester);
+    await _sendDraftPrompt(tester, 'Use the valid provider default.');
 
     expect(api.lastCreateRequest?.accessMode, 'guarded');
   });
@@ -1629,10 +1611,8 @@ void main() {
         },
       ],
     }));
-    await _pumpApp(tester, CreateSessionSheet(
-      host: _host('same-kind'), api: api, initialCwd: '/repo',
-      presentation: CreateSessionPresentation.dialog,
-    ), size: const Size(1600, 1100));
+    await _openCreateSessionPage(tester, api, host: _host('same-kind'));
+    await tester.tap(find.byKey(const ValueKey('new-session-settings-button')));
     await _pumpFrames(tester);
     expect(find.text('Fake · primary'), findsWidgets);
     await tester.tap(find.byKey(const ValueKey('create-session-provider-selector')));
@@ -1641,13 +1621,13 @@ void main() {
     await tester.tap(find.byKey(const ValueKey('provider-picker-secondary')));
     await _pumpFrames(tester);
     expect(find.text('Fake · secondary'), findsWidgets);
-    await tester.enterText(find.byKey(const ValueKey('create-session-prompt-field')), 'Use the second instance');
-    await tester.tap(find.widgetWithText(FilledButton, 'Start session'));
+    await tester.tap(find.byTooltip('Back to new session'));
     await _pumpFrames(tester);
+    await _sendDraftPrompt(tester, 'Use the second instance');
     expect(api.lastCreateRequest!.provider, 'secondary');
   });
 
-  testWidgets('create session sheet sends selected provider for mixed hosts', (
+  testWidgets('create session page sends selected provider for mixed hosts', (
     tester,
   ) async {
     await CreateSessionDefaultsStore.instance.ensureLoaded();
@@ -1686,18 +1666,14 @@ void main() {
       ),
     );
 
-    await _pumpApp(
+    await _openCreateSessionPage(
       tester,
-      CreateSessionSheet(
-        host: _host('create-provider-switch'),
-        api: api,
-        initialCwd: '/repo',
-        presentation: CreateSessionPresentation.dialog,
-      ),
-      size: const Size(1600, 1100),
+      api,
+      host: _host('create-provider-switch'),
     );
-    await _pumpFrames(tester);
 
+    await tester.tap(find.byKey(const ValueKey('new-session-settings-button')));
+    await _pumpFrames(tester);
     expect(find.text('Fake Test Provider'), findsWidgets);
 
     await tester.tap(
@@ -1709,19 +1685,16 @@ void main() {
 
     expect(find.text('GitHub Copilot'), findsWidgets);
 
-    await tester.enterText(
-      find.byKey(const ValueKey('create-session-prompt-field')),
-      'Start through Copilot.',
-    );
-    await tester.tap(find.widgetWithText(FilledButton, 'Start session'));
+    await tester.tap(find.byTooltip('Back to new session'));
     await _pumpFrames(tester);
+    await _sendDraftPrompt(tester, 'Start through Copilot.');
 
     expect(api.lastCreateRequest, isNotNull);
     expect(api.lastCreateRequest!.provider, 'copilot');
   });
 
   testWidgets(
-    'create session sheet inherits default profile runtime settings until changed',
+    'create session page inherits default profile runtime settings until changed',
     (tester) async {
       await CreateSessionDefaultsStore.instance.ensureLoaded();
       final api = _CapabilityFakeApi(
@@ -1730,24 +1703,12 @@ void main() {
         profiles: const [_codexProfile],
       );
 
-      await _pumpApp(
+      await _openCreateSessionPage(
         tester,
-        CreateSessionSheet(
-          host: _host('create-profile-inherit'),
-          api: api,
-          initialCwd: '/repo',
-          presentation: CreateSessionPresentation.dialog,
-        ),
-        size: const Size(1600, 1200),
+        api,
+        host: _host('create-profile-inherit'),
       );
-      await _pumpFrames(tester);
-
-      await tester.enterText(
-        find.byKey(const ValueKey('create-session-prompt-field')),
-        'Use the profile defaults.',
-      );
-      await tester.tap(find.widgetWithText(FilledButton, 'Start session'));
-      await _pumpFrames(tester);
+      await _sendDraftPrompt(tester, 'Use the profile defaults.');
 
       expect(api.lastCreateRequest, isNotNull);
       expect(api.lastCreateRequest!.profile, isNull);
@@ -1760,7 +1721,7 @@ void main() {
   );
 
   testWidgets(
-    'create session sheet still sends explicit launch overrides over profiles',
+    'create session page still sends explicit launch overrides over profiles',
     (tester) async {
       await CreateSessionDefaultsStore.instance.ensureLoaded();
       final api = _CapabilityFakeApi(
@@ -1769,38 +1730,33 @@ void main() {
         profiles: const [_codexProfile],
       );
 
-      await _pumpApp(
+      await _openCreateSessionPage(
         tester,
-        CreateSessionSheet(
-          host: _host('create-profile-override'),
-          api: api,
-          initialCwd: '/repo',
-          presentation: CreateSessionPresentation.dialog,
-        ),
-        size: const Size(1600, 1200),
+        api,
+        host: _host('create-profile-override'),
       );
-      await _pumpFrames(tester);
 
-      await tester.tap(find.text('Session setup'));
-      await _pumpFrames(tester);
-      await tester.ensureVisible(find.text('Never ask').first);
-      await _pumpFrames(tester);
-      await tester.tap(find.text('Never ask').first);
-      await _pumpFrames(tester);
-      await tester.ensureVisible(find.text('Full access (danger)').first);
-      await _pumpFrames(tester);
-      await tester.tap(find.text('Full access (danger)').first);
-      await _pumpFrames(tester);
-      await tester.enterText(
-        find.byKey(const ValueKey('create-session-prompt-field')),
-        'Override the profile defaults.',
-      );
-      await tester.ensureVisible(
-        find.widgetWithText(FilledButton, 'Start session'),
+      await tester.tap(
+        find.byKey(const ValueKey('new-session-settings-button')),
       );
       await _pumpFrames(tester);
-      await tester.tap(find.widgetWithText(FilledButton, 'Start session'));
+      await tester.ensureVisible(find.text('Approval'));
       await _pumpFrames(tester);
+      await tester.tap(find.text('Approval'));
+      await _pumpFrames(tester);
+      await tester.tap(find.text('Never ask').last);
+      await _pumpFrames(tester);
+      await tester.ensureVisible(find.text('File access'));
+      await _pumpFrames(tester);
+      await tester.tap(find.text('File access'));
+      await _pumpFrames(tester);
+      await tester.tap(find.text('Full access (danger)').last);
+      await _pumpFrames(tester);
+      await tester.tap(find.text('Enable full access'));
+      await _pumpFrames(tester);
+      await tester.tap(find.byTooltip('Back to new session'));
+      await _pumpFrames(tester);
+      await _sendDraftPrompt(tester, 'Override the profile defaults.');
 
       expect(api.lastCreateRequest, isNotNull);
       expect(api.lastCreateRequest!.approvalPolicy, 'never');
@@ -1841,13 +1797,17 @@ void main() {
         host: _host('create-copilot'),
         api: api,
         initialCwd: '/repo',
-        presentation: CreateSessionPresentation.dialog,
+        presentation: CreateSessionPresentation.page,
       ),
-      size: const Size(1600, 1100),
+      size: const Size(390, 844),
     );
     await _pumpFrames(tester);
 
-    await tester.tap(find.text('Session setup'));
+    await tester.tap(find.byKey(const ValueKey('new-session-settings-button')));
+    await _pumpFrames(tester);
+    await tester.ensureVisible(find.text('Approval'));
+    await _pumpFrames(tester);
+    await tester.tap(find.text('Approval'));
     await _pumpFrames(tester);
 
     expect(find.text('Ask when requested'), findsWidgets);
@@ -2626,6 +2586,44 @@ Future<void> _pumpFrames(WidgetTester tester, {int count = 1}) async {
     await tester.pump(const Duration(milliseconds: 250));
     await tester.pump();
   }
+}
+
+/// Opens the phone new-session page through its real launcher route so that
+/// a successful submit can pop it.
+Future<void> _openCreateSessionPage(
+  WidgetTester tester,
+  ApiClient api, {
+  required HostProfile host,
+  CreateSessionDraftSeed? seed,
+}) async {
+  await _pumpApp(
+    tester,
+    Builder(
+      builder: (context) => FilledButton(
+        onPressed: () => showCreateSessionLauncher(
+          context,
+          host: host,
+          api: api,
+          initialCwd: '/repo',
+          seed: seed,
+        ),
+        child: const Text('Open new session'),
+      ),
+    ),
+    size: const Size(390, 844),
+  );
+  await tester.tap(find.text('Open new session'));
+  await _pumpFrames(tester);
+}
+
+Future<void> _sendDraftPrompt(WidgetTester tester, String prompt) async {
+  await tester.enterText(
+    find.byKey(const ValueKey('create-session-prompt-field')),
+    prompt,
+  );
+  await tester.pump();
+  await tester.tap(find.byKey(const ValueKey('create-session-send-button')));
+  await _pumpFrames(tester);
 }
 
 TextField _composerTextField(WidgetTester tester) {
