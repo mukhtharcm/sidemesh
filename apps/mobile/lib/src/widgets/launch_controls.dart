@@ -3,8 +3,6 @@ import 'package:flutter/material.dart';
 import '../theme/app_colors.dart';
 import '../theme/app_tokens.dart';
 import 'app_primitives.dart';
-import 'mesh_widgets.dart';
-import '../theme/app_status_styles.dart';
 
 /// Shared visual atoms used by launch-option surfaces (create-session,
 /// new-session defaults in settings, per-session overrides).
@@ -14,136 +12,6 @@ import '../theme/app_status_styles.dart';
 /// `LaunchOptionsForm` (and the simpler defaults sheet) can reuse the
 /// exact same visual treatment, rather than each surface inventing its
 /// own pills/cards/switches.
-
-/// Bordered "icon · label · field" frame used for top-level inputs
-/// (working directory, prompt, etc).
-class LaunchFieldFrame extends StatelessWidget {
-  const LaunchFieldFrame({
-    super.key,
-    required this.icon,
-    required this.label,
-    required this.child,
-    this.alignTop = false,
-    this.trailing,
-  });
-
-  final IconData icon;
-  final String label;
-  final Widget child;
-  final bool alignTop;
-  final Widget? trailing;
-
-  @override
-  Widget build(BuildContext context) {
-    return MeshSurface(
-      tone: MeshSurfaceTone.muted,
-      radius: AppRadii.control,
-      padding: const EdgeInsets.fromLTRB(
-        AppSpacing.md,
-        AppSpacing.compact,
-        AppSpacing.md,
-        AppSpacing.compact,
-      ),
-      child: Row(
-        crossAxisAlignment: alignTop
-            ? CrossAxisAlignment.start
-            : CrossAxisAlignment.center,
-        children: [
-          Padding(
-            padding: EdgeInsets.only(top: alignTop ? AppSpacing.xxs : 0),
-            child: _IconChip(icon: icon, tone: _IconChipTone.surface),
-          ),
-          const SizedBox(width: AppSpacing.md),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                _CapsLabel(text: label),
-                const SizedBox(height: AppSpacing.tight),
-                child,
-              ],
-            ),
-          ),
-          if (trailing != null) ...[
-            const SizedBox(width: AppSpacing.sm),
-            trailing!,
-          ],
-        ],
-      ),
-    );
-  }
-}
-
-/// One-line "open a chooser" row. Renders icon + label + value + optional
-/// detail line + chevron, in the same frame as [LaunchFieldFrame] but
-/// tappable.
-class LaunchSelectorRow extends StatelessWidget {
-  const LaunchSelectorRow({
-    super.key,
-    required this.icon,
-    required this.label,
-    required this.value,
-    required this.onTap,
-    this.detail = '',
-  });
-
-  final IconData icon;
-  final String label;
-  final String value;
-  final String detail;
-  final VoidCallback? onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    final colors = context.colors;
-    return MeshSurface(
-      tone: MeshSurfaceTone.muted,
-      radius: AppRadii.control,
-      onTap: onTap,
-      padding: const EdgeInsets.fromLTRB(
-        AppSpacing.md,
-        AppSpacing.compact,
-        AppSpacing.compact,
-        AppSpacing.compact,
-      ),
-      child: Row(
-        children: [
-          _IconChip(icon: icon, tone: _IconChipTone.accent),
-          const SizedBox(width: AppSpacing.md),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                _CapsLabel(text: label),
-                const SizedBox(height: AppSpacing.xs),
-                Text(
-                  value,
-                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                    color: colors.textPrimary,
-                    fontWeight: AppWeights.title,
-                  ),
-                ),
-                if (detail.trim().isNotEmpty) ...[
-                  const SizedBox(height: AppSpacing.hairline),
-                  Text(
-                    detail,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                      color: colors.textSecondary,
-                      fontWeight: AppWeights.emphasis,
-                    ),
-                  ),
-                ],
-              ],
-            ),
-          ),
-          Icon(Icons.keyboard_arrow_down_rounded, color: colors.accent),
-        ],
-      ),
-    );
-  }
-}
 
 /// Section heading with an optional trailing widget and a vertical stack of
 /// controls. The section deliberately uses the page canvas instead of adding
@@ -337,44 +205,6 @@ class LaunchInfoLine extends StatelessWidget {
           ),
         ),
       ],
-    );
-  }
-}
-
-class _IconChip extends StatelessWidget {
-  const _IconChip({required this.icon, required this.tone});
-
-  final IconData icon;
-  final _IconChipTone tone;
-
-  @override
-  Widget build(BuildContext context) {
-    final colors = context.colors;
-    final bg = switch (tone) {
-      _IconChipTone.surface => colors.surface,
-      _IconChipTone.accent => colors.accentMuted,
-    };
-    return AppIconWell(icon: icon, background: bg);
-  }
-}
-
-enum _IconChipTone { surface, accent }
-
-class _CapsLabel extends StatelessWidget {
-  const _CapsLabel({required this.text});
-
-  final String text;
-
-  @override
-  Widget build(BuildContext context) {
-    final colors = context.colors;
-    return Text(
-      text,
-      style: Theme.of(context).textTheme.labelSmall?.copyWith(
-        color: colors.textSecondary,
-        fontWeight: AppWeights.emphasis,
-        letterSpacing: AppLetterSpacing.caps,
-      ),
     );
   }
 }

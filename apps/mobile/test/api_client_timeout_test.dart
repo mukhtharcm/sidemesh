@@ -22,10 +22,10 @@ void main() {
     );
 
     await expectLater(
-      api.createDirectory(host, path: '/repo/new-directory'),
+      api.writeFile(host, path: '/repo/notes.txt', contents: ''),
       throwsA(
         isA<ApiTimeoutException>()
-            .having((error) => error.operation, 'operation', 'create directory')
+            .having((error) => error.operation, 'operation', 'write file')
             .having(
               (error) => error.timeout,
               'timeout',
